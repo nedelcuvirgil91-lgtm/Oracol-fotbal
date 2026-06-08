@@ -177,31 +177,35 @@ class FootballOracleAPI:
     # PUBLIC METHODS — PRE-MATCH DATA
     # ──────────────────────────────────────────────────────────────────────
 
-    def get_fixtures_for_today(self, league_ids: list[int]) -> list[dict[str, Any]]:
+         def get_upcoming_fixtures(self, league_ids: list[int], days_ahead: int = 14) -> list[dict[str, Any]]:
         """
-        Fetch today's fixtures for every league ID in *league_ids*.
+        Fetch upcoming fixtures for every league ID in *league_ids* within a window of days_ahead.
 
         Parameters
         ----------
         league_ids : list[int]
             E.g. [283, 135, 39] for Romania SuperLiga, Serie A, Premier League.
+        days_ahead : int
+            Number of days into the future to scan (default 14 days to capture round + 2nd round).
 
         Returns
         -------
         list[dict]
-            Flat list of fixture objects from the API-Football response.
-            Each dict contains fixture details, teams, venue, status, etc.
+            Flat list of upcoming fixture objects from the API-Football response.
         """
-        today_str: str = date.today().isoformat()   # "YYYY-MM-DD"
+        from datetime import timedelta
+        start_date: str = date.today().isoformat()
+        end_date: str = (date.today() + timedelta(days=days_ahead)).isoformat()
         all_fixtures: list[dict[str, Any]] = []
 
         for league_id in league_ids:
             logger.info(
-                "Fetching fixtures for league_id=%d on %s …", league_id, today_str
+                "Fetching upcoming fixtures for league_id=%d from %s to %s …", league_id, start_date, end_date
             )
+            # Folosim parametrii 'from' și 'to' oferiți de API-Football pentru intervale de timp
             body = self._get(
                 "fixtures",
-                params={"league": league_id, "date": today_str},
+                params={"league": league_id, "from": start_date, "to": end_date},
             )
             if body is None:
                 logger.warning("Skipping league_id=%d — no data returned.", league_id)
@@ -209,16 +213,17 @@ class FootballOracleAPI:
 
             fixtures: list[dict] = body.get("response", [])
             logger.info(
-                "league_id=%d → %d fixture(s) found.", league_id, len(fixtures)
+                "league_id=%d → %d upcoming fixture(s) found.", league_id, len(fixtures)
             )
             all_fixtures.extend(fixtures)
 
         logger.info(
-            "Total fixtures fetched across %d league(s): %d",
+            "Total upcoming fixtures fetched across %d league(s): %d",
             len(league_ids),
             len(all_fixtures),
         )
         return all_fixtures
+
 
     # ──────────────────────────────────────────────────────────────────────
 
