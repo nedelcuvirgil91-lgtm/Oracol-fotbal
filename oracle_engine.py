@@ -482,7 +482,7 @@ class FootballOracleEngine:
     # 4. MASTER EVALUATE METHOD
     # ══════════════════════════════════════════════════════════════════════
 
-    def evaluate_match(
+        def evaluate_match(
         self,
         fixture_id:   int,
         home_team_id: int,
@@ -490,6 +490,9 @@ class FootballOracleEngine:
         league_id:    int,
         city:         str,
         match_name:   str = "",
+        season:       int = 2026,
+    ):
+
     ) -> MatchPrediction | None:
         """
         Full pre-match analysis pipeline for a single fixture.
