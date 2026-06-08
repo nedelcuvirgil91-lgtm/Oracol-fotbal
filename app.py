@@ -637,8 +637,8 @@ if nav == "🔮  Today's Oracle Predictions":
                 )
                 st.markdown('<br>', unsafe_allow_html=True)
 
-                                with st.spinner(f"Analysing {match_name} …"):
-                    pred = engine.evaluate_match(
+                 with st.spinner(f"Analysing {match_name} …"):
+                     pred = engine.evaluate_match(
                         fixture_id   = fixture_id,
                         home_team_id = home_id,
                         away_team_id = away_id,
