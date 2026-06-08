@@ -637,7 +637,7 @@ if nav == "🔮  Today's Oracle Predictions":
                 )
                 st.markdown('<br>', unsafe_allow_html=True)
 
-                with st.spinner(f"Analysing {match_name} …"):
+                                with st.spinner(f"Analysing {match_name} …"):
                     pred = engine.evaluate_match(
                         fixture_id   = fixture_id,
                         home_team_id = home_id,
@@ -645,7 +645,9 @@ if nav == "🔮  Today's Oracle Predictions":
                         league_id    = league_id,
                         city         = city,
                         match_name   = match_name,
+                        season       = 2026,  # Setați fix pe 2026 pentru toate
                     )
+
 
                 if pred is None:
                     st.error("Analysis failed — insufficient historical data for one or both teams.")
