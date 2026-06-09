@@ -25,7 +25,7 @@ from urllib3.util.retry import Retry
 # ─────────────────────────────────────────────────────────────────────────────
 # HARDCODED CREDENTIALS
 # ─────────────────────────────────────────────────────────────────────────────
-API_FOOTBALL_KEY: str = "b0e2ab9bcda1d9f4c5ddfe1063c81cd7"
+API_FOOTBALL_KEY: str = "c4e7610bf0334935d0f90801863e1801"
 API_FOOTBALL_URL: str = "https://v3.football.api-sports.io"
 
 CLAUDE_API_KEY: str = (
