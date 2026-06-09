@@ -425,7 +425,7 @@ if nav == "🔮  Today's Oracle Predictions":
         engine.config["default_season"]          = season_override
 
         with st.spinner("📡  Scanning live fixtures …"):
-            fixtures_raw = engine.api.get_fixtures_for_today(selected_ids)
+            fixtures_raw = engine.api.get_fixtures_for_today(selected_ids, season=season_override)
 
         if not fixtures_raw:
             st.info(
