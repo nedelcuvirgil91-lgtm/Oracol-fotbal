@@ -25,7 +25,7 @@ from urllib3.util.retry import Retry
 # ─────────────────────────────────────────────────────────────────────────────
 # HARDCODED CREDENTIALS
 # ─────────────────────────────────────────────────────────────────────────────
-API_FOOTBALL_KEY: str = "c4e7610bf0334935d0f90801863e1801"
+API_FOOTBALL_KEY: str = "b0e2ab9bcda1d9f4c5ddfe1063c81cd7"
 API_FOOTBALL_URL: str = "https://v3.football.api-sports.io"
 
 CLAUDE_API_KEY: str = (
@@ -150,21 +150,36 @@ class FootballOracleAPI:
     # PUBLIC — PRE-MATCH DATA
     # ──────────────────────────────────────────────────────────────────────
 
-    def get_fixtures_for_today(self, league_ids: list[int]) -> list[dict[str, Any]]:
+    def get_fixtures_for_today(
+        self,
+        league_ids: list[int],
+        season: int = DEFAULT_SEASON,
+    ) -> list[dict[str, Any]]:
         """
         Fetch today's fixtures for every league ID provided.
-        Automatically includes World Cup 2026 (ID=1) if active.
+        Season is required by API-Football v3 — defaults to 2026.
 
         Parameters
         ----------
         league_ids : list[int]  e.g. [283, 135, 39, 1]
+        season     : int        e.g. 2026
         """
         today_str: str = date.today().isoformat()
         all_fixtures: list[dict[str, Any]] = []
 
         for league_id in league_ids:
-            logger.info("Fixtures for league=%d on %s …", league_id, today_str)
-            body = self._get("fixtures", params={"league": league_id, "date": today_str})
+            logger.info(
+                "Fixtures for league=%d season=%d on %s …",
+                league_id, season, today_str,
+            )
+            body = self._get(
+                "fixtures",
+                params={
+                    "league": league_id,
+                    "season": season,
+                    "date":   today_str,
+                },
+            )
             if body is None:
                 logger.warning("Skipping league=%d — no data.", league_id)
                 continue
