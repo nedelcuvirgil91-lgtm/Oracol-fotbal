@@ -1,13 +1,28 @@
 """
 ================================================================================
-FOOTBALL ORACLE — Hybrid API + Scraping Layer
+FOOTBALL ORACLE — Hybrid API Layer (No API-Football)
 ================================================================================
 Module  : oracle_api.py
-Strategy: Cascading fallback across 4 data sources + intelligent scraping
-          Matches  : football-data.org → API-Football live → Flashscore scrape
-          Odds     : The Odds API      → Betexplorer scrape
-          Stats    : API-Football hist → football-data.io → football-data.org
-          Weather  : WeatherAPI (real xG integration)
+Strategy: Robust cascade WITHOUT API-Football (suspended/unreliable)
+
+  MATCHES (cascade):
+    1. The Odds API  → /sports/{key}/events  (meciuri + date, 0 credit cost)
+    2. football-data.org → /matches          (meciuri ligi majore)
+    3. TheSportsDB   → free, no key needed   (fallback general)
+    4. SofaScore scraping                    (fallback final)
+
+  ODDS (cascade):
+    1. The Odds API  → /sports/{key}/odds    (cote reale, cache 4h)
+    2. SofaScore / Betexplorer scraping      (fallback)
+
+  STATS pentru xG (cascade):
+    1. football-data.org → standings + form  (gratuit)
+    2. TheSportsDB       → last events       (gratuit)
+    3. Neutral league defaults               (last resort)
+
+  WEATHER:
+    WeatherAPI → penalizare xG reală
+
 ================================================================================
 """
 
@@ -25,7 +40,6 @@ from requests import Session
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# ── Optional scraping libs (graceful if missing) ──────────────────────────────
 try:
     from bs4 import BeautifulSoup
     BS4_AVAILABLE = True
@@ -33,76 +47,76 @@ except ImportError:
     BS4_AVAILABLE = False
 
 # ─────────────────────────────────────────────────────────────────────────────
-# CREDENTIALS
+# CREDENTIALS  (API-Football REMOVED)
 # ─────────────────────────────────────────────────────────────────────────────
-ODDS_API_KEY        = "b0e2ab9bcda1d9f4c5ddfe1063c81cd7"   # The Odds API
-API_FOOTBALL_KEY    = "c4e7610bf0334935d0f90801863e1801"   # API-Football v3
-FOOTBALL_DATA_KEY   = "3934542be32c47f88a194f9eec0f44a1"  # football-data.org
-FOOTBALL_DATA_IO_KEY= "fd_9778bb604b33b05afd4f5324a90f10d9a3d2f7e42702448d"
-WEATHER_API_KEY     = "48a5b54b8ced45cc924153231263005"
+ODDS_API_KEY      = "b0e2ab9bcda1d9f4c5ddfe1063c81cd7"
+FOOTBALL_DATA_KEY = "3934542be32c47f88a194f9eec0f44a1"
+WEATHER_API_KEY   = "48a5b54b8ced45cc924153231263005"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # BASE URLs
 # ─────────────────────────────────────────────────────────────────────────────
-API_FOOTBALL_URL  = "https://v3.football.api-sports.io"
 FOOTBALL_DATA_URL = "https://api.football-data.org/v4"
-FOOTBALL_DATA_IO  = "https://api.football-data.io/v1"
 ODDS_API_URL      = "https://api.the-odds-api.com/v4"
+THESPORTSDB_URL   = "https://www.thesportsdb.com/api/v1/json/3"  # free tier
 WEATHER_URL       = "http://api.weatherapi.com/v1"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# LEAGUE MAPPINGS  (football-data.org codes + The Odds API sport keys)
+# LEAGUE MAPPINGS
 # ─────────────────────────────────────────────────────────────────────────────
 
-# football-data.org competition codes
+# football-data.org competition codes (free plan supports these)
 FD_COMPETITIONS: dict[str, str] = {
-    "Premier League":       "PL",
-    "La Liga":              "PD",
-    "Serie A":              "SA",
-    "Bundesliga":           "BL1",
-    "Ligue 1":              "FL1",
-    "Champions League":     "CL",
-    "Europa League":        "EL",
-    "Romania SuperLiga":    "RO1",   # may need verification
-    "World Cup 2026":       "WC",
+    "Premier League":    "PL",
+    "La Liga":           "PD",
+    "Serie A":           "SA",
+    "Bundesliga":        "BL1",
+    "Ligue 1":           "FL1",
+    "Champions League":  "CL",
+    "Europa League":     "EL",
+    "World Cup 2026":    "WC",
 }
 
-# The Odds API sport keys for football
-ODDS_API_SPORT_KEYS: dict[str, str] = {
-    "Premier League":       "soccer_epl",
-    "La Liga":              "soccer_spain_la_liga",
-    "Serie A":              "soccer_italy_serie_a",
-    "Bundesliga":           "soccer_germany_bundesliga",
-    "Ligue 1":              "soccer_france_ligue_one",
-    "Champions League":     "soccer_uefa_champs_league",
-    "Europa League":        "soccer_uefa_europa_league",
-    "Romania SuperLiga":    "soccer_romania_1_liga",
-    "World Cup 2026":       "soccer_fifa_world_cup",
+# The Odds API sport keys
+ODDS_SPORT_KEYS: dict[str, str] = {
+    "Premier League":    "soccer_epl",
+    "La Liga":           "soccer_spain_la_liga",
+    "Serie A":           "soccer_italy_serie_a",
+    "Bundesliga":        "soccer_germany_bundesliga",
+    "Ligue 1":           "soccer_france_ligue_one",
+    "Champions League":  "soccer_uefa_champs_league",
+    "Europa League":     "soccer_uefa_europa_league",
+    "Romania SuperLiga": "soccer_romania_1_liga",
+    "World Cup 2026":    "soccer_fifa_world_cup",
+    "MLS":               "soccer_usa_mls",
+    "Eredivisie":        "soccer_netherlands_eredivisie",
+    "Primeira Liga":     "soccer_portugal_primeira_liga",
 }
 
-# API-Football league IDs (for stats/history)
-AF_LEAGUE_IDS: dict[str, int] = {
-    "Premier League":    39,
-    "La Liga":          140,
-    "Serie A":          135,
-    "Bundesliga":        78,
-    "Ligue 1":           61,
-    "Champions League":   2,
-    "Europa League":      3,
-    "Romania SuperLiga": 283,
-    "World Cup 2026":     1,
+# TheSportsDB league IDs (free)
+TSDB_LEAGUE_IDS: dict[str, str] = {
+    "Premier League":    "4328",
+    "La Liga":           "4335",
+    "Serie A":           "4332",
+    "Bundesliga":        "4331",
+    "Ligue 1":           "4334",
+    "Champions League":  "4480",
+    "Romania SuperLiga": "4652",
+    "World Cup 2026":    "4429",
 }
 
-# Betexplorer league slugs for scraping fallback
-BETEXPLORER_SLUGS: dict[str, str] = {
-    "Premier League":    "england/premier-league",
-    "La Liga":           "spain/laliga",
-    "Serie A":           "italy/serie-a",
-    "Bundesliga":        "germany/bundesliga",
-    "Ligue 1":           "france/ligue-1",
-    "Champions League":  "europe/champions-league",
-    "Europa League":     "europe/europa-league",
-    "Romania SuperLiga": "romania/superliga",
+# League baseline xG (avg goals/team/game) — used when no stats available
+LEAGUE_BASELINES: dict[str, float] = {
+    "Premier League":    1.35,
+    "La Liga":           1.20,
+    "Serie A":           1.25,
+    "Bundesliga":        1.40,
+    "Ligue 1":           1.30,
+    "Champions League":  1.20,
+    "Europa League":     1.15,
+    "Romania SuperLiga": 1.15,
+    "World Cup 2026":    1.30,
+    "default":           1.25,
 }
 
 DEFAULT_SEASON = 2026
@@ -119,7 +133,7 @@ logging.basicConfig(
 logger = logging.getLogger("FootballOracle.API")
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ROTATING USER-AGENTS  (anti-ban for scraping)
+# ROTATING USER-AGENTS
 # ─────────────────────────────────────────────────────────────────────────────
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -127,26 +141,25 @@ USER_AGENTS = [
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 "
     "(KHTML, like Gecko) Version/17.4 Safari/605.1.15",
     "Mozilla/5.0 (X11; Linux x86_64; rv:125.0) Gecko/20100101 Firefox/125.0",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 "
+    "(KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1",
 ]
 
 
-def _random_ua() -> str:
+def _ua() -> str:
     return random.choice(USER_AGENTS)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SESSION BUILDER
+# SESSION
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _build_session(retries: int = 3, backoff: float = 0.5) -> Session:
+def _build_session() -> Session:
     s = Session()
     r = Retry(
-        total=retries,
-        backoff_factor=backoff,
+        total=3, backoff_factor=0.5,
         status_forcelist=(429, 500, 502, 503, 504),
-        allowed_methods=["GET"],
-        raise_on_status=False,
+        allowed_methods=["GET"], raise_on_status=False,
     )
     a = HTTPAdapter(max_retries=r)
     s.mount("https://", a)
@@ -155,207 +168,188 @@ def _build_session(retries: int = 3, backoff: float = 0.5) -> Session:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# UNIFIED MATCH SCHEMA
+# NORMALISED MATCH SCHEMA
 # ─────────────────────────────────────────────────────────────────────────────
-# Every source normalises to this dict:
 # {
-#   "fixture_id"   : str   (source_prefix + id)
-#   "home_team"    : str
-#   "away_team"    : str
-#   "home_team_id" : str | None
-#   "away_team_id" : str | None
-#   "kickoff_utc"  : str   (ISO 8601)
-#   "kickoff_date" : str   (YYYY-MM-DD)
-#   "league"       : str
-#   "league_id"    : int | None
-#   "season"       : int
-#   "venue_city"   : str
-#   "status"       : str   ("scheduled" | "live" | "finished")
-#   "home_odds"    : float | None
-#   "draw_odds"    : float | None
-#   "away_odds"    : float | None
-#   "odds_source"  : str | None
-#   "source"       : str   (which API/scraper provided this)
+#   fixture_id, home_team, away_team, home_team_id, away_team_id,
+#   kickoff_utc, kickoff_date, league, season, venue_city, status,
+#   home_odds, draw_odds, away_odds, odds_source, source
 # }
 
 
-def _empty_match(home: str, away: str, league: str) -> dict:
-    return {
-        "fixture_id":   f"unknown_{home}_{away}",
-        "home_team":    home,
-        "away_team":    away,
-        "home_team_id": None,
-        "away_team_id": None,
-        "kickoff_utc":  "",
-        "kickoff_date": date.today().isoformat(),
-        "league":       league,
-        "league_id":    None,
-        "season":       DEFAULT_SEASON,
-        "venue_city":   "",
-        "status":       "scheduled",
-        "home_odds":    None,
-        "draw_odds":    None,
-        "away_odds":    None,
-        "odds_source":  None,
-        "source":       "unknown",
-    }
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# MAIN CLASS
-# ─────────────────────────────────────────────────────────────────────────────
-
 class FootballOracleAPI:
     """
-    Hybrid data layer: 4 API sources + intelligent scraping fallback.
-    All public methods return normalised match dicts or [] / {} on failure.
+    Hybrid data layer — NO API-Football.
+    Cascade: The Odds API → football-data.org → TheSportsDB → scraping.
     """
 
     def __init__(self) -> None:
-        self._s       = _build_session()
-        self._cache: dict[str, tuple[Any, datetime]] = {}   # simple in-memory cache
-        self._cache_ttl_min = 30   # cache TTL in minutes
-        logger.info("FootballOracleAPI (Hybrid) initialised.")
+        self._s   = _build_session()
+        self._mem: dict[str, tuple[Any, datetime]] = {}
+        self._ttl = 30   # cache TTL minutes
+        logger.info("FootballOracleAPI (No-AF Hybrid) initialised.")
 
     # ══════════════════════════════════════════════════════════════════════
-    # CACHE HELPERS
+    # CACHE
     # ══════════════════════════════════════════════════════════════════════
 
-    def _cache_get(self, key: str) -> Any | None:
-        if key in self._cache:
-            val, ts = self._cache[key]
-            if (datetime.now(timezone.utc) - ts).seconds < self._cache_ttl_min * 60:
+    def _cget(self, key: str) -> Any | None:
+        if key in self._mem:
+            v, ts = self._mem[key]
+            if (datetime.now(timezone.utc) - ts).total_seconds() < self._ttl * 60:
                 logger.info("CACHE HIT: %s", key)
-                return val
+                return v
         return None
 
-    def _cache_set(self, key: str, val: Any) -> None:
-        self._cache[key] = (val, datetime.now(timezone.utc))
+    def _cset(self, key: str, val: Any) -> None:
+        self._mem[key] = (val, datetime.now(timezone.utc))
 
     # ══════════════════════════════════════════════════════════════════════
-    # LOW-LEVEL GET HELPERS
+    # LOW-LEVEL REQUESTS
     # ══════════════════════════════════════════════════════════════════════
 
-    def _get_fd(self, endpoint: str, params: dict | None = None) -> dict | None:
-        """football-data.org GET."""
-        url = f"{FOOTBALL_DATA_URL}/{endpoint}"
-        headers = {"X-Auth-Token": FOOTBALL_DATA_KEY}
+    def _get(self, url: str, headers: dict | None = None,
+             params: dict | None = None, timeout: int = 12) -> dict | list | None:
         try:
-            r = self._s.get(url, headers=headers, params=params or {}, timeout=12)
-            if r.status_code == 429:
-                logger.warning("[FD.org] Rate limited — backing off 60s.")
-                time.sleep(60)
-                return None
+            r = self._s.get(url, headers=headers or {}, params=params or {}, timeout=timeout)
             if not r.ok:
-                logger.warning("[FD.org] HTTP %s for %s", r.status_code, endpoint)
+                logger.warning("[HTTP] %s → %s", url[:60], r.status_code)
                 return None
             return r.json()
         except Exception as exc:
-            logger.error("[FD.org] %s", exc)
+            logger.error("[HTTP] %s → %s", url[:60], exc)
             return None
 
-    def _get_af(self, endpoint: str, params: dict | None = None) -> dict | None:
-        """API-Football v3 GET."""
-        url = f"{API_FOOTBALL_URL}/{endpoint}"
-        headers = {"x-apisports-key": API_FOOTBALL_KEY, "Accept": "application/json"}
-        try:
-            r = self._s.get(url, headers=headers, params=params or {}, timeout=12)
-            if not r.ok:
-                logger.warning("[AF] HTTP %s for %s", r.status_code, endpoint)
-                return None
-            body = r.json()
-            if body.get("errors"):
-                logger.warning("[AF] API error: %s", body["errors"])
-                return None
-            return body
-        except Exception as exc:
-            logger.error("[AF] %s", exc)
-            return None
-
-    def _get_odds_api(self, endpoint: str, params: dict | None = None) -> Any | None:
-        """The Odds API GET."""
-        url = f"{ODDS_API_URL}/{endpoint}"
-        p   = {"apiKey": ODDS_API_KEY, **(params or {})}
-        try:
-            r = self._s.get(url, params=p, timeout=12)
-            remaining = r.headers.get("x-requests-remaining", "?")
-            logger.info("[OddsAPI] %s — remaining credits: %s", endpoint, remaining)
-            if not r.ok:
-                logger.warning("[OddsAPI] HTTP %s", r.status_code)
-                return None
-            return r.json()
-        except Exception as exc:
-            logger.error("[OddsAPI] %s", exc)
-            return None
-
-    def _get_scrape(self, url: str, delay: float = 1.5) -> str | None:
-        """Generic scrape GET with rotating UA and polite delay."""
+    def _scrape(self, url: str, delay: float = 1.5) -> str | None:
         if not BS4_AVAILABLE:
-            logger.warning("BeautifulSoup not installed — scraping disabled.")
             return None
-        time.sleep(delay + random.uniform(0, 0.8))
-        headers = {
-            "User-Agent":      _random_ua(),
-            "Accept-Language": "en-US,en;q=0.9",
-            "Accept":          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Referer":         "https://www.google.com/",
-        }
+        time.sleep(delay + random.uniform(0, 0.6))
         try:
-            r = self._s.get(url, headers=headers, timeout=15)
-            if not r.ok:
-                logger.warning("[Scrape] HTTP %s for %s", r.status_code, url)
-                return None
-            return r.text
+            r = self._s.get(url, headers={
+                "User-Agent": _ua(),
+                "Accept-Language": "en-US,en;q=0.9",
+                "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+                "Referer": "https://www.google.com/",
+            }, timeout=15)
+            return r.text if r.ok else None
         except Exception as exc:
-            logger.error("[Scrape] %s — %s", url, exc)
+            logger.error("[Scrape] %s → %s", url[:60], exc)
             return None
 
     # ══════════════════════════════════════════════════════════════════════
-    # 1. MATCHES — PRIMARY: football-data.org
+    # SOURCE 1 — The Odds API: events (meciuri, 0 credit cost)
     # ══════════════════════════════════════════════════════════════════════
 
-    def _fetch_matches_fd(
-        self,
-        date_from: str,
-        date_to:   str,
-        competitions: list[str] | None = None,
+    def _fetch_events_odds_api(
+        self, sport_key: str, days_ahead: int = 7
     ) -> list[dict]:
         """
-        Fetch matches from football-data.org for a date range.
-        Returns normalised match list.
+        Fetch upcoming events from The Odds API /events endpoint.
+        This uses ZERO credits — credits only consumed when fetching odds.
+        Returns normalised match dicts WITHOUT odds.
         """
-        params: dict = {"dateFrom": date_from, "dateTo": date_to, "status": "SCHEDULED,TIMED,LIVE"}
-        if competitions:
-            params["competitions"] = ",".join(competitions)
+        cache_key = f"events_{sport_key}_{days_ahead}"
+        cached = self._cget(cache_key)
+        if cached is not None:
+            return cached
 
-        body = self._get_fd("matches", params)
-        if not body:
+        now        = datetime.now(timezone.utc)
+        commence_to = (now + timedelta(days=days_ahead)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        data = self._get(
+            f"{ODDS_API_URL}/sports/{sport_key}/events",
+            params={
+                "apiKey":        ODDS_API_KEY,
+                "commenceTimeFrom": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "commenceTo":    commence_to,
+            },
+        )
+        if not data or not isinstance(data, list):
             return []
 
-        results: list[dict] = []
-        for m in body.get("matches", []):
-            try:
-                ko = m.get("utcDate", "")
-                ko_date = ko[:10] if ko else date_from
-                league_name = m.get("competition", {}).get("name", "Unknown")
-                home = m["homeTeam"]["name"]
-                away = m["awayTeam"]["name"]
-                home_id = str(m["homeTeam"].get("id", ""))
-                away_id = str(m["awayTeam"].get("id", ""))
-                area    = m.get("area", {}).get("name", "")
+        # Reverse-lookup league name from sport_key
+        league_name = next(
+            (lg for lg, sk in ODDS_SPORT_KEYS.items() if sk == sport_key),
+            sport_key,
+        )
 
+        results: list[dict] = []
+        for ev in data:
+            try:
+                ko     = ev.get("commence_time", "")
+                ko_date = ko[:10] if ko else ""
                 results.append({
-                    "fixture_id":   f"fd_{m['id']}",
-                    "home_team":    home,
-                    "away_team":    away,
-                    "home_team_id": f"fd_{home_id}",
-                    "away_team_id": f"fd_{away_id}",
+                    "fixture_id":   f"odds_{ev['id']}",
+                    "home_team":    ev["home_team"],
+                    "away_team":    ev["away_team"],
+                    "home_team_id": None,
+                    "away_team_id": None,
                     "kickoff_utc":  ko,
                     "kickoff_date": ko_date,
                     "league":       league_name,
-                    "league_id":    AF_LEAGUE_IDS.get(league_name),
                     "season":       DEFAULT_SEASON,
-                    "venue_city":   area,
+                    "venue_city":   "",
+                    "status":       "scheduled",
+                    "home_odds":    None,
+                    "draw_odds":    None,
+                    "away_odds":    None,
+                    "odds_source":  None,
+                    "source":       "the-odds-api-events",
+                    "_odds_api_id": ev["id"],
+                    "_sport_key":   sport_key,
+                })
+            except (KeyError, TypeError):
+                continue
+
+        logger.info(
+            "[OddsAPI-Events] %d events for %s.", len(results), sport_key
+        )
+        self._cset(cache_key, results)
+        return results
+
+    # ══════════════════════════════════════════════════════════════════════
+    # SOURCE 2 — football-data.org: matches
+    # ══════════════════════════════════════════════════════════════════════
+
+    def _fetch_matches_fd(
+        self, date_from: str, date_to: str,
+        comp_codes: list[str] | None = None,
+    ) -> list[dict]:
+        """Fetch matches from football-data.org for a date range."""
+        params: dict = {
+            "dateFrom": date_from,
+            "dateTo":   date_to,
+            "status":   "SCHEDULED,TIMED,LIVE,IN_PLAY",
+        }
+        if comp_codes:
+            params["competitions"] = ",".join(comp_codes)
+
+        data = self._get(
+            f"{FOOTBALL_DATA_URL}/matches",
+            headers={"X-Auth-Token": FOOTBALL_DATA_KEY},
+            params=params,
+        )
+        if not data:
+            return []
+
+        results: list[dict] = []
+        for m in data.get("matches", []):
+            try:
+                ko          = m.get("utcDate", "")
+                league_name = m.get("competition", {}).get("name", "Unknown")
+                home_id     = str(m["homeTeam"].get("id", ""))
+                away_id     = str(m["awayTeam"].get("id", ""))
+                results.append({
+                    "fixture_id":   f"fd_{m['id']}",
+                    "home_team":    m["homeTeam"]["name"],
+                    "away_team":    m["awayTeam"]["name"],
+                    "home_team_id": f"fd_{home_id}",
+                    "away_team_id": f"fd_{away_id}",
+                    "kickoff_utc":  ko,
+                    "kickoff_date": ko[:10] if ko else date_from,
+                    "league":       league_name,
+                    "season":       DEFAULT_SEASON,
+                    "venue_city":   m.get("area", {}).get("name", ""),
                     "status":       m.get("status", "SCHEDULED").lower(),
                     "home_odds":    None,
                     "draw_odds":    None,
@@ -365,362 +359,352 @@ class FootballOracleAPI:
                 })
             except (KeyError, TypeError):
                 continue
-        logger.info("[FD.org] %d matches fetched (%s → %s).", len(results), date_from, date_to)
+
+        logger.info("[FD.org] %d matches (%s → %s).", len(results), date_from, date_to)
         return results
 
     # ══════════════════════════════════════════════════════════════════════
-    # 2. MATCHES — FALLBACK: API-Football /fixtures?live=all
+    # SOURCE 3 — TheSportsDB: upcoming events (free, no key)
     # ══════════════════════════════════════════════════════════════════════
 
-    def _fetch_live_af(self) -> list[dict]:
-        """Fetch live matches from API-Football (no season required)."""
-        body = self._get_af("fixtures", {"live": "all"})
-        if not body:
+    def _fetch_matches_tsdb(self, league_id: str, league_name: str) -> list[dict]:
+        """
+        Fetch next 15 events from TheSportsDB for a league.
+        Free endpoint, no API key needed.
+        """
+        data = self._get(
+            f"{THESPORTSDB_URL}/eventsnextleague.php",
+            params={"id": league_id},
+        )
+        if not data:
             return []
 
+        events = data.get("events") or []
         results: list[dict] = []
-        for f in body.get("response", []):
+        today = date.today().isoformat()
+
+        for ev in events:
             try:
-                fix    = f["fixture"]
-                teams  = f["teams"]
-                league = f["league"]
-                ko     = fix.get("date", "")
+                ev_date = ev.get("dateEvent", "")
+                ev_time = ev.get("strTime", "00:00:00") or "00:00:00"
+                ko_utc  = f"{ev_date}T{ev_time[:8]}Z" if ev_date else ""
+
+                # Only include future/today matches
+                if ev_date and ev_date < today:
+                    continue
+
                 results.append({
-                    "fixture_id":   f"af_{fix['id']}",
-                    "home_team":    teams["home"]["name"],
-                    "away_team":    teams["away"]["name"],
-                    "home_team_id": f"af_{teams['home']['id']}",
-                    "away_team_id": f"af_{teams['away']['id']}",
-                    "kickoff_utc":  ko,
-                    "kickoff_date": ko[:10] if ko else "",
-                    "league":       league.get("name", ""),
-                    "league_id":    league.get("id"),
-                    "season":       league.get("season", DEFAULT_SEASON),
-                    "venue_city":   fix.get("venue", {}).get("city", ""),
-                    "status":       "live",
+                    "fixture_id":   f"tsdb_{ev['idEvent']}",
+                    "home_team":    ev.get("strHomeTeam", ""),
+                    "away_team":    ev.get("strAwayTeam", ""),
+                    "home_team_id": f"tsdb_{ev.get('idHomeTeam','')}",
+                    "away_team_id": f"tsdb_{ev.get('idAwayTeam','')}",
+                    "kickoff_utc":  ko_utc,
+                    "kickoff_date": ev_date,
+                    "league":       league_name,
+                    "season":       DEFAULT_SEASON,
+                    "venue_city":   ev.get("strVenue", ""),
+                    "status":       "scheduled",
                     "home_odds":    None,
                     "draw_odds":    None,
                     "away_odds":    None,
                     "odds_source":  None,
-                    "source":       "api-football-live",
+                    "source":       "thesportsdb",
                 })
             except (KeyError, TypeError):
                 continue
-        logger.info("[AF-Live] %d live matches.", len(results))
+
+        logger.info("[TSDB] %d events for %s.", len(results), league_name)
         return results
 
     # ══════════════════════════════════════════════════════════════════════
-    # 3. MATCHES — SCRAPING FALLBACK: Flashscore
+    # SOURCE 4 — SofaScore scraping fallback
     # ══════════════════════════════════════════════════════════════════════
 
-    def _fetch_matches_scrape(self, target_date: str) -> list[dict]:
+    def _fetch_matches_sofascore(self, target_date: str) -> list[dict]:
         """
-        Scrape Betexplorer for matches on a given date.
-        Returns partial normalised dicts (no team IDs).
+        Scrape SofaScore scheduled matches for a given date.
+        Uses their public API endpoint (JSON, no auth needed).
         """
-        if not BS4_AVAILABLE:
+        url  = f"https://api.sofascore.com/api/v1/sport/football/scheduled-events/{target_date}"
+        data = self._get(url, headers={
+            "User-Agent":  _ua(),
+            "Referer":     "https://www.sofascore.com/",
+            "Accept":      "application/json",
+            "Cache-Control": "no-cache",
+        })
+        if not data:
             return []
 
+        events  = data.get("events", [])
         results: list[dict] = []
-        for league_name, slug in BETEXPLORER_SLUGS.items():
-            url  = f"https://www.betexplorer.com/soccer/{slug}/"
-            html = self._get_scrape(url, delay=2.0)
-            if not html:
+
+        for ev in events:
+            try:
+                home = ev["homeTeam"]["name"]
+                away = ev["awayTeam"]["name"]
+                ts   = ev.get("startTimestamp", 0)
+                if ts:
+                    ko_dt   = datetime.fromtimestamp(ts, tz=timezone.utc)
+                    ko_utc  = ko_dt.isoformat()
+                    ko_date = ko_dt.date().isoformat()
+                else:
+                    ko_utc  = target_date + "T00:00:00Z"
+                    ko_date = target_date
+
+                league_name = ev.get("tournament", {}).get("name", "Unknown")
+                category    = ev.get("tournament", {}).get("category", {}).get("name", "")
+
+                results.append({
+                    "fixture_id":   f"sofa_{ev['id']}",
+                    "home_team":    home,
+                    "away_team":    away,
+                    "home_team_id": f"sofa_{ev['homeTeam']['id']}",
+                    "away_team_id": f"sofa_{ev['awayTeam']['id']}",
+                    "kickoff_utc":  ko_utc,
+                    "kickoff_date": ko_date,
+                    "league":       league_name,
+                    "season":       DEFAULT_SEASON,
+                    "venue_city":   category,
+                    "status":       "scheduled",
+                    "home_odds":    None,
+                    "draw_odds":    None,
+                    "away_odds":    None,
+                    "odds_source":  None,
+                    "source":       "sofascore",
+                })
+            except (KeyError, TypeError):
                 continue
 
-            try:
-                soup  = BeautifulSoup(html, "html.parser")
-                rows  = soup.select("tr.js-home-highlight, tr[data-dt]")
-                for row in rows:
-                    try:
-                        dt_attr = row.get("data-dt", "")
-                        if dt_attr and dt_attr[:10] != target_date:
-                            continue
-
-                        teams_el = row.select_one(".table-main__tt")
-                        if not teams_el:
-                            continue
-                        text = teams_el.get_text(separator=" - ", strip=True)
-                        if " - " not in text:
-                            continue
-                        home, away = text.split(" - ", 1)
-
-                        # Try to extract odds from columns
-                        odds_els = row.select("td.table-main__odds span")
-                        h_odd = d_odd = a_odd = None
-                        if len(odds_els) >= 3:
-                            try:
-                                h_odd = float(odds_els[0].get_text(strip=True))
-                                d_odd = float(odds_els[1].get_text(strip=True))
-                                a_odd = float(odds_els[2].get_text(strip=True))
-                            except ValueError:
-                                pass
-
-                        results.append({
-                            "fixture_id":   f"scrape_{league_name}_{home}_{away}",
-                            "home_team":    home.strip(),
-                            "away_team":    away.strip(),
-                            "home_team_id": None,
-                            "away_team_id": None,
-                            "kickoff_utc":  dt_attr or target_date + "T00:00:00Z",
-                            "kickoff_date": target_date,
-                            "league":       league_name,
-                            "league_id":    AF_LEAGUE_IDS.get(league_name),
-                            "season":       DEFAULT_SEASON,
-                            "venue_city":   "",
-                            "status":       "scheduled",
-                            "home_odds":    h_odd,
-                            "draw_odds":    d_odd,
-                            "away_odds":    a_odd,
-                            "odds_source":  "betexplorer-scrape" if h_odd else None,
-                            "source":       "betexplorer-scrape",
-                        })
-                    except Exception:
-                        continue
-            except Exception as exc:
-                logger.warning("[Scrape-BE] Parse error %s: %s", league_name, exc)
-
-        logger.info("[Scrape-BE] %d matches scraped for %s.", len(results), target_date)
+        logger.info("[SofaScore] %d events for %s.", len(results), target_date)
         return results
 
     # ══════════════════════════════════════════════════════════════════════
-    # 4. ODDS — PRIMARY: The Odds API
+    # ODDS — The Odds API (conserving credits with cache)
     # ══════════════════════════════════════════════════════════════════════
 
-    def _fetch_odds_odds_api(
-        self, sport_key: str
-    ) -> dict[str, dict]:
+    def _fetch_odds(self, sport_key: str) -> dict[str, dict]:
         """
-        Fetch 1X2 odds from The Odds API for a sport/league.
-        Returns dict keyed by "HomeTeam vs AwayTeam" → {home, draw, away, bookmaker}.
-        Caches result for 4 hours to conserve credits.
+        Fetch 1X2 odds for a league. Cache 4 hours to conserve 500 credits/month.
+        Returns dict: "Home vs Away" → {home, draw, away, bookmaker}
         """
-        cache_key = f"odds_api_{sport_key}"
-        cached = self._cache_get(cache_key)
+        cache_key = f"odds_{sport_key}"
+        cached    = self._cget(cache_key)
         if cached is not None:
             return cached
 
-        data = self._get_odds_api(
-            f"sports/{sport_key}/odds",
+        data = self._get(
+            f"{ODDS_API_URL}/sports/{sport_key}/odds",
             params={
-                "regions":  "eu",
-                "markets":  "h2h",
+                "apiKey":     ODDS_API_KEY,
+                "regions":    "eu",
+                "markets":    "h2h",
                 "oddsFormat": "decimal",
             },
         )
-        if not data:
+        if not data or not isinstance(data, list):
             return {}
 
         result: dict[str, dict] = {}
-        for event in data:
-            home = event.get("home_team", "")
-            away = event.get("away_team", "")
-            key  = f"{home} vs {away}"
-
+        for ev in data:
+            home     = ev.get("home_team", "")
+            away     = ev.get("away_team", "")
+            ev_id    = ev.get("id", "")
             best_h = best_d = best_a = 0.0
-            bk_name = ""
+            bk_name  = ""
 
-            for bk in event.get("bookmakers", []):
-                for market in bk.get("markets", []):
-                    if market.get("key") != "h2h":
+            for bk in ev.get("bookmakers", []):
+                for mkt in bk.get("markets", []):
+                    if mkt.get("key") != "h2h":
                         continue
-                    odds_map: dict[str, float] = {}
-                    for o in market.get("outcomes", []):
-                        odds_map[o["name"]] = float(o.get("price", 0))
-
-                    h = odds_map.get(home, 0.0)
-                    d = odds_map.get("Draw", 0.0)
-                    a = odds_map.get(away,  0.0)
-
-                    # Keep best (highest) odds across bookmakers
+                    om: dict[str, float] = {}
+                    for o in mkt.get("outcomes", []):
+                        om[o["name"]] = float(o.get("price", 0))
+                    h = om.get(home, 0.0)
+                    d = om.get("Draw", 0.0)
+                    a = om.get(away,  0.0)
                     if h > best_h:
-                        best_h = h; bk_name = bk.get("title","")
-                    if d > best_d:
-                        best_d = d
-                    if a > best_a:
-                        best_a = a
+                        best_h  = h
+                        bk_name = bk.get("title", "")
+                    if d > best_d: best_d = d
+                    if a > best_a: best_a = a
 
             if best_h > 1.0:
-                result[key] = {
-                    "home": best_h,
-                    "draw": best_d,
-                    "away": best_a,
-                    "bookmaker": bk_name,
-                }
+                # Index by multiple keys for fuzzy matching
+                result[f"{home} vs {away}"]  = {"home":best_h,"draw":best_d,"away":best_a,"bookmaker":bk_name,"ev_id":ev_id}
+                result[ev_id]                = result[f"{home} vs {away}"]
 
-        self._cache_set(cache_key, result)
-        logger.info("[OddsAPI] %d events with odds for %s.", len(result), sport_key)
+        # Cache with 4h TTL override
+        self._mem[cache_key] = (result, datetime.now(timezone.utc))
+        self._ttl = 240   # 4h for odds
+        logger.info("[OddsAPI-Odds] %d events with odds for %s.", len(result)//2, sport_key)
+        self._ttl = 30    # reset TTL for other calls
         return result
 
+    def _attach_odds(self, matches: list[dict]) -> list[dict]:
+        """
+        Attach odds to each match from The Odds API.
+        Groups by league to minimise API calls (1 call per league).
+        """
+        league_odds: dict[str, dict] = {}
+
+        for m in matches:
+            if m.get("home_odds"):
+                continue
+
+            league    = m.get("league", "")
+            sport_key = ODDS_SPORT_KEYS.get(league)
+
+            # Try to match via stored odds_api event ID first
+            ev_id = m.get("_odds_api_id", "")
+
+            if sport_key:
+                if sport_key not in league_odds:
+                    league_odds[sport_key] = self._fetch_odds(sport_key)
+                od = league_odds[sport_key]
+
+                # Lookup by event ID
+                odds = od.get(ev_id)
+
+                # Lookup by exact name
+                if not odds:
+                    odds = od.get(f"{m['home_team']} vs {m['away_team']}")
+
+                # Fuzzy lookup
+                if not odds:
+                    hn = m["home_team"].lower()
+                    an = m["away_team"].lower()
+                    for k, v in od.items():
+                        kl = k.lower()
+                        if hn[:7] in kl and an[:7] in kl:
+                            odds = v
+                            break
+
+                if odds:
+                    m["home_odds"]   = odds["home"]
+                    m["draw_odds"]   = odds["draw"]
+                    m["away_odds"]   = odds["away"]
+                    m["odds_source"] = f"The Odds API ({odds['bookmaker']})"
+
+        return matches
+
     # ══════════════════════════════════════════════════════════════════════
-    # 5. ODDS — SCRAPING FALLBACK: Betexplorer
+    # STATS — football-data.org standings (for xG calculation)
     # ══════════════════════════════════════════════════════════════════════
 
-    def _fetch_odds_scrape(
-        self, home_team: str, away_team: str, league_name: str
-    ) -> dict | None:
-        """
-        Scrape Betexplorer for specific match odds.
-        Returns {home, draw, away, bookmaker} or None.
-        """
-        if not BS4_AVAILABLE:
+    def get_team_form_fd(self, team_id: str, comp_code: str) -> dict | None:
+        """Team form/stats from fd.org standings. team_id = "fd_123"."""
+        tid = team_id.replace("fd_", "").replace("tsdb_", "").replace("sofa_", "")
+        if not tid.isdigit():
             return None
 
-        slug = BETEXPLORER_SLUGS.get(league_name)
-        if not slug:
-            return None
-
-        url  = f"https://www.betexplorer.com/soccer/{slug}/"
-        html = self._get_scrape(url, delay=1.5)
-        if not html:
-            return None
-
-        try:
-            soup = BeautifulSoup(html, "html.parser")
-            rows = soup.select("tr[data-dt]")
-            for row in rows:
-                text = (row.select_one(".table-main__tt") or row).get_text(" ", strip=True)
-                if home_team.lower()[:6] in text.lower() and away_team.lower()[:6] in text.lower():
-                    odds_els = row.select("td.table-main__odds span")
-                    if len(odds_els) >= 3:
-                        try:
-                            return {
-                                "home":      float(odds_els[0].get_text(strip=True)),
-                                "draw":      float(odds_els[1].get_text(strip=True)),
-                                "away":      float(odds_els[2].get_text(strip=True)),
-                                "bookmaker": "Betexplorer (avg)",
-                            }
-                        except ValueError:
-                            pass
-        except Exception as exc:
-            logger.warning("[Scrape-Odds] %s", exc)
-        return None
-
-    # ══════════════════════════════════════════════════════════════════════
-    # 6. STATISTICS — API-Football historical
-    # ══════════════════════════════════════════════════════════════════════
-
-    def get_team_stats_af(
-        self, team_id_raw: str, last_n: int = 5
-    ) -> list[dict]:
-        """
-        Fetch last N finished fixtures + stats for a team.
-        team_id_raw: "af_496" format or plain int string.
-        Returns normalised list of stat dicts.
-        """
-        team_id = team_id_raw.replace("af_", "").replace("fd_", "")
-        if not team_id.isdigit():
-            return []
-
-        # Try multiple recent seasons (no season lock)
-        for season in [2024, 2023, 2022]:
-            body = self._get_af(
-                "fixtures",
-                {"team": team_id, "last": last_n, "status": "FT", "season": season},
+        cache_key = f"standings_{comp_code}"
+        cached    = self._cget(cache_key)
+        if cached is None:
+            cached = self._get(
+                f"{FOOTBALL_DATA_URL}/competitions/{comp_code}/standings",
+                headers={"X-Auth-Token": FOOTBALL_DATA_KEY},
             )
-            if body and body.get("response"):
-                break
-        else:
-            return []
+            if cached:
+                self._cset(cache_key, cached)
 
-        fixtures = body.get("response", [])
-        if not fixtures:
-            return []
-
-        enriched: list[dict] = []
-        for fix in fixtures:
-            fid       = fix["fixture"]["id"]
-            home_g    = fix["goals"]["home"] or 0
-            away_g    = fix["goals"]["away"] or 0
-            t_is_home = fix["teams"]["home"]["id"] == int(team_id)
-            gf        = home_g if t_is_home else away_g
-            ga        = away_g if t_is_home else home_g
-            result    = "W" if gf > ga else ("L" if gf < ga else "D")
-
-            stats_body = self._get_af(
-                "fixtures/statistics",
-                {"fixture": fid, "team": team_id},
-            )
-            raw = []
-            if stats_body and stats_body.get("response"):
-                raw = stats_body["response"][0].get("statistics", [])
-
-            def _n(key: str) -> float:
-                for s in raw:
-                    if s["type"] == key:
-                        v = s["value"]
-                        if v is None: return 0.0
-                        if isinstance(v, str):
-                            return float(v.replace("%","").strip() or 0)
-                        return float(v)
-                return 0.0
-
-            enriched.append({
-                "fixture_id":    fid,
-                "date":          fix["fixture"]["date"][:10],
-                "result":        result,
-                "goals_for":     gf,
-                "goals_against": ga,
-                "shots_on_goal": _n("Shots on Goal"),
-                "shots_total":   _n("Total Shots"),
-                "possession":    _n("Ball Possession"),
-                "passes_acc":    _n("Passes %"),
-                "corners":       _n("Corner Kicks"),
-                "yellow_cards":  _n("Yellow Cards"),
-                "red_cards":     _n("Red Cards"),
-                "saves":         _n("Goalkeeper Saves"),
-            })
-        logger.info("[AF-Stats] team=%s — %d fixtures enriched.", team_id, len(enriched))
-        return enriched
-
-    # ══════════════════════════════════════════════════════════════════════
-    # 7. STATISTICS — football-data.org (team form via standings)
-    # ══════════════════════════════════════════════════════════════════════
-
-    def get_team_form_fd(self, team_id_raw: str, competition_code: str) -> dict | None:
-        """
-        Get team form info from football-data.org standings.
-        Returns dict with form string, points, goalsFor, goalsAgainst.
-        """
-        team_id = team_id_raw.replace("fd_", "")
-        if not team_id.isdigit():
+        if not cached:
             return None
 
-        body = self._get_fd(f"competitions/{competition_code}/standings")
-        if not body:
-            return None
-
-        for standing_group in body.get("standings", []):
-            for entry in standing_group.get("table", []):
-                if str(entry.get("team", {}).get("id", "")) == team_id:
+        for grp in cached.get("standings", []):
+            for entry in grp.get("table", []):
+                if str(entry.get("team", {}).get("id", "")) == tid:
+                    played = entry.get("playedGames") or 1
                     return {
                         "position":      entry.get("position"),
-                        "played":        entry.get("playedGames"),
-                        "won":           entry.get("won"),
-                        "draw":          entry.get("draw"),
-                        "lost":          entry.get("lost"),
-                        "goals_for":     entry.get("goalsFor"),
-                        "goals_against": entry.get("goalsAgainst"),
-                        "goal_diff":     entry.get("goalDifference"),
-                        "points":        entry.get("points"),
-                        "form":          entry.get("form", ""),    # e.g. "W,D,W,L,W"
+                        "played":        played,
+                        "won":           entry.get("won", 0),
+                        "draw":          entry.get("draw", 0),
+                        "lost":          entry.get("lost", 0),
+                        "goals_for":     entry.get("goalsFor", 0),
+                        "goals_against": entry.get("goalsAgainst", 0),
+                        "goal_diff":     entry.get("goalDifference", 0),
+                        "points":        entry.get("points", 0),
+                        "form":          entry.get("form", "") or "",
+                        "avg_gf":        round((entry.get("goalsFor", 0) or 0) / played, 3),
+                        "avg_ga":        round((entry.get("goalsAgainst", 0) or 0) / played, 3),
                     }
         return None
 
+    def get_team_last_events_tsdb(self, team_id: str) -> list[dict]:
+        """
+        Fetch last 5 events for a team from TheSportsDB.
+        Returns simplified stat dicts for xG calculation.
+        """
+        tid = team_id.replace("tsdb_", "")
+        if not tid.isdigit():
+            return []
+
+        data = self._get(
+            f"{THESPORTSDB_URL}/eventslast.php",
+            params={"id": tid},
+        )
+        if not data:
+            return []
+
+        events  = data.get("results") or []
+        results: list[dict] = []
+
+        for ev in events:
+            try:
+                home_score = int(ev.get("intHomeScore") or 0)
+                away_score = int(ev.get("intAwayScore") or 0)
+                is_home    = ev.get("idHomeTeam") == tid
+                gf = home_score if is_home else away_score
+                ga = away_score if is_home else home_score
+                results.append({
+                    "date":          ev.get("dateEvent", ""),
+                    "result":        "W" if gf > ga else ("L" if gf < ga else "D"),
+                    "goals_for":     gf,
+                    "goals_against": ga,
+                    "shots_on_goal": gf * 3.5,   # estimate: 3.5 shots per goal
+                    "possession":    50.0,         # not available via TSDB free
+                })
+            except (ValueError, TypeError):
+                continue
+
+        return results
+
+    def get_team_stats(self, team_id: str, league: str = "") -> list[dict]:
+        """
+        Public method — cascade stats fetch.
+        1. TheSportsDB last events (if tsdb_ ID)
+        2. Empty list → engine uses standings form
+        """
+        if team_id.startswith("tsdb_"):
+            return self.get_team_last_events_tsdb(team_id)
+        # sofascore / odds IDs — no stats endpoint available without auth
+        return []
+
+    def get_standings_form(self, team_id: str, league: str) -> dict | None:
+        """Get team standings form from football-data.org."""
+        comp_code = FD_COMPETITIONS.get(league)
+        if comp_code and team_id.startswith("fd_"):
+            return self.get_team_form_fd(team_id, comp_code)
+        return None
+
     # ══════════════════════════════════════════════════════════════════════
-    # 8. WEATHER  (real integration — returns xG penalty factor)
+    # WEATHER (real xG penalty)
     # ══════════════════════════════════════════════════════════════════════
 
     def get_weather(self, city: str, match_date: str | None = None) -> dict:
-        """
-        Fetch weather for a venue.
-        Returns dict including xg_penalty_factor (0.0 = no penalty, up to 0.15).
-        """
+        base = {
+            "temp_c": 15.0, "condition": "Clear", "wind_kph": 10.0,
+            "precip_mm": 0.0, "humidity": 50,
+            "xg_penalty": 0.0,
+            "description": "☀️  Clear conditions — no xG penalty.",
+        }
+        if not city or city == "Unknown":
+            return base
+
         target = match_date or date.today().isoformat()
         today  = date.today().isoformat()
-        base   = {"temp_c": 15.0, "condition": "Clear", "wind_kph": 10.0,
-                  "precip_mm": 0.0, "humidity": 50, "xg_penalty": 0.0,
-                  "description": "☀️  Clear conditions — no xG penalty."}
+
         try:
             if target <= today:
                 url    = f"{WEATHER_URL}/current.json"
@@ -732,10 +716,10 @@ class FootballOracleAPI:
             r = self._s.get(url, params=params, timeout=10)
             if not r.ok:
                 return base
-
             data = r.json()
+
             if target <= today:
-                cur = data["current"]
+                cur       = data["current"]
                 temp_c    = cur["temp_c"]
                 condition = cur["condition"]["text"]
                 wind_kph  = cur["wind_kph"]
@@ -749,62 +733,40 @@ class FootballOracleAPI:
                 precip_mm = day["totalprecip_mm"]
                 humidity  = day["avghumidity"]
 
-            # ── xG penalty calculation ─────────────────────────────────
             penalty = 0.0
             notes   = []
+            cl      = condition.lower()
 
-            bad_conditions = [
-                "heavy rain","torrential","blizzard","heavy snow",
-                "thunderstorm","sleet","freezing drizzle","ice pellets",
-            ]
-            cond_lower = condition.lower()
-
-            if any(bc in cond_lower for bc in bad_conditions):
-                penalty += 0.08
-                notes.append("severe weather")
-            elif "rain" in cond_lower or "drizzle" in cond_lower:
-                penalty += 0.04
-                notes.append("light rain")
-            elif "snow" in cond_lower:
-                penalty += 0.06
-                notes.append("snow")
-
-            if precip_mm > 15:
-                penalty += 0.04
-                notes.append(f"heavy precip ({precip_mm}mm)")
-            elif precip_mm > 5:
-                penalty += 0.02
-                notes.append(f"light precip ({precip_mm}mm)")
-
-            if wind_kph > 70:
-                penalty += 0.04
-                notes.append(f"strong wind ({wind_kph}km/h)")
-            elif wind_kph > 50:
-                penalty += 0.02
-                notes.append(f"moderate wind ({wind_kph}km/h)")
-
-            if temp_c < 0:
-                penalty += 0.03
-                notes.append(f"freezing ({temp_c}°C)")
-            elif temp_c > 38:
-                penalty += 0.02
-                notes.append(f"extreme heat ({temp_c}°C)")
-
-            penalty = min(penalty, 0.15)   # cap at -15% xG
-
-            if notes:
-                icon = "⚠️" if penalty > 0.06 else "🌧️"
-                desc = f"{icon}  {condition} | {', '.join(notes)} → xG -{penalty*100:.0f}%"
+            for bc in ["heavy rain","torrential","blizzard","heavy snow","thunderstorm","sleet","freezing"]:
+                if bc in cl:
+                    penalty += 0.08; notes.append("severe weather"); break
             else:
-                desc = f"☀️  {condition} | {temp_c}°C | No xG penalty."
+                if "rain" in cl or "drizzle" in cl:
+                    penalty += 0.04; notes.append("light rain")
+                elif "snow" in cl:
+                    penalty += 0.06; notes.append("snow")
+
+            if precip_mm > 15:  penalty += 0.04; notes.append(f"heavy precip")
+            elif precip_mm > 5: penalty += 0.02; notes.append(f"light precip")
+
+            if wind_kph > 70:   penalty += 0.04; notes.append(f"strong wind")
+            elif wind_kph > 50: penalty += 0.02; notes.append(f"moderate wind")
+
+            if temp_c < 0:      penalty += 0.03; notes.append(f"freezing")
+            elif temp_c > 38:   penalty += 0.02; notes.append(f"extreme heat")
+
+            penalty = min(penalty, 0.15)
+            desc    = (
+                f"{'⚠️' if penalty > 0.06 else '🌧️'}  {condition} | "
+                f"{', '.join(notes)} → xG -{penalty*100:.0f}%"
+                if notes else
+                f"☀️  {condition} | {temp_c}°C | No xG penalty."
+            )
 
             return {
-                "temp_c":      temp_c,
-                "condition":   condition,
-                "wind_kph":    wind_kph,
-                "precip_mm":   precip_mm,
-                "humidity":    humidity,
-                "xg_penalty":  round(penalty, 3),
+                "temp_c": temp_c, "condition": condition,
+                "wind_kph": wind_kph, "precip_mm": precip_mm,
+                "humidity": humidity, "xg_penalty": round(penalty, 3),
                 "description": desc,
             }
 
@@ -813,148 +775,104 @@ class FootballOracleAPI:
             return base
 
     # ══════════════════════════════════════════════════════════════════════
-    # PUBLIC HIGH-LEVEL METHODS
+    # PUBLIC — MAIN FETCH METHOD
     # ══════════════════════════════════════════════════════════════════════
 
     def get_matches_for_week(
         self,
-        days_ahead: int = 7,
+        days_ahead:   int = 7,
         competitions: list[str] | None = None,
     ) -> list[dict]:
         """
-        Fetch matches from today through next `days_ahead` days.
-        Cascade: football-data.org → API-Football live → scraping.
-        Enriches each match with odds from The Odds API.
-        Returns normalised match list sorted by kickoff.
+        Fetch all upcoming matches for the next `days_ahead` days.
+
+        Cascade:
+        1. The Odds API /events (0 credits, best coverage)
+        2. football-data.org  (ligi majore)
+        3. TheSportsDB        (ligi cu TSDB ID)
+        4. SofaScore scraping (fallback global)
+
+        Then enriches all matches with odds from The Odds API.
         """
         today    = date.today()
         end_date = today + timedelta(days=days_ahead)
         d_from   = today.isoformat()
         d_to     = end_date.isoformat()
 
-        cache_key = f"matches_{d_from}_{d_to}"
-        cached    = self._cache_get(cache_key)
+        cache_key = f"week_{d_from}_{days_ahead}_{','.join(sorted(competitions or []))}"
+        cached    = self._cget(cache_key)
         if cached is not None:
             return cached
 
-        # ── Source 1: football-data.org ───────────────────────────────────
-        fd_comps = None
-        if competitions:
-            fd_comps = [FD_COMPETITIONS[c] for c in competitions if c in FD_COMPETITIONS]
+        matches:    list[dict] = []
+        seen_ids:   set[str]  = set()
 
-        matches = self._fetch_matches_fd(d_from, d_to, fd_comps)
+        def _add(new_matches: list[dict]) -> None:
+            for m in new_matches:
+                fid = m.get("fixture_id", "")
+                if fid and fid not in seen_ids:
+                    seen_ids.add(fid)
+                    matches.append(m)
 
-        # ── Source 2: API-Football live (supplement live matches) ─────────
-        live = self._fetch_live_af()
-        existing_ids = {m["fixture_id"] for m in matches}
-        for lm in live:
-            if lm["fixture_id"] not in existing_ids:
-                matches.append(lm)
+        comps = competitions or list(ODDS_SPORT_KEYS.keys())
 
-        # ── Source 3: Scraping fallback ───────────────────────────────────
-        if len(matches) < 5 and BS4_AVAILABLE:
-            logger.info("Falling back to Betexplorer scraping…")
-            for i in range(min(days_ahead, 3)):
+        # ── Source 1: The Odds API events (free, no credits) ─────────────
+        logger.info("Fetching from The Odds API events…")
+        for league in comps:
+            sk = ODDS_SPORT_KEYS.get(league)
+            if sk:
+                _add(self._fetch_events_odds_api(sk, days_ahead))
+
+        logger.info("After Odds API events: %d matches", len(matches))
+
+        # ── Source 2: football-data.org ───────────────────────────────────
+        logger.info("Fetching from football-data.org…")
+        fd_codes = [
+            FD_COMPETITIONS[c] for c in comps if c in FD_COMPETITIONS
+        ] or None
+        _add(self._fetch_matches_fd(d_from, d_to, fd_codes))
+        logger.info("After FD.org: %d matches", len(matches))
+
+        # ── Source 3: TheSportsDB ─────────────────────────────────────────
+        if len(matches) < 10:
+            logger.info("Fetching from TheSportsDB…")
+            for league in comps:
+                lid = TSDB_LEAGUE_IDS.get(league)
+                if lid:
+                    _add(self._fetch_matches_tsdb(lid, league))
+            logger.info("After TSDB: %d matches", len(matches))
+
+        # ── Source 4: SofaScore scraping ──────────────────────────────────
+        if len(matches) < 5:
+            logger.info("Falling back to SofaScore scraping…")
+            for i in range(min(days_ahead, 4)):
                 d = (today + timedelta(days=i)).isoformat()
-                scraped = self._fetch_matches_scrape(d)
-                for sm in scraped:
-                    if sm["fixture_id"] not in {m["fixture_id"] for m in matches}:
-                        matches.append(sm)
+                _add(self._fetch_matches_sofascore(d))
+            logger.info("After SofaScore: %d matches", len(matches))
 
-        # ── Enrich with odds ──────────────────────────────────────────────
-        matches = self._enrich_with_odds(matches)
+        # ── Filter to date range ──────────────────────────────────────────
+        matches = [
+            m for m in matches
+            if d_from <= m.get("kickoff_date", "9999") <= d_to
+        ]
+
+        # ── Attach odds ───────────────────────────────────────────────────
+        matches = self._attach_odds(matches)
 
         # ── Sort by kickoff ───────────────────────────────────────────────
         matches.sort(key=lambda m: m.get("kickoff_utc", ""))
 
-        self._cache_set(cache_key, matches)
-        logger.info("[Hybrid] Total matches fetched: %d", len(matches))
+        logger.info("[Hybrid] Final match count: %d", len(matches))
+        self._cset(cache_key, matches)
         return matches
 
     def get_matches_for_date(self, target_date: str) -> list[dict]:
-        """Filter get_matches_for_week to a specific date."""
         all_m = self.get_matches_for_week(days_ahead=7)
-        return [m for m in all_m if m.get("kickoff_date", "") == target_date]
-
-    def _enrich_with_odds(self, matches: list[dict]) -> list[dict]:
-        """
-        Attach odds to each match.
-        Cascade: The Odds API (by league) → scraping per match.
-        Conserves Odds API credits by fetching per league (not per match).
-        """
-        # Pre-fetch odds per league key
-        league_odds_cache: dict[str, dict] = {}
-
-        for m in matches:
-            league     = m.get("league", "")
-            sport_key  = ODDS_API_SPORT_KEYS.get(league)
-
-            # Already has odds (scraped)
-            if m.get("home_odds"):
-                continue
-
-            # Attempt The Odds API
-            if sport_key:
-                if sport_key not in league_odds_cache:
-                    league_odds_cache[sport_key] = self._fetch_odds_odds_api(sport_key)
-
-                odds_dict = league_odds_cache[sport_key]
-                home = m["home_team"]
-                away = m["away_team"]
-
-                # Try exact match and partial match
-                key     = f"{home} vs {away}"
-                odds    = odds_dict.get(key)
-                if odds is None:
-                    # Fuzzy: check if both team names appear in any key
-                    for k, v in odds_dict.items():
-                        kl = k.lower()
-                        if home.lower()[:8] in kl and away.lower()[:8] in kl:
-                            odds = v
-                            break
-
-                if odds:
-                    m["home_odds"]   = odds["home"]
-                    m["draw_odds"]   = odds["draw"]
-                    m["away_odds"]   = odds["away"]
-                    m["odds_source"] = f"The Odds API ({odds['bookmaker']})"
-                    continue
-
-            # Fallback: scrape Betexplorer per match
-            if BS4_AVAILABLE:
-                scraped_odds = self._fetch_odds_scrape(
-                    m["home_team"], m["away_team"], m.get("league","")
-                )
-                if scraped_odds:
-                    m["home_odds"]   = scraped_odds["home"]
-                    m["draw_odds"]   = scraped_odds["draw"]
-                    m["away_odds"]   = scraped_odds["away"]
-                    m["odds_source"] = scraped_odds["bookmaker"]
-
-        return matches
-
-    def get_team_stats(self, team_id: str, league: str = "") -> list[dict]:
-        """
-        Get team stats with cascade fallback.
-        API-Football historical → empty list.
-        """
-        if team_id.startswith("af_") or team_id.isdigit():
-            return self.get_team_stats_af(team_id)
-        # football-data.org IDs — stats not available via FD.org free tier
-        # Return empty, engine will use standings form as fallback
-        return []
-
-    def get_standings_form(self, team_id: str, league: str) -> dict | None:
-        """Get team form from standings (football-data.org)."""
-        comp_code = FD_COMPETITIONS.get(league)
-        if comp_code and team_id.startswith("fd_"):
-            return self.get_team_form_fd(team_id, comp_code)
-        return None
+        return [m for m in all_m if m.get("kickoff_date") == target_date]
 
     def clear_cache(self) -> None:
-        """Clear the in-memory cache (force fresh data on next call)."""
-        self._cache.clear()
-        logger.info("API cache cleared.")
+        self._mem.clear()
+        logger.info("Cache cleared.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -963,25 +881,27 @@ class FootballOracleAPI:
 
 if __name__ == "__main__":
     print("\n" + "=" * 65)
-    print("  FOOTBALL ORACLE — Hybrid API Smoke Test")
+    print("  FOOTBALL ORACLE — No-AF Hybrid API Smoke Test")
     print("=" * 65)
 
     api = FootballOracleAPI()
 
-    print("\n[1] Matches next 7 days …")
-    matches = api.get_matches_for_week(days_ahead=7)
+    print("\n[1] Matches next 7 days (Premier League + Serie A)…")
+    matches = api.get_matches_for_week(
+        days_ahead=7,
+        competitions=["Premier League", "Serie A", "Champions League"],
+    )
     print(f"    → {len(matches)} matches found")
-    for m in matches[:5]:
+    for m in matches[:8]:
         odds_str = (
             f"H={m['home_odds']:.2f} D={m['draw_odds']:.2f} A={m['away_odds']:.2f}"
-            if m.get("home_odds") else "No odds"
+            if m.get("home_odds") else "No odds yet"
         )
-        print(f"    {m['kickoff_date']}  {m['home_team']} vs {m['away_team']}"
-              f"  [{m['league']}]  {odds_str}")
+        print(f"    {m['kickoff_date']}  {m['home_team']:25} vs {m['away_team']:25}"
+              f"  [{m['league']}]  {odds_str}  [{m['source']}]")
 
-    print("\n[2] Weather — Bucharest …")
+    print("\n[2] Weather — Bucharest…")
     w = api.get_weather("Bucharest")
     print(f"    → {w['description']}")
-    print(f"    → xG penalty: -{w['xg_penalty']*100:.0f}%")
 
     print("\n" + "=" * 65 + "\n")
