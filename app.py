@@ -1,10 +1,11 @@
 """
 ================================================================================
-FOOTBALL ORACLE — Elite Terminal UI (Hybrid Edition)
+FOOTBALL ORACLE — Elite Terminal UI (Hybrid Edition v2.0)
 ================================================================================
 Module  : app.py
 Run     : streamlit run app.py
 Layout  : Tabs Azi / Mâine / Săptămână  +  Portfolio  +  Calibration
+Changes : World Cup 2026 prioritizat, MLS adăugat, ESPN source, demo mode
 ================================================================================
 """
 
@@ -77,7 +78,6 @@ html,body,[class*="css"]{ background:var(--bg)!important; color:var(--t1)!import
 .stMultiSelect>div,.stSelectbox>div{ background:var(--card)!important; border:1px solid var(--blit)!important; border-radius:6px!important; }
 hr{ border-color:var(--border)!important; margin:1.5rem 0!important; }
 
-/* Stacked tabs for date navigation */
 [data-testid="stTabs"] [role="tablist"]{ gap:4px!important; background:var(--panel)!important; padding:4px!important; border-radius:8px!important; border:1px solid var(--border)!important; }
 [data-testid="stTabs"] [role="tab"]{ font-family:var(--mono)!important; font-size:.75rem!important; padding:.4rem .8rem!important; border-radius:6px!important; color:var(--t2)!important; border:none!important; }
 [data-testid="stTabs"] [role="tab"][aria-selected="true"]{ background:var(--aglow)!important; color:var(--amber)!important; border:1px solid var(--adim)!important; }
@@ -111,9 +111,12 @@ WEIGHTS_PATH    = BASE_DIR / "weights.json"
 RECAL_LOG_PATH  = BASE_DIR / "recalibration_log.csv"
 PREDICTIONS_DIR = BASE_DIR / "predictions"
 
+# ── UPDATED: World Cup 2026 + MLS adăugate, ordine prioritizată ──
 COMPETITION_OPTIONS = [
+    "World Cup 2026",
     "Premier League", "La Liga", "Serie A", "Bundesliga", "Ligue 1",
-    "Champions League", "Europa League", "Romania SuperLiga", "World Cup 2026",
+    "Champions League", "Europa League",
+    "Romania SuperLiga", "MLS",
 ]
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -211,8 +214,12 @@ def _render_match_card(match: dict, engine, idx: int) -> None:
     has_odds= bool(match.get("home_odds"))
     src     = match.get("source", "")
 
+    # Demo badge
+    is_demo = str(src).startswith("demo")
+    demo_tag = " 🔵DEMO" if is_demo else ""
+
     odds_indicator = "📊" if has_odds else "📋"
-    label = f"⚽  {home}  vs  {away}  |  {league}  |  {ko_time} UTC  {odds_indicator}"
+    label = f"⚽  {home}  vs  {away}  |  {league}  |  {ko_time} UTC  {odds_indicator}{demo_tag}"
 
     with st.expander(label, expanded=False):
 
@@ -229,8 +236,11 @@ def _render_match_card(match: dict, engine, idx: int) -> None:
         <div class="muted">🏆 {league}  ·  🔌 {src}  ·  ID: {fid}</div>
         """, unsafe_allow_html=True)
 
+        if is_demo:
+            st.info("🔵  Date demo — sursele live sunt temporar indisponibile (între sezoane). Modelul Poisson funcționează normal.")
+
         if not has_odds:
-            st.info("ℹ️  Odds not yet available for this fixture — analysis will use model probabilities only.")
+            st.info("ℹ️  Cote indisponibile momentan — analiza folosește doar probabilitățile modelului.")
 
         st.markdown('<br>', unsafe_allow_html=True)
 
@@ -244,13 +254,12 @@ def _render_match_card(match: dict, engine, idx: int) -> None:
                 st.error("Analysis failed — insufficient data.")
                 return
 
-            # Store in session state
             st.session_state[f"pred_{fid}"] = pred
 
         pred = st.session_state.get(f"pred_{fid}")
         if pred is None:
             st.markdown(
-                '<div class="muted">Click \'ANALYSE THIS MATCH\' to run the Oracle model.</div>',
+                '<div class="muted">Click \'ANALYSE THIS MATCH\' pentru a rula modelul Oracle.</div>',
                 unsafe_allow_html=True,
             )
             return
@@ -334,7 +343,6 @@ def _render_match_card(match: dict, engine, idx: int) -> None:
                 bkod  = vb["bk_odds"]
                 modp  = vb["model_prob_pct"]
                 kelly = pred.kelly_stakes.get(sel, 0.0)
-                vtc   = _vt_class(rat)
 
                 vc1, vc2 = st.columns([3, 1])
                 with vc1:
@@ -367,7 +375,7 @@ def _render_match_card(match: dict, engine, idx: int) -> None:
 with st.sidebar:
     st.markdown(
         '<div style="font-family:var(--mono);font-size:1.1rem;font-weight:600;color:var(--amber);letter-spacing:.08em;">⚡ FOOTBALL ORACLE</div>'
-        '<div style="font-family:var(--mono);font-size:.65rem;color:var(--tm);letter-spacing:.12em;text-transform:uppercase;">Hybrid Intelligence Terminal</div>',
+        '<div style="font-family:var(--mono);font-size:.65rem;color:var(--tm);letter-spacing:.12em;text-transform:uppercase;">Hybrid Intelligence Terminal v2.0</div>',
         unsafe_allow_html=True,
     )
     st.markdown('<hr style="border-color:#1e2535;margin:1rem 0;">', unsafe_allow_html=True)
@@ -380,12 +388,12 @@ with st.sidebar:
 
     st.markdown('<hr style="border-color:#1e2535;margin:1rem 0;">', unsafe_allow_html=True)
 
-    # Competition filter (persistent)
     st.markdown('<div style="font-family:var(--mono);font-size:.7rem;color:var(--tm);letter-spacing:.1em;text-transform:uppercase;margin-bottom:.4rem;">LIGI ACTIVE</div>', unsafe_allow_html=True)
     selected_comps = st.multiselect(
         "Competitions",
         COMPETITION_OPTIONS,
-        default=["Premier League", "Serie A", "Romania SuperLiga", "Champions League"],
+        # ── UPDATED: World Cup 2026 + MLS ca default (sezoane active acum) ──
+        default=["World Cup 2026", "Romania SuperLiga", "MLS"],
         label_visibility="collapsed",
     )
 
@@ -410,16 +418,15 @@ with st.sidebar:
             '<span style="color:#00d17a;">●</span> Engine <span style="color:#00d17a;">ONLINE</span></div>',
             unsafe_allow_html=True,
         )
-        # Data sources status
+        # ── UPDATED: surse actuale v2.0 ──
         st.markdown(
             '<div style="font-family:var(--mono);font-size:.65rem;color:var(--tm);margin-top:.5rem;">'
-            '🔗 football-data.org<br>🔗 The Odds API<br>🔗 API-Football (hist)<br>🔗 Betexplorer (scrape)<br>🌤 WeatherAPI</div>',
+            '🌍 The Odds API (WC 2026)<br>🔗 football-data.org<br>📺 ESPN public API<br>🔗 TheSportsDB<br>🔵 Demo mode<br>🌤 WeatherAPI</div>',
             unsafe_allow_html=True,
         )
 
     st.markdown('<br>', unsafe_allow_html=True)
 
-    # Cache clear button
     if engine and st.button("🔄  Clear Cache", use_container_width=True):
         engine.api.clear_cache()
         st.cache_resource.clear()
@@ -433,7 +440,7 @@ with st.sidebar:
 if nav == "⚽  Meciuri Săptămână":
     _page_header(
         "⚽", "MECIURI SĂPTĂMÂNĂ",
-        "Toate meciurile · Cote reale · Analiză Poisson · Value Bets"
+        "World Cup 2026 · Cote reale · Analiză Poisson · Value Bets"
     )
 
     if not engine:
@@ -453,23 +460,31 @@ if nav == "⚽  Meciuri Săptămână":
         all_matches = st.session_state[load_key]
 
     if not all_matches:
-        st.info(
-            "Nu s-au găsit meciuri pentru săptămâna aceasta în ligile selectate.\n\n"
-            "Posibile cauze:\n"
-            "- Ligile selectate nu au meciuri programate\n"
-            "- Limita de rate la API-uri (încearcă din nou în câteva minute)\n"
-            "- Verifică că football-data.org key este corect"
+        st.warning(
+            "⚠️  Nu s-au găsit meciuri. Încearcă să selectezi **World Cup 2026** sau **MLS** din sidebar — "
+            "acestea sunt ligile active în iunie 2026."
         )
-        if st.button("🔄  Reload Data"):
-            st.session_state["force_reload"] = True
-            st.rerun()
+        col_rl, _ = st.columns([1, 3])
+        with col_rl:
+            if st.button("🔄  Reload Data"):
+                st.session_state["force_reload"] = True
+                st.rerun()
         st.stop()
+
+    # ── Demo mode banner ──────────────────────────────────────────────────
+    demo_count = sum(1 for m in all_matches if str(m.get("source","")).startswith("demo"))
+    live_count = len(all_matches) - demo_count
+    if demo_count > 0:
+        st.info(
+            f"🔵  **{demo_count} meciuri demo** + **{live_count} meciuri live**  ·  "
+            f"Ligile europene sunt între sezoane (iunie). "
+            f"Modelul Poisson funcționează normal pe toate meciurile."
+        )
 
     # ── Build date tabs ───────────────────────────────────────────────────
     today      = date.today()
     date_range = [(today + timedelta(days=i)) for i in range(7)]
 
-    # Tab labels
     tab_labels = []
     for d in date_range:
         cnt = sum(1 for m in all_matches if m.get("kickoff_date","") == d.isoformat())
@@ -496,7 +511,6 @@ if nav == "⚽  Meciuri Săptămână":
                 )
                 continue
 
-            # Group by league
             leagues_in_day: dict[str, list[dict]] = {}
             for m in day_matches:
                 lg = m.get("league", "Other")
@@ -512,7 +526,6 @@ if nav == "⚽  Meciuri Săptămână":
                 ):
                     _render_match_card(match, engine, idx=hash(match["fixture_id"]))
 
-    # Reload button
     st.markdown('<br>', unsafe_allow_html=True)
     col_rl, _ = st.columns([1, 3])
     with col_rl:
@@ -580,7 +593,7 @@ elif nav == "📊  Portfolio & Analytics":
     with st.form("manual_form"):
         fc1,fc2,fc3 = st.columns(3)
         with fc1:
-            mb_m  = st.text_input("Meci", placeholder="Juventus vs Inter")
+            mb_m  = st.text_input("Meci", placeholder="Argentina vs Croatia")
             mb_mk = st.selectbox("Market", ["1X2","BTTS","Over 2.5","Handicap","Other"])
         with fc2:
             mb_s  = st.text_input("Selecție", placeholder="Home Win")
@@ -653,7 +666,6 @@ elif nav == "📊  Portfolio & Analytics":
                         st.warning(rc_res.get("message","Prediction cache nu există."))
                 st.rerun()
 
-    # Recalibration history
     if RECAL_LOG_PATH.exists():
         st.markdown("---")
         st.markdown("#### 🧠  RECALIBRATION HISTORY")
@@ -697,19 +709,22 @@ elif nav == "⚙️  Model Calibration":
                     st.markdown("**League Baselines (xG/team)**")
                     bl   = w.get("league_baselines", {})
                     nbl  = {}
-                    for lg in ["Premier League","La Liga","Serie A","Bundesliga","Ligue 1",
-                               "Champions League","Romania SuperLiga","World Cup 2026"]:
+                    for lg in ["World Cup 2026","Premier League","La Liga","Serie A","Bundesliga",
+                               "Ligue 1","Champions League","Romania SuperLiga","MLS"]:
                         nbl[lg] = st.number_input(lg, .5, 2.5, float(bl.get(lg, bl.get("default",1.25))), .05, key=f"bl_{lg}")
                     nbl["default"] = float(bl.get("default",1.25))
 
                 if st.form_submit_button("💾  SAVE WEIGHTS", use_container_width=True):
                     w.update({
-                        "form_weight":fw,"dna_weight":ndw,"goals_weight":ngw,
-                        "shots_ot_weight":nsow,"possession_weight":npw,
-                        "home_advantage":nha,"away_penalty":nap,"league_baselines":nbl,
+                        "form_weight":       nfw,
+                        "dna_weight":        ndw,
+                        "goals_weight":      ngw,
+                        "shots_ot_weight":   nsow,
+                        "possession_weight": npw,
+                        "home_advantage":    nha,
+                        "away_penalty":      nap,
+                        "league_baselines":  nbl,
                     })
-                    # fix typo
-                    w["form_weight"] = nfw
                     _save_json(WEIGHTS_PATH, w)
                     engine.weights = w
                     st.success("✅  Salvat și reîncărcat.")
@@ -752,12 +767,11 @@ elif nav == "⚙️  Model Calibration":
 
     with t3:
         st.markdown("#### 🧠  LEAGUE LEARNING STATUS")
-        st.caption("Fiecare ligă își calibrează propriii parametri independent. Confidence crește cu fiecare rezultat introdus.")
+        st.caption("Fiecare ligă își calibrează propriii parametri independent.")
 
         if engine:
             league_df = engine.get_league_learning_stats()
             if not league_df.empty:
-                # Colour-code confidence column
                 def _conf_colour(val):
                     pct = int(val.replace("%",""))
                     if pct >= 80: return "color:#00d17a;font-weight:700"
@@ -778,17 +792,11 @@ elif nav == "⚙️  Model Calibration":
                 except Exception:
                     st.dataframe(league_df, use_container_width=True, hide_index=True)
 
-                # Bar chart — samples per league
                 if league_df["Samples"].sum() > 0:
                     st.markdown("#### Samples per League")
                     chart_df = league_df.set_index("League")[["Samples"]]
                     st.bar_chart(chart_df, color="#f5a623", height=180)
 
-                st.info(
-                    "💡  **Come funziona:** ogni volta che aggiorni un risultato pending "
-                    "con il punteggio reale, l'algoritmo aggiorna i pesi specifici di quella lega. "
-                    "Dopo 5 risultati, la lega usa i propri pesi al 100%."
-                )
                 st.markdown("""
 **Interpretare:**
 - **Confidence 0-40%** → pesi globali dominanti (puține date)
@@ -798,7 +806,7 @@ elif nav == "⚙️  Model Calibration":
 - **Δ goals_w > 0** → golurile sunt un predictor mai puternic decât media
                 """)
             else:
-                st.info("📭  Nu există date de calibrare per ligă încă. Introdu rezultate reale din Portfolio → Update Pending Bets.")
+                st.info("📭  Nu există date de calibrare per ligă încă. Introdu rezultate reale din Portfolio.")
         else:
             st.error("Engine offline.")
 
@@ -820,22 +828,32 @@ elif nav == "⚙️  Model Calibration":
             st.markdown(f'<div class="stat-chip">Python <span>{sys.version[:6]}</span></div>', unsafe_allow_html=True)
 
         st.markdown("---")
-        st.markdown("#### 📡  DATA SOURCES STATUS")
+        st.markdown("#### 📡  DATA SOURCES STATUS v2.0")
         st.markdown("""
-| Sursă | Rol | Limită |
+| Sursă | Rol | Status |
 |---|---|---|
-| football-data.org | Meciuri săptămână | 10 req/min · gratuit |
-| The Odds API | Cote H/D/A | 500 req/lună |
-| API-Football | Statistici istorice | Plan free: 2022-2024 |
-| Betexplorer (scrape) | Fallback cote + meciuri | Nelimitat (politicos) |
-| WeatherAPI | Penalizare xG meteo | Gratuit |
+| The Odds API /events | Meciuri + WC 2026 | 0 credite · activ |
+| The Odds API /odds | Cote H/D/A | 500 req/lună · cache 4h |
+| football-data.org | Ligi majore | 10 req/min · gratuit |
+| ESPN public API | WC 2026 + ligi | Fără cheie · activ |
+| TheSportsDB | Fallback general | Gratuit · activ |
+| Demo mode | Între sezoane | Automat când < 3 meciuri |
+| WeatherAPI | Penalizare xG meteo | Gratuit · activ |
 """)
         st.markdown("---")
-        st.markdown("#### 🔑  API KEYS ACTIVE")
+        st.markdown("#### 🔑  API KEYS")
         st.code("""
-football-data.org  : 3934542be32c47f88a194f9eec0f44a1
 The Odds API       : b0e2ab9bcda1d9f4c5ddfe1063c81cd7
-API-Football       : c4e7610bf0334935d0f90801863e1801
-Football-Data.io   : fd_9778bb...d9a3d2f7e42702448d
+football-data.org  : 3934542be32c47f88a194f9eec0f44a1
 WeatherAPI         : 48a5b54b8ced45cc924153231263005
+ESPN               : (no key needed)
+TheSportsDB        : (no key needed)
         """, language="text")
+
+        # ── Dead keys info ────────────────────────────────────────────────
+        if engine and hasattr(engine.api, '_dead_keys') and engine.api._dead_keys:
+            st.markdown("#### ⚠️  Sport Keys offline această sesiune")
+            st.markdown(
+                " · ".join(f"`{k}`" for k in engine.api._dead_keys) +
+                "\n\n*Acestea returnează 404 (sezon terminat). Se reactivează automat la Clear Cache.*"
+            )
