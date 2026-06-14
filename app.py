@@ -1,11 +1,17 @@
 """
 ================================================================================
-FOOTBALL ORACLE — Elite Terminal UI (Hybrid Edition v2.0)
+FOOTBALL ORACLE — Elite Terminal UI v2.2
 ================================================================================
 Module  : app.py
 Run     : streamlit run app.py
-Layout  : Tabs Azi / Mâine / Săptămână  +  Portfolio  +  Calibration
-Changes : World Cup 2026 prioritizat, MLS adăugat, ESPN source, demo mode
+
+CHANGES v2.2:
+  - Data quality badges (✅ live / 🟡 elo / ⚠️ neutral) în Team DNA
+  - Secțiune Injuries în fiecare meci card
+  - xG before/after injury penalty vizibil
+  - Key Manager alerts banner în sidebar
+  - Cache stats în Diagnostics tab
+  - Key Manager status în sidebar
 ================================================================================
 """
 
@@ -36,52 +42,31 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap');
 :root {
-    --bg:     #0a0c10; --panel: #0f1218; --card:  #141820; --hover: #1a2030;
-    --border: #1e2535; --blit:  #2a3550;
-    --amber:  #f5a623; --adim:  #b87518; --aglow: rgba(245,166,35,0.12);
-    --green:  #00d17a; --red:   #ff4757; --blue:  #4a9eff;
-    --t1: #e8eaf0;     --t2: #8892a4;    --tm: #4a5568;
-    --mono: 'IBM Plex Mono', monospace;
-    --sans: 'IBM Plex Sans', sans-serif;
+    --bg:#0a0c10; --panel:#0f1218; --card:#141820; --hover:#1a2030;
+    --border:#1e2535; --blit:#2a3550;
+    --amber:#f5a623; --adim:#b87518; --aglow:rgba(245,166,35,0.12);
+    --green:#00d17a; --red:#ff4757; --blue:#4a9eff;
+    --t1:#e8eaf0; --t2:#8892a4; --tm:#4a5568;
+    --mono:'IBM Plex Mono',monospace; --sans:'IBM Plex Sans',sans-serif;
 }
 html,body,[class*="css"]{ background:var(--bg)!important; color:var(--t1)!important; font-family:var(--sans)!important; }
 #MainMenu,footer,header{ visibility:hidden; }
 .block-container{ padding:1.5rem 2rem 3rem!important; max-width:100%!important; }
-
 [data-testid="stSidebar"]{ background:var(--panel)!important; border-right:1px solid var(--border)!important; }
 [data-testid="stSidebar"] *{ font-family:var(--mono)!important; }
-[data-testid="stSidebar"] .stRadio>div{ gap:0!important; flex-direction:column!important; }
-[data-testid="stSidebar"] .stRadio label{
-    display:block!important; padding:.65rem 1rem!important; border-radius:6px!important;
-    margin:2px 0!important; font-size:.85rem!important; font-weight:500!important;
-    cursor:pointer!important; color:var(--t2)!important; border:1px solid transparent!important; transition:all .15s!important;
-}
-[data-testid="stSidebar"] .stRadio label:hover{ background:var(--aglow)!important; color:var(--amber)!important; border-color:var(--adim)!important; }
-
 [data-testid="stMetric"]{ background:var(--card)!important; border:1px solid var(--border)!important; border-radius:10px!important; padding:1.1rem 1.3rem!important; position:relative!important; overflow:hidden!important; }
 [data-testid="stMetric"]::before{ content:''; position:absolute; top:0; left:0; width:3px; height:100%; background:var(--amber); border-radius:10px 0 0 10px; }
 [data-testid="stMetricLabel"]{ font-family:var(--mono)!important; font-size:.7rem!important; letter-spacing:.1em!important; text-transform:uppercase!important; color:var(--t2)!important; }
 [data-testid="stMetricValue"]{ font-family:var(--mono)!important; font-size:1.6rem!important; font-weight:600!important; color:var(--amber)!important; }
-
 .stButton>button{ font-family:var(--mono)!important; font-size:.8rem!important; font-weight:600!important; letter-spacing:.08em!important; text-transform:uppercase!important; border-radius:6px!important; border:1px solid var(--blit)!important; background:var(--card)!important; color:var(--t1)!important; transition:all .2s!important; }
 .stButton>button:hover{ border-color:var(--amber)!important; color:var(--amber)!important; box-shadow:0 0 12px var(--aglow)!important; }
-.oracle-btn>button{ background:linear-gradient(135deg,#1a1200,#2d1f00)!important; border:1px solid var(--adim)!important; color:var(--amber)!important; font-size:.9rem!important; width:100%!important; box-shadow:0 0 20px rgba(245,166,35,.15)!important; }
-.oracle-btn>button:hover{ box-shadow:0 0 35px rgba(245,166,35,.3)!important; }
-
 [data-testid="stExpander"]{ background:var(--card)!important; border:1px solid var(--border)!important; border-radius:10px!important; margin-bottom:.75rem!important; }
 [data-testid="stExpander"]:hover{ border-color:var(--blit)!important; }
 [data-testid="stExpander"] summary{ font-family:var(--mono)!important; font-size:.88rem!important; padding:.85rem 1.1rem!important; color:var(--t1)!important; }
 .stAlert{ border-radius:8px!important; border-left-width:3px!important; font-family:var(--mono)!important; font-size:.8rem!important; }
-[data-testid="stDataFrame"]{ border:1px solid var(--border)!important; border-radius:8px!important; }
-
-.stTextInput input,.stNumberInput input{ background:var(--card)!important; border:1px solid var(--blit)!important; border-radius:6px!important; color:var(--t1)!important; font-family:var(--mono)!important; }
-.stMultiSelect>div,.stSelectbox>div{ background:var(--card)!important; border:1px solid var(--blit)!important; border-radius:6px!important; }
-hr{ border-color:var(--border)!important; margin:1.5rem 0!important; }
-
 [data-testid="stTabs"] [role="tablist"]{ gap:4px!important; background:var(--panel)!important; padding:4px!important; border-radius:8px!important; border:1px solid var(--border)!important; }
 [data-testid="stTabs"] [role="tab"]{ font-family:var(--mono)!important; font-size:.75rem!important; padding:.4rem .8rem!important; border-radius:6px!important; color:var(--t2)!important; border:none!important; }
 [data-testid="stTabs"] [role="tab"][aria-selected="true"]{ background:var(--aglow)!important; color:var(--amber)!important; border:1px solid var(--adim)!important; }
-
 .score-badge{ display:inline-block; background:var(--hover); border:1px solid var(--blit); border-radius:6px; padding:.3rem .8rem; font-family:var(--mono); font-size:.82rem; color:var(--t2); margin:.15rem; }
 .score-badge.top1{ border-color:var(--adim); color:var(--amber); background:var(--aglow); }
 .section-label{ font-family:var(--mono); font-size:.65rem; letter-spacing:.15em; text-transform:uppercase; color:var(--tm); margin-bottom:.4rem; }
@@ -89,12 +74,18 @@ hr{ border-color:var(--border)!important; margin:1.5rem 0!important; }
 .stat-chip span{ color:var(--t1); font-weight:600; }
 .muted{ color:var(--t2)!important; font-family:var(--mono); font-size:.8rem; }
 .day-header{ font-family:var(--mono); font-size:.7rem; letter-spacing:.15em; text-transform:uppercase; color:var(--tm); padding:.3rem 0; border-bottom:1px solid var(--border); margin-bottom:.6rem; }
-.match-row-badge{ display:inline-block; background:var(--hover); border:1px solid var(--border); border-radius:4px; padding:.1rem .4rem; font-family:var(--mono); font-size:.65rem; color:var(--t2); margin-left:.4rem; }
+.dq-live{ display:inline-block; background:rgba(0,209,122,.12); border:1px solid #00d17a33; border-radius:4px; padding:.1rem .4rem; font-family:var(--mono); font-size:.65rem; color:#00d17a; }
+.dq-elo{ display:inline-block; background:rgba(245,166,35,.12); border:1px solid #f5a62333; border-radius:4px; padding:.1rem .4rem; font-family:var(--mono); font-size:.65rem; color:#f5a623; }
+.dq-neutral{ display:inline-block; background:rgba(255,71,87,.12); border:1px solid #ff475733; border-radius:4px; padding:.1rem .4rem; font-family:var(--mono); font-size:.65rem; color:#ff4757; }
+.injury-badge{ display:inline-block; background:rgba(255,71,87,.10); border:1px solid #ff475733; border-radius:4px; padding:.1rem .5rem; font-family:var(--mono); font-size:.65rem; color:#ff4757; margin:.1rem; }
+.injury-key{ color:#ff4757; font-weight:700; }
+.injury-starter{ color:#f5a623; }
+.injury-rotation{ color:#8892a4; }
 .value-tag{ display:inline-block; border-radius:4px; padding:.15rem .5rem; font-family:var(--mono); font-size:.65rem; font-weight:600; letter-spacing:.04em; }
 .vt-elite{ background:rgba(245,166,35,.2); color:#f5a623; border:1px solid #f5a62355; }
-.vt-high { background:rgba(255,71,87,.15);  color:#ff4757; border:1px solid #ff475733; }
-.vt-med  { background:rgba(0,209,122,.12);  color:#00d17a; border:1px solid #00d17a33; }
-.vt-low  { background:rgba(74,158,255,.12); color:#4a9eff; border:1px solid #4a9eff33; }
+.vt-high{ background:rgba(255,71,87,.15); color:#ff4757; border:1px solid #ff475733; }
+.vt-med{ background:rgba(0,209,122,.12); color:#00d17a; border:1px solid #00d17a33; }
+.vt-low{ background:rgba(74,158,255,.12); color:#4a9eff; border:1px solid #4a9eff33; }
 ::-webkit-scrollbar{ width:5px; height:5px; }
 ::-webkit-scrollbar-track{ background:var(--bg); }
 ::-webkit-scrollbar-thumb{ background:var(--blit); border-radius:10px; }
@@ -102,7 +93,7 @@ hr{ border-color:var(--border)!important; margin:1.5rem 0!important; }
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PATHS
+# PATHS & OPTIONS
 # ─────────────────────────────────────────────────────────────────────────────
 BASE_DIR        = Path(__file__).parent
 PORTFOLIO_PATH  = BASE_DIR / "portfolio.csv"
@@ -111,7 +102,6 @@ WEIGHTS_PATH    = BASE_DIR / "weights.json"
 RECAL_LOG_PATH  = BASE_DIR / "recalibration_log.csv"
 PREDICTIONS_DIR = BASE_DIR / "predictions"
 
-# ── UPDATED: World Cup 2026 + MLS adăugate, ordine prioritizată ──
 COMPETITION_OPTIONS = [
     "World Cup 2026",
     "Premier League", "La Liga", "Serie A", "Bundesliga", "Ligue 1",
@@ -166,13 +156,21 @@ def _prob_bar(label: str, prob: float, colour: str) -> str:
         <div style="width:52px;font-family:var(--mono);font-size:.8rem;color:{colour};font-weight:600;">{pct:.1f}%</div>
     </div>"""
 
-def _xg_chip(label: str, val: float, home: bool) -> str:
+def _xg_chip(label: str, val: float, val_pre: float, home: bool) -> str:
     c = "#4a9eff" if home else "#f5a623"
+    injury_diff = val - val_pre
+    injury_html = ""
+    if abs(injury_diff) > 0.01:
+        injury_html = (
+            f'<div style="font-family:var(--mono);font-size:.6rem;'
+            f'color:#ff4757;">injury: {injury_diff:+.3f}</div>'
+        )
     return f"""
     <div style="text-align:center;background:#141820;border:1px solid #1e2535;border-radius:8px;padding:.5rem .8rem;">
         <div style="font-family:var(--mono);font-size:.6rem;color:#8892a4;letter-spacing:.1em;text-transform:uppercase;">{label}</div>
         <div style="font-family:var(--mono);font-size:1.4rem;font-weight:600;color:{c};">{val:.3f}</div>
         <div style="font-family:var(--mono);font-size:.6rem;color:#4a5568;">xG</div>
+        {injury_html}
     </div>"""
 
 def _odds_box(label: str, odds: float, model_pct: float, edge: float) -> str:
@@ -186,6 +184,15 @@ def _odds_box(label: str, odds: float, model_pct: float, edge: float) -> str:
         <div style="font-family:var(--mono);font-size:.75rem;color:{ec};font-weight:600;">Edge {'+' if edge>0 else ''}{edge:.1f}%</div>
     </div>"""
 
+def _dq_badge(data_quality: str, note: str) -> str:
+    cls_map = {
+        "live":    "dq-live",
+        "elo":     "dq-elo",
+        "neutral": "dq-neutral",
+    }
+    cls = cls_map.get(data_quality, "dq-neutral")
+    return f'<span class="{cls}" title="{note}">{note[:35]}</span>'
+
 def _page_header(icon: str, title: str, sub: str = "") -> None:
     sub_h = f'<div style="font-family:var(--mono);font-size:.82rem;color:var(--t2);margin-top:.3rem;">{sub}</div>' if sub else ""
     st.markdown(f"""
@@ -196,15 +203,59 @@ def _page_header(icon: str, title: str, sub: str = "") -> None:
         <div style="height:2px;background:linear-gradient(90deg,var(--adim),transparent);margin-top:.8rem;border-radius:2px;"></div>
     </div>""", unsafe_allow_html=True)
 
-def _vt_class(rating: str) -> str:
-    r = rating.lower()
-    if "elite" in r: return "vt-elite"
-    if "high"  in r: return "vt-high"
-    if "medium"in r: return "vt-med"
-    return "vt-low"
+# ─────────────────────────────────────────────────────────────────────────────
+# INJURY SECTION RENDERER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _render_injury_section(pred) -> None:
+    """Renderează secțiunea de accidentări pentru un meci."""
+    from injury_manager import InjuryManager
+
+    home_rep = getattr(pred, "home_injury_report", None)
+    away_rep = getattr(pred, "away_injury_report", None)
+
+    if home_rep is None and away_rep is None:
+        st.markdown(
+            '<div class="muted">ℹ️ Date accidentări indisponibile '
+            '(lineup neconfirmat sau meci fără event ID SportAPI)</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    injury_note = getattr(pred, "injury_note", "")
+    if injury_note and injury_note != "✅ Fără penalizări accidentări":
+        if "KEY PLAYER" in injury_note or "⚠️" in injury_note:
+            st.warning(injury_note)
+        else:
+            st.info(injury_note)
+
+    ic1, ic2 = st.columns(2)
+    with ic1:
+        if home_rep:
+            st.markdown(
+                f'<div style="font-family:var(--mono);font-size:.7rem;'
+                f'color:var(--t2);margin-bottom:.3rem;">'
+                f'🏠 {pred.home_team}</div>',
+                unsafe_allow_html=True,
+            )
+            html = InjuryManager.format_report_for_ui(home_rep)
+            st.markdown(html, unsafe_allow_html=True)
+    with ic2:
+        if away_rep:
+            st.markdown(
+                f'<div style="font-family:var(--mono);font-size:.7rem;'
+                f'color:var(--t2);margin-bottom:.3rem;">'
+                f'✈️ {pred.away_team}</div>',
+                unsafe_allow_html=True,
+            )
+            html = InjuryManager.format_report_for_ui(away_rep)
+            st.markdown(html, unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MATCH CARD RENDERER
+# ─────────────────────────────────────────────────────────────────────────────
 
 def _render_match_card(match: dict, engine, idx: int) -> None:
-    """Render one match expander with full analysis."""
     home    = match["home_team"]
     away    = match["away_team"]
     league  = match.get("league", "")
@@ -214,16 +265,13 @@ def _render_match_card(match: dict, engine, idx: int) -> None:
     has_odds= bool(match.get("home_odds"))
     src     = match.get("source", "")
 
-    # Demo badge
     is_demo = str(src).startswith("demo")
     demo_tag = " 🔵DEMO" if is_demo else ""
-
     odds_indicator = "📊" if has_odds else "📋"
+
     label = f"⚽  {home}  vs  {away}  |  {league}  |  {ko_time} UTC  {odds_indicator}{demo_tag}"
 
     with st.expander(label, expanded=False):
-
-        # ── Header ────────────────────────────────────────────────────────
         st.markdown(f"""
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;">
             <div>
@@ -237,23 +285,19 @@ def _render_match_card(match: dict, engine, idx: int) -> None:
         """, unsafe_allow_html=True)
 
         if is_demo:
-            st.info("🔵  Date demo — sursele live sunt temporar indisponibile (între sezoane). Modelul Poisson funcționează normal.")
-
+            st.info("🔵  Date demo — sursele live sunt temporar indisponibile. Modelul Poisson funcționează normal.")
         if not has_odds:
-            st.info("ℹ️  Cote indisponibile momentan — analiza folosește doar probabilitățile modelului.")
+            st.info("ℹ️  Cote indisponibile — analiza folosește doar probabilitățile modelului.")
 
         st.markdown('<br>', unsafe_allow_html=True)
 
-        # ── ANALYSE button ────────────────────────────────────────────────
         btn_key = f"analyse_{fid}_{idx}"
         if st.button("🔮  ANALYSE THIS MATCH", key=btn_key, use_container_width=True):
             with st.spinner(f"Analysing {home} vs {away} …"):
                 pred = engine.evaluate_match(match)
-
             if pred is None:
                 st.error("Analysis failed — insufficient data.")
                 return
-
             st.session_state[f"pred_{fid}"] = pred
 
         pred = st.session_state.get(f"pred_{fid}")
@@ -267,35 +311,62 @@ def _render_match_card(match: dict, engine, idx: int) -> None:
         # ── xG ────────────────────────────────────────────────────────────
         st.markdown('<div class="section-label">Expected Goals (xG)</div>', unsafe_allow_html=True)
         xc1, xc2, xc3 = st.columns([2, 1, 2])
+        home_xg_pre = getattr(pred, "home_xg_pre_injury", pred.home_xg)
+        away_xg_pre = getattr(pred, "away_xg_pre_injury", pred.away_xg)
         with xc1:
-            st.markdown(_xg_chip(home, pred.home_xg, True), unsafe_allow_html=True)
+            st.markdown(_xg_chip(home, pred.home_xg, home_xg_pre, True), unsafe_allow_html=True)
         with xc2:
             st.markdown('<div style="text-align:center;padding-top:.8rem;font-family:var(--mono);font-size:.9rem;color:var(--tm);">vs</div>', unsafe_allow_html=True)
         with xc3:
-            st.markdown(_xg_chip(away, pred.away_xg, False), unsafe_allow_html=True)
+            st.markdown(_xg_chip(away, pred.away_xg, away_xg_pre, False), unsafe_allow_html=True)
 
-        # Team DNA
+        # ── Team DNA + Data Quality badges ────────────────────────────────
         if pred.home_profile and pred.away_profile:
             st.markdown('<br><div class="section-label">Team DNA</div>', unsafe_allow_html=True)
             dc1, dc2 = st.columns(2)
             with dc1:
                 hp = pred.home_profile
+                dq_h = _dq_badge(hp.data_quality, hp.data_quality_note)
+                elo_h = f'ELO <span>{hp.elo_rating}</span>' if hp.elo_rating else ''
                 st.markdown(
+                    f'{dq_h}<br>'
                     f'<div class="stat-chip">OFF <span>{hp.offensive_rating:.3f}</span></div>'
                     f'<div class="stat-chip">DEF <span>{hp.defensive_rating:.3f}</span></div>'
                     f'<div class="stat-chip">Form <span>{"".join(hp.form_results[-5:]) or "N/A"}</span></div>'
-                    f'<div class="stat-chip">Source <span>{hp.data_source}</span></div>',
+                    + (f'<div class="stat-chip">{elo_h}</div>' if elo_h else '') +
+                    f'<div class="stat-chip">Src <span>{hp.data_source}</span></div>',
                     unsafe_allow_html=True,
                 )
             with dc2:
                 ap = pred.away_profile
+                dq_a = _dq_badge(ap.data_quality, ap.data_quality_note)
+                elo_a = f'ELO <span>{ap.elo_rating}</span>' if ap.elo_rating else ''
                 st.markdown(
+                    f'{dq_a}<br>'
                     f'<div class="stat-chip">OFF <span>{ap.offensive_rating:.3f}</span></div>'
                     f'<div class="stat-chip">DEF <span>{ap.defensive_rating:.3f}</span></div>'
                     f'<div class="stat-chip">Form <span>{"".join(ap.form_results[-5:]) or "N/A"}</span></div>'
-                    f'<div class="stat-chip">Source <span>{ap.data_source}</span></div>',
+                    + (f'<div class="stat-chip">{elo_a}</div>' if elo_a else '') +
+                    f'<div class="stat-chip">Src <span>{ap.data_source}</span></div>',
                     unsafe_allow_html=True,
                 )
+
+        # ── H2H ───────────────────────────────────────────────────────────
+        if pred.h2h and pred.h2h.meetings > 0:
+            st.markdown('<br><div class="section-label">Head to Head</div>', unsafe_allow_html=True)
+            st.markdown(
+                f'<div class="muted">{pred.h2h.summary}</div>',
+                unsafe_allow_html=True,
+            )
+
+        st.markdown('<br>', unsafe_allow_html=True)
+
+        # ── Injuries ──────────────────────────────────────────────────────
+        st.markdown('<div class="section-label">🏥 Accidentări & Suspendări</div>', unsafe_allow_html=True)
+        try:
+            _render_injury_section(pred)
+        except Exception:
+            st.markdown('<div class="muted">ℹ️ Module accidentări indisponibil.</div>', unsafe_allow_html=True)
 
         st.markdown('<br>', unsafe_allow_html=True)
 
@@ -342,6 +413,7 @@ def _render_match_card(match: dict, engine, idx: int) -> None:
                 rat   = vb["rating"]
                 bkod  = vb["bk_odds"]
                 modp  = vb["model_prob_pct"]
+                conf  = vb.get("confidence_note", "")
                 kelly = pred.kelly_stakes.get(sel, 0.0)
 
                 vc1, vc2 = st.columns([3, 1])
@@ -349,7 +421,7 @@ def _render_match_card(match: dict, engine, idx: int) -> None:
                     st.success(
                         f'**{rat}**  {sel}  @  **{bkod:.2f}**  |  '
                         f'Edge: **+{edge:.1f}%**  |  Model: {modp:.1f}%  |  '
-                        f'Kelly: **€{kelly:.2f}**'
+                        f'Kelly: **€{kelly:.2f}**{conf}'
                     )
                 with vc2:
                     if st.button("📌 Log", key=f"log_{fid}_{sel.replace(' ','_')}"):
@@ -372,10 +444,11 @@ def _render_match_card(match: dict, engine, idx: int) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 # SIDEBAR
 # ─────────────────────────────────────────────────────────────────────────────
+
 with st.sidebar:
     st.markdown(
         '<div style="font-family:var(--mono);font-size:1.1rem;font-weight:600;color:var(--amber);letter-spacing:.08em;">⚡ FOOTBALL ORACLE</div>'
-        '<div style="font-family:var(--mono);font-size:.65rem;color:var(--tm);letter-spacing:.12em;text-transform:uppercase;">Hybrid Intelligence Terminal v2.0</div>',
+        '<div style="font-family:var(--mono);font-size:.65rem;color:var(--tm);letter-spacing:.12em;text-transform:uppercase;">Hybrid Intelligence Terminal v2.2</div>',
         unsafe_allow_html=True,
     )
     st.markdown('<hr style="border-color:#1e2535;margin:1rem 0;">', unsafe_allow_html=True)
@@ -392,7 +465,6 @@ with st.sidebar:
     selected_comps = st.multiselect(
         "Competitions",
         COMPETITION_OPTIONS,
-        # ── UPDATED: World Cup 2026 + MLS ca default (sezoane active acum) ──
         default=["World Cup 2026", "Romania SuperLiga", "MLS"],
         label_visibility="collapsed",
     )
@@ -418,15 +490,49 @@ with st.sidebar:
             '<span style="color:#00d17a;">●</span> Engine <span style="color:#00d17a;">ONLINE</span></div>',
             unsafe_allow_html=True,
         )
-        # ── UPDATED: surse actuale v2.0 ──
-        st.markdown(
-            '<div style="font-family:var(--mono);font-size:.65rem;color:var(--tm);margin-top:.5rem;">'
-            '🌍 The Odds API (WC 2026)<br>🔗 football-data.org<br>📺 ESPN public API<br>🔗 TheSportsDB<br>🔵 Demo mode<br>🌤 WeatherAPI</div>',
-            unsafe_allow_html=True,
-        )
+
+    # ── Key Manager Status ────────────────────────────────────────────────
+    try:
+        from key_manager import get_key_manager
+        km = get_key_manager()
+        st.markdown('<hr style="border-color:#1e2535;margin:.8rem 0;">', unsafe_allow_html=True)
+        st.markdown('<div style="font-family:var(--mono);font-size:.65rem;color:var(--tm);letter-spacing:.1em;text-transform:uppercase;margin-bottom:.3rem;">API KEYS STATUS</div>', unsafe_allow_html=True)
+        for prov_id in ["sportapi", "freelivefootball", "oddsapi"]:
+            line = km.summary_line(prov_id)
+            st.markdown(
+                f'<div style="font-family:var(--mono);font-size:.65rem;color:var(--t2);margin:.15rem 0;">{line}</div>',
+                unsafe_allow_html=True,
+            )
+
+        # Alerts
+        alerts = km.get_alerts()
+        for alert in alerts:
+            if alert["level"] == "exhausted":
+                st.error(alert["message"])
+            elif alert["level"] == "critical":
+                st.warning(alert["message"])
+            elif alert["level"] == "warning":
+                st.info(alert["message"])
+
+        # Add new key form
+        with st.expander("➕ Adaugă cheie nouă"):
+            with st.form("add_key_form"):
+                new_prov  = st.selectbox("Provider", ["sportapi", "freelivefootball", "oddsapi"])
+                new_key   = st.text_input("API Key")
+                new_limit = st.number_input("Limită/lună", min_value=1, value=50)
+                new_label = st.text_input("Label", value="Key2")
+                if st.form_submit_button("Adaugă"):
+                    if new_key:
+                        ok = km.add_key(new_prov, new_key, int(new_limit), new_label)
+                        if ok:
+                            st.success(f"✅ Cheie {new_label} adăugată!")
+                        else:
+                            st.warning("Cheie existentă sau provider invalid.")
+
+    except ImportError:
+        pass
 
     st.markdown('<br>', unsafe_allow_html=True)
-
     if engine and st.button("🔄  Clear Cache", use_container_width=True):
         engine.api.clear_cache()
         st.cache_resource.clear()
@@ -438,16 +544,13 @@ with st.sidebar:
 # ═════════════════════════════════════════════════════════════════════════════
 
 if nav == "⚽  Meciuri Săptămână":
-    _page_header(
-        "⚽", "MECIURI SĂPTĂMÂNĂ",
-        "World Cup 2026 · Cote reale · Analiză Poisson · Value Bets"
-    )
+    _page_header("⚽", "MECIURI SĂPTĂMÂNĂ",
+                 "World Cup 2026 · SportAPI Stats · Injuries · Value Bets")
 
     if not engine:
         st.error("Engine offline. Verifică oracle_engine.py și oracle_api.py.")
         st.stop()
 
-    # ── Load matches ──────────────────────────────────────────────────────
     load_key = "week_matches"
     if load_key not in st.session_state or st.session_state.get("force_reload"):
         with st.spinner("📡  Fetching meciuri (toate sursele) …"):
@@ -461,8 +564,7 @@ if nav == "⚽  Meciuri Săptămână":
 
     if not all_matches:
         st.warning(
-            "⚠️  Nu s-au găsit meciuri. Încearcă să selectezi **World Cup 2026** sau **MLS** din sidebar — "
-            "acestea sunt ligile active în iunie 2026."
+            "⚠️  Nu s-au găsit meciuri. Încearcă să selectezi **World Cup 2026** sau **MLS** din sidebar."
         )
         col_rl, _ = st.columns([1, 3])
         with col_rl:
@@ -471,17 +573,14 @@ if nav == "⚽  Meciuri Săptămână":
                 st.rerun()
         st.stop()
 
-    # ── Demo mode banner ──────────────────────────────────────────────────
     demo_count = sum(1 for m in all_matches if str(m.get("source","")).startswith("demo"))
     live_count = len(all_matches) - demo_count
     if demo_count > 0:
         st.info(
             f"🔵  **{demo_count} meciuri demo** + **{live_count} meciuri live**  ·  "
-            f"Ligile europene sunt între sezoane (iunie). "
             f"Modelul Poisson funcționează normal pe toate meciurile."
         )
 
-    # ── Build date tabs ───────────────────────────────────────────────────
     today      = date.today()
     date_range = [(today + timedelta(days=i)) for i in range(7)]
 
@@ -503,10 +602,9 @@ if nav == "⚽  Meciuri Săptămână":
                 m for m in all_matches
                 if m.get("kickoff_date","") == target_date.isoformat()
             ]
-
             if not day_matches:
                 st.markdown(
-                    f'<div class="muted" style="padding:1rem 0;">Nu există meciuri programate pentru {target_date.strftime("%A, %d %B %Y")}.</div>',
+                    f'<div class="muted" style="padding:1rem 0;">Nu există meciuri pentru {target_date.strftime("%A, %d %B %Y")}.</div>',
                     unsafe_allow_html=True,
                 )
                 continue
@@ -574,7 +672,8 @@ elif nav == "📊  Portfolio & Analytics":
             if v=="PENDING": return "color:#f5a623"
             return ""
         def _sp(v):
-            if isinstance(v,(int,float)): return "color:#00d17a" if v>0 else ("color:#ff4757" if v<0 else "")
+            if isinstance(v,(int,float)):
+                return "color:#00d17a" if v>0 else ("color:#ff4757" if v<0 else "")
             return ""
         try:
             styled = (
@@ -585,9 +684,8 @@ elif nav == "📊  Portfolio & Analytics":
         except Exception:
             st.dataframe(df, use_container_width=True, height=300)
     else:
-        st.info("📭  Nu există pariuri înregistrate. Rulează Oracle și logează primul pariu.")
+        st.info("📭  Nu există pariuri înregistrate.")
 
-    # ── Manual entry ──────────────────────────────────────────────────────
     st.markdown("---")
     st.markdown("#### ✏️  MANUAL BET ENTRY")
     with st.form("manual_form"):
@@ -609,7 +707,7 @@ elif nav == "📊  Portfolio & Analytics":
                 st.success(f"✅  Logat: {mb_m} | {mb_s} @ {mb_o:.2f}")
                 st.rerun()
 
-    # ── Update pending + Recalibration ────────────────────────────────────
+    # Update pending
     pending_df = None
     if df is not None:
         pending_df = df[df["Result"]=="PENDING"]
@@ -617,12 +715,10 @@ elif nav == "📊  Portfolio & Analytics":
     if pending_df is not None and not pending_df.empty:
         st.markdown("---")
         st.markdown("#### 🔄  UPDATE PENDING  +  🧠 AUTO-RECALIBRATION")
-
         st.dataframe(
             pending_df[["Date","Match","Selection","Odds","Stake","FixtureID"]],
             use_container_width=True
         )
-
         with st.form("update_form"):
             row_idx = st.selectbox(
                 "Selecție pariu",
@@ -637,7 +733,8 @@ elif nav == "📊  Portfolio & Analytics":
             with rc3: do_rc = st.checkbox("Rulează recalibrarea", value=True)
 
             if st.form_submit_button("✅  UPDATE", use_container_width=True):
-                full = pd.read_csv(PORTFOLIO_PATH)
+                import pandas as _pd
+                full = _pd.read_csv(PORTFOLIO_PATH)
                 ov   = float(full.loc[row_idx,"Odds"])
                 sv   = float(full.loc[row_idx,"Stake"])
                 fid  = str(full.loc[row_idx,"FixtureID"])
@@ -650,20 +747,12 @@ elif nav == "📊  Portfolio & Analytics":
                 if do_rc and engine and fid and fid != "manual":
                     with st.spinner("🧠  Recalibrare …"):
                         rc_res = engine.update_weights_from_result(fid, int(ah), int(aa))
-                    status = rc_res.get("status","error")
-                    if status == "stable":
-                        st.info(f"🟢  Model precis (eroare={rc_res.get('combined_error','?'):.3f}) — fără ajustări.")
-                    elif status == "recalibrated":
-                        st.success(f"🧠  Recalibrat!  Eroare combinată: {rc_res['combined_error']:.3f}")
-                        st.caption(rc_res.get("reason",""))
-                        if rc_res.get("adjustments"):
-                            adj = pd.DataFrame([
-                                {"Weight":k,"Old":v["old"],"Delta":f"{v['delta']:+.4f}","New":v["new"]}
-                                for k,v in rc_res["adjustments"].items()
-                            ])
-                            st.dataframe(adj, use_container_width=True, hide_index=True)
+                    if rc_res.get("status") == "stable":
+                        st.info(f"🟢  Model precis — fără ajustări.")
+                    elif rc_res.get("status") == "recalibrated":
+                        st.success(f"🧠  Recalibrat! Eroare: {rc_res['combined_error']:.3f}")
                     else:
-                        st.warning(rc_res.get("message","Prediction cache nu există."))
+                        st.warning(rc_res.get("message",""))
                 st.rerun()
 
     if RECAL_LOG_PATH.exists():
@@ -678,19 +767,22 @@ elif nav == "📊  Portfolio & Analytics":
 # ═════════════════════════════════════════════════════════════════════════════
 
 elif nav == "⚙️  Model Calibration":
-    _page_header("⚙️", "MODEL CALIBRATION", "Weights · Config · Diagnostice")
+    _page_header("⚙️", "MODEL CALIBRATION", "Weights · Config · Cache · Diagnostice")
 
     if not engine:
         st.error("Engine offline.")
         st.stop()
 
-    t1, t2, t3, t4 = st.tabs(["🎛  Weights", "⚡  Config", "🧠  League Learning", "🔍  Diagnostics"])
+    t1, t2, t3, t4, t5 = st.tabs([
+        "🎛  Weights", "⚡  Config",
+        "🧠  League Learning", "💾  Cache", "🔍  Diagnostics",
+    ])
 
     with t1:
         st.markdown("#### MODEL WEIGHTS  (`weights.json`)")
         w = _load_json(WEIGHTS_PATH)
         if not w:
-            st.warning("weights.json lipsă. Rulează engine-ul odată pentru a-l genera.")
+            st.warning("weights.json lipsă.")
         else:
             with st.form("w_form"):
                 wc1, wc2 = st.columns(2)
@@ -706,13 +798,8 @@ elif nav == "⚙️  Model Calibration":
                     st.markdown("**Adjustments**")
                     nha  = st.slider("home_advantage", 1.00, 1.20, float(w.get("home_advantage",1.07)), .01)
                     nap  = st.slider("away_penalty",   0.80, 1.00, float(w.get("away_penalty",  0.95)), .01)
-                    st.markdown("**League Baselines (xG/team)**")
-                    bl   = w.get("league_baselines", {})
-                    nbl  = {}
-                    for lg in ["World Cup 2026","Premier League","La Liga","Serie A","Bundesliga",
-                               "Ligue 1","Champions League","Romania SuperLiga","MLS"]:
-                        nbl[lg] = st.number_input(lg, .5, 2.5, float(bl.get(lg, bl.get("default",1.25))), .05, key=f"bl_{lg}")
-                    nbl["default"] = float(bl.get("default",1.25))
+                    st.markdown("**ELO Config**")
+                    nel  = st.slider("elo_blend_weight", .10, .60, float(w.get("elo_blend_weight",.35)), .05)
 
                 if st.form_submit_button("💾  SAVE WEIGHTS", use_container_width=True):
                     w.update({
@@ -723,14 +810,11 @@ elif nav == "⚙️  Model Calibration":
                         "possession_weight": npw,
                         "home_advantage":    nha,
                         "away_penalty":      nap,
-                        "league_baselines":  nbl,
+                        "elo_blend_weight":  nel,
                     })
                     _save_json(WEIGHTS_PATH, w)
                     engine.weights = w
                     st.success("✅  Salvat și reîncărcat.")
-
-            with st.expander("📄  Raw JSON"):
-                st.code(json.dumps(_load_json(WEIGHTS_PATH), indent=4), language="json")
 
     with t2:
         st.markdown("#### ENGINE CONFIG  (`config.json`)")
@@ -742,13 +826,12 @@ elif nav == "⚙️  Model Calibration":
                 cc1,cc2 = st.columns(2)
                 with cc1:
                     nt  = st.number_input("value_bet_threshold_pct", 1.0,30.0, float(cfg.get("value_bet_threshold_pct",5.0)), .5)
-                    nmg = st.number_input("max_goals_poisson",        5,15,     int(cfg.get("max_goals_poisson",8)),           1)
-                    nln = st.number_input("last_n_fixtures",          3,10,     int(cfg.get("last_n_fixtures",5)),             1)
+                    nmg = st.number_input("max_goals_poisson", 5,15, int(cfg.get("max_goals_poisson",8)), 1)
+                    nln = st.number_input("last_n_fixtures",   3,10, int(cfg.get("last_n_fixtures",5)), 1)
                 with cc2:
-                    nsd = st.number_input("stake_default (€)", 1.0,1000.0, float(cfg.get("stake_default",10.0)),  1.0)
-                    nkf = st.slider("kelly_fraction",     .05,1.0,  float(cfg.get("kelly_fraction",.25)),           .05)
-                    nlr = st.slider("learning_rate",      .01,.20,  float(cfg.get("recalibration_learning_rate",.05)),.01)
-                    nmd = st.slider("max_delta",          .05,.30,  float(cfg.get("recalibration_max_delta",.15)),   .01)
+                    nsd = st.number_input("stake_default (€)", 1.0,1000.0, float(cfg.get("stake_default",10.0)), 1.0)
+                    nkf = st.slider("kelly_fraction",  .05,1.0, float(cfg.get("kelly_fraction",.25)), .05)
+                    nlr = st.slider("learning_rate",   .01,.20, float(cfg.get("recalibration_learning_rate",.05)), .01)
                 if st.form_submit_button("💾  SAVE CONFIG", use_container_width=True):
                     cfg.update({
                         "value_bet_threshold_pct":    round(nt,1),
@@ -757,60 +840,65 @@ elif nav == "⚙️  Model Calibration":
                         "stake_default":              round(nsd,2),
                         "kelly_fraction":             round(nkf,2),
                         "recalibration_learning_rate":round(nlr,3),
-                        "recalibration_max_delta":    round(nmd,3),
                     })
                     _save_json(CONFIG_PATH, cfg)
                     engine.config = cfg
                     st.success("✅  Salvat.")
-            with st.expander("📄  Raw JSON"):
-                st.code(json.dumps(_load_json(CONFIG_PATH), indent=4), language="json")
 
     with t3:
         st.markdown("#### 🧠  LEAGUE LEARNING STATUS")
-        st.caption("Fiecare ligă își calibrează propriii parametri independent.")
-
         if engine:
             league_df = engine.get_league_learning_stats()
             if not league_df.empty:
-                def _conf_colour(val):
-                    pct = int(val.replace("%",""))
-                    if pct >= 80: return "color:#00d17a;font-weight:700"
-                    if pct >= 40: return "color:#f5a623;font-weight:600"
-                    return "color:#ff4757"
-                def _delta_colour(val):
-                    if isinstance(val, float):
-                        return "color:#00d17a" if val > 0 else ("color:#ff4757" if val < 0 else "")
-                    return ""
-                try:
-                    styled_df = (
-                        league_df.style
-                        .applymap(_conf_colour, subset=["Confidence"])
-                        .applymap(_delta_colour, subset=["Δ form_w","Δ goals_w","Δ home_adv"])
-                        .format({"Δ form_w":"{:+.4f}","Δ goals_w":"{:+.4f}","Δ home_adv":"{:+.4f}"})
-                    )
-                    st.dataframe(styled_df, use_container_width=True, hide_index=True)
-                except Exception:
-                    st.dataframe(league_df, use_container_width=True, hide_index=True)
-
-                if league_df["Samples"].sum() > 0:
-                    st.markdown("#### Samples per League")
-                    chart_df = league_df.set_index("League")[["Samples"]]
-                    st.bar_chart(chart_df, color="#f5a623", height=180)
-
-                st.markdown("""
-**Interpretare:**
-- **Confidence 0-40%** → pesi globali dominanti (puține date)
-- **Confidence 40-80%** → blend global + ligă
-- **Confidence 80-100%** → liga și-a calibrat propriile pattern-uri
-- **Δ home_adv > 0** → avantajul acasă e mai mare decât media în această ligă
-- **Δ goals_w > 0** → golurile sunt un predictor mai puternic decât media
-                """)
+                st.dataframe(league_df, use_container_width=True, hide_index=True)
             else:
-                st.info("📭  Nu există date de calibrare per ligă încă. Introdu rezultate reale din Portfolio.")
-        else:
-            st.error("Engine offline.")
+                st.info("📭  Fără date de calibrare încă.")
 
     with t4:
+        st.markdown("#### 💾  CACHE STATUS")
+        try:
+            from cache_manager import get_cache
+            cm = get_cache()
+            stats = cm.stats()
+
+            col_a, col_b, col_c = st.columns(3)
+            col_a.metric("Total fișiere", stats["total_files"])
+            col_b.metric("Dimensiune", f"{stats['total_size_kb']:.1f} KB")
+            col_c.metric("Fișiere expirate", stats["stale_files"])
+
+            st.markdown("#### Per categorie")
+            rows = []
+            for cat, data in stats["by_category"].items():
+                rows.append({
+                    "Categorie": cat,
+                    "Fișiere": data["files"],
+                    "Fresh": data["fresh"],
+                    "Expirate": data["stale"],
+                    "TTL (ore)": data["ttl_hours"],
+                    "Size (KB)": data["size_kb"],
+                })
+            if rows:
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+            col_i, col_ii, col_iii = st.columns(3)
+            with col_i:
+                if st.button("🗑️  Clear injuries cache"):
+                    n = cm.invalidate_category("injuries")
+                    st.success(f"✅ {n} fișiere injuries șterse.")
+            with col_ii:
+                if st.button("🗑️  Clear lineups cache"):
+                    n = cm.invalidate_category("lineups")
+                    st.success(f"✅ {n} fișiere lineups șterse.")
+            with col_iii:
+                if st.button("🗑️  Clear ALL cache"):
+                    n = cm.invalidate_all()
+                    st.success(f"✅ {n} fișiere șterse.")
+
+        except ImportError:
+            st.warning("cache_manager.py indisponibil.")
+
+    with t5:
         st.markdown("#### 🔍  DIAGNOSTICS")
         d1,d2,d3,d4 = st.columns(4)
         with d1:
@@ -827,33 +915,40 @@ elif nav == "⚙️  Model Calibration":
             st.markdown(f'<div class="stat-chip">Engine <span>{"✅ ONLINE" if engine else "❌"}</span></div>', unsafe_allow_html=True)
             st.markdown(f'<div class="stat-chip">Python <span>{sys.version[:6]}</span></div>', unsafe_allow_html=True)
 
+        # Module availability
         st.markdown("---")
-        st.markdown("#### 📡  DATA SOURCES STATUS v2.0")
-        st.markdown("""
-| Sursă | Rol | Status |
-|---|---|---|
-| The Odds API /events | Meciuri + WC 2026 | 0 credite · activ |
-| The Odds API /odds | Cote H/D/A | 500 req/lună · cache 4h |
-| football-data.org | Ligi majore | 10 req/min · gratuit |
-| ESPN public API | WC 2026 + ligi | Fără cheie · activ |
-| TheSportsDB | Fallback general | Gratuit · activ |
-| Demo mode | Între sezoane | Automat când < 3 meciuri |
-| WeatherAPI | Penalizare xG meteo | Gratuit · activ |
-""")
-        st.markdown("---")
-        st.markdown("#### 🔑  API KEYS")
-        st.code("""
-The Odds API       : b0e2ab9bcda1d9f4c5ddfe1063c81cd7
-football-data.org  : 3934542be32c47f88a194f9eec0f44a1
-WeatherAPI         : 48a5b54b8ced45cc924153231263005
-ESPN               : (no key needed)
-TheSportsDB        : (no key needed)
-        """, language="text")
+        st.markdown("#### 📦  Module Status")
+        modules = [
+            ("mappings.py",        "mappings"),
+            ("cache_manager.py",   "cache_manager"),
+            ("key_manager.py",     "key_manager"),
+            ("injury_manager.py",  "injury_manager"),
+            ("oracle_api.py",      "oracle_api"),
+            ("oracle_engine.py",   "oracle_engine"),
+        ]
+        mc1, mc2 = st.columns(2)
+        for i, (fname, mod) in enumerate(modules):
+            col = mc1 if i % 2 == 0 else mc2
+            try:
+                __import__(mod)
+                col.markdown(f'<div class="stat-chip">{fname} <span>✅</span></div>', unsafe_allow_html=True)
+            except ImportError:
+                col.markdown(f'<div class="stat-chip">{fname} <span>❌</span></div>', unsafe_allow_html=True)
 
-        # ── Dead keys info ────────────────────────────────────────────────
-        if engine and hasattr(engine.api, '_dead_keys') and engine.api._dead_keys:
-            st.markdown("#### ⚠️  Sport Keys offline această sesiune")
-            st.markdown(
-                " · ".join(f"`{k}`" for k in engine.api._dead_keys) +
-                "\n\n*Acestea returnează 404 (sezon terminat). Se reactivează automat la Clear Cache.*"
-            )
+        st.markdown("---")
+        st.markdown("#### 📡  DATA SOURCES")
+        st.markdown("""
+| Sursă | Rol | Limite |
+|---|---|---|
+| SportAPI | Stats, Lineups, H2H | 50 req/lună |
+| Free Live Football | Backup stats | 100 req/lună |
+| The Odds API /events | Meciuri | 0 credite |
+| The Odds API /odds | Cote H/D/A | 500 req/lună |
+| The Odds API /scores | Formă recentă | 2 credite/apel |
+| football-data.org | Clasamente clubs | 10 req/min |
+| ESPN public API | WC 2026 | Fără limită |
+| TheSportsDB | Fallback general | Gratuit |
+| eloratings.net | ELO naționale | 1 apel/zi |
+| WeatherAPI | Penalizare xG meteo | 1M req/lună |
+| Demo mode | Între sezoane | Automat |
+""")
