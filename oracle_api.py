@@ -69,6 +69,7 @@ from mappings import (
     ESPN_LEAGUE_SLUGS,
     TSDB_LEAGUE_IDS,
     LEAGUE_BASELINES,
+    ELO_RATINGS_FALLBACK,
     normalize_team_name,
     match_key,
 )
@@ -1184,8 +1185,14 @@ class FootballOracleAPI:
                 _disc_save(ELO_CACHE_PATH, ratings)
                 self._elo_cache = ratings
                 self._cset("elo_ratings", ratings)
+            else:
+                # Scraping a eșuat — folosim fallback hardcodat
+                logger.info("[ELO] Scraping returned 0 teams — using hardcoded fallback.")
+                ratings = {k: v for k, v in ELO_RATINGS_FALLBACK.items()}
+                self._elo_cache = ratings
+                self._cset("elo_ratings", ratings)
 
-            logger.info("[ELO] Scraped %d teams.", len(ratings))
+            logger.info("[ELO] %d team ratings available.", len(ratings))
             return ratings
 
         except Exception as exc:
@@ -1194,7 +1201,14 @@ class FootballOracleAPI:
 
     def get_elo_rating(self, team_name: str) -> int | None:
         canonical = normalize_team_name(team_name)
-        return self._fetch_elo_ratings().get(canonical)
+        ratings   = self._fetch_elo_ratings()
+        result    = ratings.get(canonical)
+        if result is None:
+            # Check hardcoded fallback directly
+            result = ELO_RATINGS_FALLBACK.get(canonical)
+            if result:
+                logger.info("[ELO] %s found in hardcoded fallback: %d", canonical, result)
+        return result
 
     # ══════════════════════════════════════════════════════════════════════
     # LEGACY STATS (clubs — fd.org + TSDB)
