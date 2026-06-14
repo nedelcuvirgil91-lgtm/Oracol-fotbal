@@ -568,27 +568,43 @@ class FootballOracleEngine:
             data_source  = "elo-only"
             data_quality = DATA_QUALITY_ELO
 
-        # ── Level 4: neutral defaults ─────────────────────────────────────
+        # ── Level 4: neutral defaults — folosește ELO dacă există ─────────
         else:
-            logger.warning(
-                "No data for '%s' — using neutral defaults.", team_name
-            )
             baseline = float(
                 self.weights.get("league_baselines", {}).get(
                     league,
                     self.weights.get("league_baselines", {}).get("default", 1.25)
                 )
             )
-            off_rating = round(baseline * 0.65, 4)
-            def_rating = round(baseline, 4)
-            gf  = baseline
-            ga  = baseline
-            sot = baseline * 0.45
+
+            if elo_off is not None:
+                # Avem ELO — folosim valorile sigmoid în loc de defaults plate
+                off_rating = round(elo_off * baseline, 4)
+                def_rating = round(elo_def, 4)
+                gf  = baseline * elo_off
+                ga  = baseline * elo_def
+                data_source  = "elo-sigmoid"
+                data_quality = DATA_QUALITY_ELO
+                logger.info(
+                    "[Profile] %s: ELO sigmoid → OFF=%.3f DEF=%.3f",
+                    team_name, off_rating, def_rating,
+                )
+            else:
+                # Fără ELO și fără date — neutral defaults
+                logger.warning(
+                    "No data for '%s' — using neutral defaults.", team_name
+                )
+                off_rating = round(baseline * 0.65, 4)
+                def_rating = round(baseline, 4)
+                gf  = baseline
+                ga  = baseline
+                data_source  = "neutral-defaults"
+                data_quality = DATA_QUALITY_NEUTRAL
+
+            sot = gf * 0.45
             pos = 50.0
             n   = 0
-            results     = []
-            data_source  = "neutral-defaults"
-            data_quality = DATA_QUALITY_NEUTRAL
+            results = []
 
         # ── Form score (exponential recency) ──────────────────────────────
         rv  = {"W": 1.0, "D": 0.4, "L": 0.0}
