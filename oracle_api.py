@@ -354,13 +354,15 @@ class FootballOracleAPI:
         if canonical in self._sportapi_ids:
             return self._sportapi_ids[canonical]
 
-        # Fetch today's events to find team IDs
-        today = date.today().isoformat().replace("-", "/")
+        # ── Fetch today's events to find team IDs ──────────────────────────
+        today_dt = date.today()
+        today = f"{today_dt.year}/{today_dt.month:02d}/{today_dt.day:02d}"
         data = self._sportapi_get(f"sport/Football/scheduled-events/{today}")
 
         if not data or "events" not in data:
             # Try yesterday too
-            yesterday = (date.today() - timedelta(days=1)).isoformat().replace("-", "/")
+            yest_dt   = date.today() - timedelta(days=1)
+            yesterday = f"{yest_dt.year}/{yest_dt.month:02d}/{yest_dt.day:02d}"
             data = self._sportapi_get(
                 f"sport/Football/scheduled-events/{yesterday}"
             )
@@ -633,7 +635,8 @@ class FootballOracleAPI:
         if cached is not None:
             return cached
 
-        date_fmt = target_date.replace("-", "/")
+        target_dt  = date.fromisoformat(target_date)
+        date_fmt   = f"{target_dt.year}/{target_dt.month:02d}/{target_dt.day:02d}"
         data = self._sportapi_get(f"sport/Football/scheduled-events/{date_fmt}")
         if not data or "events" not in data:
             self._cset(cache_key, [])
