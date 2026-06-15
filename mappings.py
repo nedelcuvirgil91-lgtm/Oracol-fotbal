@@ -91,6 +91,7 @@ TEAM_ALIASES: dict[str, list[str]] = {
 
     # ── Other WC teams ────────────────────────────────────────────────────
     "Curaçao": ["Curacao", "CUW", "Curaçao national football team"],
+    "Cape Verde": ["Cabo Verde", "CPV", "Cape Verde Islands"],
     "New Zealand": ["NZL", "All Whites"],
     "Bolivia": ["BOL"],
     "Paraguay": ["PAR", "PAR"],
@@ -330,6 +331,7 @@ ELO_RATINGS_FALLBACK: dict[str, int] = {
     "Paraguay":        1812,
     "Jamaica":         1780,
     "Curaçao":         1745,
+    "Cape Verde":      1820,
     "New Zealand":     1738,
     "Bahrain":         1720,
     "Iraq":            1715,
