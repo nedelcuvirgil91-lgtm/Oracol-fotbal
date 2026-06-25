@@ -1,17 +1,15 @@
 """
 ================================================================================
-FOOTBALL ORACLE — Elite Terminal UI v2.2
+FOOTBALL ORACLE — Elite Terminal UI v2.3
 ================================================================================
 Module  : app.py
 Run     : streamlit run app.py
 
-CHANGES v2.2:
-  - Data quality badges (✅ live / 🟡 elo / ⚠️ neutral) în Team DNA
-  - Secțiune Injuries în fiecare meci card
-  - xG before/after injury penalty vizibil
-  - Key Manager alerts banner în sidebar
-  - Cache stats în Diagnostics tab
-  - Key Manager status în sidebar
+CHANGES v2.3 (față de v2.2):
+  - Sidebar Key Manager: provider loop actualizat → "freelivefootball" în loc de "sportapi"
+  - Header subtitle: "SportAPI Stats" → "Free Live Football"
+  - Badge coverage_level vizibil în match card (has_xg_coverage / coverageLevel)
+  - Tabel DATA SOURCES din Diagnostics actualizat: Free Live Football = sursă principală
 ================================================================================
 """
 
@@ -86,6 +84,9 @@ html,body,[class*="css"]{ background:var(--bg)!important; color:var(--t1)!import
 .vt-high{ background:rgba(255,71,87,.15); color:#ff4757; border:1px solid #ff475733; }
 .vt-med{ background:rgba(0,209,122,.12); color:#00d17a; border:1px solid #00d17a33; }
 .vt-low{ background:rgba(74,158,255,.12); color:#4a9eff; border:1px solid #4a9eff33; }
+.cov-xg{ display:inline-block; background:rgba(0,209,122,.12); border:1px solid #00d17a33; border-radius:4px; padding:.1rem .4rem; font-family:var(--mono); font-size:.62rem; color:#00d17a; }
+.cov-basic{ display:inline-block; background:rgba(245,166,35,.12); border:1px solid #f5a62333; border-radius:4px; padding:.1rem .4rem; font-family:var(--mono); font-size:.62rem; color:#f5a623; }
+.cov-none{ display:inline-block; background:rgba(74,158,255,.10); border:1px solid #4a9eff33; border-radius:4px; padding:.1rem .4rem; font-family:var(--mono); font-size:.62rem; color:#4a9eff; }
 ::-webkit-scrollbar{ width:5px; height:5px; }
 ::-webkit-scrollbar-track{ background:var(--bg); }
 ::-webkit-scrollbar-thumb{ background:var(--blit); border-radius:10px; }
@@ -193,6 +194,18 @@ def _dq_badge(data_quality: str, note: str) -> str:
     cls = cls_map.get(data_quality, "dq-neutral")
     return f'<span class="{cls}" title="{note}">{note[:35]}</span>'
 
+def _coverage_badge(coverage_level: str) -> str:
+    """Badge vizual pentru nivelul de acoperire date Free Live Football."""
+    if not coverage_level:
+        return ""
+    cl = str(coverage_level).lower()
+    if cl == "xg":
+        return '<span class="cov-xg" title="Statistics disponibile cu xG real">📊 xG live</span>'
+    elif cl in ("basic", "score"):
+        return '<span class="cov-basic" title="Statistics de bază disponibile">📋 basic</span>'
+    else:
+        return '<span class="cov-none" title="Fără statistics detaliate">🔵 lineup only</span>'
+
 def _page_header(icon: str, title: str, sub: str = "") -> None:
     sub_h = f'<div style="font-family:var(--mono);font-size:.82rem;color:var(--t2);margin-top:.3rem;">{sub}</div>' if sub else ""
     st.markdown(f"""
@@ -217,7 +230,7 @@ def _render_injury_section(pred) -> None:
     if home_rep is None and away_rep is None:
         st.markdown(
             '<div class="muted">ℹ️ Date accidentări indisponibile '
-            '(lineup neconfirmat sau meci fără event ID SportAPI)</div>',
+            '(lineup neconfirmat sau meci fără event ID)</div>',
             unsafe_allow_html=True,
         )
         return
@@ -265,6 +278,9 @@ def _render_match_card(match: dict, engine, idx: int) -> None:
     has_odds= bool(match.get("home_odds"))
     src     = match.get("source", "")
 
+    # [MOD v2.3] coverage_level din Free Live Football
+    coverage_level = match.get("coverage_level") or match.get("coverageLevel", "")
+
     is_demo = str(src).startswith("demo")
     demo_tag = " 🔵DEMO" if is_demo else ""
     odds_indicator = "📊" if has_odds else "📋"
@@ -272,6 +288,9 @@ def _render_match_card(match: dict, engine, idx: int) -> None:
     label = f"⚽  {home}  vs  {away}  |  {league}  |  {ko_time} UTC  {odds_indicator}{demo_tag}"
 
     with st.expander(label, expanded=False):
+        # [MOD v2.3] badge coverage_level afișat lângă sursă
+        cov_html = _coverage_badge(coverage_level) if coverage_level else ""
+
         st.markdown(f"""
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:.5rem;">
             <div>
@@ -281,7 +300,7 @@ def _render_match_card(match: dict, engine, idx: int) -> None:
             </div>
             <div style="font-family:var(--mono);font-size:.72rem;color:var(--tm);">⏱ {ko_time} UTC</div>
         </div>
-        <div class="muted">🏆 {league}  ·  🔌 {src}  ·  ID: {fid}</div>
+        <div class="muted">🏆 {league}  ·  🔌 {src}  ·  ID: {fid}  {cov_html}</div>
         """, unsafe_allow_html=True)
 
         if is_demo:
@@ -448,7 +467,7 @@ def _render_match_card(match: dict, engine, idx: int) -> None:
 with st.sidebar:
     st.markdown(
         '<div style="font-family:var(--mono);font-size:1.1rem;font-weight:600;color:var(--amber);letter-spacing:.08em;">⚡ FOOTBALL ORACLE</div>'
-        '<div style="font-family:var(--mono);font-size:.65rem;color:var(--tm);letter-spacing:.12em;text-transform:uppercase;">Hybrid Intelligence Terminal v2.2</div>',
+        '<div style="font-family:var(--mono);font-size:.65rem;color:var(--tm);letter-spacing:.12em;text-transform:uppercase;">Hybrid Intelligence Terminal v2.3</div>',
         unsafe_allow_html=True,
     )
     st.markdown('<hr style="border-color:#1e2535;margin:1rem 0;">', unsafe_allow_html=True)
@@ -492,12 +511,13 @@ with st.sidebar:
         )
 
     # ── Key Manager Status ────────────────────────────────────────────────
+    # [MOD v2.3] loop actualizat: "sportapi" înlocuit cu "freelivefootball"
     try:
         from key_manager import get_key_manager
         km = get_key_manager()
         st.markdown('<hr style="border-color:#1e2535;margin:.8rem 0;">', unsafe_allow_html=True)
         st.markdown('<div style="font-family:var(--mono);font-size:.65rem;color:var(--tm);letter-spacing:.1em;text-transform:uppercase;margin-bottom:.3rem;">API KEYS STATUS</div>', unsafe_allow_html=True)
-        for prov_id in ["sportapi", "freelivefootball", "oddsapi"]:
+        for prov_id in ["freelivefootball", "oddsapi"]:
             line = km.summary_line(prov_id)
             st.markdown(
                 f'<div style="font-family:var(--mono);font-size:.65rem;color:var(--t2);margin:.15rem 0;">{line}</div>',
@@ -517,7 +537,8 @@ with st.sidebar:
         # Add new key form
         with st.expander("➕ Adaugă cheie nouă"):
             with st.form("add_key_form"):
-                new_prov  = st.selectbox("Provider", ["sportapi", "freelivefootball", "oddsapi"])
+                # [MOD v2.3] provider list actualizat
+                new_prov  = st.selectbox("Provider", ["freelivefootball", "oddsapi"])
                 new_key   = st.text_input("API Key")
                 new_limit = st.number_input("Limită/lună", min_value=1, value=50)
                 new_label = st.text_input("Label", value="Key2")
@@ -544,8 +565,9 @@ with st.sidebar:
 # ═════════════════════════════════════════════════════════════════════════════
 
 if nav == "⚽  Meciuri Săptămână":
+    # [MOD v2.3] subtitle actualizat: SportAPI → Free Live Football
     _page_header("⚽", "MECIURI SĂPTĂMÂNĂ",
-                 "World Cup 2026 · SportAPI Stats · Injuries · Value Bets")
+                 "World Cup 2026 · Free Live Football · Injuries · Value Bets")
 
     if not engine:
         st.error("Engine offline. Verifică oracle_engine.py și oracle_api.py.")
@@ -564,7 +586,7 @@ if nav == "⚽  Meciuri Săptămână":
 
     if not all_matches:
         st.warning(
-            "⚠️  Nu s-au găsit meciuri. Încearcă să selectezi **World Cup 2026** sau **MLS** din sidebar."
+            "⚠️  Nu s-au găsit meciuri. Încearcă să selectezi **World Cup 2026** sau **Romania SuperLiga** din sidebar."
         )
         col_rl, _ = st.columns([1, 3])
         with col_rl:
@@ -936,19 +958,18 @@ elif nav == "⚙️  Model Calibration":
                 col.markdown(f'<div class="stat-chip">{fname} <span>❌</span></div>', unsafe_allow_html=True)
 
         st.markdown("---")
+        # [MOD v2.3] Tabel DATA SOURCES actualizat: Free Live Football = sursă principală
         st.markdown("#### 📡  DATA SOURCES")
         st.markdown("""
 | Sursă | Rol | Limite |
 |---|---|---|
-| SportAPI | Stats, Lineups, H2H | 50 req/lună |
-| Free Live Football | Backup stats | 100 req/lună |
-| The Odds API /events | Meciuri | 0 credite |
+| **Free Live Football** | **Meciuri, Standings, Stats (xG), H2H, Lineups** | **50 req/lună** |
+| The Odds API /events | Meciuri (fallback) | 0 credite |
 | The Odds API /odds | Cote H/D/A | 500 req/lună |
-| The Odds API /scores | Formă recentă | 2 credite/apel |
-| football-data.org | Clasamente clubs | 10 req/min |
-| ESPN public API | WC 2026 | Fără limită |
+| football-data.org | Clasamente clubs (fallback) | 10 req/min |
+| ESPN public API | WC 2026 (fallback) | Fără limită |
 | TheSportsDB | Fallback general | Gratuit |
 | eloratings.net | ELO naționale | 1 apel/zi |
 | WeatherAPI | Penalizare xG meteo | 1M req/lună |
-| Demo mode | Între sezoane | Automat |
+| Demo mode | Între sezoane / fără credite | Automat |
 """)
