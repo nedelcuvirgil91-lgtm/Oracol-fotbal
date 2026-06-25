@@ -11,6 +11,12 @@ Surse de date:
   - eloratings.net                — ELO naționale
   - WeatherAPI                    — penalizare xG meteo
   - Demo mode                     — când toate sursele eșuează
+
+CHANGES v2.3.1:
+  - get_lineup(): adăugat câmpul "position" în dict-ul normalizat al
+    jucătorilor indisponibili — injury_manager.py are nevoie de el pentru
+    ponderea pe post (GK/DEF/MID/FWD). Fără el, toți absenții erau tratați
+    implicit ca mijlocași (weight 0.8), indiferent de postul real.
 ================================================================================
 """
 from __future__ import annotations
@@ -476,6 +482,10 @@ class FootballOracleAPI:
                 {
                     "id":              p.get("id"),
                     "name":            p.get("name", ""),
+                    # [FIX v2.3.1] păstrăm postul — injury_manager are nevoie
+                    # de el pentru ponderea GK/DEF/MID/FWD; fără asta toți
+                    # absenții erau ponderați implicit ca mijlocași.
+                    "position":        p.get("position", "M") or "M",
                     "market_value":    float(p.get("marketValue") or 0),
                     "unavailability":  p.get("unavailability") or {},
                 }
