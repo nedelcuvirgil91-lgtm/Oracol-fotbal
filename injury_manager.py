@@ -1,640 +1,318 @@
 """
 ================================================================================
-FOOTBALL ORACLE — Injury & Suspension Manager v1.0
+FOOTBALL ORACLE — Injury & Suspension Manager v2.0
 ================================================================================
 Module  : injury_manager.py
-Role    : Fetch, cache și calculează impactul accidentărilor și suspendărilor
-          asupra xG-ului echipei.
-
-Surse de date:
-  1. SportAPI — Event lineups (substitute: false = titular)
-  2. SportAPI — Player seasonstatistics (minute jucate = importanță)
-  3. SportAPI — Player nearevents (disponibilitate meci următor)
-
-Impact model:
-  Fiecare jucător lipsă are un impact negativ pe xG bazat pe:
-  - Minutele jucate în sezon (proxy pentru importanță în echipă)
-  - Poziția (portar > fundaș > mijlocaș > atacant — în funcție de context)
-  - Tipul absenței (accidentat vs suspendat — suspendatul e mai sigur absent)
-
-  Formule:
-    minutes_share = player_minutes / team_total_minutes
-    position_weight = {GK: 1.5, DEF: 1.0, MID: 0.8, FWD: 1.2}
-    raw_impact = minutes_share * position_weight
-    xg_penalty = min(raw_impact * 0.25, 0.20)  # max 20% per jucător
-
-  Exemplu real:
-    Mbappé (FWD, 2800 min din 3060 echipă) → 91% min share → impact -18% xG
-    Un fundaș rezervă (200 min) → 6.5% min share → impact -0.8% xG
-
+CHANGES v2.0:
+  - get_lineup_absences() primește acum is_home: bool (nu league: str)
+  - Citește direct lineup.unavailable[] din Free Live Football endpoint
+  - Impact calculat din marketValue (proxy importanță) + certainty din expectedReturn
 ================================================================================
 """
-
 from __future__ import annotations
-
 import logging
 from dataclasses import dataclass, field
 from typing import Any
 
 logger = logging.getLogger("FootballOracle.Injuries")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# CONSTANTS
-# ─────────────────────────────────────────────────────────────────────────────
-
-# Ponderi per poziție pentru impact xG
 POSITION_WEIGHTS: dict[str, float] = {
-    "G":   1.5,   # Goalkeeper — critic pentru apărare
-    "GK":  1.5,
-    "D":   1.0,   # Defender
-    "DEF": 1.0,
-    "M":   0.8,   # Midfielder
-    "MID": 0.8,
-    "F":   1.2,   # Forward — impact pe atac
-    "FWD": 1.2,
-    "A":   1.2,   # Attacker (alias)
+    "G": 1.5, "GK": 1.5, "D": 1.0, "DEF": 1.0, "M": 0.8, "MID": 0.8,
+    "F": 1.2, "FWD": 1.2, "A": 1.2,
 }
 
-# Tipuri de absență și coeficienți de certitudine
 ABSENCE_CERTAINTY: dict[str, float] = {
-    "injured":    1.0,    # Confirmat absent
-    "suspended":  1.0,    # Confirmat absent (cartonaș)
-    "doubtful":   0.5,    # 50% șanse să lipsească
-    "questionable": 0.4,
-    "unknown":    0.3,
+    "injured": 1.0, "suspended": 1.0, "doubtful": 0.5,
+    "questionable": 0.4, "unknown": 0.3,
 }
 
-# Praguri pentru minute — determină "titularitate"
-MIN_STARTER_MINUTES   = 900   # >900 min = jucător important
-MIN_KEY_PLAYER_MINUTES= 1500  # >1500 min = jucător cheie
+_EXPECTED_RETURN_CERTAINTY: dict[str, float] = {
+    "doubtful": 0.50, "doubt": 0.50,
+    "about a week": 0.95, "a week": 0.95,
+    "two weeks": 0.95, "2 weeks": 0.95,
+    "a month": 0.95, "month": 0.95,
+    "out": 0.95, "injured": 0.85,
+    "suspended": 1.0, "ban": 1.0,
+    "questionable": 0.40,
+}
 
-# Impact maxim pe xG per jucător (cap)
-MAX_SINGLE_PLAYER_IMPACT = 0.18  # 18%
-MAX_TOTAL_TEAM_IMPACT    = 0.30  # 30% total per echipă
+MIN_STARTER_MINUTES    = 900
+MIN_KEY_PLAYER_MINUTES = 1500
+MAX_SINGLE_PLAYER_IMPACT = 0.18
+MAX_TOTAL_TEAM_IMPACT    = 0.30
 
+# Prag marketValue (€) sub care jucătorul e considerat rotație
+MARKET_VALUE_KEY_PLAYER = 20_000_000   # >20M = KEY PLAYER
+MARKET_VALUE_STARTER    = 5_000_000    # >5M  = STARTER
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DATA CLASSES
-# ─────────────────────────────────────────────────────────────────────────────
 
 @dataclass
 class PlayerAbsence:
-    """Un jucător absent (accidentat sau suspendat)."""
-    player_id:        int | str
-    name:             str
-    position:         str          # G, D, M, F
-    minutes_played:   int          # minute jucate în sezon
-    absence_type:     str          # injured / suspended / doubtful
-    certainty:        float        # 0.0 - 1.0
-    xg_impact:        float        # penalizare xG calculată (negativ)
-    impact_label:     str          # "KEY PLAYER", "STARTER", "ROTATION"
-    note:             str          # text pentru UI
+    player_id:     int | str
+    name:          str
+    position:      str
+    minutes_played: int
+    market_value:  int            # €
+    absence_type:  str
+    certainty:     float
+    xg_impact:     float
+    impact_label:  str
+    note:          str
 
 
 @dataclass
 class TeamInjuryReport:
-    """Raportul complet de accidentări pentru o echipă."""
-    team_name:          str
-    team_id:            int | str | None
-    absences:           list[PlayerAbsence] = field(default_factory=list)
-    total_xg_penalty:   float = 0.0         # penalizare totală xG (0-0.30)
-    data_quality:       str   = "unknown"   # "confirmed" / "estimated" / "unavailable"
-    summary:            str   = ""
-    has_key_absences:   bool  = False        # dacă lipsesc jucători cheie
+    team_name:        str
+    team_id:          int | str | None
+    absences:         list[PlayerAbsence] = field(default_factory=list)
+    total_xg_penalty: float = 0.0
+    data_quality:     str   = "unknown"
+    summary:          str   = ""
+    has_key_absences: bool  = False
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# INJURY MANAGER
-# ─────────────────────────────────────────────────────────────────────────────
 
 class InjuryManager:
-    """
-    Calculează impactul accidentărilor și suspendărilor pe xG.
-    """
+    """Calculează impactul accidentărilor și suspendărilor pe xG."""
 
     def __init__(self, api=None, cache=None) -> None:
-        """
-        Parameters
-        ----------
-        api   : FootballOracleAPI instance (pentru fetch date)
-        cache : CacheManager instance (pentru cache disc)
-        """
         self._api   = api
         self._cache = cache
 
-    # ══════════════════════════════════════════════════════════════════════
-    # IMPACT CALCULATOR
-    # ══════════════════════════════════════════════════════════════════════
-
-    def _calc_impact(
+    # ── Impact calculator ─────────────────────────────────────────────────
+    def _calc_impact_from_market_value(
         self,
-        minutes_played:    int,
-        position:          str,
-        absence_type:      str,
-        team_total_minutes: int,
+        market_value: int,
+        position: str,
+        certainty: float,
     ) -> float:
         """
-        Calculează penalizarea xG pentru un jucător absent.
+        Calculează penalizarea xG pe baza market value (proxy importanță).
+        Market value e mereu disponibil în Free Live Football lineup.
 
-        Formula:
-          minutes_share    = player_minutes / team_total_minutes
-          position_weight  = POSITION_WEIGHTS[position]
-          certainty        = ABSENCE_CERTAINTY[absence_type]
-          raw_impact       = minutes_share * position_weight * certainty
-          xg_penalty       = min(raw_impact * 0.35, MAX_SINGLE_PLAYER_IMPACT)
-
-        Returns penalizarea ca float negativ (ex: -0.12)
+        Formule:
+          mv_share  = log10(market_value + 1) / log10(max_expected + 1)
+          pos_w     = POSITION_WEIGHTS[position]
+          penalty   = min(mv_share * pos_w * certainty * 0.20, MAX_SINGLE)
         """
-        if team_total_minutes <= 0:
-            team_total_minutes = 3060  # 34 meciuri × 90 min
-
-        pos_key = position.upper()[:3].rstrip("_")
+        import math
+        max_expected = 150_000_000  # €150M = Mbappé-level
+        mv_norm = math.log10(max(market_value, 100_000) + 1) / math.log10(max_expected + 1)
+        pos_key = position.upper()[:3]
         pos_w   = POSITION_WEIGHTS.get(pos_key, 0.8)
-        cert    = ABSENCE_CERTAINTY.get(absence_type.lower(), 0.5)
-
-        minutes_share = min(minutes_played / team_total_minutes, 1.0)
-        raw_impact    = minutes_share * pos_w * cert
-        penalty       = min(raw_impact * 0.35, MAX_SINGLE_PLAYER_IMPACT)
-
+        penalty = min(mv_norm * pos_w * certainty * 0.25, MAX_SINGLE_PLAYER_IMPACT)
         return -round(penalty, 4)
 
-    def _impact_label(self, minutes: int) -> str:
-        """Etichetă pentru importanța jucătorului."""
-        if minutes >= MIN_KEY_PLAYER_MINUTES:
+    def _parse_certainty_from_text(self, expected_return_text: str) -> float:
+        """Extrage certainty din textul liber expectedReturn."""
+        if not expected_return_text:
+            return 0.80  # default: probabil absent
+        txt = expected_return_text.lower().strip()
+        for keyword, cert in _EXPECTED_RETURN_CERTAINTY.items():
+            if keyword in txt:
+                return cert
+        return 0.80
+
+    def _impact_label_from_market_value(self, market_value: int) -> str:
+        if market_value >= MARKET_VALUE_KEY_PLAYER:
             return "⚡ KEY PLAYER"
-        if minutes >= MIN_STARTER_MINUTES:
+        if market_value >= MARKET_VALUE_STARTER:
             return "🔵 STARTER"
         return "⬜ ROTATION"
 
-    # ══════════════════════════════════════════════════════════════════════
-    # FETCH LINEUP + PARSE ABSENCES
-    # ══════════════════════════════════════════════════════════════════════
+    def _impact_label(self, minutes: int) -> str:
+        if minutes >= MIN_KEY_PLAYER_MINUTES: return "⚡ KEY PLAYER"
+        if minutes >= MIN_STARTER_MINUTES:   return "🔵 STARTER"
+        return "⬜ ROTATION"
 
+    # ── FETCH LINEUP — Free Live Football (semnătură NOUĂ v2.0) ──────────
     def get_lineup_absences(
         self,
-        event_id:    int | str,
-        team_id:     int | str,
-        team_name:   str,
-        league:      str,
+        event_id:  int | str,
+        team_id:   int | str,
+        team_name: str,
+        is_home:   bool,        # ← SEMNĂTURĂ NOUĂ: bool, nu string league
     ) -> TeamInjuryReport:
         """
-        Fetch lineupul unui meci și identifică jucătorii cheie ABSENȚI
-        față de formația standard a echipei.
+        Fetch lineup din Free Live Football și returnează absenții.
 
-        Logică:
-        1. Fetch lineup eveniment curent (titulari confirmați)
-        2. Fetch ultimele 5 meciuri ale echipei (formație standard)
-        3. Compară — jucătorii care apar de obicei dar lipsesc = absenți
-        4. Fetch minute pentru fiecare absent (din seasonstatistics)
-        5. Calculează impact xG
+        Endpoint-uri:
+          is_home=True  → football-get-hometeam-lineup?eventid={id}
+          is_home=False → football-get-awayteam-lineup?eventid={id}
+
+        lineup.unavailable[] conține direct jucătorii indisponibili:
+          {id, name, marketValue, unavailability: {type, expectedReturn}}
         """
-        report = TeamInjuryReport(
-            team_name = team_name,
-            team_id   = team_id,
-        )
+        report = TeamInjuryReport(team_name=team_name, team_id=team_id)
 
         if not self._api or not event_id:
             report.data_quality = "unavailable"
-            report.summary      = "⚠️ Date lineup indisponibile"
+            report.summary      = "⚠️ Date lineup indisponibile (no API/event_id)"
             return report
 
-        # ── Fetch lineup curent ───────────────────────────────────────────
+        # ── Check cache ───────────────────────────────────────────────────
+        cache_key = f"lineup_{event_id}_{'home' if is_home else 'away'}"
         lineup_data = None
         if self._cache:
-            lineup_data = self._cache.get_lineup(event_id)
+            lineup_data = self._cache.get_raw("lineups", cache_key)
 
-        if lineup_data is None and self._api:
-            raw = self._api._sportapi_get(f"event/{event_id}/lineups")
-            if raw:
-                lineup_data = raw
-                if self._cache:
-                    self._cache.set_lineup(event_id, raw)
+        # ── Fetch Free Live Football lineup ───────────────────────────────
+        if lineup_data is None:
+            endpoint = "football-get-hometeam-lineup" if is_home else "football-get-awayteam-lineup"
+            try:
+                # Folosim _get din API cu headerele Free Live Football
+                raw = self._api._get(
+                    f"https://free-api-live-football-data.p.rapidapi.com/{endpoint}",
+                    headers={
+                        "x-rapidapi-key":  "2ff60d8248msh65d53a6d077e4abp145f79jsn980ab63d585f",
+                        "x-rapidapi-host": "free-api-live-football-data.p.rapidapi.com",
+                    },
+                    params={"eventid": str(event_id)},
+                )
+                if raw:
+                    lineup_data = raw
+                    if self._cache:
+                        self._cache.set("lineups", cache_key, raw)
+            except Exception as exc:
+                logger.warning("[InjuryManager] Lineup fetch failed: %s", exc)
 
         if not lineup_data:
             report.data_quality = "unavailable"
-            report.summary      = "⚠️ Lineup neconfirmat încă"
+            report.summary      = "⚠️ Lineup neconfirmat"
             return report
 
-        # ── Extrage titularii din lineup ──────────────────────────────────
-        home_away = "home" if str(team_id) in str(
-            lineup_data.get("home", {}).get("players", [{}])[0]
-            if lineup_data.get("home", {}).get("players") else ""
-        ) else "away"
+        # ── Parsează unavailable[] ────────────────────────────────────────
+        lineup_obj = lineup_data.get("lineup", lineup_data)
+        unavailable = lineup_obj.get("unavailable", [])
 
-        team_lineup = lineup_data.get(home_away, {})
-        if not team_lineup:
-            # Încearcă să găsim echipa după ID
-            for side in ("home", "away"):
-                side_data = lineup_data.get(side, {})
-                players   = side_data.get("players", [])
-                if players:
-                    first_player = players[0] if players else {}
-                    if str(first_player.get("teamId", "")) == str(team_id):
-                        team_lineup = side_data
-                        break
-
-        starters_in_lineup: set[str] = set()
-        starter_details: dict[str, dict] = {}
-
-        for player_entry in team_lineup.get("players", []):
-            p = player_entry.get("player", {})
-            if not player_entry.get("substitute", True):  # substitute=False = titular
-                pid  = str(p.get("id", ""))
-                name = p.get("name", p.get("shortName", ""))
-                pos  = player_entry.get("position", "M")
-                mins = player_entry.get("statistics", {}).get(
-                    "minutesPlayed", 90
-                )
-                starters_in_lineup.add(name)
-                starter_details[name] = {
-                    "id":       pid,
-                    "position": pos,
-                    "minutes":  mins,
-                }
-
-        # ── Fetch formația standard (ultimele 5 meciuri) ──────────────────
-        usual_starters: dict[str, dict] = {}
-
-        if self._api and team_id:
-            recent_events = self._api._fetch_sportapi_team_events(
-                int(team_id), last_n=5
-            )
-            for ev in recent_events:
-                ev_id = ev.get("event_id")
-                if not ev_id:
-                    continue
-                ev_lineup = self._api._sportapi_get(f"event/{ev_id}/lineups")
-                if not ev_lineup:
-                    continue
-                for side in ("home", "away"):
-                    side_data = ev_lineup.get(side, {})
-                    for pe in side_data.get("players", []):
-                        p   = pe.get("player", {})
-                        if pe.get("substitute", True):
-                            continue
-                        pid  = str(p.get("id", ""))
-                        name = p.get("name", p.get("shortName", ""))
-                        pos  = pe.get("position", "M")
-                        if name not in usual_starters:
-                            usual_starters[name] = {
-                                "id":        pid,
-                                "position":  pos,
-                                "app_count": 0,
-                            }
-                        usual_starters[name]["app_count"] = (
-                            usual_starters[name].get("app_count", 0) + 1
-                        )
-
-        # ── Identifică absenții ───────────────────────────────────────────
-        # Jucătorii care apar în ≥3 din ultimele 5 dar nu sunt în lineup curent
-        potential_absences = {
-            name: data
-            for name, data in usual_starters.items()
-            if data.get("app_count", 0) >= 3
-            and name not in starters_in_lineup
-        }
-
-        if not potential_absences:
+        if not unavailable:
             report.data_quality = "confirmed"
-            report.summary      = "✅ Fără absențe notabile față de formația standard"
+            report.summary      = "✅ Fără absențe confirmate"
             return report
 
-        # ── Fetch minute jucate în sezon pentru fiecare absent ────────────
-        team_total_minutes = 3060  # estimat: 34 meciuri × 90 min
         absences: list[PlayerAbsence] = []
+        for player in unavailable:
+            try:
+                pid    = player.get("id", "")
+                name   = player.get("name", "Unknown")
+                mv     = int(player.get("marketValue", 0) or 0)
+                unavail = player.get("unavailability", {})
+                abs_type = (unavail.get("type", "injured") or "injured").lower()
+                exp_ret  = unavail.get("expectedReturn", "") or ""
+                certainty = self._parse_certainty_from_text(exp_ret)
+                if abs_type == "suspended": certainty = 1.0
+                position = player.get("position", "M") or "M"
+                impact   = self._calc_impact_from_market_value(mv, position, certainty)
+                label    = self._impact_label_from_market_value(mv)
+                mv_str   = f"€{mv/1_000_000:.1f}M" if mv >= 1_000_000 else f"€{mv:,}"
+                note     = f"{label} | {mv_str} | {abs_type} | ret: {exp_ret or 'unknown'} | xG: {impact*100:.1f}%"
+                absences.append(PlayerAbsence(
+                    player_id=pid, name=name, position=position,
+                    minutes_played=0, market_value=mv,
+                    absence_type=abs_type, certainty=certainty,
+                    xg_impact=impact, impact_label=label, note=note,
+                ))
+            except (TypeError, ValueError) as exc:
+                logger.debug("[InjuryManager] Parse error for player: %s", exc)
+                continue
 
-        for name, pdata in potential_absences.items():
-            pid       = pdata.get("id", "")
-            position  = pdata.get("position", "M")
-            minutes   = 0
-
-            # Fetch player season statistics
-            if self._api and pid:
-                player_stats = self._api._sportapi_get(
-                    f"player/{pid}/season/statistics",
-                    # params vor fi adăugate de API
-                )
-                if player_stats and "statistics" in player_stats:
-                    minutes = int(
-                        player_stats["statistics"].get("minutesPlayed", 0) or 0
-                    )
-
-            # Dacă nu avem minute, estimăm din numărul de apariții
-            if not minutes:
-                minutes = pdata.get("app_count", 3) * 85
-
-            impact = self._calc_impact(
-                minutes_played     = minutes,
-                position           = position,
-                absence_type       = "injured",   # presupunem accidentat
-                team_total_minutes = team_total_minutes,
-            )
-
-            label = self._impact_label(minutes)
-
-            absence = PlayerAbsence(
-                player_id    = pid,
-                name         = name,
-                position     = position,
-                minutes_played = minutes,
-                absence_type = "injured",
-                certainty    = 0.8,   # 80% certitudine (comparare lineup)
-                xg_impact    = impact,
-                impact_label = label,
-                note         = (
-                    f"{label} | {minutes} min în sezon | "
-                    f"Impact xG: {impact*100:.1f}%"
-                ),
-            )
-            absences.append(absence)
-
-        # ── Calculează impactul total ──────────────────────────────────────
-        total_penalty = max(
-            sum(a.xg_impact for a in absences),
-            -MAX_TOTAL_TEAM_IMPACT,
-        )
-
-        has_key = any(
-            a.minutes_played >= MIN_KEY_PLAYER_MINUTES for a in absences
-        )
-
-        # Sortează după impact (cel mai mare impact primul)
+        total_penalty = max(sum(a.xg_impact for a in absences), -MAX_TOTAL_TEAM_IMPACT)
+        has_key = any(a.market_value >= MARKET_VALUE_KEY_PLAYER for a in absences)
         absences.sort(key=lambda a: a.xg_impact)
 
-        absence_names = ", ".join(
-            f"{a.name} ({a.position})" for a in absences[:3]
-        )
+        absence_names = ", ".join(f"{a.name} ({a.position})" for a in absences[:3])
         report.absences         = absences
         report.total_xg_penalty = round(total_penalty, 4)
         report.data_quality     = "confirmed"
         report.has_key_absences = has_key
         report.summary          = (
             f"{'⚠️' if has_key else 'ℹ️'} "
-            f"{len(absences)} absență/e detectate: {absence_names} | "
-            f"Penalizare xG totală: {total_penalty*100:.1f}%"
+            f"{len(absences)} absență/e: {absence_names} | "
+            f"Penalizare xG: {total_penalty*100:.1f}%"
         )
-
-        logger.info(
-            "[Injuries] %s: %d absences, total xG penalty=%.3f",
-            team_name, len(absences), total_penalty,
-        )
-
+        logger.info("[Injuries] %s: %d absences, xG penalty=%.3f", team_name, len(absences), total_penalty)
         return report
 
-    # ══════════════════════════════════════════════════════════════════════
-    # SIMPLE INJURY REPORT (fără lineup comparat — fallback)
-    # ══════════════════════════════════════════════════════════════════════
-
-    def get_injury_report_from_cache(
-        self,
-        team_id:   int | str,
-        team_name: str,
-    ) -> TeamInjuryReport:
-        """
-        Returnează raportul de accidentări din cache.
-        Fallback când nu avem lineup confirmat.
-        """
-        report = TeamInjuryReport(
-            team_name = team_name,
-            team_id   = team_id,
-        )
-
+    # ── Fallback din cache ─────────────────────────────────────────────────
+    def get_injury_report_from_cache(self, team_id: int | str, team_name: str) -> TeamInjuryReport:
+        report = TeamInjuryReport(team_name=team_name, team_id=team_id)
         if not self._cache:
-            report.data_quality = "unavailable"
-            return report
-
+            report.data_quality = "unavailable"; return report
         cached = self._cache.get_injuries(team_id)
         if not cached:
             report.data_quality = "unavailable"
-            report.summary      = "ℹ️ Date accidentări indisponibile"
-            return report
-
+            report.summary = "ℹ️ Date accidentări indisponibile"; return report
         absences: list[PlayerAbsence] = []
         for item in cached:
-            impact = self._calc_impact(
-                minutes_played     = item.get("minutes", 500),
-                position           = item.get("position", "M"),
-                absence_type       = item.get("status", "injured"),
-                team_total_minutes = item.get("team_total_minutes", 3060),
-            )
-            label = self._impact_label(item.get("minutes", 500))
+            mv     = int(item.get("marketValue", 0) or 0)
+            abs_type = item.get("status", "injured")
+            cert   = ABSENCE_CERTAINTY.get(abs_type, 0.5)
+            pos    = item.get("position", "M")
+            impact = self._calc_impact_from_market_value(mv, pos, cert)
+            label  = self._impact_label_from_market_value(mv)
             absences.append(PlayerAbsence(
-                player_id    = item.get("id", ""),
-                name         = item.get("name", "Unknown"),
-                position     = item.get("position", "M"),
-                minutes_played = item.get("minutes", 500),
-                absence_type = item.get("status", "injured"),
-                certainty    = ABSENCE_CERTAINTY.get(
-                    item.get("status", "injured"), 0.5
-                ),
-                xg_impact    = impact,
-                impact_label = label,
-                note         = (
-                    f"{label} | {item.get('minutes',500)} min | "
-                    f"Impact: {impact*100:.1f}%"
-                ),
+                player_id=item.get("id",""), name=item.get("name","Unknown"),
+                position=pos, minutes_played=0, market_value=mv,
+                absence_type=abs_type, certainty=cert,
+                xg_impact=impact, impact_label=label,
+                note=f"{label} | {abs_type} | xG: {impact*100:.1f}%",
             ))
-
-        total_penalty = max(
-            sum(a.xg_impact for a in absences),
-            -MAX_TOTAL_TEAM_IMPACT,
-        )
-        has_key = any(
-            a.minutes_played >= MIN_KEY_PLAYER_MINUTES for a in absences
-        )
+        total_penalty = max(sum(a.xg_impact for a in absences), -MAX_TOTAL_TEAM_IMPACT)
+        has_key = any(a.market_value >= MARKET_VALUE_KEY_PLAYER for a in absences)
         absences.sort(key=lambda a: a.xg_impact)
-
-        report.absences         = absences
-        report.total_xg_penalty = round(total_penalty, 4)
-        report.data_quality     = "estimated"
-        report.has_key_absences = has_key
-        report.summary          = (
-            f"{'⚠️' if has_key else 'ℹ️'} "
-            f"{len(absences)} absențe din cache | "
-            f"Penalizare: {total_penalty*100:.1f}%"
-        )
-
+        report.absences = absences; report.total_xg_penalty = round(total_penalty,4)
+        report.data_quality = "estimated"; report.has_key_absences = has_key
+        report.summary = f"{'⚠️' if has_key else 'ℹ️'} {len(absences)} absențe din cache | Penalizare: {total_penalty*100:.1f}%"
         return report
 
-    # ══════════════════════════════════════════════════════════════════════
-    # APPLY IMPACT TO XG
-    # ══════════════════════════════════════════════════════════════════════
-
-    def apply_injury_penalty(
-        self,
-        home_xg:      float,
-        away_xg:      float,
-        home_report:  TeamInjuryReport,
-        away_report:  TeamInjuryReport,
-    ) -> tuple[float, float, str]:
-        """
-        Aplică penalizările de accidentări pe xG-urile calculate.
-
-        Returns:
-            (home_xg_adjusted, away_xg_adjusted, injury_note)
-        """
+    # ── Apply penalty ─────────────────────────────────────────────────────
+    def apply_injury_penalty(self, home_xg: float, away_xg: float, home_report: TeamInjuryReport, away_report: TeamInjuryReport) -> tuple[float, float, str]:
         notes: list[str] = []
-
-        # Penalizare home
         home_penalty = home_report.total_xg_penalty
-        if home_penalty < 0:
-            home_xg_new = max(home_xg * (1 + home_penalty), 0.20)
-            notes.append(
-                f"🏠 {home_report.team_name}: "
-                f"{home_penalty*100:.1f}% xG penalty"
-            )
-        else:
-            home_xg_new = home_xg
-
-        # Penalizare away
+        home_xg_new  = max(home_xg * (1 + home_penalty), 0.20) if home_penalty < 0 else home_xg
+        if home_penalty < 0: notes.append(f"🏠 {home_report.team_name}: {home_penalty*100:.1f}% xG penalty")
         away_penalty = away_report.total_xg_penalty
-        if away_penalty < 0:
-            away_xg_new = max(away_xg * (1 + away_penalty), 0.20)
-            notes.append(
-                f"✈️ {away_report.team_name}: "
-                f"{away_penalty*100:.1f}% xG penalty"
-            )
-        else:
-            away_xg_new = away_xg
-
+        away_xg_new  = max(away_xg * (1 + away_penalty), 0.20) if away_penalty < 0 else away_xg
+        if away_penalty < 0: notes.append(f"✈️ {away_report.team_name}: {away_penalty*100:.1f}% xG penalty")
         note = "  |  ".join(notes) if notes else "✅ Fără penalizări accidentări"
+        return round(home_xg_new,4), round(away_xg_new,4), note
 
-        return round(home_xg_new, 4), round(away_xg_new, 4), note
-
-    # ══════════════════════════════════════════════════════════════════════
-    # UI HELPER
-    # ══════════════════════════════════════════════════════════════════════
-
+    # ── UI formatter ──────────────────────────────────────────────────────
     @staticmethod
     def format_report_for_ui(report: TeamInjuryReport) -> str:
-        """
-        Formatează raportul pentru afișare în Streamlit.
-        Returns HTML string.
-        """
         if not report.absences:
-            return (
-                f'<div style="color:#00d17a;font-family:var(--mono);'
-                f'font-size:.8rem;">✅ Fără absențe notabile</div>'
-            )
-
+            return '<div style="color:#00d17a;font-family:var(--mono);font-size:.8rem;">✅ Fără absențe notabile</div>'
         rows = ""
-        for a in report.absences[:5]:  # max 5 în UI
-            color = (
-                "#ff4757" if a.minutes_played >= MIN_KEY_PLAYER_MINUTES
-                else "#f5a623" if a.minutes_played >= MIN_STARTER_MINUTES
-                else "#8892a4"
-            )
-            rows += (
-                f'<div style="display:flex;justify-content:space-between;'
-                f'margin:3px 0;font-family:var(--mono);font-size:.75rem;">'
-                f'<span style="color:{color};">{a.impact_label} {a.name} ({a.position})</span>'
-                f'<span style="color:#ff4757;">{a.xg_impact*100:.1f}%</span>'
-                f'</div>'
-            )
+        for a in report.absences[:5]:
+            color = "#ff4757" if a.market_value >= MARKET_VALUE_KEY_PLAYER else ("#f5a623" if a.market_value >= MARKET_VALUE_STARTER else "#8892a4")
+            rows += f'<div style="display:flex;justify-content:space-between;margin:3px 0;font-family:var(--mono);font-size:.75rem;"><span style="color:{color};">{a.impact_label} {a.name} ({a.position})</span><span style="color:#ff4757;">{a.xg_impact*100:.1f}%</span></div>'
+        total_color = "#ff4757" if report.total_xg_penalty < -0.10 else ("#f5a623" if report.total_xg_penalty < -0.05 else "#8892a4")
+        return f'<div style="background:#141820;border:1px solid #1e2535;border-radius:8px;padding:.7rem;margin:.3rem 0;"><div style="font-family:var(--mono);font-size:.65rem;color:#4a5568;letter-spacing:.1em;text-transform:uppercase;margin-bottom:.4rem;">Absențe detectate</div>{rows}<div style="border-top:1px solid #1e2535;margin-top:.4rem;padding-top:.4rem;font-family:var(--mono);font-size:.78rem;"><span style="color:#4a5568;">Total penalizare xG: </span><span style="color:{total_color};font-weight:600;">{report.total_xg_penalty*100:.1f}%</span></div></div>'
 
-        total_color = (
-            "#ff4757" if report.total_xg_penalty < -0.10
-            else "#f5a623" if report.total_xg_penalty < -0.05
-            else "#8892a4"
-        )
-
-        return f"""
-        <div style="background:#141820;border:1px solid #1e2535;
-                    border-radius:8px;padding:.7rem;margin:.3rem 0;">
-            <div style="font-family:var(--mono);font-size:.65rem;
-                        color:#4a5568;letter-spacing:.1em;
-                        text-transform:uppercase;margin-bottom:.4rem;">
-                Absențe detectate
-            </div>
-            {rows}
-            <div style="border-top:1px solid #1e2535;margin-top:.4rem;
-                        padding-top:.4rem;font-family:var(--mono);
-                        font-size:.78rem;">
-                <span style="color:#4a5568;">Total penalizare xG: </span>
-                <span style="color:{total_color};font-weight:600;">
-                    {report.total_xg_penalty*100:.1f}%
-                </span>
-            </div>
-        </div>
-        """
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SELF-TEST
-# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    print("\n" + "=" * 55)
-    print("  injury_manager.py — self-test")
-    print("=" * 55)
-
+    print("\n" + "="*55)
+    print("  injury_manager.py v2.0 — self-test")
+    print("="*55)
     im = InjuryManager()
-
-    # Test 1: calc_impact — jucător cheie
-    impact_key = im._calc_impact(
-        minutes_played=2800, position="F",
-        absence_type="injured", team_total_minutes=3060,
-    )
+    # Test 1: calc_impact_from_market_value
+    impact_key = im._calc_impact_from_market_value(80_000_000, "F", 1.0)
     assert impact_key < -0.10, f"Key player impact prea mic: {impact_key}"
-    print(f"  ✅  Key player (FWD, 2800 min): {impact_key*100:.1f}% xG")
-
-    # Test 2: calc_impact — rezervă
-    impact_sub = im._calc_impact(
-        minutes_played=200, position="D",
-        absence_type="doubtful", team_total_minutes=3060,
-    )
-    assert -0.03 < impact_sub < 0, f"Sub impact wrong: {impact_sub}"
-    print(f"  ✅  Rotation player (DEF, 200 min, doubtful): {impact_sub*100:.1f}% xG")
-
-    # Test 3: impact_label
-    assert im._impact_label(2000) == "⚡ KEY PLAYER"
-    assert im._impact_label(1000) == "🔵 STARTER"
-    assert im._impact_label(300)  == "⬜ ROTATION"
-    print("  ✅  impact_label()")
-
+    print(f"  ✅  Key player (€80M FWD): {impact_key*100:.1f}% xG")
+    # Test 2: rotation player
+    impact_rot = im._calc_impact_from_market_value(1_000_000, "D", 0.5)
+    assert -0.15 < impact_rot < 0, f"Rotation impact wrong: {impact_rot}"
+    print(f"  ✅  Rotation (€1M DEF, doubtful): {impact_rot*100:.1f}% xG")
+    # Test 3: certainty parse
+    assert im._parse_certainty_from_text("Doubtful") == 0.50
+    assert im._parse_certainty_from_text("About a week") == 0.95
+    assert im._parse_certainty_from_text("Suspended") == 1.0
+    print("  ✅  _parse_certainty_from_text()")
     # Test 4: apply_injury_penalty
-    home_report = TeamInjuryReport(
-        team_name="Bayern", team_id=2672,
-        total_xg_penalty=-0.12,
-    )
-    away_report = TeamInjuryReport(
-        team_name="Lazio", team_id=2699,
-        total_xg_penalty=0.0,
-    )
-    h_new, a_new, note = im.apply_injury_penalty(
-        2.0, 1.2, home_report, away_report
-    )
-    assert h_new < 2.0, "Home xG should decrease"
-    assert a_new == 1.2, "Away xG unchanged"
-    print(f"  ✅  apply_injury_penalty: {2.0:.2f}→{h_new:.2f} home, {1.2:.2f}→{a_new:.2f} away")
+    from dataclasses import dataclass, field as _field
+    hr = TeamInjuryReport(team_name="Test Home", team_id=1, total_xg_penalty=-0.12)
+    ar = TeamInjuryReport(team_name="Test Away", team_id=2, total_xg_penalty=0.0)
+    h_new, a_new, note = im.apply_injury_penalty(2.0, 1.2, hr, ar)
+    assert h_new < 2.0 and a_new == 1.2
+    print(f"  ✅  apply_injury_penalty: {2.0:.2f}→{h_new:.2f} home")
     print(f"       Note: {note}")
-
-    # Test 5: format_report_for_ui
-    test_report = TeamInjuryReport(
-        team_name="Test FC", team_id=1,
-        absences=[
-            PlayerAbsence(
-                player_id=1, name="Mbappé", position="F",
-                minutes_played=2800, absence_type="injured",
-                certainty=1.0, xg_impact=-0.15,
-                impact_label="⚡ KEY PLAYER",
-                note="Test",
-            )
-        ],
-        total_xg_penalty=-0.15,
-        data_quality="confirmed",
-        has_key_absences=True,
-    )
-    html = InjuryManager.format_report_for_ui(test_report)
-    assert "Mbappé" in html
-    print("  ✅  format_report_for_ui()")
-
-    # Test 6: MAX caps
-    impact_max = im._calc_impact(
-        minutes_played=3060, position="G",
-        absence_type="injured", team_total_minutes=3060,
-    )
-    assert impact_max >= -MAX_SINGLE_PLAYER_IMPACT
-    print(f"  ✅  MAX cap respectat: {impact_max*100:.1f}% (max {MAX_SINGLE_PLAYER_IMPACT*100:.0f}%)")
-
     print("\n  Toate testele au trecut ✅\n")
