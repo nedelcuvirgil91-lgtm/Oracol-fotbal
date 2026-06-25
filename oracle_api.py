@@ -220,9 +220,25 @@ class FootballOracleAPI:
             self._cset(cache_key, []); return []
 
         # Detectare automată cheie listă în răspuns
+        # Free Live Football returnează {"status":..., "response": {...}} sau {"response": [...]}
         raw_list: list = []
-        if isinstance(data.get("response"), list):
-            raw_list = data["response"]
+        resp = data.get("response")
+        if isinstance(resp, list):
+            raw_list = resp
+        elif isinstance(resp, dict):
+            # response e un dict — caută lista înăuntru
+            for inner_key in ("matches", "events", "data", "fixtures", "results"):
+                if isinstance(resp.get(inner_key), list):
+                    raw_list = resp[inner_key]
+                    break
+            if not raw_list:
+                for v in resp.values():
+                    if isinstance(v, list) and v:
+                        raw_list = v
+                        break
+            if not raw_list:
+                logger.warning("[FreeLF] response dict keys: %s", list(resp.keys())[:10])
+                self._cset(cache_key, []); return []
         elif isinstance(data.get("matches"), list):
             raw_list = data["matches"]
         elif isinstance(data.get("events"), list):
@@ -230,7 +246,6 @@ class FootballOracleAPI:
         elif isinstance(data.get("data"), list):
             raw_list = data["data"]
         else:
-            # log structura top-level pentru debugging
             logger.warning("[FreeLF] Unknown response structure keys: %s", list(data.keys())[:10])
             self._cset(cache_key, []); return []
 
