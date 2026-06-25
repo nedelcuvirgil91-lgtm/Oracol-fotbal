@@ -1,6 +1,6 @@
 """
 ================================================================================
-FOOTBALL ORACLE — Mappings & Normalization (v1.0)
+FOOTBALL ORACLE — Mappings & Normalization (v1.1)
 ================================================================================
 """
 from __future__ import annotations
@@ -125,7 +125,6 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "Club de Foot Montréal": ["CF Montréal","CF Montreal","Impact de Montréal"],
     "San Jose Earthquakes": ["SJ Earthquakes"],
     "Orlando City": ["Orlando City SC"],
-    # Feyenoord/Ajax/PSV pentru teste lineup
     "Feyenoord": ["Feyenoord Rotterdam","Feyenoord FC"],
     "Ajax": ["AFC Ajax","Ajax Amsterdam"],
     "PSV": ["PSV Eindhoven","PSV Eindhoven FC"],
@@ -201,7 +200,6 @@ LEAGUE_BASELINES: dict[str, float] = {
     "World Cup 2026": 1.25, "MLS": 1.40, "default": 1.25,
 }
 
-# FREE LIVE FOOTBALL league IDs
 FREE_LF_LEAGUE_IDS: dict[str, int] = {
     "World Cup 2026": 77, "Premier League": 47, "Champions League": 42,
     "La Liga": 87, "Bundesliga": 54, "Europa League": 73,
@@ -236,8 +234,9 @@ def normalize_team_name(name: str) -> str:
     if len(unique) == 1: return unique[0]
     return cleaned
 
+# [FIX v1.1] — guard None pentru home/away
 def match_key(home: str, away: str, kickoff_date: str) -> str:
-    h = normalize_team_name(home).lower()
-    a = normalize_team_name(away).lower()
+    h = normalize_team_name(home or "").lower()
+    a = normalize_team_name(away or "").lower()
     d = (kickoff_date or "")[:10]
     return f"{h}||{a}||{d}"
