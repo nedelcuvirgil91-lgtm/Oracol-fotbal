@@ -1,13 +1,15 @@
 """
 ================================================================================
-FOOTBALL ORACLE — Core Engine v2.2 (reconciliat)
+FOOTBALL ORACLE — Core Engine v2.3 (Free Live Football edition)
 ================================================================================
 Module  : oracle_engine.py
-CHANGES v2.2 (reconciliere):
-  - _build_profile() folosește SportAPI (get_sportapi_stats + get_sportapi_recent_form)
-    ca sursă primară, cu cascade spre fd.org / TSDB / ELO / neutral
-  - _build_h2h() folosește fetch_sportapi_h2h() (semnătură nouă)
-  - injury_manager.get_lineup_absences() cu semnătura NOUĂ (is_home: bool)
+CHANGES v2.3 (migrare SportAPI → Free Live Football):
+  - _build_profile() folosește Free Live Football (get_freelf_standings +
+    get_team_form_freelf) ca sursă primară, cu cascade spre fd.org / TSDB /
+    ELO / neutral
+  - _build_h2h() folosește get_h2h() (semnătură nouă, pe _freelf_event_id)
+  - evaluate_match(): _sportapi_event_id / _sportapi_home_id / _sportapi_away_id
+    → _freelf_event_id / _freelf_home_id / _freelf_away_id (injury_manager)
   - ELO sigmoid blending, per-league weights, self-learning — neschimbate
 ================================================================================
 """
@@ -215,7 +217,7 @@ class FootballOracleEngine:
             InjuryManager(api=self.api, cache=self.cache)
             if INJURY_MANAGER_AVAILABLE else None
         )
-        logger.info("FootballOracleEngine v2.2 ready. Injuries=%s Cache=%s KeyMgr=%s",
+        logger.info("FootballOracleEngine v2.3 ready. Injuries=%s Cache=%s KeyMgr=%s",
                     INJURY_MANAGER_AVAILABLE, CACHE_MANAGER_AVAILABLE, KEY_MANAGER_AVAILABLE)
 
     # ── ELO sigmoid ──────────────────────────────────────────────────────
@@ -233,30 +235,30 @@ class FootballOracleEngine:
         sigmoid = 1.0 / (1.0 + math.exp(-x))
         return round(1.80 - sigmoid * 1.20, 4)
 
-    # ── H2H — v2.2 folosește SportAPI ────────────────────────────────────
+    # ── H2H — v2.3 folosește Free Live Football ──────────────────────────
     def _build_h2h(self, home_name: str, away_name: str, match: dict) -> H2HRecord:
         """
-        Încearcă SportAPI h2h (dacă avem _sportapi_event_id),
+        Încearcă Free Live Football h2h (dacă avem _freelf_event_id),
         altfel fallback pe Odds API /scores.
         """
-        event_id = match.get("_sportapi_event_id")
+        event_id = match.get("_freelf_event_id")
 
-        # ── Încearcă SportAPI h2h ─────────────────────────────────────────
+        # ── Încearcă Free Live Football h2h ───────────────────────────────
         if event_id:
-            sportapi_h2h = self.api.fetch_sportapi_h2h(int(event_id), home_name, away_name)
-            if sportapi_h2h and sportapi_h2h.get("meetings", 0) >= 1:
+            freelf_h2h = self.api.get_h2h(int(event_id), home_name, away_name)
+            if freelf_h2h and freelf_h2h.get("meetings", 0) >= 1:
                 return H2HRecord(
                     home_team      = normalize_team_name(home_name),
                     away_team      = normalize_team_name(away_name),
-                    meetings       = sportapi_h2h["meetings"],
-                    home_wins      = sportapi_h2h["home_wins"],
-                    draws          = sportapi_h2h["draws"],
-                    away_wins      = sportapi_h2h["away_wins"],
-                    home_goals_avg = sportapi_h2h["home_goals_avg"],
-                    away_goals_avg = sportapi_h2h["away_goals_avg"],
-                    last_5         = sportapi_h2h["last_5"],
-                    h2h_modifier   = sportapi_h2h["h2h_modifier"],
-                    summary        = sportapi_h2h["summary"],
+                    meetings       = freelf_h2h["meetings"],
+                    home_wins      = freelf_h2h["home_wins"],
+                    draws          = freelf_h2h["draws"],
+                    away_wins      = freelf_h2h["away_wins"],
+                    home_goals_avg = freelf_h2h["home_goals_avg"],
+                    away_goals_avg = freelf_h2h["away_goals_avg"],
+                    last_5         = freelf_h2h["last_5"],
+                    h2h_modifier   = freelf_h2h["h2h_modifier"],
+                    summary        = freelf_h2h["summary"],
                 )
 
         # ── Fallback: Odds API /scores ────────────────────────────────────
@@ -305,16 +307,16 @@ class FootballOracleEngine:
             last_5=last_5, h2h_modifier=h2h_modifier, summary=summary,
         )
 
-    # ── _build_profile — v2.2 cascade cu SportAPI primar ─────────────────
+    # ── _build_profile — v2.3 cascade cu Free Live Football primar ───────
     def _build_profile(self, team_id: str, team_name: str, league: str) -> TeamProfile:
         """
         Cascade:
-          0. SportAPI season stats   (get_sportapi_stats)       ← PRIMAR v2.2
-          1. SportAPI recent events  (get_sportapi_recent_form) ← NOU v2.2
-          2. Odds API /scores        (get_team_recent_form)
-          3. fd.org standings        (get_standings_form)
-          4. TheSportsDB events      (get_team_stats)
-          5. ELO sigmoid             (întotdeauna blended)
+          0. Free Live Football standings (get_freelf_standings) ← PRIMAR v2.3
+          1. Free Live Football form       (get_team_form_freelf) ← NOU v2.3
+          2. Odds API /scores               (get_team_recent_form)
+          3. fd.org standings                (get_standings_form)
+          4. TheSportsDB events               (get_team_stats)
+          5. ELO sigmoid                      (întotdeauna blended)
           6. Neutral defaults
         """
         w        = self.weights
@@ -330,31 +332,58 @@ class FootballOracleEngine:
         elo_blend = float(self.config.get("elo_blend_weight", 0.35))
 
         stats: list[dict] = []
-        data_source  = ""
-        data_quality = DATA_QUALITY_NEUTRAL
+        data_source   = ""
+        data_quality  = DATA_QUALITY_NEUTRAL
+        season_stats: dict | None = None
 
-        # ── Level 0: SportAPI season stats ───────────────────────────────
-        season_stats = self.api.get_sportapi_stats(canonical, league)
-        if season_stats:
-            gf  = season_stats.get("avg_goals_for",    1.25)
-            ga  = season_stats.get("avg_goals_against", 1.25)
-            sot = season_stats.get("avg_shots_on_target", gf * 0.45)
-            pos = season_stats.get("avg_possession", 50.0)
+        # ── ID numeric Free Live Football (fără prefixul "freelf_") ──────
+        freelf_tid: int | None = None
+        if team_id and str(team_id).startswith("freelf_"):
+            raw_tid = str(team_id).replace("freelf_", "")
+            if raw_tid.isdigit():
+                freelf_tid = int(raw_tid)
+
+        # ── Level 0: Free Live Football standings (avg goluri/sezon) ─────
+        standings = self.api.get_freelf_standings(league)
+        standings_entry = None
+        if standings:
+            for entry in standings:
+                if entry.get("team") == canonical:
+                    standings_entry = entry
+                    break
+            if standings_entry is None and freelf_tid is not None:
+                for entry in standings:
+                    if entry.get("team_id") == freelf_tid:
+                        standings_entry = entry
+                        break
+
+        if standings_entry:
+            gf  = float(standings_entry.get("avg_gf", 1.25))
+            ga  = float(standings_entry.get("avg_ga", 1.25))
+            sot = gf * 0.45
+            pos = 50.0
+            matches_n = max(1, min(int(standings_entry.get("played", 5) or 1), 5))
+            season_stats = {"avg_goals_for": gf, "avg_goals_against": ga,
+                            "avg_shots_on_target": sot, "avg_possession": pos,
+                            "matches": matches_n}
             # Construim stats-like list din season averages (pentru form_score)
             stats = [{"result": "W", "goals_for": gf, "goals_against": ga,
-                      "shots_on_goal": sot, "possession": pos}] * min(season_stats.get("matches",5), 5)
-            data_source  = "sportapi-season"
+                      "shots_on_goal": sot, "possession": pos}] * matches_n
+            data_source  = "freelf-standings"
             data_quality = DATA_QUALITY_LIVE
 
-        # ── Level 1: SportAPI recent form (suprascrie form_results) ──────
-        recent_events = self.api.get_sportapi_recent_form(canonical, last_n=last_n)
+        # ── Level 1: Free Live Football form (suprascrie form_results) ───
+        recent_events = (
+            self.api.get_team_form_freelf(freelf_tid, league, last_n=last_n)
+            if freelf_tid is not None else []
+        )
         if recent_events:
             if not stats:
                 stats        = recent_events
-                data_source  = "sportapi-events"
+                data_source  = "freelf-form"
                 data_quality = DATA_QUALITY_LIVE
             # Dacă avem season_stats, folosim recent_events doar pentru form_results
-            # (golurile per meci din season stats sunt mai fiabile)
+            # (golurile per meci din standings sunt mai fiabile)
 
         # ── Level 2: Odds API /scores ────────────────────────────────────
         if not stats:
@@ -366,12 +395,12 @@ class FootballOracleEngine:
 
         # ── Level 3: fd.org standings ────────────────────────────────────
         if not stats and team_id and team_id.startswith("fd_"):
-            standings = self.api.get_standings_form(team_id, league)
-            if standings:
-                played = standings.get("played") or 1
-                gf_avg = (standings.get("goals_for",0) or 0) / played
-                ga_avg = (standings.get("goals_against",0) or 0) / played
-                form_str = standings.get("form","") or ""
+            standings_fd = self.api.get_standings_form(team_id, league)
+            if standings_fd:
+                played = standings_fd.get("played") or 1
+                gf_avg = (standings_fd.get("goals_for",0) or 0) / played
+                ga_avg = (standings_fd.get("goals_against",0) or 0) / played
+                form_str = standings_fd.get("form","") or ""
                 results  = [r.strip() for r in form_str.split(",") if r.strip()][:last_n]
                 stats = [{"result": r, "goals_for": gf_avg, "goals_against": ga_avg,
                           "shots_on_goal": gf_avg*0.45, "possession": 50.0} for r in results]
@@ -586,18 +615,18 @@ class FootballOracleEngine:
         home_xg_pre = home_xg; away_xg_pre = away_xg
         injury_note = "ℹ️ Date accidentări indisponibile"
         home_injury_report = None; away_injury_report = None
-        event_id = match.get("_sportapi_event_id")
+        event_id = match.get("_freelf_event_id")
 
         if self.injury_manager and event_id:
             home_injury_report = self.injury_manager.get_lineup_absences(
                 event_id  = event_id,
-                team_id   = match.get("_sportapi_home_id",""),
+                team_id   = match.get("_freelf_home_id",""),
                 team_name = home_name,
                 is_home   = True,          # ← SEMNĂTURĂ NOUĂ
             )
             away_injury_report = self.injury_manager.get_lineup_absences(
                 event_id  = event_id,
-                team_id   = match.get("_sportapi_away_id",""),
+                team_id   = match.get("_freelf_away_id",""),
                 team_name = away_name,
                 is_home   = False,         # ← SEMNĂTURĂ NOUĂ
             )
@@ -608,8 +637,8 @@ class FootballOracleEngine:
                 logger.warning("[Injuries] Key absences! %s", injury_note)
         elif self.injury_manager and self.cache:
             # Fallback din cache
-            home_tid = match.get("_sportapi_home_id","")
-            away_tid = match.get("_sportapi_away_id","")
+            home_tid = match.get("_freelf_home_id","")
+            away_tid = match.get("_freelf_away_id","")
             if home_tid:
                 home_injury_report = self.injury_manager.get_injury_report_from_cache(home_tid, home_name)
             if away_tid:
