@@ -1,12 +1,24 @@
 """
 ================================================================================
-FOOTBALL ORACLE — Injury & Suspension Manager v2.0
+FOOTBALL ORACLE — Injury & Suspension Manager v2.1
 ================================================================================
 Module  : injury_manager.py
 CHANGES v2.0:
   - get_lineup_absences() primește acum is_home: bool (nu league: str)
   - Citește direct lineup.unavailable[] din Free Live Football endpoint
   - Impact calculat din marketValue (proxy importanță) + certainty din expectedReturn
+
+CHANGES v2.1:
+  - get_lineup_absences() delegă fetch-ul către self._api.get_lineup()
+    (oracle_api.py) în loc să-și ducă propriul HTTP call cu URL/cheie
+    RapidAPI hardcodate în acest fișier. Asta elimină:
+      1) duplicarea cheii API în două fișiere (risc la rotația cheii)
+      2) un bug de robustețe: fetch-ul propriu citea doar
+         lineup_data["lineup"], fără fallback pe ["response"] — pe care
+         get_lineup() din oracle_api.py îl gestionează deja corect.
+  - Parsarea câmpurilor folosește acum schema normalizată din get_lineup()
+    ("market_value" în loc de "marketValue"; "position" e preluat la fel
+    ca înainte — oracle_api.py a fost actualizat să-l includă).
 ================================================================================
 """
 from __future__ import annotations
@@ -133,14 +145,14 @@ class InjuryManager:
         is_home:   bool,        # ← SEMNĂTURĂ NOUĂ: bool, nu string league
     ) -> TeamInjuryReport:
         """
-        Fetch lineup din Free Live Football și returnează absenții.
+        Fetch lineup prin oracle_api.get_lineup() (Free Live Football) și
+        returnează absenții. Delegăm fetch-ul propriu-zis către oracle_api.py
+        — acolo se gestionează deja URL-ul, cheia RapidAPI, caching-ul în
+        memorie, și fallback-ul pe forma de răspuns ("lineup" sau "response").
 
-        Endpoint-uri:
-          is_home=True  → football-get-hometeam-lineup?eventid={id}
-          is_home=False → football-get-awayteam-lineup?eventid={id}
-
-        lineup.unavailable[] conține direct jucătorii indisponibili:
-          {id, name, marketValue, unavailability: {type, expectedReturn}}
+        get_lineup() întoarce deja normalizat:
+          {confirmed, formation, unavailable: [{id, name, position,
+                                                 market_value, unavailability}]}
         """
         report = TeamInjuryReport(team_name=team_name, team_id=team_id)
 
@@ -149,25 +161,16 @@ class InjuryManager:
             report.summary      = "⚠️ Date lineup indisponibile (no API/event_id)"
             return report
 
-        # ── Check cache ───────────────────────────────────────────────────
+        # ── Check cache (disc, categorie "lineups") ───────────────────────
         cache_key = f"lineup_{event_id}_{'home' if is_home else 'away'}"
         lineup_data = None
         if self._cache:
             lineup_data = self._cache.get_raw("lineups", cache_key)
 
-        # ── Fetch Free Live Football lineup ───────────────────────────────
+        # ── Fetch prin oracle_api.get_lineup() — sursă unică de adevăr ────
         if lineup_data is None:
-            endpoint = "football-get-hometeam-lineup" if is_home else "football-get-awayteam-lineup"
             try:
-                # Folosim _get din API cu headerele Free Live Football
-                raw = self._api._get(
-                    f"https://free-api-live-football-data.p.rapidapi.com/{endpoint}",
-                    headers={
-                        "x-rapidapi-key":  "2ff60d8248msh65d53a6d077e4abp145f79jsn980ab63d585f",
-                        "x-rapidapi-host": "free-api-live-football-data.p.rapidapi.com",
-                    },
-                    params={"eventid": str(event_id)},
-                )
+                raw = self._api.get_lineup(event_id, is_home)
                 if raw:
                     lineup_data = raw
                     if self._cache:
@@ -180,9 +183,8 @@ class InjuryManager:
             report.summary      = "⚠️ Lineup neconfirmat"
             return report
 
-        # ── Parsează unavailable[] ────────────────────────────────────────
-        lineup_obj = lineup_data.get("lineup", lineup_data)
-        unavailable = lineup_obj.get("unavailable", [])
+        # ── Parsează unavailable[] (deja normalizat de get_lineup()) ─────
+        unavailable = lineup_data.get("unavailable", [])
 
         if not unavailable:
             report.data_quality = "confirmed"
@@ -194,7 +196,7 @@ class InjuryManager:
             try:
                 pid    = player.get("id", "")
                 name   = player.get("name", "Unknown")
-                mv     = int(player.get("marketValue", 0) or 0)
+                mv     = int(player.get("market_value", 0) or 0)
                 unavail = player.get("unavailability", {})
                 abs_type = (unavail.get("type", "injured") or "injured").lower()
                 exp_ret  = unavail.get("expectedReturn", "") or ""
@@ -291,7 +293,7 @@ class InjuryManager:
 
 if __name__ == "__main__":
     print("\n" + "="*55)
-    print("  injury_manager.py v2.0 — self-test")
+    print("  injury_manager.py v2.1 — self-test")
     print("="*55)
     im = InjuryManager()
     # Test 1: calc_impact_from_market_value
@@ -308,7 +310,6 @@ if __name__ == "__main__":
     assert im._parse_certainty_from_text("Suspended") == 1.0
     print("  ✅  _parse_certainty_from_text()")
     # Test 4: apply_injury_penalty
-    from dataclasses import dataclass, field as _field
     hr = TeamInjuryReport(team_name="Test Home", team_id=1, total_xg_penalty=-0.12)
     ar = TeamInjuryReport(team_name="Test Away", team_id=2, total_xg_penalty=0.0)
     h_new, a_new, note = im.apply_injury_penalty(2.0, 1.2, hr, ar)
