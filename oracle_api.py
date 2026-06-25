@@ -218,8 +218,26 @@ class FootballOracleAPI:
         )
         if not data:
             self._cset(cache_key, []); return []
+
+        # Detectare automată cheie listă în răspuns
+        raw_list: list = []
+        if isinstance(data.get("response"), list):
+            raw_list = data["response"]
+        elif isinstance(data.get("matches"), list):
+            raw_list = data["matches"]
+        elif isinstance(data.get("events"), list):
+            raw_list = data["events"]
+        elif isinstance(data.get("data"), list):
+            raw_list = data["data"]
+        else:
+            # log structura top-level pentru debugging
+            logger.warning("[FreeLF] Unknown response structure keys: %s", list(data.keys())[:10])
+            self._cset(cache_key, []); return []
+
         results: list[dict] = []
-        for ev in data.get("response", []):
+        for ev in raw_list:
+            if not isinstance(ev, dict):
+                continue
             try:
                 # parentLeagueId e ID-ul canonical, leagueId e runda internă
                 parent_lid = ev.get("parentLeagueId") or ev.get("leagueId")
