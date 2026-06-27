@@ -1,15 +1,14 @@
 """
 ================================================================================
-FOOTBALL ORACLE — Core Engine v2.3 (Free Live Football edition)
+FOOTBALL ORACLE — Core Engine v2.3 (reconciliat Free Live Football)
 ================================================================================
 Module  : oracle_engine.py
-CHANGES v2.3 (migrare SportAPI → Free Live Football):
+CHANGES v2.3:
   - _build_profile() folosește Free Live Football (get_freelf_standings +
-    get_team_form_freelf) ca sursă primară, cu cascade spre fd.org / TSDB /
-    ELO / neutral
-  - _build_h2h() folosește get_h2h() (semnătură nouă, pe _freelf_event_id)
-  - evaluate_match(): _sportapi_event_id / _sportapi_home_id / _sportapi_away_id
-    → _freelf_event_id / _freelf_home_id / _freelf_away_id (injury_manager)
+    get_team_form_freelf) ca sursă primară, cu cascade spre Odds API /
+    fd.org / TSDB / ELO / neutral
+  - _build_h2h() folosește get_h2h() (Free Live Football, _freelf_event_id)
+  - injury_manager.get_lineup_absences() cu is_home: bool (semnătură v2.0)
   - ELO sigmoid blending, per-league weights, self-learning — neschimbate
 ================================================================================
 """
@@ -217,49 +216,46 @@ class FootballOracleEngine:
             InjuryManager(api=self.api, cache=self.cache)
             if INJURY_MANAGER_AVAILABLE else None
         )
-        logger.info("FootballOracleEngine v2.3 ready. Injuries=%s Cache=%s KeyMgr=%s",
+        logger.info("FootballOracleEngine v2.2 ready. Injuries=%s Cache=%s KeyMgr=%s",
                     INJURY_MANAGER_AVAILABLE, CACHE_MANAGER_AVAILABLE, KEY_MANAGER_AVAILABLE)
 
-    # ── ELO sigmoid ──────────────────────────────────────────────────────
+    # ── ELO sigmoid ───────────────────────────────────────────────────────
     def _elo_to_multiplier(self, elo: int) -> float:
         ref   = float(self.config.get("elo_reference",    1500.0))
         scale = float(self.config.get("elo_sigmoid_scale", 400.0))
-        x = (elo - ref) / scale
-        sigmoid = 1.0 / (1.0 + math.exp(-x))
+        sigmoid = 1.0 / (1.0 + math.exp(-((elo - ref) / scale)))
         return round(0.55 + sigmoid * 1.10, 4)
 
     def _elo_to_defensive_multiplier(self, elo: int) -> float:
         ref   = float(self.config.get("elo_reference",    1500.0))
         scale = float(self.config.get("elo_sigmoid_scale", 400.0))
-        x = (elo - ref) / scale
-        sigmoid = 1.0 / (1.0 + math.exp(-x))
+        sigmoid = 1.0 / (1.0 + math.exp(-((elo - ref) / scale)))
         return round(1.80 - sigmoid * 1.20, 4)
 
-    # ── H2H — v2.3 folosește Free Live Football ──────────────────────────
+    # ── H2H — v2.3 folosește Free Live Football ───────────────────────────
     def _build_h2h(self, home_name: str, away_name: str, match: dict) -> H2HRecord:
-        """
-        Încearcă Free Live Football h2h (dacă avem _freelf_event_id),
-        altfel fallback pe Odds API /scores.
-        """
         event_id = match.get("_freelf_event_id")
 
-        # ── Încearcă Free Live Football h2h ───────────────────────────────
+        # ── Încearcă Free Live Football H2H ──────────────────────────────
         if event_id:
-            freelf_h2h = self.api.get_h2h(int(event_id), home_name, away_name)
-            if freelf_h2h and freelf_h2h.get("meetings", 0) >= 1:
-                return H2HRecord(
-                    home_team      = normalize_team_name(home_name),
-                    away_team      = normalize_team_name(away_name),
-                    meetings       = freelf_h2h["meetings"],
-                    home_wins      = freelf_h2h["home_wins"],
-                    draws          = freelf_h2h["draws"],
-                    away_wins      = freelf_h2h["away_wins"],
-                    home_goals_avg = freelf_h2h["home_goals_avg"],
-                    away_goals_avg = freelf_h2h["away_goals_avg"],
-                    last_5         = freelf_h2h["last_5"],
-                    h2h_modifier   = freelf_h2h["h2h_modifier"],
-                    summary        = freelf_h2h["summary"],
-                )
+            try:
+                freelf_h2h = self.api.get_h2h(int(event_id), home_name, away_name)
+                if freelf_h2h and freelf_h2h.get("meetings", 0) >= 1:
+                    return H2HRecord(
+                        home_team      = normalize_team_name(home_name),
+                        away_team      = normalize_team_name(away_name),
+                        meetings       = freelf_h2h["meetings"],
+                        home_wins      = freelf_h2h["home_wins"],
+                        draws          = freelf_h2h["draws"],
+                        away_wins      = freelf_h2h["away_wins"],
+                        home_goals_avg = freelf_h2h["home_goals_avg"],
+                        away_goals_avg = freelf_h2h["away_goals_avg"],
+                        last_5         = freelf_h2h["last_5"],
+                        h2h_modifier   = freelf_h2h["h2h_modifier"],
+                        summary        = freelf_h2h["summary"],
+                    )
+            except Exception as exc:
+                logger.warning("[H2H] FreeLF failed for event %s: %s", event_id, exc)
 
         # ── Fallback: Odds API /scores ────────────────────────────────────
         league    = match.get("league", "")
@@ -268,14 +264,13 @@ class FootballOracleEngine:
         if not sport_key:
             return H2HRecord.empty(home_name, away_name)
 
-        scores  = self.api._fetch_scores_odds_api(sport_key, days_back=3)
-        home_c  = normalize_team_name(home_name)
-        away_c  = normalize_team_name(away_name)
+        scores = self.api._fetch_scores_odds_api(sport_key, days_back=3)
+        home_c = normalize_team_name(home_name)
+        away_c = normalize_team_name(away_name)
         meetings: list[dict] = []
-
         for s in scores:
-            h = normalize_team_name(s.get("home_team",""))
-            a = normalize_team_name(s.get("away_team",""))
+            h = normalize_team_name(s.get("home_team", ""))
+            a = normalize_team_name(s.get("away_team", ""))
             if (h == home_c and a == away_c) or (h == away_c and a == home_c):
                 meetings.append(s)
 
@@ -285,10 +280,9 @@ class FootballOracleEngine:
         home_wins = draws = away_wins = 0
         home_g = away_g = 0
         last_5: list[str] = []
-
         for m in meetings[:5]:
             is_home_first = normalize_team_name(m["home_team"]) == home_c
-            hs = m.get("home_score",0); as_ = m.get("away_score",0)
+            hs = m.get("home_score", 0); as_ = m.get("away_score", 0)
             gf = hs if is_home_first else as_; ga = as_ if is_home_first else hs
             home_g += gf; away_g += ga
             if gf > ga:   home_wins += 1; last_5.append("H")
@@ -307,16 +301,16 @@ class FootballOracleEngine:
             last_5=last_5, h2h_modifier=h2h_modifier, summary=summary,
         )
 
-    # ── _build_profile — v2.3 cascade cu Free Live Football primar ───────
+    # ── _build_profile — v2.3 cascade cu Free Live Football primar ────────
     def _build_profile(self, team_id: str, team_name: str, league: str) -> TeamProfile:
         """
         Cascade:
-          0. Free Live Football standings (get_freelf_standings) ← PRIMAR v2.3
-          1. Free Live Football form       (get_team_form_freelf) ← NOU v2.3
-          2. Odds API /scores               (get_team_recent_form)
-          3. fd.org standings                (get_standings_form)
-          4. TheSportsDB events               (get_team_stats)
-          5. ELO sigmoid                      (întotdeauna blended)
+          0. Free Live Football standings (get_freelf_standings)   ← PRIMAR v2.3
+          1. Free Live Football form      (get_team_form_freelf)   ← NOU v2.3
+          2. Odds API /scores             (get_team_recent_form)
+          3. fd.org standings             (get_standings_form)
+          4. TheSportsDB events           (get_team_stats)
+          5. ELO sigmoid                  (întotdeauna blended)
           6. Neutral defaults
         """
         w        = self.weights
@@ -327,111 +321,99 @@ class FootballOracleEngine:
 
         # ELO — întotdeauna fetch (blended la toate nivelele)
         elo_raw   = self.api.get_elo_rating(canonical)
-        elo_off   = self._elo_to_multiplier(elo_raw)          if elo_raw else None
+        elo_off   = self._elo_to_multiplier(elo_raw)           if elo_raw else None
         elo_def   = self._elo_to_defensive_multiplier(elo_raw) if elo_raw else None
         elo_blend = float(self.config.get("elo_blend_weight", 0.35))
 
         stats: list[dict] = []
-        data_source   = ""
-        data_quality  = DATA_QUALITY_NEUTRAL
-        season_stats: dict | None = None
+        season_entry: dict | None = None
+        data_source  = ""
+        data_quality = DATA_QUALITY_NEUTRAL
 
-        # ── ID numeric Free Live Football (fără prefixul "freelf_") ──────
-        freelf_tid: int | None = None
-        if team_id and str(team_id).startswith("freelf_"):
-            raw_tid = str(team_id).replace("freelf_", "")
-            if raw_tid.isdigit():
-                freelf_tid = int(raw_tid)
-
-        # ── Level 0: Free Live Football standings (avg goluri/sezon) ─────
-        standings = self.api.get_freelf_standings(league)
-        standings_entry = None
-        if standings:
-            for entry in standings:
-                if entry.get("team") == canonical:
-                    standings_entry = entry
+        # ── Level 0: Free Live Football standings ─────────────────────────
+        try:
+            standings_list = self.api.get_freelf_standings(league)
+            for entry in standings_list:
+                if entry.get("team","").lower() == canonical.lower():
+                    season_entry = entry
                     break
-            if standings_entry is None and freelf_tid is not None:
-                for entry in standings:
-                    if entry.get("team_id") == freelf_tid:
-                        standings_entry = entry
-                        break
-
-        if standings_entry:
-            gf  = float(standings_entry.get("avg_gf", 1.25))
-            ga  = float(standings_entry.get("avg_ga", 1.25))
-            sot = gf * 0.45
-            pos = 50.0
-            matches_n = max(1, min(int(standings_entry.get("played", 5) or 1), 5))
-            season_stats = {"avg_goals_for": gf, "avg_goals_against": ga,
-                            "avg_shots_on_target": sot, "avg_possession": pos,
-                            "matches": matches_n}
-            # Construim stats-like list din season averages (pentru form_score)
-            stats = [{"result": "W", "goals_for": gf, "goals_against": ga,
-                      "shots_on_goal": sot, "possession": pos}] * matches_n
-            data_source  = "freelf-standings"
-            data_quality = DATA_QUALITY_LIVE
-
-        # ── Level 1: Free Live Football form (suprascrie form_results) ───
-        recent_events = (
-            self.api.get_team_form_freelf(freelf_tid, league, last_n=last_n)
-            if freelf_tid is not None else []
-        )
-        if recent_events:
-            if not stats:
-                stats        = recent_events
-                data_source  = "freelf-form"
+            if season_entry:
+                gf  = season_entry.get("avg_gf", 1.25)
+                ga  = season_entry.get("avg_ga", 1.25)
+                sot = gf * 0.45
+                pos = 50.0
+                played = season_entry.get("played", 5)
+                stats = [{"result": "W", "goals_for": gf, "goals_against": ga,
+                          "shots_on_goal": sot, "possession": pos}] * min(played, 5)
+                data_source  = "freelf-standings"
                 data_quality = DATA_QUALITY_LIVE
-            # Dacă avem season_stats, folosim recent_events doar pentru form_results
-            # (golurile per meci din standings sunt mai fiabile)
+        except Exception as exc:
+            logger.warning("[Profile] FreeLF standings error for %s: %s", team_name, exc)
 
-        # ── Level 2: Odds API /scores ────────────────────────────────────
+        # ── Level 1: Free Live Football form ──────────────────────────────
+        recent_form: list[dict] = []
+        try:
+            freelf_id = season_entry.get("team_id") if season_entry else None
+            if freelf_id:
+                recent_form = self.api.get_team_form_freelf(int(freelf_id), league, last_n)
+        except Exception as exc:
+            logger.warning("[Profile] FreeLF form error for %s: %s", team_name, exc)
+
+        # ── Level 2: Odds API /scores ─────────────────────────────────────
         if not stats:
-            scores_form = self.api.get_team_recent_form(canonical, league, days_back=14)
-            if scores_form:
-                stats        = scores_form
-                data_source  = "scores-api"
-                data_quality = DATA_QUALITY_LIVE
+            try:
+                scores_form = self.api.get_team_recent_form(canonical, league, days_back=14)
+                if scores_form:
+                    stats        = scores_form
+                    data_source  = "scores-api"
+                    data_quality = DATA_QUALITY_LIVE
+            except Exception:
+                pass
 
-        # ── Level 3: fd.org standings ────────────────────────────────────
+        # ── Level 3: fd.org standings ─────────────────────────────────────
         if not stats and team_id and team_id.startswith("fd_"):
-            standings_fd = self.api.get_standings_form(team_id, league)
-            if standings_fd:
-                played = standings_fd.get("played") or 1
-                gf_avg = (standings_fd.get("goals_for",0) or 0) / played
-                ga_avg = (standings_fd.get("goals_against",0) or 0) / played
-                form_str = standings_fd.get("form","") or ""
-                results  = [r.strip() for r in form_str.split(",") if r.strip()][:last_n]
-                stats = [{"result": r, "goals_for": gf_avg, "goals_against": ga_avg,
-                          "shots_on_goal": gf_avg*0.45, "possession": 50.0} for r in results]
-                data_source  = "standings-fd"
-                data_quality = DATA_QUALITY_LIVE
+            try:
+                fd_standings = self.api.get_standings_form(team_id, league)
+                if fd_standings:
+                    played   = fd_standings.get("played") or 1
+                    gf_avg   = (fd_standings.get("goals_for", 0) or 0) / played
+                    ga_avg   = (fd_standings.get("goals_against", 0) or 0) / played
+                    form_str = fd_standings.get("form", "") or ""
+                    results  = [r.strip() for r in form_str.split(",") if r.strip()][:last_n]
+                    stats = [{"result": r, "goals_for": gf_avg, "goals_against": ga_avg,
+                              "shots_on_goal": gf_avg*0.45, "possession": 50.0} for r in results]
+                    data_source  = "standings-fd"
+                    data_quality = DATA_QUALITY_LIVE
+            except Exception:
+                pass
 
-        # ── Level 4: TheSportsDB ─────────────────────────────────────────
+        # ── Level 4: TheSportsDB ──────────────────────────────────────────
         if not stats and team_id and team_id.startswith("tsdb_"):
-            tsdb_stats = self.api.get_team_stats(team_id, league)
-            if tsdb_stats:
-                stats        = tsdb_stats
-                data_source  = "thesportsdb"
-                data_quality = DATA_QUALITY_LIVE
+            try:
+                tsdb_stats = self.api.get_team_stats(team_id, league)
+                if tsdb_stats:
+                    stats        = tsdb_stats
+                    data_source  = "thesportsdb"
+                    data_quality = DATA_QUALITY_LIVE
+            except Exception:
+                pass
 
         # ── Compute ratings din stats ─────────────────────────────────────
         if stats:
-            n   = len(stats)
-            # Dacă avem season_stats, folosim valorile lor (mai precise)
-            if season_stats:
-                gf  = season_stats.get("avg_goals_for",    sum(s["goals_for"]     for s in stats)/n)
-                ga  = season_stats.get("avg_goals_against",sum(s["goals_against"] for s in stats)/n)
-                sot = season_stats.get("avg_shots_on_target", gf*0.45)
-                pos = season_stats.get("avg_possession", 50.0)
+            n = len(stats)
+            if season_entry:
+                gf  = season_entry.get("avg_gf", sum(s["goals_for"]     for s in stats)/n)
+                ga  = season_entry.get("avg_ga", sum(s["goals_against"] for s in stats)/n)
+                sot = gf * 0.45
+                pos = 50.0
             else:
                 gf  = sum(s["goals_for"]     for s in stats) / n
                 ga  = sum(s["goals_against"] for s in stats) / n
                 sot = sum(s.get("shots_on_goal", gf*0.45) for s in stats) / n
                 pos = sum(s.get("possession",    50.0)     for s in stats) / n
 
-            # Form results — preferăm recent_events dacă există
-            form_source = recent_events if recent_events else stats
+            # Form results — preferăm recent_form FreeLF dacă există
+            form_source = recent_form if recent_form else stats
             results = [s["result"] for s in form_source]
 
             g_w   = float(w.get("goals_weight",      0.45))
@@ -452,7 +434,7 @@ class FootballOracleEngine:
                 off_rating = round(off_stat, 4)
                 def_rating = round(def_stat, 4)
 
-        # ── Level 5: ELO only ────────────────────────────────────────────
+        # ── Level 5: ELO only ─────────────────────────────────────────────
         elif elo_off is not None:
             baseline   = float(w.get("league_baselines",{}).get(league, w.get("league_baselines",{}).get("default",1.25)))
             off_rating = round(elo_off * baseline, 4)
@@ -462,7 +444,7 @@ class FootballOracleEngine:
             data_source  = "elo-only"
             data_quality = DATA_QUALITY_ELO
 
-        # ── Level 6: Neutral defaults ────────────────────────────────────
+        # ── Level 6: Neutral defaults ─────────────────────────────────────
         else:
             baseline   = float(w.get("league_baselines",{}).get(league, w.get("league_baselines",{}).get("default",1.25)))
             logger.warning("No data for '%s' — neutral defaults.", team_name)
@@ -477,7 +459,7 @@ class FootballOracleEngine:
         rv  = {"W": 1.0, "D": 0.4, "L": 0.0}
         wts = [2**i for i in range(len(results))]
         tw  = sum(wts) or 1
-        form_score = sum(rv.get(r,0.4)*wts[i] for i,r in enumerate(results)) / tw
+        form_score = sum(rv.get(r, 0.4)*wts[i] for i, r in enumerate(results)) / tw
 
         off_rating = min(off_rating, o_cap)
         def_rating = min(def_rating, d_cap)
@@ -520,7 +502,7 @@ class FootballOracleEngine:
             "sample_count":      sc,
         }
 
-    # ── xG calibration ───────────────────────────────────────────────────
+    # ── xG calibration ────────────────────────────────────────────────────
     def _calibrate_xg(self, home_p: TeamProfile, away_p: TeamProfile,
                       league: str, weather_penalty: float = 0.0,
                       h2h: H2HRecord | None = None) -> tuple[float, float]:
@@ -532,8 +514,8 @@ class FootballOracleEngine:
         d_cap    = float(w.get("defensive_cap", 2.5))
         home_adv = lw["home_advantage"]; away_pen = lw["away_penalty"]
 
-        away_def_mod = 0.60 + (away_p.defensive_rating / d_cap) * 0.80
-        home_def_mod = 0.60 + (home_p.defensive_rating / d_cap) * 0.80
+        away_def_mod  = 0.60 + (away_p.defensive_rating / d_cap) * 0.80
+        home_def_mod  = 0.60 + (home_p.defensive_rating / d_cap) * 0.80
         home_form_mod = 0.80 + home_p.form_score * 0.40
         away_form_mod = 0.80 + away_p.form_score * 0.40
 
@@ -552,7 +534,7 @@ class FootballOracleEngine:
         logger.info("[xG] home=%.3f  away=%.3f  (weather=%.3f)", home_xg, away_xg, weather_penalty)
         return home_xg, away_xg
 
-    # ── Poisson model ────────────────────────────────────────────────────
+    # ── Poisson model ─────────────────────────────────────────────────────
     def _poisson_model(self, home_xg: float, away_xg: float) -> tuple[float, float, float, list]:
         max_g  = int(self.config.get("max_goals_poisson", 8))
         matrix = np.zeros((max_g+1, max_g+1))
@@ -563,12 +545,13 @@ class FootballOracleEngine:
         pd = float(np.sum(np.diag(matrix)))
         pa = float(np.sum(np.triu(matrix,  1)))
         scores = sorted(
-            [(hg, ag, round(matrix[hg,ag]*100, 2)) for hg in range(max_g+1) for ag in range(max_g+1)],
+            [(hg, ag, round(matrix[hg,ag]*100, 2))
+             for hg in range(max_g+1) for ag in range(max_g+1)],
             key=lambda x: x[2], reverse=True,
         )
         return ph, pd, pa, scores[:6]
 
-    # ── Value bet helpers ────────────────────────────────────────────────
+    # ── Value bet helpers ─────────────────────────────────────────────────
     @staticmethod
     def _implied(odds: float) -> float:
         return 0.0 if odds <= 1.0 else 1.0 / odds
@@ -589,7 +572,8 @@ class FootballOracleEngine:
         if odds <= 1.0 or prob <= 0: return 0.0
         b  = odds - 1.0
         kf = max((b * prob - (1 - prob)) / b, 0.0)
-        return round(float(self.config.get("stake_default",10.0)) * kf * float(self.config.get("kelly_fraction",0.25)), 2)
+        return round(float(self.config.get("stake_default",10.0)) *
+                     kf * float(self.config.get("kelly_fraction",0.25)), 2)
 
     # ── evaluate_match ────────────────────────────────────────────────────
     def evaluate_match(self, match: dict) -> MatchPrediction | None:
@@ -611,42 +595,34 @@ class FootballOracleEngine:
 
         home_xg, away_xg = self._calibrate_xg(home_p, away_p, league, w_pen, h2h)
 
-        # ── Injury penalty — semnătură NOUĂ: is_home=True/False ──────────
+        # ── Injury penalty ────────────────────────────────────────────────
         home_xg_pre = home_xg; away_xg_pre = away_xg
         injury_note = "ℹ️ Date accidentări indisponibile"
         home_injury_report = None; away_injury_report = None
         event_id = match.get("_freelf_event_id")
 
         if self.injury_manager and event_id:
-            home_injury_report = self.injury_manager.get_lineup_absences(
-                event_id  = event_id,
-                team_id   = match.get("_freelf_home_id",""),
-                team_name = home_name,
-                is_home   = True,          # ← SEMNĂTURĂ NOUĂ
-            )
-            away_injury_report = self.injury_manager.get_lineup_absences(
-                event_id  = event_id,
-                team_id   = match.get("_freelf_away_id",""),
-                team_name = away_name,
-                is_home   = False,         # ← SEMNĂTURĂ NOUĂ
-            )
-            home_xg, away_xg, injury_note = self.injury_manager.apply_injury_penalty(
-                home_xg, away_xg, home_injury_report, away_injury_report
-            )
-            if home_injury_report.has_key_absences or away_injury_report.has_key_absences:
-                logger.warning("[Injuries] Key absences! %s", injury_note)
-        elif self.injury_manager and self.cache:
-            # Fallback din cache
-            home_tid = match.get("_freelf_home_id","")
-            away_tid = match.get("_freelf_away_id","")
-            if home_tid:
-                home_injury_report = self.injury_manager.get_injury_report_from_cache(home_tid, home_name)
-            if away_tid:
-                away_injury_report = self.injury_manager.get_injury_report_from_cache(away_tid, away_name)
-            if home_injury_report and away_injury_report:
+            try:
+                home_injury_report = self.injury_manager.get_lineup_absences(
+                    event_id  = event_id,
+                    team_id   = match.get("_freelf_home_id",""),
+                    team_name = home_name,
+                    is_home   = True,
+                )
+                away_injury_report = self.injury_manager.get_lineup_absences(
+                    event_id  = event_id,
+                    team_id   = match.get("_freelf_away_id",""),
+                    team_name = away_name,
+                    is_home   = False,
+                )
                 home_xg, away_xg, injury_note = self.injury_manager.apply_injury_penalty(
                     home_xg, away_xg, home_injury_report, away_injury_report
                 )
+                if (home_injury_report and home_injury_report.has_key_absences) or \
+                   (away_injury_report and away_injury_report.has_key_absences):
+                    logger.warning("[Injuries] Key absences! %s", injury_note)
+            except Exception as exc:
+                logger.warning("[Injuries] Failed for event %s: %s", event_id, exc)
 
         logger.info("[xG after injuries] home=%.3f (was %.3f)  away=%.3f (was %.3f)",
                     home_xg, home_xg_pre, away_xg, away_xg_pre)
@@ -672,7 +648,9 @@ class FootballOracleEngine:
                     conf = " ⚠️ date estimate"
                 elif home_p.data_quality == DATA_QUALITY_ELO or away_p.data_quality == DATA_QUALITY_ELO:
                     conf = " 🟡 ELO only"
-                value_bets.append({"market":"1X2","selection":sel,"edge_pct":ep,"rating":self._rating(ep),"model_prob_pct":round(mp*100,2),"bk_odds":odds,"confidence_note":conf})
+                value_bets.append({"market":"1X2","selection":sel,"edge_pct":ep,
+                                   "rating":self._rating(ep),"model_prob_pct":round(mp*100,2),
+                                   "bk_odds":odds,"confidence_note":conf})
 
         kelly: dict[str,float] = {}
         for sel, prob, odds in [("Home Win",ph,bk_h),("Draw",pd,bk_d),("Away Win",pa,bk_a)]:
@@ -686,13 +664,16 @@ class FootballOracleEngine:
             prob_home_win=round(ph,4), prob_draw=round(pd,4), prob_away_win=round(pa,4),
             top_scores=top_scores,
             bk_home_odds=bk_h, bk_draw_odds=bk_d, bk_away_odds=bk_a, bookmaker_name=bk_n,
-            impl_home_pct=round(impl_h*100,2), impl_draw_pct=round(impl_d*100,2), impl_away_pct=round(impl_a*100,2),
+            impl_home_pct=round(impl_h*100,2), impl_draw_pct=round(impl_d*100,2),
+            impl_away_pct=round(impl_a*100,2),
             edge_home_pct=edge_h, edge_draw_pct=edge_d, edge_away_pct=edge_a,
-            value_bets=value_bets, weather_note=w_note, weather_penalty=w_pen, kelly_stakes=kelly,
+            value_bets=value_bets, weather_note=w_note, weather_penalty=w_pen,
+            kelly_stakes=kelly,
             home_profile=home_p, away_profile=away_p, h2h=h2h,
             data_quality_home=home_p.data_quality, data_quality_away=away_p.data_quality,
             home_injury_report=home_injury_report, away_injury_report=away_injury_report,
-            injury_note=injury_note, home_xg_pre_injury=home_xg_pre, away_xg_pre_injury=away_xg_pre,
+            injury_note=injury_note, home_xg_pre_injury=home_xg_pre,
+            away_xg_pre_injury=away_xg_pre,
         )
         self._cache_prediction(pred)
         return pred
@@ -705,11 +686,14 @@ class FootballOracleEngine:
         return self.api.get_matches_for_date(target_date)
 
     def _cache_prediction(self, pred: MatchPrediction) -> None:
-        data = {"fixture_id": pred.fixture_id, "home_team": pred.home_team, "away_team": pred.away_team,
-                "league": pred.league, "kickoff_date": pred.kickoff_date,
+        data = {"fixture_id": pred.fixture_id, "home_team": pred.home_team,
+                "away_team": pred.away_team, "league": pred.league,
+                "kickoff_date": pred.kickoff_date,
                 "home_xg": pred.home_xg, "away_xg": pred.away_xg,
-                "prob_home": pred.prob_home_win, "prob_draw": pred.prob_draw, "prob_away": pred.prob_away_win,
-                "data_quality_home": pred.data_quality_home, "data_quality_away": pred.data_quality_away,
+                "prob_home": pred.prob_home_win, "prob_draw": pred.prob_draw,
+                "prob_away": pred.prob_away_win,
+                "data_quality_home": pred.data_quality_home,
+                "data_quality_away": pred.data_quality_away,
                 "saved_at": datetime.now(timezone.utc).isoformat()}
         safe_id = str(pred.fixture_id).replace("/","_")
         _save_json(PREDICTIONS_DIR / f"{safe_id}.json", data)
@@ -721,19 +705,24 @@ class FootballOracleEngine:
         try: return json.loads(p.read_text(encoding="utf-8"))
         except Exception: return None
 
-    # ── Self-learning recalibration (logică neschimbată din v2.1) ────────
+    # ── Self-learning recalibration ───────────────────────────────────────
     def update_weights_from_result(self, fixture_id: str, actual_home_goals: int, actual_away_goals: int) -> dict:
         cache = self._load_prediction(fixture_id)
-        if cache is None: return {"status":"error","message":f"No cached prediction for {fixture_id}."}
+        if cache is None:
+            return {"status":"error","message":f"No cached prediction for {fixture_id}."}
         pred_h = float(cache.get("home_xg",1.25)); pred_a = float(cache.get("away_xg",1.00))
         league = cache.get("league","default")
         home_err = actual_home_goals - pred_h; away_err = actual_away_goals - pred_a
         combined = (abs(home_err) + abs(away_err)) / 2.0; avg_err = (home_err + away_err) / 2.0
-        lr = float(self.config.get("recalibration_learning_rate",0.05)); max_d = float(self.config.get("recalibration_max_delta",0.15))
-        if combined < 0.30: return {"status":"stable","league":league,"combined_error":round(combined,4),"message":"Model accurate.","adjustments":{}}
+        lr = float(self.config.get("recalibration_learning_rate",0.05))
+        max_d = float(self.config.get("recalibration_max_delta",0.15))
+        if combined < 0.30:
+            return {"status":"stable","league":league,"combined_error":round(combined,4),
+                    "message":"Model accurate.","adjustments":{}}
         adjustments: dict = {}; reasons: list = []
         def _shift(name, cur, delta, lo=0.05, hi=0.95):
-            delta = max(-max_d, min(max_d, delta)); new_val = max(lo, min(hi, cur+delta))
+            delta = max(-max_d, min(max_d, delta))
+            new_val = max(lo, min(hi, cur+delta))
             adjustments[name] = {"old":round(cur,4),"delta":round(delta,4),"new":round(new_val,4)}
             return new_val
         lw_all = self.weights.setdefault("league_weights",{})
@@ -743,27 +732,57 @@ class FootballOracleEngine:
         lr_league = min(lr * max(1.0, 3.0/(sc+1)), lr*3); scale_l = min(combined/3.0,1.0) * lr_league
         fw=float(lw.get("form_weight",0.60)); dw=float(lw.get("dna_weight",0.40))
         gw=float(lw.get("goals_weight",0.45)); sow=float(lw.get("shots_ot_weight",0.30))
-        pw=float(lw.get("possession_weight",0.25)); ha=float(lw.get("home_advantage",1.07)); ap=float(lw.get("away_penalty",0.95))
-        if combined >= 0.50: fw=_shift("form_weight",fw,-scale_l*0.6,lo=0.10,hi=0.90); dw=_shift("dna_weight",dw,+scale_l*0.6,lo=0.10,hi=0.90); reasons.append(f"[{league}] Large error ({combined:.2f}) → DNA shift.")
-        if avg_err > 0.50: gw=_shift("goals_weight",gw,+scale_l*0.5,lo=0.10,hi=0.80); sow=_shift("shots_ot_weight",sow,+scale_l*0.3,lo=0.05,hi=0.60); ha=_shift("home_advantage",ha,+scale_l*0.2,lo=1.00,hi=1.20) if home_err>0.5 else ha; reasons.append(f"[{league}] Under-estimated.")
-        elif avg_err < -0.50: gw=_shift("goals_weight",gw,-scale_l*0.4,lo=0.10,hi=0.80); pw=_shift("possession_weight",pw,+scale_l*0.3,lo=0.05,hi=0.50); ha=_shift("home_advantage",ha,-scale_l*0.15,lo=1.00,hi=1.20) if home_err<-0.5 else ha; reasons.append(f"[{league}] Over-estimated.")
+        pw=float(lw.get("possession_weight",0.25)); ha=float(lw.get("home_advantage",1.07))
+        ap=float(lw.get("away_penalty",0.95))
+        if combined >= 0.50:
+            fw=_shift("form_weight",fw,-scale_l*0.6,lo=0.10,hi=0.90)
+            dw=_shift("dna_weight",dw,+scale_l*0.6,lo=0.10,hi=0.90)
+            reasons.append(f"[{league}] Large error ({combined:.2f}) → DNA shift.")
+        if avg_err > 0.50:
+            gw=_shift("goals_weight",gw,+scale_l*0.5,lo=0.10,hi=0.80)
+            sow=_shift("shots_ot_weight",sow,+scale_l*0.3,lo=0.05,hi=0.60)
+            if home_err>0.5: ha=_shift("home_advantage",ha,+scale_l*0.2,lo=1.00,hi=1.20)
+            reasons.append(f"[{league}] Under-estimated.")
+        elif avg_err < -0.50:
+            gw=_shift("goals_weight",gw,-scale_l*0.4,lo=0.10,hi=0.80)
+            pw=_shift("possession_weight",pw,+scale_l*0.3,lo=0.05,hi=0.50)
+            if home_err<-0.5: ha=_shift("home_advantage",ha,-scale_l*0.15,lo=1.00,hi=1.20)
+            reasons.append(f"[{league}] Over-estimated.")
         t_comp = gw+sow+pw
         if t_comp > 0: gw=round(gw/t_comp,4); sow=round(sow/t_comp,4); pw=round(pw/t_comp,4)
         t_fd = fw+dw
         if t_fd > 0: fw=round(fw/t_fd,4); dw=round(dw/t_fd,4)
-        lw_all[league].update({"form_weight":fw,"dna_weight":dw,"goals_weight":gw,"shots_ot_weight":sow,"possession_weight":pw,"home_advantage":ha,"away_penalty":ap,"sample_count":sc+1})
+        lw_all[league].update({"form_weight":fw,"dna_weight":dw,"goals_weight":gw,
+                                "shots_ot_weight":sow,"possession_weight":pw,
+                                "home_advantage":ha,"away_penalty":ap,"sample_count":sc+1})
         gfw=float(self.weights.get("form_weight",0.60)); gdw=float(self.weights.get("dna_weight",0.40))
-        ggw=float(self.weights.get("goals_weight",0.45)); gsow=float(self.weights.get("shots_ot_weight",0.30)); gpw=float(self.weights.get("possession_weight",0.25))
-        self.weights.update({"form_weight":round(max(0.10,min(0.90,gfw+(fw-gfw)*0.25)),4),"dna_weight":round(max(0.10,min(0.90,gdw+(dw-gdw)*0.25)),4),"goals_weight":round(max(0.10,min(0.80,ggw+(gw-ggw)*0.25)),4),"shots_ot_weight":round(max(0.05,min(0.60,gsow+(sow-gsow)*0.25)),4),"possession_weight":round(max(0.05,min(0.50,gpw+(pw-gpw)*0.25)),4),"league_weights":lw_all})
+        ggw=float(self.weights.get("goals_weight",0.45)); gsow=float(self.weights.get("shots_ot_weight",0.30))
+        gpw=float(self.weights.get("possession_weight",0.25))
+        self.weights.update({"form_weight":round(max(0.10,min(0.90,gfw+(fw-gfw)*0.25)),4),
+                              "dna_weight":round(max(0.10,min(0.90,gdw+(dw-gdw)*0.25)),4),
+                              "goals_weight":round(max(0.10,min(0.80,ggw+(gw-ggw)*0.25)),4),
+                              "shots_ot_weight":round(max(0.05,min(0.60,gsow+(sow-gsow)*0.25)),4),
+                              "possession_weight":round(max(0.05,min(0.50,gpw+(pw-gpw)*0.25)),4),
+                              "league_weights":lw_all})
         _save_json(WEIGHTS_PATH, self.weights)
         reason = "  |  ".join(reasons) or "Minor adjustment."
-        log_row = {"timestamp":datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),"fixture_id":fixture_id,"league":league,"sample_count":sc+1,"home":f"{cache.get('home_team','')} ({pred_h:.2f} xG)","away":f"{cache.get('away_team','')} ({pred_a:.2f} xG)","actual":f"{actual_home_goals}-{actual_away_goals}","combined_error":round(combined,3),"new_form_w":fw,"new_dna_w":dw,"home_advantage":ha,"reason":reason}
+        log_row = {"timestamp":datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
+                   "fixture_id":fixture_id,"league":league,"sample_count":sc+1,
+                   "home":f"{cache.get('home_team','')} ({pred_h:.2f} xG)",
+                   "away":f"{cache.get('away_team','')} ({pred_a:.2f} xG)",
+                   "actual":f"{actual_home_goals}-{actual_away_goals}",
+                   "combined_error":round(combined,3),"new_form_w":fw,"new_dna_w":dw,
+                   "home_advantage":ha,"reason":reason}
         exists = RECAL_LOG_PATH.exists()
         with RECAL_LOG_PATH.open("a", newline="", encoding="utf-8") as f:
             wr = csv.DictWriter(f, fieldnames=list(log_row.keys()))
             if not exists: wr.writeheader()
             wr.writerow(log_row)
-        return {"status":"recalibrated","fixture_id":fixture_id,"pred_home_xg":round(pred_h,3),"pred_away_xg":round(pred_a,3),"actual_home":actual_home_goals,"actual_away":actual_away_goals,"home_error":round(home_err,3),"away_error":round(away_err,3),"combined_error":round(combined,3),"adjustments":adjustments,"reason":reason}
+        return {"status":"recalibrated","fixture_id":fixture_id,
+                "pred_home_xg":round(pred_h,3),"pred_away_xg":round(pred_a,3),
+                "actual_home":actual_home_goals,"actual_away":actual_away_goals,
+                "home_error":round(home_err,3),"away_error":round(away_err,3),
+                "combined_error":round(combined,3),"adjustments":adjustments,"reason":reason}
 
     # ── Portfolio ─────────────────────────────────────────────────────────
     HEADERS = ["Date","FixtureID","Match","Market","Selection","Odds","Stake","Result","PnL"]
@@ -771,7 +790,10 @@ class FootballOracleEngine:
     def log_bet(self, fixture_id, match_name, market, selection, odds, stake, result="") -> dict:
         result = result.upper().strip()
         pnl = round(stake*(odds-1),2) if result=="W" else (-round(stake,2) if result=="L" else 0.0)
-        row = {"Date":datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),"FixtureID":str(fixture_id),"Match":match_name,"Market":market,"Selection":selection,"Odds":odds,"Stake":stake,"Result":result or "PENDING","PnL":pnl}
+        row = {"Date":datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
+               "FixtureID":str(fixture_id),"Match":match_name,"Market":market,
+               "Selection":selection,"Odds":odds,"Stake":stake,
+               "Result":result or "PENDING","PnL":pnl}
         exists = PORTFOLIO_PATH.exists()
         with PORTFOLIO_PATH.open("a", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=self.HEADERS)
@@ -780,13 +802,25 @@ class FootballOracleEngine:
         return row
 
     def get_league_learning_stats(self) -> pd.DataFrame:
-        global_defaults = {"form_weight":0.60,"dna_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95}
+        global_defaults = {"form_weight":0.60,"dna_weight":0.40,"goals_weight":0.45,
+                           "shots_ot_weight":0.30,"possession_weight":0.25,
+                           "home_advantage":1.07,"away_penalty":0.95}
         lw_all = self.weights.get("league_weights",{}); rows = []
         for league, lw in lw_all.items():
             if league == "default": continue
             sc = int(lw.get("sample_count",0))
-            rows.append({"League":league,"Samples":sc,"Confidence":f"{min(sc/5*100,100):.0f}%","form_w":round(float(lw.get("form_weight",0.60)),4),"dna_w":round(float(lw.get("dna_weight",0.40)),4),"goals_w":round(float(lw.get("goals_weight",0.45)),4),"home_adv":round(float(lw.get("home_advantage",1.07)),4),"Δ form_w":round(float(lw.get("form_weight",0.60))-global_defaults["form_weight"],4),"Δ goals_w":round(float(lw.get("goals_weight",0.45))-global_defaults["goals_weight"],4),"Δ home_adv":round(float(lw.get("home_advantage",1.07))-global_defaults["home_advantage"],4)})
-        if not rows: return pd.DataFrame(columns=["League","Samples","Confidence","form_w","dna_w","goals_w","home_adv","Δ form_w","Δ goals_w","Δ home_adv"])
+            rows.append({"League":league,"Samples":sc,
+                         "Confidence":f"{min(sc/5*100,100):.0f}%",
+                         "form_w":round(float(lw.get("form_weight",0.60)),4),
+                         "dna_w":round(float(lw.get("dna_weight",0.40)),4),
+                         "goals_w":round(float(lw.get("goals_weight",0.45)),4),
+                         "home_adv":round(float(lw.get("home_advantage",1.07)),4),
+                         "Δ form_w":round(float(lw.get("form_weight",0.60))-global_defaults["form_weight"],4),
+                         "Δ goals_w":round(float(lw.get("goals_weight",0.45))-global_defaults["goals_weight"],4),
+                         "Δ home_adv":round(float(lw.get("home_advantage",1.07))-global_defaults["home_advantage"],4)})
+        if not rows:
+            return pd.DataFrame(columns=["League","Samples","Confidence","form_w","dna_w",
+                                         "goals_w","home_adv","Δ form_w","Δ goals_w","Δ home_adv"])
         return pd.DataFrame(rows).sort_values("Samples",ascending=False).reset_index(drop=True)
 
     def portfolio_summary(self) -> pd.DataFrame | None:
