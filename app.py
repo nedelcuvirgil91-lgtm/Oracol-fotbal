@@ -109,7 +109,7 @@ PREDICTIONS_DIR= BASE_DIR / "predictions"
 COMPETITIONS_META = [
     {"key":"World Cup 2026",    "icon":"🏆","label":"World Cup",       "color":"#ffb300"},
     {"key":"Champions League",  "icon":"⭐","label":"UCL",             "color":"#00c2ff"},
-    {"key":"Premier League",    "icon":"🏴󠁧󠁢󠁥󠁮󠁧󠁿","label":"Premier League", "color":"#9b59b6"},
+    {"key":"Premier League",    "icon":"🏴","label":"Premier League", "color":"#9b59b6"},
     {"key":"La Liga",           "icon":"🇪🇸","label":"La Liga",         "color":"#e74c3c"},
     {"key":"Serie A",           "icon":"🇮🇹","label":"Serie A",         "color":"#2ecc71"},
     {"key":"Bundesliga",        "icon":"🇩🇪","label":"Bundesliga",      "color":"#e67e22"},
