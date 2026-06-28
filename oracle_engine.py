@@ -330,6 +330,23 @@ class FootballOracleEngine:
         data_source  = ""
         data_quality = DATA_QUALITY_NEUTRAL
 
+        # ── Level -1: Date naționale hardcodate (World Cup + naționale) ───
+        from mappings import NATIONAL_TEAM_STATS
+        nat = NATIONAL_TEAM_STATS.get(canonical)
+        if nat:
+            gf  = float(nat["avg_gf"])
+            ga  = float(nat["avg_ga"])
+            sot = float(nat.get("avg_sot", gf * 0.45))
+            pos = float(nat.get("avg_possession", 50.0))
+            n   = int(nat.get("matches", 10))
+            results = list(nat.get("form", []))
+            stats = [{"result": r, "goals_for": gf, "goals_against": ga,
+                      "shots_on_goal": sot, "possession": pos}
+                     for r in (results or ["W"] * 5)]
+            data_source  = "national-stats-hardcoded"
+            data_quality = DATA_QUALITY_LIVE
+            logger.info("[Profile] %s — national stats hardcoded (gf=%.2f ga=%.2f)", canonical, gf, ga)
+
         # ── Level 0: Free Live Football standings ─────────────────────────
         try:
             standings_list = self.api.get_freelf_standings(league)
