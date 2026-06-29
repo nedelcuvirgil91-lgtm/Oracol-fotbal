@@ -748,6 +748,11 @@ class FootballOracleEngine:
 
         ph, pd, pa, top_scores = self._poisson_model(home_xg, away_xg)
 
+        # ── Monte Carlo + Confidence + Piețe speciale ─────────────────────
+        n_sim = int(self.config.get("monte_carlo_simulations", 10000))
+        mc    = self._monte_carlo(home_xg, away_xg, n_sim)
+        special_vbets = self._special_value_bets(mc, match)
+
         bk_h = float(match.get("home_odds") or 0.0)
         bk_d = float(match.get("draw_odds") or 0.0)
         bk_a = float(match.get("away_odds") or 0.0)
