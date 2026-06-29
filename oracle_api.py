@@ -151,6 +151,7 @@ class FootballOracleAPI:
         self._mem: dict[str, tuple[Any, datetime]] = {}
         self._ttl = 30
         self._dead_keys: set[str] = set()
+        self._freelf_exhausted: bool = False
         self._elo_cache:    dict[str, int]  = _disc_load(ELO_CACHE_PATH)
         self._scores_cache: dict[str, list] = _disc_load(SCORES_CACHE_PATH)
         self._active_sport_keys: set[str]   = set()
@@ -175,7 +176,12 @@ class FootballOracleAPI:
             r = self._s.get(url, headers=headers or {}, params=params or {}, timeout=timeout)
             if r.status_code == 404: logger.warning("[HTTP 404] %s", url[:80]); return None
             if r.status_code == 403: logger.warning("[HTTP 403] %s", url[:80]); return None
-            if r.status_code == 429: logger.warning("[HTTP 429] %s", url[:80]); return None
+            if r.status_code == 429:
+                logger.warning("[HTTP 429] %s", url[:80])
+                if FREE_LF_HOST in url:
+                    self._freelf_exhausted = True
+                    logger.warning("[FreeLF] Limita 429 — trecem pe fallback ESPN/demo.")
+                return None
             if not r.ok: logger.warning("[HTTP %s] %s", r.status_code, url[:80]); return None
             return r.json()
         except Exception as exc:
@@ -204,6 +210,8 @@ class FootballOracleAPI:
 
     # ── Free Live Football — meciuri pe zi ────────────────────────────────
     def _fetch_freelf_matches(self, target_date: str, league: str) -> list[dict]:
+        if self._freelf_exhausted:
+            return []
         league_id = FREE_LF_LEAGUE_IDS.get(league)
         if not league_id:
             return []
@@ -302,6 +310,8 @@ class FootballOracleAPI:
 
     # ── Free Live Football — standings ────────────────────────────────────
     def get_freelf_standings(self, league: str) -> list[dict]:
+        if self._freelf_exhausted:
+            return []
         league_id = FREE_LF_LEAGUE_IDS.get(league)
         if not league_id:
             return []
@@ -372,7 +382,7 @@ class FootballOracleAPI:
 
     # ── Free Live Football — statistics (xG) ─────────────────────────────
     def get_match_statistics(self, event_id: int) -> dict | None:
-        if not event_id:
+        if self._freelf_exhausted or not event_id:
             return None
         cache_key = f"freelf_stats_{event_id}"
         cached = self._cget(cache_key)
@@ -402,7 +412,7 @@ class FootballOracleAPI:
 
     # ── Free Live Football — H2H ──────────────────────────────────────────
     def get_h2h(self, event_id: int, home_name: str = "", away_name: str = "") -> dict | None:
-        if not event_id:
+        if self._freelf_exhausted or not event_id:
             return None
         cache_key = f"freelf_h2h_{event_id}"
         cached = self._cget(cache_key)
@@ -453,7 +463,7 @@ class FootballOracleAPI:
 
     # ── Free Live Football — lineup / absențe ─────────────────────────────
     def get_lineup(self, event_id: int, is_home: bool) -> dict | None:
-        if not event_id:
+        if self._freelf_exhausted or not event_id:
             return None
         side = "home" if is_home else "away"
         cache_key = f"freelf_lineup_{event_id}_{side}"
@@ -1001,4 +1011,5 @@ class FootballOracleAPI:
 
     def clear_cache(self) -> None:
         self._mem.clear(); self._dead_keys.clear()
-        logger.info("Cache cleared.")
+        self._freelf_exhausted = False
+        logger.info("Cache cleared. FreeLF exhausted flag reset.")
