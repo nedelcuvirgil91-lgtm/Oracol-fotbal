@@ -81,6 +81,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "elo_reference":               1500.0,
     "h2h_weight":                  0.15,
     "h2h_lookback_days":           1095,
+    "monte_carlo_simulations":     10000,
 }
 
 DEFAULT_WEIGHTS: dict[str, Any] = {
@@ -592,6 +593,107 @@ class FootballOracleEngine:
         return round(float(self.config.get("stake_default",10.0)) *
                      kf * float(self.config.get("kelly_fraction",0.25)), 2)
 
+
+    # ── Monte Carlo Simulator ─────────────────────────────────────────────
+    def _monte_carlo(self, home_xg: float, away_xg: float,
+                     n_sim: int = 10_000) -> dict:
+        """
+        Simulează n_sim meciuri independente cu distribuție Poisson.
+        Returnează probabilități MC + confidence score.
+        """
+        rng = np.random.default_rng(seed=42)
+        home_goals = rng.poisson(home_xg, n_sim)
+        away_goals = rng.poisson(away_xg, n_sim)
+
+        ph = float(np.mean(home_goals > away_goals))
+        pd = float(np.mean(home_goals == away_goals))
+        pa = float(np.mean(home_goals < away_goals))
+
+        # ── Piețe speciale din simulare ───────────────────────────────────
+        over25  = float(np.mean((home_goals + away_goals) > 2.5))
+        over15  = float(np.mean((home_goals + away_goals) > 1.5))
+        under25 = float(np.mean((home_goals + away_goals) < 2.5))
+        btts    = float(np.mean((home_goals > 0) & (away_goals > 0)))
+        cs_h    = float(np.mean(away_goals == 0))
+        cs_a    = float(np.mean(home_goals == 0))
+        dc_h    = float(np.mean(home_goals >= away_goals))   # 1X
+        dc_a    = float(np.mean(home_goals <= away_goals))   # X2
+
+        # ── Confidence Score ─────────────────────────────────────────────
+        # Bazat pe: varianța probabilităților MC vs Poisson analitic,
+        # calitatea datelor (live > elo > neutral), și concentrarea distribuției
+        poisson_ph, poisson_pd, poisson_pa, _ = self._poisson_model(home_xg, away_xg)
+        divergence = (abs(ph - poisson_ph) + abs(pd - poisson_pd) + abs(pa - poisson_pa)) / 3.0
+        # Cu cât MC și Poisson analitic sunt mai aproape, cu atât modelul e mai consistent
+        consistency = max(0.0, 1.0 - divergence * 10.0)
+
+        # Concentrarea: dacă o echipă domină clar → confidence ridicat
+        max_p = max(ph, pd, pa)
+        concentration = (max_p - 0.333) / 0.667  # 0 = uniform, 1 = certitudine
+
+        confidence_raw = (consistency * 0.4 + concentration * 0.6) * 100.0
+        confidence_score = round(min(max(confidence_raw, 5.0), 99.0), 1)
+
+        if confidence_score >= 70:
+            confidence_label = "🟢 Ridicat"
+        elif confidence_score >= 45:
+            confidence_label = "🟡 Mediu"
+        else:
+            confidence_label = "🔴 Scăzut"
+
+        logger.info("[MC] ph=%.3f pd=%.3f pa=%.3f confidence=%.1f%%",
+                    ph, pd, pa, confidence_score)
+
+        return {
+            "mc_prob_home":           round(ph, 4),
+            "mc_prob_draw":           round(pd, 4),
+            "mc_prob_away":           round(pa, 4),
+            "confidence_score":       confidence_score,
+            "confidence_label":       confidence_label,
+            "mc_simulations":         n_sim,
+            "prob_over25":            round(over25, 4),
+            "prob_over15":            round(over15, 4),
+            "prob_under25":           round(under25, 4),
+            "prob_btts":              round(btts, 4),
+            "prob_clean_sheet_home":  round(cs_h, 4),
+            "prob_clean_sheet_away":  round(cs_a, 4),
+            "prob_double_chance_home": round(dc_h, 4),
+            "prob_double_chance_away": round(dc_a, 4),
+        }
+
+    # ── Value bets piețe speciale ─────────────────────────────────────────
+    def _special_value_bets(self, mc: dict, match: dict) -> list[dict]:
+        """Caută value bets în piețele Over/Under, BTTS, Double Chance."""
+        results: list[dict] = []
+        threshold = float(self.config.get("value_bet_threshold_pct", 5.0))
+
+        # Mapare piață → probabilitate model → cheie odds în match
+        markets = [
+            ("Over 2.5",      mc["prob_over25"],            "over25_odds"),
+            ("Under 2.5",     mc["prob_under25"],           "under25_odds"),
+            ("BTTS Da",       mc["prob_btts"],              "btts_yes_odds"),
+            ("BTTS Nu",       1 - mc["prob_btts"],          "btts_no_odds"),
+            ("Double Chance 1X", mc["prob_double_chance_home"], "dc_home_odds"),
+            ("Double Chance X2", mc["prob_double_chance_away"], "dc_away_odds"),
+        ]
+
+        for market_name, model_prob, odds_key in markets:
+            bk_odds = float(match.get(odds_key) or 0.0)
+            if bk_odds <= 1.0:
+                continue
+            impl_p = 1.0 / bk_odds
+            edge   = (model_prob - impl_p) / impl_p * 100.0
+            if edge >= threshold:
+                results.append({
+                    "market":        market_name,
+                    "model_prob_pct": round(model_prob * 100, 1),
+                    "bk_odds":       bk_odds,
+                    "edge_pct":      round(edge, 2),
+                    "rating":        self._rating(edge),
+                })
+
+        return sorted(results, key=lambda x: x["edge_pct"], reverse=True)
+
     # ── evaluate_match ────────────────────────────────────────────────────
     def evaluate_match(self, match: dict) -> MatchPrediction | None:
         home_name = match["home_team"]; away_name = match["away_team"]
@@ -691,6 +793,23 @@ class FootballOracleEngine:
             home_injury_report=home_injury_report, away_injury_report=away_injury_report,
             injury_note=injury_note, home_xg_pre_injury=home_xg_pre,
             away_xg_pre_injury=away_xg_pre,
+            # Monte Carlo & Confidence
+            mc_prob_home=mc["mc_prob_home"],
+            mc_prob_draw=mc["mc_prob_draw"],
+            mc_prob_away=mc["mc_prob_away"],
+            confidence_score=mc["confidence_score"],
+            confidence_label=mc["confidence_label"],
+            mc_simulations=mc["mc_simulations"],
+            # Piețe speciale
+            prob_over25=mc["prob_over25"],
+            prob_over15=mc["prob_over15"],
+            prob_under25=mc["prob_under25"],
+            prob_btts=mc["prob_btts"],
+            prob_clean_sheet_home=mc["prob_clean_sheet_home"],
+            prob_clean_sheet_away=mc["prob_clean_sheet_away"],
+            prob_double_chance_home=mc["prob_double_chance_home"],
+            prob_double_chance_away=mc["prob_double_chance_away"],
+            special_value_bets=special_vbets,
         )
         self._cache_prediction(pred)
         return pred
