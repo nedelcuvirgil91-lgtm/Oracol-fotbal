@@ -262,7 +262,81 @@ def _render_match_card(match: dict, engine) -> None:
             + "</div>", unsafe_allow_html=True
         )
 
-    # ── Value bets ────────────────────────────────────────────────────────
+    # ── Monte Carlo vs Poisson comparison ───────────────────────────────
+    mc_home = getattr(pred, "mc_prob_home", None)
+    if mc_home is not None:
+        st.markdown('<span class="sub-label">Model comparison — Poisson vs Monte Carlo (10k sim)</span>', unsafe_allow_html=True)
+        mc_draw = pred.mc_prob_draw; mc_away = pred.mc_prob_away
+        st.markdown(f"""
+        <div style="padding:0 1.5rem;">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:.4rem;margin-bottom:.4rem;">
+                <div style="background:var(--card);border:1px solid var(--border);border-radius:6px;padding:.4rem;text-align:center;">
+                    <div style="font-size:.55rem;color:var(--t3);text-transform:uppercase;">Acasă</div>
+                    <div style="font-family:var(--oswald);font-size:.9rem;color:#4a9eff;">P {pred.prob_home_win*100:.1f}%</div>
+                    <div style="font-family:var(--oswald);font-size:.9rem;color:#4a9effaa;">MC {mc_home*100:.1f}%</div>
+                </div>
+                <div style="background:var(--card);border:1px solid var(--border);border-radius:6px;padding:.4rem;text-align:center;">
+                    <div style="font-size:.55rem;color:var(--t3);text-transform:uppercase;">Egal</div>
+                    <div style="font-family:var(--oswald);font-size:.9rem;color:var(--amber);">P {pred.prob_draw*100:.1f}%</div>
+                    <div style="font-family:var(--oswald);font-size:.9rem;color:#ffb300aa;">MC {mc_draw*100:.1f}%</div>
+                </div>
+                <div style="background:var(--card);border:1px solid var(--border);border-radius:6px;padding:.4rem;text-align:center;">
+                    <div style="font-size:.55rem;color:var(--t3);text-transform:uppercase;">Oaspeți</div>
+                    <div style="font-family:var(--oswald);font-size:.9rem;color:var(--accent2);">P {pred.prob_away_win*100:.1f}%</div>
+                    <div style="font-family:var(--oswald);font-size:.9rem;color:#ff3d57aa;">MC {mc_away*100:.1f}%</div>
+                </div>
+            </div>
+        </div>""", unsafe_allow_html=True)
+
+    # ── Piețe speciale ────────────────────────────────────────────────────
+    over25 = getattr(pred, "prob_over25", None)
+    if over25 is not None:
+        st.markdown('<span class="sub-label">Piețe speciale</span>', unsafe_allow_html=True)
+        btts   = pred.prob_btts
+        u25    = pred.prob_under25
+        over15 = pred.prob_over15
+        cs_h   = pred.prob_clean_sheet_home
+        cs_a   = pred.prob_clean_sheet_away
+        dc_h   = pred.prob_double_chance_home
+        dc_a   = pred.prob_double_chance_away
+
+        def _market_pill(label, prob, color="#4a9eff"):
+            pct = prob * 100
+            bg = "rgba(0,194,255,.08)" if color=="#4a9eff" else "rgba(0,230,118,.08)" if color=="var(--accent3)" else "rgba(255,179,0,.08)"
+            return f'''<div style="background:{bg};border:1px solid {color}33;border-radius:7px;padding:.45rem .6rem;text-align:center;">
+                <div style="font-size:.58rem;color:var(--t2);text-transform:uppercase;letter-spacing:.07em;">{label}</div>
+                <div style="font-family:var(--oswald);font-size:1.05rem;font-weight:700;color:{color};">{pct:.1f}%</div>
+            </div>'''
+
+        st.markdown(f"""
+        <div style="padding:0 1.5rem;">
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem;margin-bottom:.4rem;">
+                {_market_pill("Over 2.5", over25, "#00e676")}
+                {_market_pill("Under 2.5", u25, "#ff3d57")}
+                {_market_pill("Over 1.5", over15, "#00c2ff")}
+                {_market_pill("BTTS Da", btts, "#ffb300")}
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.4rem;">
+                {_market_pill("CS Acasă", cs_h, "#4a9eff")}
+                {_market_pill("CS Oaspeți", cs_a, "#4a9eff")}
+                {_market_pill("DC 1X", dc_h, "#9b59b6")}
+                {_market_pill("DC X2", dc_a, "#9b59b6")}
+            </div>
+        </div>""", unsafe_allow_html=True)
+
+    # ── Value bets piețe speciale ─────────────────────────────────────────
+    special_vbets = getattr(pred, "special_value_bets", [])
+    if special_vbets:
+        st.markdown('<span class="sub-label">🎯 Value Bets — Piețe Speciale</span>', unsafe_allow_html=True)
+        for vb in special_vbets:
+            st.markdown(f"""
+            <div class="vbet" style="margin:0 1.5rem .3rem;">
+                <div><div class="vbet-sel">{vb["rating"]} {vb["market"]} @ {vb["bk_odds"]:.2f}</div>
+                <div class="vbet-detail">Model {vb["model_prob_pct"]:.1f}%</div></div>
+                <div class="vbet-edge">+{vb["edge_pct"]:.1f}%</div>
+            </div>""", unsafe_allow_html=True)
+
+    # ── Value bets 1X2 ────────────────────────────────────────────────────
     if pred.value_bets:
         st.markdown('<span class="sub-label">🎯 Value Bets</span>', unsafe_allow_html=True)
         for vb in pred.value_bets:
