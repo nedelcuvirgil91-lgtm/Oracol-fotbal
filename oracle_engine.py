@@ -1,16 +1,22 @@
 """
 ================================================================================
-FOOTBALL ORACLE — Core Engine v2.3 (reconciliat Free Live Football)
+FOOTBALL ORACLE — Core Engine v3.0 (Supabase + ML edition)
 ================================================================================
 Module  : oracle_engine.py
-CHANGES v2.3:
-  - _build_profile() folosește Free Live Football (get_freelf_standings +
-    get_team_form_freelf) ca sursă primară, cu cascade spre Odds API /
-    fd.org / TSDB / ELO / neutral
-  - _build_h2h() folosește get_h2h() (Free Live Football, _freelf_event_id)
-  - injury_manager.get_lineup_absences() cu is_home: bool (semnătură v2.0)
-  - ELO sigmoid blending, per-league weights, self-learning — neschimbate
-  - FIX v2.3.1: MatchPrediction dataclass extins cu câmpuri MC + piețe speciale
+CHANGES v3.0 (față de v2.3):
+  - Persistență migrată din fișiere locale (weights.json, portfolio.csv,
+    recalibration_log.csv) în Supabase Postgres — supraviețuiește redeploy-
+    urilor pe Streamlit Community Cloud.
+  - Strat ML nou (ml_predictor.py, XGBoost) — învață tipare din meciuri
+    istorice salvate automat în Supabase (match_history) de fiecare dată
+    când utilizatorul confirmă rezultatul real al unui meci.
+  - evaluate_match() combină (blend) predicția Poisson/Monte Carlo cu
+    predicția ML, dacă există suficiente date de antrenare (≥30 meciuri).
+  - update_weights_from_result() salvează acum și un rând în match_history
+    pentru fiecare meci confirmat, pe lângă recalibrarea euristică existentă.
+  - Fallback automat pe fișiere locale dacă Supabase nu e configurat
+    (SUPABASE_URL / SUPABASE_SECRET_KEY lipsesc din st.secrets) — aplicația
+    tot funcționează, doar nu persistă între redeploy-uri.
 ================================================================================
 """
 from __future__ import annotations
@@ -53,6 +59,18 @@ try:
 except ModuleNotFoundError:
     KEY_MANAGER_AVAILABLE = False
 
+try:
+    import supabase_client as sb
+    SUPABASE_MODULE_AVAILABLE = True
+except ModuleNotFoundError:
+    SUPABASE_MODULE_AVAILABLE = False
+
+try:
+    from ml_predictor import MLPredictorEngine, blend_predictions, FEATURE_COLUMNS
+    ML_MODULE_AVAILABLE = True
+except ModuleNotFoundError:
+    ML_MODULE_AVAILABLE = False
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  [%(levelname)s]  %(name)s — %(message)s",
@@ -83,6 +101,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "h2h_weight":                  0.15,
     "h2h_lookback_days":           1095,
     "monte_carlo_simulations":     10000,
+    "ml_blend_weight":             0.35,
 }
 
 DEFAULT_WEIGHTS: dict[str, Any] = {
@@ -236,24 +255,65 @@ class MatchPrediction:
     prob_double_chance_home:  float = 0.0
     prob_double_chance_away:  float = 0.0
     special_value_bets:       list  = field(default_factory=list)
+    # ── ML (v3.0) ────────────────────────────────────────────────────────
+    ml_active:                bool  = False
+    ml_prob_home:             float = 0.0
+    ml_prob_draw:             float = 0.0
+    ml_prob_away:             float = 0.0
+    ml_confidence:            float = 0.0
+    ml_blend_label:           str   = "poisson-only"
+    ml_samples_used:          int   = 0
 
 
 class FootballOracleEngine:
 
     def __init__(self) -> None:
         self.api         = FootballOracleAPI()
-        self.config      = _load_json(CONFIG_PATH,  DEFAULT_CONFIG)
-        self.weights     = _load_json(WEIGHTS_PATH, DEFAULT_WEIGHTS)
+        self.use_supabase = SUPABASE_MODULE_AVAILABLE and sb.is_available()
+
+        if self.use_supabase:
+            self.config  = sb.load_config(DEFAULT_CONFIG)
+            self.weights = sb.load_weights(DEFAULT_WEIGHTS)
+            if not self.config:
+                self.config = dict(DEFAULT_CONFIG)
+            if not self.weights:
+                self.weights = dict(DEFAULT_WEIGHTS)
+            logger.info("[Persistence] Supabase activ — config/weights încărcate din cloud.")
+        else:
+            self.config  = _load_json(CONFIG_PATH,  DEFAULT_CONFIG)
+            self.weights = _load_json(WEIGHTS_PATH, DEFAULT_WEIGHTS)
+            reason = sb.last_error() if SUPABASE_MODULE_AVAILABLE else "modul supabase_client lipsă"
+            logger.warning("[Persistence] Supabase indisponibil (%s) — fallback pe fișiere locale (NU persistă la redeploy).", reason)
+
         self.cache       = get_cache()       if CACHE_MANAGER_AVAILABLE else None
         self.key_manager = get_key_manager() if KEY_MANAGER_AVAILABLE   else None
         self.injury_manager = (
             InjuryManager(api=self.api, cache=self.cache)
             if INJURY_MANAGER_AVAILABLE else None
         )
+
+        self.ml = MLPredictorEngine() if ML_MODULE_AVAILABLE else None
+        if self.ml and self.use_supabase:
+            train_result = self.ml.train()
+            logger.info("[ML] Inițializare: %s — %s", train_result.status, train_result.message)
+
         logger.info(
-            "FootballOracleEngine v2.3 ready. Injuries=%s Cache=%s KeyMgr=%s",
-            INJURY_MANAGER_AVAILABLE, CACHE_MANAGER_AVAILABLE, KEY_MANAGER_AVAILABLE,
+            "FootballOracleEngine v3.0 ready. Supabase=%s Injuries=%s Cache=%s KeyMgr=%s ML=%s",
+            self.use_supabase, INJURY_MANAGER_AVAILABLE, CACHE_MANAGER_AVAILABLE,
+            KEY_MANAGER_AVAILABLE, ML_MODULE_AVAILABLE,
         )
+
+    def _persist_weights(self) -> None:
+        if self.use_supabase:
+            sb.save_weights(self.weights)
+        else:
+            _save_json(WEIGHTS_PATH, self.weights)
+
+    def _persist_config(self) -> None:
+        if self.use_supabase:
+            sb.save_config(self.config)
+        else:
+            _save_json(CONFIG_PATH, self.config)
 
     # ── ELO sigmoid ───────────────────────────────────────────────────────
     def _elo_to_multiplier(self, elo: int) -> float:
@@ -745,6 +805,31 @@ class FootballOracleEngine:
 
         return sorted(results, key=lambda x: x["edge_pct"], reverse=True)
 
+    # ── ML feature builder (v3.0) ───────────────────────────────────────
+    def _build_ml_features(
+        self, home_p: TeamProfile, away_p: TeamProfile, h2h: H2HRecord,
+        home_xg: float, away_xg: float, ph: float, pd_: float, pa: float,
+        mc: dict, weather_penalty: float,
+    ) -> dict:
+        return {
+            "home_xg_pred":            home_xg,
+            "away_xg_pred":            away_xg,
+            "home_offensive_rating":   home_p.offensive_rating,
+            "home_defensive_rating":   home_p.defensive_rating,
+            "away_offensive_rating":   away_p.offensive_rating,
+            "away_defensive_rating":   away_p.defensive_rating,
+            "home_form_score":         home_p.form_score,
+            "away_form_score":         away_p.form_score,
+            "home_elo":                home_p.elo_rating or 1500,
+            "away_elo":                away_p.elo_rating or 1500,
+            "h2h_modifier":            h2h.h2h_modifier if h2h else 0.0,
+            "h2h_meetings":            h2h.meetings if h2h else 0,
+            "weather_penalty":         weather_penalty,
+            "mc_prob_home":            mc["mc_prob_home"],
+            "mc_prob_draw":            mc["mc_prob_draw"],
+            "mc_prob_away":            mc["mc_prob_away"],
+        }
+
     # ── evaluate_match ────────────────────────────────────────────────────
     def evaluate_match(self, match: dict) -> MatchPrediction | None:
         home_name = match["home_team"]
@@ -809,6 +894,33 @@ class FootballOracleEngine:
         n_sim         = int(self.config.get("monte_carlo_simulations", 10000))
         mc            = self._monte_carlo(home_xg, away_xg, n_sim)
         special_vbets = self._special_value_bets(mc, match)
+
+        # ── ML blend (v3.0) ───────────────────────────────────────────────
+        ml_active       = False
+        ml_prob_home    = 0.0
+        ml_prob_draw    = 0.0
+        ml_prob_away    = 0.0
+        ml_confidence   = 0.0
+        ml_blend_label  = "poisson-only"
+        ml_samples_used = 0
+
+        if self.ml and self.ml.is_trained:
+            try:
+                ml_features = self._build_ml_features(
+                    home_p, away_p, h2h, home_xg, away_xg, ph, pd, pa, mc, w_pen,
+                )
+                ml_pred = self.ml.predict(ml_features)
+                ml_weight = float(self.config.get("ml_blend_weight", 0.35))
+                ph, pd, pa, ml_blend_label = blend_predictions((ph, pd, pa), ml_pred, ml_weight)
+                if ml_pred:
+                    ml_active       = True
+                    ml_prob_home    = ml_pred.prob_home
+                    ml_prob_draw    = ml_pred.prob_draw
+                    ml_prob_away    = ml_pred.prob_away
+                    ml_confidence   = ml_pred.confidence
+                    ml_samples_used = ml_pred.samples_used
+            except Exception as exc:
+                logger.warning("[ML] Blend failed, fallback la Poisson: %s", exc)
 
         bk_h = float(match.get("home_odds") or 0.0)
         bk_d = float(match.get("draw_odds") or 0.0)
@@ -879,8 +991,13 @@ class FootballOracleEngine:
             prob_double_chance_home=mc["prob_double_chance_home"],
             prob_double_chance_away=mc["prob_double_chance_away"],
             special_value_bets=special_vbets,
+            # ML
+            ml_active=ml_active,
+            ml_prob_home=ml_prob_home, ml_prob_draw=ml_prob_draw, ml_prob_away=ml_prob_away,
+            ml_confidence=ml_confidence, ml_blend_label=ml_blend_label,
+            ml_samples_used=ml_samples_used,
         )
-        self._cache_prediction(pred)
+        self._cache_prediction(pred, home_p, away_p, h2h, w_pen, mc)
         return pred
 
     # ── Utility methods ───────────────────────────────────────────────────
@@ -890,7 +1007,13 @@ class FootballOracleEngine:
     def get_matches_by_date(self, target_date: str) -> list[dict]:
         return self.api.get_matches_for_date(target_date)
 
-    def _cache_prediction(self, pred: MatchPrediction) -> None:
+    def _cache_prediction(
+        self, pred: MatchPrediction, home_p: TeamProfile, away_p: TeamProfile,
+        h2h: H2HRecord, weather_penalty: float, mc: dict,
+    ) -> None:
+        """Salvează predicția — local (pentru recalibrare rapidă) ȘI, dacă
+        Supabase e activ, un rând complet de feature-uri în match_history
+        (fără rezultat încă — se completează la update_weights_from_result)."""
         data = {
             "fixture_id":        pred.fixture_id,
             "home_team":         pred.home_team,
@@ -905,9 +1028,46 @@ class FootballOracleEngine:
             "data_quality_home": pred.data_quality_home,
             "data_quality_away": pred.data_quality_away,
             "saved_at":          datetime.now(timezone.utc).isoformat(),
+            # feature-uri ML — reținute ca să nu trebuiască reconstruite
+            # la momentul update_weights_from_result()
+            "ml_features": self._build_ml_features(
+                home_p, away_p, h2h, pred.home_xg_pre_injury, pred.away_xg_pre_injury,
+                pred.prob_home_win, pred.prob_draw, pred.prob_away_win, mc, weather_penalty,
+            ),
         }
         safe_id = str(pred.fixture_id).replace("/", "_")
         _save_json(PREDICTIONS_DIR / f"{safe_id}.json", data)
+
+        if self.use_supabase:
+            mlf = data["ml_features"]
+            sb.upsert_match_history({
+                "fixture_id":   pred.fixture_id,
+                "home_team":    pred.home_team,
+                "away_team":    pred.away_team,
+                "league":       pred.league,
+                "kickoff_date": pred.kickoff_date,
+                "home_xg_pred": mlf["home_xg_pred"],
+                "away_xg_pred": mlf["away_xg_pred"],
+                "home_offensive_rating": mlf["home_offensive_rating"],
+                "home_defensive_rating": mlf["home_defensive_rating"],
+                "away_offensive_rating": mlf["away_offensive_rating"],
+                "away_defensive_rating": mlf["away_defensive_rating"],
+                "home_form_score": mlf["home_form_score"],
+                "away_form_score": mlf["away_form_score"],
+                "home_elo": mlf["home_elo"],
+                "away_elo": mlf["away_elo"],
+                "h2h_modifier": mlf["h2h_modifier"],
+                "h2h_meetings": mlf["h2h_meetings"],
+                "weather_penalty": mlf["weather_penalty"],
+                "home_data_quality": pred.data_quality_home,
+                "away_data_quality": pred.data_quality_away,
+                "prob_home_pred": pred.prob_home_win,
+                "prob_draw_pred": pred.prob_draw,
+                "prob_away_pred": pred.prob_away_win,
+                "mc_prob_home": mlf["mc_prob_home"],
+                "mc_prob_draw": mlf["mc_prob_draw"],
+                "mc_prob_away": mlf["mc_prob_away"],
+            })
 
     def _load_prediction(self, fixture_id: str) -> dict | None:
         safe_id = str(fixture_id).replace("/", "_")
@@ -926,6 +1086,23 @@ class FootballOracleEngine:
         cache = self._load_prediction(fixture_id)
         if cache is None:
             return {"status": "error", "message": f"No cached prediction for {fixture_id}."}
+
+        # ── v3.0: completează match_history cu rezultatul real ────────────
+        if self.use_supabase:
+            actual_result = (
+                "H" if actual_home_goals > actual_away_goals
+                else "A" if actual_home_goals < actual_away_goals
+                else "D"
+            )
+            sb.upsert_match_history({
+                "fixture_id":        fixture_id,
+                "home_team":         cache.get("home_team", ""),
+                "away_team":         cache.get("away_team", ""),
+                "league":            cache.get("league", "default"),
+                "actual_home_goals": actual_home_goals,
+                "actual_away_goals": actual_away_goals,
+                "actual_result":     actual_result,
+            })
 
         pred_h   = float(cache.get("home_xg", 1.25))
         pred_a   = float(cache.get("away_xg", 1.00))
@@ -1027,11 +1204,10 @@ class FootballOracleEngine:
             "possession_weight": round(max(0.05, min(0.50, gpw  + (pw  - gpw)  * 0.25)), 4),
             "league_weights":    lw_all,
         })
-        _save_json(WEIGHTS_PATH, self.weights)
+        self._persist_weights()
 
         reason  = "  |  ".join(reasons) or "Minor adjustment."
         log_row = {
-            "timestamp":      datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"),
             "fixture_id":     fixture_id,
             "league":         league,
             "sample_count":   sc + 1,
@@ -1044,12 +1220,17 @@ class FootballOracleEngine:
             "home_advantage": ha,
             "reason":         reason,
         }
-        exists = RECAL_LOG_PATH.exists()
-        with RECAL_LOG_PATH.open("a", newline="", encoding="utf-8") as f:
-            wr = csv.DictWriter(f, fieldnames=list(log_row.keys()))
-            if not exists:
-                wr.writeheader()
-            wr.writerow(log_row)
+
+        if self.use_supabase:
+            sb.append_recalibration_log(log_row)
+        else:
+            log_row_csv = {"timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"), **log_row}
+            exists = RECAL_LOG_PATH.exists()
+            with RECAL_LOG_PATH.open("a", newline="", encoding="utf-8") as f:
+                wr = csv.DictWriter(f, fieldnames=list(log_row_csv.keys()))
+                if not exists:
+                    wr.writeheader()
+                wr.writerow(log_row_csv)
 
         return {
             "status":         "recalibrated",
@@ -1065,10 +1246,33 @@ class FootballOracleEngine:
             "reason":         reason,
         }
 
+    # ── ML training trigger (v3.0) ────────────────────────────────────────
+    def retrain_ml_model(self):
+        """Reantrenează modelul ML pe toate datele disponibile în Supabase."""
+        if not self.ml:
+            return {"status": "unavailable", "message": "Modulul ml_predictor.py lipsește."}
+        result = self.ml.train()
+        return {
+            "status": result.status, "samples_used": result.samples_used,
+            "accuracy": result.accuracy, "log_loss": result.log_loss,
+            "message": result.message,
+        }
+
+    def get_ml_status(self) -> dict:
+        if not self.ml:
+            return {"available": False}
+        status = self.ml.status_summary()
+        status["available"] = True
+        status["supabase_connected"] = self.use_supabase
+        return status
+
     # ── Portfolio ─────────────────────────────────────────────────────────
     HEADERS = ["Date", "FixtureID", "Match", "Market", "Selection", "Odds", "Stake", "Result", "PnL"]
 
     def log_bet(self, fixture_id, match_name, market, selection, odds, stake, result="") -> dict:
+        if self.use_supabase:
+            return sb.log_bet(fixture_id, match_name, market, selection, odds, stake, result)
+
         result = result.upper().strip()
         pnl    = round(stake * (odds - 1), 2) if result == "W" else (-round(stake, 2) if result == "L" else 0.0)
         row    = {
@@ -1122,6 +1326,22 @@ class FootballOracleEngine:
         return pd.DataFrame(rows).sort_values("Samples", ascending=False).reset_index(drop=True)
 
     def portfolio_summary(self) -> pd.DataFrame | None:
+        if self.use_supabase:
+            rows = sb.get_portfolio()
+            if not rows:
+                return None
+            df = pd.DataFrame(rows)
+            # Normalizează numele coloanelor la formatul vechi (Date, FixtureID, ...)
+            # ca app.py să continue să funcționeze fără modificări suplimentare
+            rename_map = {
+                "bet_date": "Date", "fixture_id": "FixtureID", "match_name": "Match",
+                "market": "Market", "selection": "Selection", "odds": "Odds",
+                "stake": "Stake", "result": "Result", "pnl": "PnL",
+            }
+            df = df.rename(columns=rename_map)
+            cols = [c for c in self.HEADERS if c in df.columns]
+            return df[cols] if not df.empty else None
+
         if not PORTFOLIO_PATH.exists():
             return None
         df = pd.read_csv(PORTFOLIO_PATH)
