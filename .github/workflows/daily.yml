@@ -1,0 +1,62 @@
+name: Football Oracle — Daily Sync
+
+on:
+  schedule:
+    # Rulează zilnic la 03:00 UTC
+    - cron: "0 3 * * *"
+  # Permite și rulare manuală din GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      skip_elo:
+        description: "Sări recalcularea ELO"
+        required: false
+        default: "false"
+        type: boolean
+      skip_ml:
+        description: "Sări reantrenarea ML"
+        required: false
+        default: "false"
+        type: boolean
+      dry_run:
+        description: "Dry run (fără scriere în Supabase)"
+        required: false
+        default: "false"
+        type: boolean
+
+jobs:
+  daily-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run daily sync
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.skip_elo }}" = "true" ]; then ARGS="$ARGS --no-elo"; fi
+          if [ "${{ github.event.inputs.skip_ml }}" = "true" ]; then ARGS="$ARGS --no-ml"; fi
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          python sync/run_daily.py $ARGS
+
+      - name: Upload sync logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 7
+          if-no-files-found: ignore
