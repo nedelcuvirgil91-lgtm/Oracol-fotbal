@@ -178,16 +178,15 @@ def run(
             sample_count = get_ml_sample_count()
 
             if should_retrain_ml(min_new_matches=20):
-                # Importăm engine-ul și reantrenăm
-                sys.path.insert(0, str(root))
-                from oracle_engine import FootballOracleEngine
-                engine    = FootballOracleEngine()
-                ml_result = engine.retrain_ml_model()
+                # Antrenăm direct din ml_predictor — fără să încărcăm tot engine-ul
+                from ml_predictor import MLPredictorEngine
+                ml_engine = MLPredictorEngine()
+                result    = ml_engine.train()
                 ml_status = {
-                    "status":       ml_result.get("status"),
-                    "samples_used": ml_result.get("samples_used", 0),
-                    "accuracy":     ml_result.get("accuracy"),
-                    "message":      ml_result.get("message", ""),
+                    "status":       result.status,
+                    "samples_used": result.samples_used,
+                    "accuracy":     result.accuracy,
+                    "message":      result.message,
                 }
             else:
                 ml_status = {
