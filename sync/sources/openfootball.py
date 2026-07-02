@@ -67,6 +67,11 @@ LEAGUE_PATHS: dict[str, dict] = {
         "seasons": ["2021-22", "2022-23", "2023-24", "2024-25"],
         "file": "cl.json",
     },
+  "Romania SuperLiga": {
+        "path": "ro",
+        "seasons": ["2021-22", "2022-23", "2023-24", "2024-25"],
+        "file": "1-liga.json",
+    },
 }
 
 # Fallback: URL alternativ folosind openfootball/football (format diferit)
