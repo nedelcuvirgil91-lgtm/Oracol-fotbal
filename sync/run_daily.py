@@ -118,6 +118,24 @@ def run(
     if dry_run:
         print("  ⚠️  DRY RUN — nicio scriere în Supabase\n")
 
+    # ── Pasul 0: Rezultate de ieri ────────────────────────────────────────
+    print("▶  Pasul 0/3 — Rezultate meciuri de ieri...")
+
+    if dry_run:
+        print("  ℹ️  Sărit (dry run)")
+    else:
+        try:
+            from sync.sync_results import sync_yesterday_results
+            results_status = sync_yesterday_results()
+            updated   = results_status.get("updated", 0)
+            not_found = results_status.get("not_found", 0)
+            print(f"  ✅ {updated} meciuri actualizate cu scoruri reale")
+            if not_found > 0:
+                print(f"  ℹ️  {not_found} meciuri negăsite în match_history")
+        except Exception as exc:
+            logger.error("[DailySync] sync_yesterday_results failed: %s", exc)
+            print(f"  ⚠️  Eroare la sync rezultate: {exc}")
+
     # ── Pasul 1: Sincronizare meciuri ─────────────────────────────────────
     print("▶  Pasul 1/3 — Sincronizare meciuri istorice...")
 
