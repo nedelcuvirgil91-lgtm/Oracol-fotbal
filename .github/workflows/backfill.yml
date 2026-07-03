@@ -1,0 +1,81 @@
+name: Football Oracle — Backfill Features
+
+on:
+  # Rulare manuală cu parametri
+  workflow_dispatch:
+    inputs:
+      league:
+        description: "Ligă specifică (gol = toate ligile)"
+        required: false
+        default: ""
+        type: string
+      batch_size:
+        description: "Meciuri per batch (default: 50)"
+        required: false
+        default: "50"
+        type: string
+      dry_run:
+        description: "Dry run (fără scriere în Supabase)"
+        required: false
+        default: "false"
+        type: boolean
+      retrain_ml:
+        description: "Reantrenează ML după backfill"
+        required: false
+        default: "true"
+        type: boolean
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run backfill
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.league }}" ]; then
+            ARGS="$ARGS --league \"${{ github.event.inputs.league }}\""
+          fi
+          if [ -n "${{ github.event.inputs.batch_size }}" ]; then
+            ARGS="$ARGS --batch-size ${{ github.event.inputs.batch_size }}"
+          fi
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          echo "Rulează: python sync/backfill_features.py $ARGS"
+          eval python sync/backfill_features.py $ARGS
+
+      - name: Retrain ML after backfill
+        if: ${{ github.event.inputs.retrain_ml != 'false' && github.event.inputs.dry_run != 'true' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from ml_predictor import MLPredictorEngine
+          engine = MLPredictorEngine()
+          result = engine.train()
+          print(f'ML Status: {result.status}')
+          print(f'Samples: {result.samples_used}')
+          print(f'Accuracy: {result.accuracy}')
+          print(f'Log Loss: {result.log_loss}')
+          print(f'Message: {result.message}')
+          "
