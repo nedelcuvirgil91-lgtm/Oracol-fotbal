@@ -1,0 +1,16 @@
+{
+    "value_bet_threshold_pct": 5.0,
+    "max_goals_poisson": 8,
+    "last_n_fixtures": 5,
+    "stake_default": 10.0,
+    "kelly_fraction": 0.25,
+    "recalibration_learning_rate": 0.05,
+    "recalibration_max_delta": 0.15,
+    "elo_blend_weight": 0.35,
+    "elo_sigmoid_scale": 400.0,
+    "elo_reference": 1500.0,
+    "h2h_weight": 0.15,
+    "h2h_lookback_days": 1095,
+    "monte_carlo_simulations": 10000,
+    "ml_blend_weight": 0.35
+}
