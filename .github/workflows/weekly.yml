@@ -1,0 +1,55 @@
+name: Football Oracle — Weekly ML Retrain
+
+on:
+  schedule:
+    # Duminică la 04:00 UTC (după sync-ul zilnic de la 03:00)
+    - cron: "0 4 * * 0"
+  workflow_dispatch:
+
+jobs:
+  weekly-retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Retrain ML model
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from ml_predictor import MLPredictorEngine
+          from database.queries import get_ml_sample_count
+
+          sample_count = get_ml_sample_count()
+          print(f'Samples disponibile: {sample_count}')
+
+          engine = MLPredictorEngine()
+          result = engine.train()
+
+          print('=' * 50)
+          print(f'Status   : {result.status}')
+          print(f'Samples  : {result.samples_used}')
+          print(f'Accuracy : {result.accuracy}')
+          print(f'Log Loss : {result.log_loss}')
+          print(f'Message  : {result.message}')
+          print('=' * 50)
+
+          if result.accuracy and result.accuracy < 0.42:
+              print('WARNING: Accuracy sub 42% — verifică datele de antrenare!')
+              sys.exit(1)
+          "
