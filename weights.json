@@ -1,0 +1,13 @@
+{
+    "goals_weight": 0.45,
+    "shots_ot_weight": 0.30,
+    "possession_weight": 0.25,
+    "form_weight": 0.60,
+    "dna_weight": 0.40,
+    "home_advantage": 1.07,
+    "away_penalty": 0.95,
+    "offensive_cap": 3.5,
+    "defensive_cap": 2.5,
+    "elo_blend_weight": 0.35,
+    "league_weights": {}
+}
