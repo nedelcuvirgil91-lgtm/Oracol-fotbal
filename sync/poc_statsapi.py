@@ -112,16 +112,26 @@ def _get(path: str, params: dict | None = None,
 
     try:
         resp = requests.get(
-            f"{BASE_URL}/{path.lstrip('/')}",
-            headers={"Authorization": f"Bearer {api_key}"},
-            params=params or {},
-            timeout=timeout,
-        )
-        _last_req_time = time.time()
+    f"{BASE_URL}/{path.lstrip('/')}",
+    headers={
+        "Authorization": f"Bearer {api_key}",
+        "Accept": "application/json",
+    },
+    params=params or {},
+    timeout=timeout,
+)
+_last_req_time = time.time()
 
-        if resp.status_code == 200:
-            _req_stats.successful += 1
-            return resp.json()
+# DEBUG TEMPORAR
+if resp.status_code != 200:
+    print(f"\n===== DEBUG {path} =====")
+    print("STATUS:", resp.status_code)
+    print("BODY:", resp.text)
+    print("========================\n")
+
+if resp.status_code == 200:
+    _req_stats.successful += 1
+    return resp.json()
         if resp.status_code == 429:
             _req_stats.rate_limit_hit = True
             logger.warning("Rate limit 429 la %s", path)
