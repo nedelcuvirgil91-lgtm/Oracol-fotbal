@@ -6,13 +6,13 @@ on:
       quick:
         description: "Quick mode (5 meciuri/ligă în loc de 18)"
         required: false
-        default: "false"
+        default: "true"
         type: boolean
 
 jobs:
   poc:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -25,16 +25,14 @@ jobs:
           cache: "pip"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install requests
 
       - name: Run Stats API PoC
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
           STATS_API_KEY: ${{ secrets.STATS_API_KEY }}
         run: |
-          ARGS=""
-          if [ "${{ github.event.inputs.quick }}" = "true" ]; then
-            ARGS="--quick"
+          ARGS="--quick"
+          if [ "${{ github.event.inputs.quick }}" = "false" ]; then
+            ARGS=""
           fi
           python sync/poc_statsapi.py $ARGS
