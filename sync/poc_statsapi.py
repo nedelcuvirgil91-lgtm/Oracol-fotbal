@@ -112,34 +112,37 @@ def _get(path: str, params: dict | None = None,
 
     try:
         resp = requests.get(
-    f"{BASE_URL}/{path.lstrip('/')}",
-    headers={
-        "Authorization": f"Bearer {api_key}",
-        "Accept": "application/json",
-    },
-    params=params or {},
-    timeout=timeout,
-)
-_last_req_time = time.time()
+            f"{BASE_URL}/{path.lstrip('/')}",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Accept": "application/json",
+            },
+            params=params or {},
+            timeout=timeout,
+        )
+        _last_req_time = time.time()
 
-# DEBUG TEMPORAR
-if resp.status_code != 200:
-    print(f"\n===== DEBUG {path} =====")
-    print("STATUS:", resp.status_code)
-    print("BODY:", resp.text)
-    print("========================\n")
+        # DEBUG TEMPORAR
+        if resp.status_code != 200:
+            print(f"\n===== DEBUG {path} =====")
+            print("STATUS:", resp.status_code)
+            print("BODY:", resp.text)
+            print("========================\n")
 
-if resp.status_code == 200:
-    _req_stats.successful += 1
-    return resp.json()
+        if resp.status_code == 200:
+            _req_stats.successful += 1
+            return resp.json()
+
         if resp.status_code == 429:
             _req_stats.rate_limit_hit = True
             logger.warning("Rate limit 429 la %s", path)
             time.sleep(10)
             return None
+
         if resp.status_code in (401, 403):
             print(f"❌ Auth error {resp.status_code} — verifică STATS_API_KEY")
             return None
+
         if resp.status_code == 404:
             return None
 
