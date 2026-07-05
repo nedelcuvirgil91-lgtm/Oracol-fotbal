@@ -1,0 +1,40 @@
+name: Football Oracle — Sprint 0 Stats API PoC
+
+on:
+  workflow_dispatch:
+    inputs:
+      quick:
+        description: "Quick mode (5 meciuri/ligă în loc de 18)"
+        required: false
+        default: "false"
+        type: boolean
+
+jobs:
+  poc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Stats API PoC
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          STATS_API_KEY: ${{ secrets.STATS_API_KEY }}
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.quick }}" = "true" ]; then
+            ARGS="--quick"
+          fi
+          python sync/poc_statsapi.py $ARGS
