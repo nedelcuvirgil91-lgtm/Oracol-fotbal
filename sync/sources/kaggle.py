@@ -33,10 +33,25 @@ XG_DATASET = "codytipton/understat-data"
 # Campuri logice minime asteptate intr-un fisier de meciuri. Fiecare intrare
 # e o lista de alias-uri posibile de nume de coloana (case-insensitive).
 # Nu opreste executia — doar genereaza un WARNING daca niciun alias nu e gasit.
+# Aceasta lista NU e un column_map de import — e doar validare la inspectie.
 REQUIRED_FIELD_ALIASES: dict[str, list[str]] = {
-    "date": ["date", "match_date", "kickoff", "utc_date"],
+    "date": ["date", "match_date", "matchdate", "kickoff", "utc_date"],
     "home_team": ["home_team", "hometeam", "home", "team_home"],
     "away_team": ["away_team", "awayteam", "away", "team_away"],
+}
+
+# Campuri recunoscute, dar OPTIONALE — nu genereaza warning daca lipsesc
+# (multe CSV-uri, ca EloRatings.csv, nu sunt fisiere de meciuri).
+# Daca sunt gasite, sunt doar raportate ca INFO, util pentru vizibilitate
+# inainte de a scrie column_map-ul real in import_historical.py.
+KNOWN_OPTIONAL_FIELD_ALIASES: dict[str, list[str]] = {
+    "home_goals": ["fthome", "ft_home", "home_goals", "homegoals"],
+    "away_goals": ["ftaway", "ft_away", "away_goals", "awaygoals"],
+    "odds_home": ["oddhome", "odd_home", "odds_home", "home_odds"],
+    "odds_draw": ["odddraw", "odd_draw", "odds_draw", "draw_odds"],
+    "odds_away": ["oddaway", "odd_away", "odds_away", "away_odds"],
+    "home_elo": ["homeelo", "home_elo", "elo_home"],
+    "away_elo": ["awayelo", "away_elo", "elo_away"],
 }
 
 SAMPLE_ROWS_FOR_TYPES = 1000
@@ -54,6 +69,7 @@ class CsvSummary:
     columns: list[str]
     dtypes: dict[str, str]
     missing_required_fields: list[str]
+    known_optional_fields: dict[str, str]
     file_size_bytes: int
 
 
@@ -162,6 +178,21 @@ def _check_required_fields(columns: list[str]) -> list[str]:
     return missing
 
 
+def _check_known_optional_fields(columns: list[str]) -> dict[str, str]:
+    """
+    Returneaza doar campurile optionale RECUNOSCUTE care au fost gasite,
+    ca {nume_logic: nume_coloana_original}. Nu semnaleaza nimic daca lipsesc.
+    """
+    found: dict[str, str] = {}
+    lower_to_original = {c.lower(): c for c in columns}
+    for field_name, aliases in KNOWN_OPTIONAL_FIELD_ALIASES.items():
+        for alias in aliases:
+            if alias in lower_to_original:
+                found[field_name] = lower_to_original[alias]
+                break
+    return found
+
+
 def inspect_dataset(dataset_slug: str) -> DatasetInspection:
     """
     Descarca dataset-ul (daca nu e deja in cache) si intoarce un rezumat
@@ -186,6 +217,7 @@ def inspect_dataset(dataset_slug: str) -> DatasetInspection:
             rows = _count_rows_fast(csv_path)
             dtypes = _infer_dtypes_from_sample(csv_path)
             missing_fields = _check_required_fields(columns)
+            optional_fields = _check_known_optional_fields(columns)
             file_size = os.path.getsize(csv_path)
         except Exception as exc:
             logger.warning("Nu am putut inspecta '%s': %s", csv_path, exc)
@@ -197,6 +229,11 @@ def inspect_dataset(dataset_slug: str) -> DatasetInspection:
                 "Coloanele existente sunt: %s",
                 os.path.basename(csv_path), missing_fields, columns,
             )
+        if optional_fields:
+            logger.info(
+                "Fisierul '%s' contine campuri optionale recunoscute: %s",
+                os.path.basename(csv_path), optional_fields,
+            )
 
         summaries.append(
             CsvSummary(
@@ -206,6 +243,7 @@ def inspect_dataset(dataset_slug: str) -> DatasetInspection:
                 columns=columns,
                 dtypes=dtypes,
                 missing_required_fields=missing_fields,
+                known_optional_fields=optional_fields,
                 file_size_bytes=file_size,
             )
         )
