@@ -1,0 +1,374 @@
+"""
+================================================================================
+FOOTBALL ORACLE — sync/import_historical.py (v1.1)
+Importa date istorice din Kaggle (adamgbor/club-football-match-data-2000-2025)
+in Supabase: fisierul de meciuri -> match_history, fisierul de ELO -> elo_history.
+
+NU implementeaza inca integrarea Understat / xG (scop viitor, separat).
+NU modifica mappings.py — foloseste doar normalize_team_name() existent.
+NU ghiceste structura: clasifica fisierele CSV pe baza metadatelor produse
+de sync.sources.kaggle.inspect_dataset(), nu pe nume de fisier hardcodat.
+
+GARANTIE dry-run: toate scrierile in Supabase trec exclusiv prin _safe_upsert().
+In dry-run, aceasta functie returneaza (0, 0) fara sa apeleze niciodata
+upsert_matches_bulk() / upsert_elo_history_bulk() — deci zero scrieri reale,
+garantat la nivel de cod, nu doar prin conventie.
+================================================================================
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import logging
+import sys
+from pathlib import Path
+from typing import Callable
+
+import pandas as pd
+
+root = Path(__file__).parent.parent
+if str(root) not in sys.path:
+    sys.path.insert(0, str(root))
+
+from mappings import normalize_team_name, match_key
+from database.queries import upsert_matches_bulk, upsert_elo_history_bulk
+from sync.sources.kaggle import (
+    MAIN_DATASET,
+    CsvSummary,
+    KaggleSourceError,
+    inspect_dataset,
+)
+
+logger = logging.getLogger("football_oracle.sync.import_historical")
+
+CHUNK_SIZE = 5000
+MAX_DUPLICATE_EXAMPLES = 5
+
+
+def _safe_upsert(dry_run: bool, upsert_fn: Callable[[list[dict]], tuple[int, int]],
+                  rows: list[dict]) -> tuple[int, int]:
+    """
+    Singurul punct din tot fisierul prin care se scrie in Supabase.
+    Daca dry_run e True, NU apeleaza niciodata upsert_fn — returneaza (0, 0)
+    necondiționat. Aceasta e garantia ca dry-run nu produce nicio scriere reala.
+    """
+    if dry_run:
+        return 0, 0
+    return upsert_fn(rows)
+
+
+class ImportStats:
+    """Contor pentru raportul final: detectate / valide / respinse (cu motiv) / scrise."""
+
+    def __init__(self, label: str) -> None:
+        self.label = label
+        self.rows_seen = 0
+        self.rows_valid = 0
+        self.rows_written = 0
+        self.upsert_errors = 0
+        self.rejection_reasons: dict[str, int] = {}
+        self.duplicate_keys_count = 0
+        self.duplicate_key_examples: list[str] = []
+        self.distinct_teams: set[str] = set()
+        self.distinct_leagues: set[str] = set()
+        self.dates: list[str] = []
+
+    def reject(self, reason: str) -> None:
+        self.rejection_reasons[reason] = self.rejection_reasons.get(reason, 0) + 1
+
+    def note_duplicate(self, key: str) -> None:
+        self.duplicate_keys_count += 1
+        if len(self.duplicate_key_examples) < MAX_DUPLICATE_EXAMPLES:
+            self.duplicate_key_examples.append(key)
+
+    def report(self) -> None:
+        total_rejected = sum(self.rejection_reasons.values())
+        logger.info("=== Raport import: %s ===", self.label)
+        logger.info("  Randuri detectate        : %d", self.rows_seen)
+        logger.info("  Randuri valide            : %d", self.rows_valid)
+        logger.info("  Randuri respinse          : %d", total_rejected)
+        for reason, count in sorted(self.rejection_reasons.items()):
+            logger.info("      - %-22s: %d", reason, count)
+        logger.info("  Scrise efectiv in Supabase: %d", self.rows_written)
+        logger.info("  Erori la UPSERT           : %d", self.upsert_errors)
+        if self.duplicate_keys_count:
+            logger.warning(
+                "  Chei duplicate (fixture_id / team+data) detectate: %d (exemple: %s)",
+                self.duplicate_keys_count, self.duplicate_key_examples,
+            )
+        logger.info("  Echipe distincte          : %d", len(self.distinct_teams))
+        if self.distinct_leagues:
+            logger.info("  Competitii/coduri distincte: %d (%s)",
+                        len(self.distinct_leagues), sorted(self.distinct_leagues))
+        if self.dates:
+            logger.info("  Interval date             : %s -> %s",
+                        min(self.dates), max(self.dates))
+
+
+def _classify_csv(summary: CsvSummary) -> str:
+    """
+    Clasifica un CsvSummary fara sa presupuna numele fisierului.
+    Returneaza: "matches", "elo_snapshot", sau "unknown".
+    """
+    if not summary.missing_required_fields:
+        return "matches"
+
+    lower_cols = {c.lower() for c in summary.columns}
+    has_elo = "elo" in lower_cols
+    has_team_like = bool(lower_cols & {"club", "team"})
+    has_date_like = bool(lower_cols & {"date", "snapshot_date"})
+    if has_elo and has_team_like and has_date_like:
+        return "elo_snapshot"
+
+    return "unknown"
+
+
+def _generate_fixture_id(home_team: str, away_team: str, kickoff_date: str) -> str:
+    """
+    Genereaza un fixture_id sintetic, determinist, pentru meciuri fara
+    fixture_id nativ (sursa Kaggle, spre deosebire de API-Football).
+    Foloseste match_key() existent din mappings.py ca baza.
+    """
+    key = match_key(home_team, away_team, kickoff_date)
+    digest = hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
+    return f"kaggle_{digest}"
+
+
+def import_matches(summary: CsvSummary, dry_run: bool = False, limit: int | None = None) -> ImportStats:
+    """
+    Importa fisierul de meciuri (detectat automat) in match_history.
+    Coloane asteptate (Kaggle adamgbor): Division, MatchDate, HomeTeam,
+    AwayTeam, HomeElo, AwayElo, FTHome, FTAway, FTResult (restul, ignorate
+    la acest pas — odds/xG raman pentru un pas viitor, cu aprobare separata).
+    """
+    stats = ImportStats("Matches -> match_history")
+    usecols = [c for c in [
+        "Division", "MatchDate", "HomeTeam", "AwayTeam",
+        "HomeElo", "AwayElo", "FTHome", "FTAway", "FTResult",
+    ] if c in summary.columns]
+
+    missing_cols = {"MatchDate", "HomeTeam", "AwayTeam"} - set(usecols)
+    if missing_cols:
+        raise KaggleSourceError(
+            f"Fisierul de meciuri nu are coloanele obligatorii: {missing_cols}. "
+            f"Coloane disponibile: {summary.columns}"
+        )
+
+    seen_fixture_ids: set[str] = set()
+    rows_processed_total = 0
+
+    for chunk in pd.read_csv(summary.path, usecols=usecols, dtype=str, chunksize=CHUNK_SIZE):
+        if limit is not None and rows_processed_total >= limit:
+            break
+
+        chunk["_parsed_date"] = pd.to_datetime(chunk["MatchDate"], dayfirst=True, errors="coerce")
+
+        batch_rows: list[dict] = []
+        for _, r in chunk.iterrows():
+            stats.rows_seen += 1
+            rows_processed_total += 1
+            if limit is not None and rows_processed_total > limit:
+                break
+
+            if pd.isna(r["_parsed_date"]):
+                stats.reject("invalid_date")
+                continue
+
+            try:
+                kickoff_date = r["_parsed_date"].strftime("%Y-%m-%d")
+                home_team = normalize_team_name(r["HomeTeam"])
+                away_team = normalize_team_name(r["AwayTeam"])
+
+                if not home_team or not away_team:
+                    stats.reject("missing_team_name")
+                    continue
+
+                league_code = (r.get("Division") or "").strip() or None
+                fixture_id = _generate_fixture_id(home_team, away_team, kickoff_date)
+
+                if fixture_id in seen_fixture_ids:
+                    stats.note_duplicate(fixture_id)
+                else:
+                    seen_fixture_ids.add(fixture_id)
+
+                row: dict = {
+                    "fixture_id": fixture_id,
+                    "home_team": home_team,
+                    "away_team": away_team,
+                    "league": league_code,
+                    "kickoff_date": kickoff_date,
+                    "actual_result": (r.get("FTResult") or "").strip() or None,
+                    "used_for_training": True,
+                }
+
+                if r.get("FTHome") not in (None, "", "nan"):
+                    row["actual_home_goals"] = int(float(r["FTHome"]))
+                if r.get("FTAway") not in (None, "", "nan"):
+                    row["actual_away_goals"] = int(float(r["FTAway"]))
+                if r.get("HomeElo") not in (None, "", "nan"):
+                    row["home_elo"] = int(float(r["HomeElo"]))
+                if r.get("AwayElo") not in (None, "", "nan"):
+                    row["away_elo"] = int(float(r["AwayElo"]))
+
+                batch_rows.append(row)
+                stats.rows_valid += 1
+                stats.distinct_teams.add(home_team)
+                stats.distinct_teams.add(away_team)
+                if league_code:
+                    stats.distinct_leagues.add(league_code)
+                stats.dates.append(kickoff_date)
+
+            except Exception as exc:
+                stats.reject("processing_error")
+                logger.warning("Rand ignorat (eroare procesare): %s", exc)
+
+        if batch_rows:
+            written, errors = _safe_upsert(dry_run, upsert_matches_bulk, batch_rows)
+            stats.rows_written += written
+            stats.upsert_errors += errors
+
+    return stats
+
+
+def import_elo_history(summary: CsvSummary, dry_run: bool = False, limit: int | None = None) -> ImportStats:
+    """
+    Importa fisierul de snapshot-uri ELO (detectat automat) in elo_history.
+    Coloana 'country' din Kaggle e salvata TEMPORAR in 'league' (ex. "England",
+    "Spain") — nu e o competitie reala, ci o tara. Va fi normalizata corect
+    cand se implementeaza normalize_league_name() si o structura de competitii.
+    """
+    stats = ImportStats("EloRatings -> elo_history")
+
+    lower_to_original = {c.lower(): c for c in summary.columns}
+    date_col = lower_to_original.get("date") or lower_to_original.get("snapshot_date")
+    team_col = lower_to_original.get("club") or lower_to_original.get("team")
+    elo_col = lower_to_original.get("elo")
+    country_col = lower_to_original.get("country")
+
+    if not (date_col and team_col and elo_col):
+        raise KaggleSourceError(
+            f"Fisierul de ELO nu are coloanele necesare (date/club/elo). "
+            f"Coloane disponibile: {summary.columns}"
+        )
+
+    usecols = [c for c in [date_col, team_col, elo_col, country_col] if c]
+    seen_team_dates: set[str] = set()
+    rows_processed_total = 0
+
+    for chunk in pd.read_csv(summary.path, usecols=usecols, dtype=str, chunksize=CHUNK_SIZE):
+        if limit is not None and rows_processed_total >= limit:
+            break
+
+        chunk["_parsed_date"] = pd.to_datetime(chunk[date_col], dayfirst=True, errors="coerce")
+
+        batch_rows: list[dict] = []
+        for _, r in chunk.iterrows():
+            stats.rows_seen += 1
+            rows_processed_total += 1
+            if limit is not None and rows_processed_total > limit:
+                break
+
+            if pd.isna(r["_parsed_date"]):
+                stats.reject("invalid_date")
+                continue
+
+            try:
+                snapshot_date = r["_parsed_date"].strftime("%Y-%m-%d")
+                team = normalize_team_name(r[team_col])
+
+                if not team:
+                    stats.reject("missing_team_name")
+                    continue
+
+                elo_value = int(float(r[elo_col]))
+                country_value = (r.get(country_col) or "").strip() if country_col else ""
+
+                dedup_key = f"{team}||{snapshot_date}"
+                if dedup_key in seen_team_dates:
+                    stats.note_duplicate(dedup_key)
+                else:
+                    seen_team_dates.add(dedup_key)
+
+                row = {
+                    "team": team,
+                    "elo": elo_value,
+                    "snapshot_date": snapshot_date,
+                    "source": "kaggle",
+                }
+                if country_value:
+                    # Temporar: 'country' (ex. "England") stocat direct in 'league'.
+                    # NU e o competitie reala — va fi normalizat ulterior.
+                    row["league"] = country_value
+                    stats.distinct_leagues.add(country_value)
+
+                batch_rows.append(row)
+                stats.rows_valid += 1
+                stats.distinct_teams.add(team)
+                stats.dates.append(snapshot_date)
+
+            except Exception as exc:
+                stats.reject("processing_error")
+                logger.warning("Rand ELO ignorat (eroare procesare): %s", exc)
+
+        if batch_rows:
+            written, errors = _safe_upsert(dry_run, upsert_elo_history_bulk, batch_rows)
+            stats.rows_written += written
+            stats.upsert_errors += errors
+
+    return stats
+
+
+def run(dry_run: bool = False, limit: int | None = None) -> None:
+    logger.info("Inspectez dataset-ul principal Kaggle inainte de import...")
+    inspection = inspect_dataset(MAIN_DATASET)
+
+    matches_summary: CsvSummary | None = None
+    elo_summary: CsvSummary | None = None
+
+    for summary in inspection.csv_files:
+        kind = _classify_csv(summary)
+        logger.info("Fisier '%s' clasificat ca: %s", summary.filename, kind)
+        if kind == "matches" and matches_summary is None:
+            matches_summary = summary
+        elif kind == "elo_snapshot" and elo_summary is None:
+            elo_summary = summary
+        elif kind == "unknown":
+            logger.warning(
+                "Fisierul '%s' nu a putut fi clasificat automat — este SARIT. "
+                "Coloane: %s", summary.filename, summary.columns,
+            )
+
+    if matches_summary is None:
+        raise KaggleSourceError(
+            "Niciun fisier de meciuri identificat in dataset-ul principal. "
+            "Verifica daca structura Kaggle s-a schimbat."
+        )
+    if elo_summary is None:
+        logger.warning(
+            "Niciun fisier de snapshot ELO identificat — se importa doar meciurile."
+        )
+
+    if dry_run:
+        logger.info("=== DRY RUN — validare completa, ZERO scrieri in Supabase ===")
+
+    match_stats = import_matches(matches_summary, dry_run=dry_run, limit=limit)
+    match_stats.report()
+
+    if elo_summary is not None:
+        elo_stats = import_elo_history(elo_summary, dry_run=dry_run, limit=limit)
+        elo_stats.report()
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Import istoric Kaggle -> Supabase")
+    parser.add_argument("--dry-run", action="store_true", help="Validare completa, ZERO scrieri in Supabase.")
+    parser.add_argument("--limit", type=int, default=None, help="Limiteaza numarul de randuri procesate per fisier (util pentru testare).")
+    args = parser.parse_args()
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+    try:
+        run(dry_run=args.dry_run, limit=args.limit)
+    except KaggleSourceError as exc:
+        logger.error("Import esuat: %s", exc)
+        raise SystemExit(1) from exc
