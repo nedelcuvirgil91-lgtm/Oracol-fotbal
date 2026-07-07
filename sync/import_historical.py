@@ -196,6 +196,10 @@ class ImportStats:
         self.total_rows_in_file: int = 0
         self.stopped_early: bool = False
         self.rows_at_stop: int = 0
+        # [v1.3.1] Necesar ca report() sa poata explica de ce rows_written
+        # e 0 in dry-run, in loc sa lase impresia falsa ca nu exista randuri
+        # valide de importat.
+        self.dry_run: bool = False
 
     def reject(self, reason: str) -> None:
         self.rejection_reasons[reason] = self.rejection_reasons.get(reason, 0) + 1
@@ -221,7 +225,11 @@ class ImportStats:
             logger.info("  Randuri in fisier (total) : %d", self.total_rows_in_file)
         logger.info("  Randuri citite             : %d%s", self.rows_seen,
                      " (oprit devreme)" if self.stopped_early else "")
-        logger.info("  Rows imported              : %d", self.rows_written)
+        logger.info("  Rows valid                 : %d", self.rows_valid)
+        if self.dry_run:
+            logger.info("  Rows written               : %d (DRY RUN)", self.rows_written)
+        else:
+            logger.info("  Rows written               : %d", self.rows_written)
         logger.info("  Rows skipped (before cutoff): %d", before_cutoff_count)
         logger.info("  Rows skipped (alte motive) : %d", other_rejected_count)
         for reason, count in sorted(self.rejection_reasons.items()):
@@ -346,6 +354,7 @@ def import_matches(
     stats = ImportStats("Matches -> match_history")
     stats.cutoff_date = cutoff_date
     stats.total_rows_in_file = summary.rows
+    stats.dry_run = dry_run
 
     usecols = [c for c in [
         "Division", "MatchDate", "HomeTeam", "AwayTeam",
@@ -494,6 +503,7 @@ def import_elo_history(
     stats = ImportStats("EloRatings -> elo_history")
     stats.cutoff_date = cutoff_date
     stats.total_rows_in_file = summary.rows
+    stats.dry_run = dry_run
 
     lower_to_original = {c.lower(): c for c in summary.columns}
     date_col = lower_to_original.get("date") or lower_to_original.get("snapshot_date")
