@@ -21,6 +21,7 @@ import argparse
 import hashlib
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -31,7 +32,7 @@ if str(root) not in sys.path:
     sys.path.insert(0, str(root))
 
 from mappings import normalize_team_name, match_key
-from database.queries import upsert_matches_bulk, upsert_elo_history_bulk
+from database.queries import upsert_matches_bulk, upsert_elo_history_bulk, upsert_sync_status
 from sync.sources.kaggle import (
     MAIN_DATASET,
     CsvSummary,
@@ -43,6 +44,7 @@ logger = logging.getLogger("football_oracle.sync.import_historical")
 
 CHUNK_SIZE = 5000
 MAX_DUPLICATE_EXAMPLES = 5
+PROGRESS_LOG_INTERVAL = 20000
 
 
 def _safe_upsert(dry_run: bool, upsert_fn: Callable[[list[dict]], tuple[int, int]],
@@ -202,6 +204,13 @@ def import_matches(summary: CsvSummary, dry_run: bool = False, limit: int | None
             if limit is not None and rows_processed_total > limit:
                 break
 
+            if stats.rows_seen % PROGRESS_LOG_INTERVAL == 0:
+                logger.info(
+                    "Progres Matches: %d/%d randuri procesate (%.1f%%)",
+                    stats.rows_seen, summary.rows,
+                    100 * stats.rows_seen / summary.rows,
+                )
+
             if pd.isna(r["_parsed_date"]):
                 stats.reject("invalid_date")
                 stats.note_invalid_date_example(r.get("MatchDate"))
@@ -305,6 +314,13 @@ def import_elo_history(summary: CsvSummary, dry_run: bool = False, limit: int | 
             if limit is not None and rows_processed_total > limit:
                 break
 
+            if stats.rows_seen % PROGRESS_LOG_INTERVAL == 0:
+                logger.info(
+                    "Progres EloRatings: %d/%d randuri procesate (%.1f%%)",
+                    stats.rows_seen, summary.rows,
+                    100 * stats.rows_seen / summary.rows,
+                )
+
             if pd.isna(r["_parsed_date"]):
                 stats.reject("invalid_date")
                 stats.note_invalid_date_example(r.get(date_col))
@@ -395,9 +411,36 @@ def run(dry_run: bool = False, limit: int | None = None) -> None:
     match_stats = import_matches(matches_summary, dry_run=dry_run, limit=limit)
     match_stats.report()
 
+    elo_stats: ImportStats | None = None
     if elo_summary is not None:
         elo_stats = import_elo_history(elo_summary, dry_run=dry_run, limit=limit)
         elo_stats.report()
+
+    # Inregistrare auditabila a rularii, refolosind functia deja existenta
+    # upsert_sync_status(). Respecta ACEEASI garantie de zero-scriere in
+    # dry-run — nu se apeleaza deloc daca dry_run e True.
+    if not dry_run:
+        total_written = match_stats.rows_written + (elo_stats.rows_written if elo_stats else 0)
+        total_errors = match_stats.upsert_errors + (elo_stats.upsert_errors if elo_stats else 0)
+        status = "ok" if total_errors == 0 else "partial_errors"
+        notes = (
+            f"matches_valid={match_stats.rows_valid}, matches_written={match_stats.rows_written}, "
+            f"elo_valid={elo_stats.rows_valid if elo_stats else 0}, "
+            f"elo_written={elo_stats.rows_written if elo_stats else 0}, "
+            f"limit={limit or 'none'}"
+        )
+        ok = upsert_sync_status(
+            source="kaggle_historical",
+            last_sync=datetime.now(timezone.utc).isoformat(),
+            matches_added=total_written,
+            matches_updated=0,
+            status=status,
+            notes=notes,
+        )
+        if not ok:
+            logger.warning("Nu s-a putut scrie in sync_status (import-ul in sine a mers OK).")
+    else:
+        logger.info("DRY RUN — sync_status NU este atins (garantie zero-scriere).")
 
 
 if __name__ == "__main__":
