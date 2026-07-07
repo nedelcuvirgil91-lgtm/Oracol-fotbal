@@ -168,6 +168,24 @@ def _safe_int(value) -> int | None:
         return None
 
 
+def _safe_str(value) -> str:
+    """
+    Converteste o valoare la str curat, tratand corect NaN. Aceeasi clasa
+    de bug ca la _safe_int(): expresia `nan or ""` evalueaza la `nan` (nu
+    la ""), pentru ca un float NaN e "truthy" in Python — deci un simplu
+    `(value or "").strip()` arunca AttributeError pe randuri cu date lipsa.
+    Returneaza "" pentru orice valoare lipsa/invalida, niciodata exceptie.
+    """
+    if value is None:
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(value).strip()
+
+
 def import_matches(summary: CsvSummary, dry_run: bool = False, limit: int | None = None) -> ImportStats:
     """
     Importa fisierul de meciuri (detectat automat) in match_history.
@@ -218,14 +236,14 @@ def import_matches(summary: CsvSummary, dry_run: bool = False, limit: int | None
 
             try:
                 kickoff_date = r["_parsed_date"].strftime("%Y-%m-%d")
-                home_team = normalize_team_name(r["HomeTeam"])
-                away_team = normalize_team_name(r["AwayTeam"])
+                home_team = normalize_team_name(_safe_str(r["HomeTeam"]))
+                away_team = normalize_team_name(_safe_str(r["AwayTeam"]))
 
                 if not home_team or not away_team:
                     stats.reject("missing_team_name")
                     continue
 
-                league_code = (r.get("Division") or "").strip() or None
+                league_code = _safe_str(r.get("Division")) or None
                 fixture_id = _generate_fixture_id(home_team, away_team, kickoff_date)
 
                 if fixture_id in seen_fixture_ids:
@@ -239,7 +257,7 @@ def import_matches(summary: CsvSummary, dry_run: bool = False, limit: int | None
                     "away_team": away_team,
                     "league": league_code,
                     "kickoff_date": kickoff_date,
-                    "actual_result": (r.get("FTResult") or "").strip() or None,
+                    "actual_result": _safe_str(r.get("FTResult")) or None,
                     "used_for_training": True,
                 }
 
@@ -328,7 +346,7 @@ def import_elo_history(summary: CsvSummary, dry_run: bool = False, limit: int | 
 
             try:
                 snapshot_date = r["_parsed_date"].strftime("%Y-%m-%d")
-                team = normalize_team_name(r[team_col])
+                team = normalize_team_name(_safe_str(r[team_col]))
 
                 if not team:
                     stats.reject("missing_team_name")
@@ -338,11 +356,11 @@ def import_elo_history(summary: CsvSummary, dry_run: bool = False, limit: int | 
                 if elo_value is None:
                     stats.reject("missing_elo_value")
                     continue
-                country_value = (r.get(country_col) or "").strip() if country_col else ""
+                country_value = _safe_str(r.get(country_col)) if country_col else ""
 
                 dedup_key = f"{team}||{snapshot_date}"
                 if dedup_key in seen_team_dates:
-                    stats.note_duplicate(dedup_key)
+                    stats.note_duplicate(f"{dedup_key} (raw='{r[team_col]}')")
                 else:
                     seen_team_dates.add(dedup_key)
 
