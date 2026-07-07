@@ -446,7 +446,7 @@ def run(dry_run: bool = False, limit: int | None = None) -> None:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Import istoric Kaggle -> Supabase")
     parser.add_argument("--dry-run", action="store_true", help="Validare completa, ZERO scrieri in Supabase.")
-    parser.add_argument("--limit", type=int, default=None, help="Limiteaza numarul de randuri procesate per fisier (util pentru testare).")
+    parser.add_argument("--limit", type=int, default=None, help="Limiteaza numarul de randuri procesate per fisier (util pentru testare). Omis = import complet.")
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
