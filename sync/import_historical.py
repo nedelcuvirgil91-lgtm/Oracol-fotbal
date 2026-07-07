@@ -1,6 +1,6 @@
 """
 ================================================================================
-FOOTBALL ORACLE — sync/import_historical.py (v1.2)
+FOOTBALL ORACLE — sync/import_historical.py (v1.3)
 Importa date istorice din Kaggle (adamgbor/club-football-match-data-2000-2025)
 in Supabase: fisierul de meciuri -> match_history, fisierul de ELO -> elo_history.
 
@@ -14,15 +14,36 @@ In dry-run, aceasta functie returneaza (0, 0) fara sa apeleze niciodata
 upsert_matches_bulk() / upsert_elo_history_bulk() — deci zero scrieri reale,
 garantat la nivel de cod, nu doar prin conventie.
 
-CHANGES v1.2:
-  - Import istoric limitat implicit la ultimii HISTORICAL_YEARS_BACK ani
-    (calendaristic: azi minus 5 ani, calculat dinamic la fiecare rulare).
-    Randurile mai vechi decat pragul sunt respinse cu motivul
-    "before_cutoff" si NU mai ajung in Supabase. Motivatie: meciurile din
-    baza nu mai aduc valoare modelului dupa acest interval, iar volumul de
-    scrieri catre Supabase (si deci timpul de rulare al workflow-ului) scade
-    substantial. Actualizarile ulterioare (meciuri noi, saptamanale) vin
-    incremental prin fluxul live existent, nu prin acest script.
+CHANGES v1.3:
+  - [CUTOFF] Pragul de relevanta istorica nu mai e calendaristic
+    ("azi minus N ani"), ci bazat pe SEZON fotbalistic (inceput la 1 iulie).
+    HISTORICAL_YEARS_BACK -> redenumit HISTORICAL_SEASONS_BACK (semantica
+    s-a schimbat: nu mai sunt "ani calendaristici", ci "sezoane complete").
+    Sezonul curent e determinat dupa data de azi (UTC): daca azi >= 1 iulie
+    an X, sezonul curent e X; altfel X-1. Cutoff = inceputul sezonului
+    (sezon_curent - HISTORICAL_SEASONS_BACK), adica 1 iulie al acelui an.
+    Motivatie: nu vrem sa taiem un sezon la jumatate doar pentru ziua din
+    an in care ruleaza workflow-ul — pastram intotdeauna sezoane complete.
+    Vezi _compute_season_cutoff_date(). Vechiul tratament special pentru
+    29 februarie (an bisect) a disparut — nu mai are sens, cutoff-ul e
+    intotdeauna 1 iulie.
+  - [PERFORMANCE] Early-stop pentru fisiere ordonate cronologic DESCRESCATOR
+    (cele mai recente randuri primele). Ordinea e detectata AUTOMAT si
+    CONTINUU, chunk cu chunk (nu presupusa dinainte) — vezi _SortOrderTracker.
+    Odata ce ordinea descrescatoare e confirmata si un chunk intreg are toate
+    datele < cutoff, restul fisierului e garantat in afara intervalului si
+    citirea se opreste (break). Daca ordinea presupusa e violata la orice
+    moment, tracker-ul se dezactiveaza definitiv si tot fisierul e procesat
+    normal — siguranta > viteza, in nicio situatie nu se omit randuri valide
+    silentios.
+    NOTA: pentru fisiere ordonate CRESCATOR (cele mai vechi randuri primele),
+    randurile valide (ultimii N ani) sunt la finalul fisierului, deci nu
+    exista shortcut fara seek/binary-search pe fisier — decizie explicita,
+    neimplementata in acest pas (complexitate/risc suplimentar, discutat
+    si respins pentru moment).
+  - [RAPORT] report() afiseaza acum explicit: cutoff season, rows imported,
+    rows skipped (before cutoff) separat de celelalte motive de respingere,
+    si, daca s-a activat early-stop, la ce rand s-a oprit citirea.
   - Pragul se aplica identic pentru ambele fisiere (meciuri si ELO
     snapshots), pentru consistenta.
 ================================================================================
@@ -58,24 +79,100 @@ CHUNK_SIZE = 5000
 MAX_DUPLICATE_EXAMPLES = 5
 PROGRESS_LOG_INTERVAL = 20000
 
-# [v1.2] Pragul implicit de relevanta istorica. Fix, calendaristic
-# (azi minus N ani), calculat dinamic la fiecare rulare — nu configurabil
-# din CLI, prin decizie explicita: simplitate peste flexibilitate aici.
-HISTORICAL_YEARS_BACK = 5
+# [v1.3] Numarul de sezoane complete pastrate. Fix, nu configurabil din CLI,
+# prin decizie explicita: simplitate peste flexibilitate aici. Un sezon
+# fotbalistic incepe la 1 iulie — vezi _compute_season_cutoff_date().
+HISTORICAL_SEASONS_BACK = 5
 
 
-def _compute_cutoff_date(years_back: int = HISTORICAL_YEARS_BACK) -> date:
+def _compute_season_cutoff_date(seasons_back: int = HISTORICAL_SEASONS_BACK) -> date:
     """
-    Calculeaza data-prag calendaristica: azi minus `years_back` ani.
-    Trateaza cazul special 29 februarie (an bisect) prin fallback la 28 feb,
-    pentru ca `date.replace(year=...)` arunca ValueError pentru acea zi
-    daca noul an nu e bisect.
+    Calculeaza cutoff-ul ca INCEPUT DE SEZON (1 iulie), nu calendaristic.
+
+    Sezonul fotbalistic e considerat a incepe la 1 iulie. Sezonul curent e
+    identificat dupa data de azi (UTC): daca azi >= 1 iulie al anului X,
+    sezonul curent e X; altfel sezonul curent e X-1. Cutoff-ul e inceputul
+    sezonului (sezon_curent - seasons_back), adica 1 iulie al acelui an.
+
+    Exemplu: azi = 8 iulie 2026 -> sezon curent = 2026 -> cu seasons_back=5
+    -> cutoff = 2021-07-01.
+
+    Motivatie: pastram intotdeauna sezoane complete, nu taiem un sezon la
+    jumatate doar in functie de ziua din an in care ruleaza workflow-ul.
     """
     today = datetime.now(timezone.utc).date()
-    try:
-        return today.replace(year=today.year - years_back)
-    except ValueError:
-        return today.replace(month=2, day=28, year=today.year - years_back)
+    current_season_start_year = today.year if today >= date(today.year, 7, 1) else today.year - 1
+    cutoff_season_start_year = current_season_start_year - seasons_back
+    return date(cutoff_season_start_year, 7, 1)
+
+
+class _SortOrderTracker:
+    """
+    Detecteaza si urmareste, AUTOMAT si CONTINUU (chunk cu chunk), daca un
+    fisier CSV e ordonat cronologic descrescator (cele mai recente randuri
+    primele). Nu presupune ordinea dinainte — o verifica la fiecare chunk
+    nou, inclusiv continuitatea la granita dintre chunk-uri consecutive.
+
+    Daca ordinea presupusa e violata la orice moment, se dezactiveaza
+    DEFINITIV (stare "unsorted") si ramane asa pentru tot restul rularii —
+    e o decizie deliberata pentru siguranta: mai bine procesam tot fisierul
+    (mai lent) decat sa riscam sa omitem randuri valide pe baza unei
+    presupuneri de ordine care s-a dovedit gresita.
+
+    Doar starea "descending" permite early-stop. Un fisier "ascending"
+    (cele mai vechi randuri primele) e detectat si raportat, dar NU aduce
+    niciun beneficiu de early-stop cu aceasta implementare — randurile
+    valide (ultimii N ani) sunt la finalul fisierului, deci tot trebuie
+    citite secvential toate randurile dinaintea lor.
+    """
+
+    def __init__(self, label: str) -> None:
+        self.label = label
+        self.state = "unknown"  # unknown | descending | ascending | unsorted
+        self._last_date: date | None = None
+
+    def observe_chunk(self, dates_in_order: list[date]) -> None:
+        if self.state == "unsorted" or not dates_in_order:
+            return
+
+        is_non_increasing = all(a >= b for a, b in zip(dates_in_order, dates_in_order[1:]))
+        is_non_decreasing = all(a <= b for a, b in zip(dates_in_order, dates_in_order[1:]))
+        boundary_ok_desc = self._last_date is None or dates_in_order[0] <= self._last_date
+        boundary_ok_asc = self._last_date is None or dates_in_order[0] >= self._last_date
+
+        if self.state == "unknown":
+            if is_non_increasing:
+                self.state = "descending"
+                logger.info("[%s] Ordine cronologica DESCRESCATOARE detectata -> early-stop activ.", self.label)
+            elif is_non_decreasing:
+                self.state = "ascending"
+                logger.info(
+                    "[%s] Ordine cronologica CRESCATOARE detectata -> early-stop NU se aplica "
+                    "(randurile valide sunt la finalul fisierului).", self.label,
+                )
+            else:
+                self.state = "unsorted"
+                logger.info("[%s] Fisier NEordonat cronologic -> early-stop dezactivat, se citeste tot.", self.label)
+        elif self.state == "descending":
+            if not (is_non_increasing and boundary_ok_desc):
+                self.state = "unsorted"
+                logger.warning(
+                    "[%s] Ordinea descrescatoare asumata a fost VIOLATA -> early-stop dezactivat, "
+                    "se proceseaza tot fisierul de aici incolo (siguranta > viteza).", self.label,
+                )
+        elif self.state == "ascending":
+            if not (is_non_decreasing and boundary_ok_asc):
+                self.state = "unsorted"
+                logger.info(
+                    "[%s] Ordinea crescatoare asumata a fost violata (fara impact functional, "
+                    "early-stop nu se aplica oricum pentru ascendent).", self.label,
+                )
+
+        self._last_date = dates_in_order[-1]
+
+    @property
+    def can_early_stop(self) -> bool:
+        return self.state == "descending"
 
 
 class ImportStats:
@@ -94,6 +191,11 @@ class ImportStats:
         self.distinct_teams: set[str] = set()
         self.distinct_leagues: set[str] = set()
         self.dates: list[str] = []
+        # [v1.3] Metadate pentru raportul de cutoff / early-stop.
+        self.cutoff_date: date | None = None
+        self.total_rows_in_file: int = 0
+        self.stopped_early: bool = False
+        self.rows_at_stop: int = 0
 
     def reject(self, reason: str) -> None:
         self.rejection_reasons[reason] = self.rejection_reasons.get(reason, 0) + 1
@@ -109,27 +211,43 @@ class ImportStats:
 
     def report(self) -> None:
         total_rejected = sum(self.rejection_reasons.values())
+        before_cutoff_count = self.rejection_reasons.get("before_cutoff", 0)
+        other_rejected_count = total_rejected - before_cutoff_count
+
         logger.info("=== Raport import: %s ===", self.label)
-        logger.info("  Randuri detectate        : %d", self.rows_seen)
-        logger.info("  Randuri valide            : %d", self.rows_valid)
-        logger.info("  Randuri respinse          : %d", total_rejected)
+        if self.cutoff_date is not None:
+            logger.info("  Cutoff season             : %s", self.cutoff_date.isoformat())
+        if self.total_rows_in_file:
+            logger.info("  Randuri in fisier (total) : %d", self.total_rows_in_file)
+        logger.info("  Randuri citite             : %d%s", self.rows_seen,
+                     " (oprit devreme)" if self.stopped_early else "")
+        logger.info("  Rows imported              : %d", self.rows_written)
+        logger.info("  Rows skipped (before cutoff): %d", before_cutoff_count)
+        logger.info("  Rows skipped (alte motive) : %d", other_rejected_count)
         for reason, count in sorted(self.rejection_reasons.items()):
+            if reason == "before_cutoff":
+                continue
             logger.info("      - %-22s: %d", reason, count)
         if self.invalid_date_examples:
             logger.info("      Exemple date nevalide: %s", self.invalid_date_examples)
-        logger.info("  Scrise efectiv in Supabase: %d", self.rows_written)
-        logger.info("  Erori la UPSERT           : %d", self.upsert_errors)
+        logger.info("  Erori la UPSERT            : %d", self.upsert_errors)
+        if self.stopped_early:
+            logger.info(
+                "  Import oprit prematur la randul %d/%d — fisier detectat ordonat cronologic "
+                "descrescator, restul e considerat inainte de cutoff.",
+                self.rows_at_stop, self.total_rows_in_file,
+            )
         if self.duplicate_keys_count:
             logger.warning(
                 "  Chei duplicate (fixture_id / team+data) detectate: %d (exemple: %s)",
                 self.duplicate_keys_count, self.duplicate_key_examples,
             )
-        logger.info("  Echipe distincte          : %d", len(self.distinct_teams))
+        logger.info("  Echipe distincte           : %d", len(self.distinct_teams))
         if self.distinct_leagues:
             logger.info("  Competitii/coduri distincte: %d (%s)",
                         len(self.distinct_leagues), sorted(self.distinct_leagues))
         if self.dates:
-            logger.info("  Interval date             : %s -> %s",
+            logger.info("  Interval date              : %s -> %s",
                         min(self.dates), max(self.dates))
 
 
@@ -219,9 +337,16 @@ def import_matches(
 
     Daca `cutoff_date` este furnizat, randurile cu MatchDate < cutoff_date
     sunt respinse (motiv "before_cutoff") si NU ajung in Supabase — vezi
-    HISTORICAL_YEARS_BACK / _compute_cutoff_date().
+    HISTORICAL_SEASONS_BACK / _compute_season_cutoff_date().
+
+    [v1.3] Daca fisierul e detectat AUTOMAT ca ordonat cronologic
+    descrescator (cele mai recente randuri primele), citirea se opreste
+    imediat ce un chunk intreg cade sub cutoff_date — vezi _SortOrderTracker.
     """
     stats = ImportStats("Matches -> match_history")
+    stats.cutoff_date = cutoff_date
+    stats.total_rows_in_file = summary.rows
+
     usecols = [c for c in [
         "Division", "MatchDate", "HomeTeam", "AwayTeam",
         "HomeElo", "AwayElo", "FTHome", "FTAway", "FTResult",
@@ -236,12 +361,17 @@ def import_matches(
 
     seen_fixture_ids: set[str] = set()
     rows_processed_total = 0
+    order_tracker = _SortOrderTracker("Matches")
 
     for chunk in pd.read_csv(summary.path, usecols=usecols, dtype=str, chunksize=CHUNK_SIZE):
         if limit is not None and rows_processed_total >= limit:
             break
 
         chunk["_parsed_date"] = pd.to_datetime(chunk["MatchDate"], errors="coerce")
+
+        # [v1.3] Datele valide, in ordinea din fisier, pentru detectia de sortare.
+        valid_dates_in_order = [d.date() for d in chunk["_parsed_date"] if pd.notna(d)]
+        order_tracker.observe_chunk(valid_dates_in_order)
 
         batch_rows: list[dict] = []
         for _, r in chunk.iterrows():
@@ -324,6 +454,24 @@ def import_matches(
             stats.rows_written += written
             stats.upsert_errors += errors
 
+        # [v1.3] Early-stop: doar daca ordinea descrescatoare e confirmata SI
+        # tot chunk-ul curent cade sub cutoff -> restul fisierului e garantat
+        # in afara intervalului (fisier descrescator = valorile scad mereu).
+        if (
+            cutoff_date is not None
+            and order_tracker.can_early_stop
+            and valid_dates_in_order
+            and max(valid_dates_in_order) < cutoff_date
+        ):
+            stats.stopped_early = True
+            stats.rows_at_stop = stats.rows_seen
+            logger.info(
+                "[Matches] Chunk curent integral inainte de cutoff (%s), ordine descrescatoare "
+                "confirmata -> opresc citirea la randul %d/%d.",
+                cutoff_date.isoformat(), stats.rows_seen, summary.rows,
+            )
+            break
+
     return stats
 
 
@@ -340,9 +488,12 @@ def import_elo_history(
     cand se implementeaza normalize_league_name() si o structura de competitii.
 
     Acelasi `cutoff_date` ca la import_matches() este aplicat aici, pentru
-    consistenta (vezi HISTORICAL_YEARS_BACK).
+    consistenta (vezi HISTORICAL_SEASONS_BACK). Aceeasi logica de early-stop
+    pentru fisiere descrescatoare se aplica independent, pe acest fisier.
     """
     stats = ImportStats("EloRatings -> elo_history")
+    stats.cutoff_date = cutoff_date
+    stats.total_rows_in_file = summary.rows
 
     lower_to_original = {c.lower(): c for c in summary.columns}
     date_col = lower_to_original.get("date") or lower_to_original.get("snapshot_date")
@@ -359,12 +510,16 @@ def import_elo_history(
     usecols = [c for c in [date_col, team_col, elo_col, country_col] if c]
     seen_team_dates: dict[str, str] = {}
     rows_processed_total = 0
+    order_tracker = _SortOrderTracker("EloRatings")
 
     for chunk in pd.read_csv(summary.path, usecols=usecols, dtype=str, chunksize=CHUNK_SIZE):
         if limit is not None and rows_processed_total >= limit:
             break
 
         chunk["_parsed_date"] = pd.to_datetime(chunk[date_col], errors="coerce")
+
+        valid_dates_in_order = [d.date() for d in chunk["_parsed_date"] if pd.notna(d)]
+        order_tracker.observe_chunk(valid_dates_in_order)
 
         batch_rows: list[dict] = []
         for _, r in chunk.iterrows():
@@ -443,6 +598,21 @@ def import_elo_history(
             stats.rows_written += written
             stats.upsert_errors += errors
 
+        if (
+            cutoff_date is not None
+            and order_tracker.can_early_stop
+            and valid_dates_in_order
+            and max(valid_dates_in_order) < cutoff_date
+        ):
+            stats.stopped_early = True
+            stats.rows_at_stop = stats.rows_seen
+            logger.info(
+                "[EloRatings] Chunk curent integral inainte de cutoff (%s), ordine descrescatoare "
+                "confirmata -> opresc citirea la randul %d/%d.",
+                cutoff_date.isoformat(), stats.rows_seen, summary.rows,
+            )
+            break
+
     return stats
 
 
@@ -459,10 +629,11 @@ def _safe_upsert(dry_run: bool, upsert_fn: Callable[[list[dict]], tuple[int, int
 
 
 def run(dry_run: bool = False, limit: int | None = None) -> None:
-    cutoff_date = _compute_cutoff_date(HISTORICAL_YEARS_BACK)
+    cutoff_date = _compute_season_cutoff_date(HISTORICAL_SEASONS_BACK)
     logger.info(
-        "Import istoric limitat la ultimii %d ani — prag: meciuri/ELO cu data < %s sunt respinse.",
-        HISTORICAL_YEARS_BACK, cutoff_date.isoformat(),
+        "Import istoric limitat la ultimele %d sezoane — cutoff season: %s "
+        "(randuri cu data < cutoff sunt respinse).",
+        HISTORICAL_SEASONS_BACK, cutoff_date.isoformat(),
     )
 
     logger.info("Inspectez dataset-ul principal Kaggle inainte de import...")
@@ -514,10 +685,14 @@ def run(dry_run: bool = False, limit: int | None = None) -> None:
         status = "ok" if total_errors == 0 else "partial_errors"
         notes = (
             f"matches_valid={match_stats.rows_valid}, matches_written={match_stats.rows_written}, "
+            f"matches_skipped_before_cutoff={match_stats.rejection_reasons.get('before_cutoff', 0)}, "
+            f"matches_stopped_early={match_stats.stopped_early}, "
             f"elo_valid={elo_stats.rows_valid if elo_stats else 0}, "
             f"elo_written={elo_stats.rows_written if elo_stats else 0}, "
-            f"limit={limit or 'none'}, cutoff_date={cutoff_date.isoformat()}, "
-            f"years_back={HISTORICAL_YEARS_BACK}"
+            f"elo_skipped_before_cutoff={elo_stats.rejection_reasons.get('before_cutoff', 0) if elo_stats else 0}, "
+            f"elo_stopped_early={elo_stats.stopped_early if elo_stats else False}, "
+            f"limit={limit or 'none'}, cutoff_season={cutoff_date.isoformat()}, "
+            f"seasons_back={HISTORICAL_SEASONS_BACK}"
         )
         ok = upsert_sync_status(
             source="kaggle_historical",
