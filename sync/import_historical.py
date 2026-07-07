@@ -1,6 +1,6 @@
 """
 ================================================================================
-FOOTBALL ORACLE — sync/import_historical.py (v1.1)
+FOOTBALL ORACLE — sync/import_historical.py (v1.2)
 Importa date istorice din Kaggle (adamgbor/club-football-match-data-2000-2025)
 in Supabase: fisierul de meciuri -> match_history, fisierul de ELO -> elo_history.
 
@@ -13,6 +13,18 @@ GARANTIE dry-run: toate scrierile in Supabase trec exclusiv prin _safe_upsert().
 In dry-run, aceasta functie returneaza (0, 0) fara sa apeleze niciodata
 upsert_matches_bulk() / upsert_elo_history_bulk() — deci zero scrieri reale,
 garantat la nivel de cod, nu doar prin conventie.
+
+CHANGES v1.2:
+  - Import istoric limitat implicit la ultimii HISTORICAL_YEARS_BACK ani
+    (calendaristic: azi minus 5 ani, calculat dinamic la fiecare rulare).
+    Randurile mai vechi decat pragul sunt respinse cu motivul
+    "before_cutoff" si NU mai ajung in Supabase. Motivatie: meciurile din
+    baza nu mai aduc valoare modelului dupa acest interval, iar volumul de
+    scrieri catre Supabase (si deci timpul de rulare al workflow-ului) scade
+    substantial. Actualizarile ulterioare (meciuri noi, saptamanale) vin
+    incremental prin fluxul live existent, nu prin acest script.
+  - Pragul se aplica identic pentru ambele fisiere (meciuri si ELO
+    snapshots), pentru consistenta.
 ================================================================================
 """
 from __future__ import annotations
@@ -21,7 +33,7 @@ import argparse
 import hashlib
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -46,17 +58,24 @@ CHUNK_SIZE = 5000
 MAX_DUPLICATE_EXAMPLES = 5
 PROGRESS_LOG_INTERVAL = 20000
 
+# [v1.2] Pragul implicit de relevanta istorica. Fix, calendaristic
+# (azi minus N ani), calculat dinamic la fiecare rulare — nu configurabil
+# din CLI, prin decizie explicita: simplitate peste flexibilitate aici.
+HISTORICAL_YEARS_BACK = 5
 
-def _safe_upsert(dry_run: bool, upsert_fn: Callable[[list[dict]], tuple[int, int]],
-                  rows: list[dict]) -> tuple[int, int]:
+
+def _compute_cutoff_date(years_back: int = HISTORICAL_YEARS_BACK) -> date:
     """
-    Singurul punct din tot fisierul prin care se scrie in Supabase.
-    Daca dry_run e True, NU apeleaza niciodata upsert_fn — returneaza (0, 0)
-    necondiționat. Aceasta e garantia ca dry-run nu produce nicio scriere reala.
+    Calculeaza data-prag calendaristica: azi minus `years_back` ani.
+    Trateaza cazul special 29 februarie (an bisect) prin fallback la 28 feb,
+    pentru ca `date.replace(year=...)` arunca ValueError pentru acea zi
+    daca noul an nu e bisect.
     """
-    if dry_run:
-        return 0, 0
-    return upsert_fn(rows)
+    today = datetime.now(timezone.utc).date()
+    try:
+        return today.replace(year=today.year - years_back)
+    except ValueError:
+        return today.replace(month=2, day=28, year=today.year - years_back)
 
 
 class ImportStats:
@@ -186,12 +205,21 @@ def _safe_str(value) -> str:
     return str(value).strip()
 
 
-def import_matches(summary: CsvSummary, dry_run: bool = False, limit: int | None = None) -> ImportStats:
+def import_matches(
+    summary: CsvSummary,
+    dry_run: bool = False,
+    limit: int | None = None,
+    cutoff_date: date | None = None,
+) -> ImportStats:
     """
     Importa fisierul de meciuri (detectat automat) in match_history.
     Coloane asteptate (Kaggle adamgbor): Division, MatchDate, HomeTeam,
     AwayTeam, HomeElo, AwayElo, FTHome, FTAway, FTResult (restul, ignorate
     la acest pas — odds/xG raman pentru un pas viitor, cu aprobare separata).
+
+    Daca `cutoff_date` este furnizat, randurile cu MatchDate < cutoff_date
+    sunt respinse (motiv "before_cutoff") si NU ajung in Supabase — vezi
+    HISTORICAL_YEARS_BACK / _compute_cutoff_date().
     """
     stats = ImportStats("Matches -> match_history")
     usecols = [c for c in [
@@ -232,6 +260,11 @@ def import_matches(summary: CsvSummary, dry_run: bool = False, limit: int | None
             if pd.isna(r["_parsed_date"]):
                 stats.reject("invalid_date")
                 stats.note_invalid_date_example(r.get("MatchDate"))
+                continue
+
+            parsed_date_obj = r["_parsed_date"].date()
+            if cutoff_date is not None and parsed_date_obj < cutoff_date:
+                stats.reject("before_cutoff")
                 continue
 
             try:
@@ -294,12 +327,20 @@ def import_matches(summary: CsvSummary, dry_run: bool = False, limit: int | None
     return stats
 
 
-def import_elo_history(summary: CsvSummary, dry_run: bool = False, limit: int | None = None) -> ImportStats:
+def import_elo_history(
+    summary: CsvSummary,
+    dry_run: bool = False,
+    limit: int | None = None,
+    cutoff_date: date | None = None,
+) -> ImportStats:
     """
     Importa fisierul de snapshot-uri ELO (detectat automat) in elo_history.
     Coloana 'country' din Kaggle e salvata TEMPORAR in 'league' (ex. "England",
     "Spain") — nu e o competitie reala, ci o tara. Va fi normalizata corect
     cand se implementeaza normalize_league_name() si o structura de competitii.
+
+    Acelasi `cutoff_date` ca la import_matches() este aplicat aici, pentru
+    consistenta (vezi HISTORICAL_YEARS_BACK).
     """
     stats = ImportStats("EloRatings -> elo_history")
 
@@ -342,6 +383,11 @@ def import_elo_history(summary: CsvSummary, dry_run: bool = False, limit: int | 
             if pd.isna(r["_parsed_date"]):
                 stats.reject("invalid_date")
                 stats.note_invalid_date_example(r.get(date_col))
+                continue
+
+            parsed_date_obj = r["_parsed_date"].date()
+            if cutoff_date is not None and parsed_date_obj < cutoff_date:
+                stats.reject("before_cutoff")
                 continue
 
             try:
@@ -400,7 +446,25 @@ def import_elo_history(summary: CsvSummary, dry_run: bool = False, limit: int | 
     return stats
 
 
+def _safe_upsert(dry_run: bool, upsert_fn: Callable[[list[dict]], tuple[int, int]],
+                  rows: list[dict]) -> tuple[int, int]:
+    """
+    Singurul punct din tot fisierul prin care se scrie in Supabase.
+    Daca dry_run e True, NU apeleaza niciodata upsert_fn — returneaza (0, 0)
+    necondiționat. Aceasta e garantia ca dry-run nu produce nicio scriere reala.
+    """
+    if dry_run:
+        return 0, 0
+    return upsert_fn(rows)
+
+
 def run(dry_run: bool = False, limit: int | None = None) -> None:
+    cutoff_date = _compute_cutoff_date(HISTORICAL_YEARS_BACK)
+    logger.info(
+        "Import istoric limitat la ultimii %d ani — prag: meciuri/ELO cu data < %s sunt respinse.",
+        HISTORICAL_YEARS_BACK, cutoff_date.isoformat(),
+    )
+
     logger.info("Inspectez dataset-ul principal Kaggle inainte de import...")
     inspection = inspect_dataset(MAIN_DATASET)
 
@@ -433,12 +497,12 @@ def run(dry_run: bool = False, limit: int | None = None) -> None:
     if dry_run:
         logger.info("=== DRY RUN — validare completa, ZERO scrieri in Supabase ===")
 
-    match_stats = import_matches(matches_summary, dry_run=dry_run, limit=limit)
+    match_stats = import_matches(matches_summary, dry_run=dry_run, limit=limit, cutoff_date=cutoff_date)
     match_stats.report()
 
     elo_stats: ImportStats | None = None
     if elo_summary is not None:
-        elo_stats = import_elo_history(elo_summary, dry_run=dry_run, limit=limit)
+        elo_stats = import_elo_history(elo_summary, dry_run=dry_run, limit=limit, cutoff_date=cutoff_date)
         elo_stats.report()
 
     # Inregistrare auditabila a rularii, refolosind functia deja existenta
@@ -452,7 +516,8 @@ def run(dry_run: bool = False, limit: int | None = None) -> None:
             f"matches_valid={match_stats.rows_valid}, matches_written={match_stats.rows_written}, "
             f"elo_valid={elo_stats.rows_valid if elo_stats else 0}, "
             f"elo_written={elo_stats.rows_written if elo_stats else 0}, "
-            f"limit={limit or 'none'}"
+            f"limit={limit or 'none'}, cutoff_date={cutoff_date.isoformat()}, "
+            f"years_back={HISTORICAL_YEARS_BACK}"
         )
         ok = upsert_sync_status(
             source="kaggle_historical",
@@ -481,4 +546,3 @@ if __name__ == "__main__":
     except KaggleSourceError as exc:
         logger.error("Import esuat: %s", exc)
         raise SystemExit(1) from exc
-
