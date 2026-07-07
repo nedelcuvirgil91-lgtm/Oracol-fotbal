@@ -253,6 +253,36 @@ def get_elo_ratings(league: str | None = None) -> dict[str, int]:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# ELO HISTORY (snapshot-uri temporale, separat de elo_ratings care e curent)
+# ════════════════════════════════════════════════════════════════════════════
+
+def upsert_elo_history_bulk(rows: list[dict]) -> tuple[int, int]:
+    """
+    Inserează/actualizează snapshot-uri ELO istorice în elo_history.
+    Format rând: {"team": "...", "league": "...", "elo": 1850,
+                  "snapshot_date": "YYYY-MM-DD", "source": "kaggle"}
+    Cheia unică e (team, snapshot_date) — conform schemei create anterior.
+    """
+    client = get_client()
+    if client is None:
+        return 0, len(rows)
+    ok = 0
+    errors = 0
+    batch_size = 50
+    for i in range(0, len(rows), batch_size):
+        batch = rows[i:i + batch_size]
+        try:
+            client.table("elo_history").upsert(
+                batch, on_conflict="team,snapshot_date"
+            ).execute()
+            ok += len(batch)
+        except Exception as exc:
+            logger.error("[Queries] upsert_elo_history_bulk batch %d failed: %s", i, exc)
+            errors += len(batch)
+    return ok, errors
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # ML STATUS
 # ════════════════════════════════════════════════════════════════════════════
 
