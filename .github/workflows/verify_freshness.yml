@@ -1,0 +1,61 @@
+name: Football Oracle — Import Historical Kaggle Data
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (fără scriere în Supabase)"
+        required: false
+        default: "true"
+        type: boolean
+      limit:
+        description: "0 = fără limită (import complet). Orice altă valoare limitează, pt. testare"
+        required: false
+        default: "0"
+        type: string
+
+jobs:
+  import-historical:
+    runs-on: ubuntu-latest
+    # NOTA: ~9.500 request-uri HTTP catre Supabase la scara completa
+    # (batch de 50 randuri), estimare 30-50 min doar pentru retea.
+    # 90 min = marja de siguranta, nu o cifra exacta masurata.
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Show installed versions
+        run: |
+          echo "Python: $(python --version)"
+          echo "----"
+          pip show pandas | grep -E "Name|Version"
+          echo "----"
+          pip show kagglehub | grep -E "Name|Version"
+
+      - name: Run historical import
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_TOKEN: ${{ secrets.KAGGLE_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          if [ "${{ github.event.inputs.limit }}" != "0" ] && [ -n "${{ github.event.inputs.limit }}" ]; then
+            ARGS="$ARGS --limit ${{ github.event.inputs.limit }}"
+          fi
+          echo "Rulează: python -m sync.import_historical $ARGS"
+          eval python -m sync.import_historical $ARGS
