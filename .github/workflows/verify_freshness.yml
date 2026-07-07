@@ -1,26 +1,21 @@
-name: Football Oracle — Import Historical Kaggle Data
+name: Football Oracle — Verify Dataset Freshness (Kaggle)
 
 on:
   workflow_dispatch:
     inputs:
-      dry_run:
-        description: "Dry run (fără scriere în Supabase)"
+      reference_date:
+        description: "Data de referință (YYYY-MM-DD) față de care se numără rândurile mai noi"
         required: false
-        default: "true"
-        type: boolean
-      limit:
-        description: "0 = fără limită (import complet). Orice altă valoare limitează, pt. testare"
-        required: false
-        default: "0"
+        default: "2025-06-01"
         type: string
 
 jobs:
-  import-historical:
+  verify-freshness:
     runs-on: ubuntu-latest
-    # NOTA: ~9.500 request-uri HTTP catre Supabase la scara completa
-    # (batch de 50 randuri), estimare 30-50 min doar pentru retea.
-    # 90 min = marja de siguranta, nu o cifra exacta masurata.
-    timeout-minutes: 90
+    # Script read-only — nu scrie nimic în Supabase, doar scanează CSV-urile
+    # Kaggle (~14 MB total) pentru data minimă/maximă reală. Mult mai rapid
+    # decât import-ul complet (fără request-uri HTTP către Supabase).
+    timeout-minutes: 15
 
     steps:
       - name: Checkout repository
@@ -35,27 +30,10 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Show installed versions
-        run: |
-          echo "Python: $(python --version)"
-          echo "----"
-          pip show pandas | grep -E "Name|Version"
-          echo "----"
-          pip show kagglehub | grep -E "Name|Version"
-
-      - name: Run historical import
+      - name: Run dataset freshness verification
         env:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_TOKEN: ${{ secrets.KAGGLE_TOKEN }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: |
-          ARGS=""
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            ARGS="$ARGS --dry-run"
-          fi
-          if [ "${{ github.event.inputs.limit }}" != "0" ] && [ -n "${{ github.event.inputs.limit }}" ]; then
-            ARGS="$ARGS --limit ${{ github.event.inputs.limit }}"
-          fi
-          echo "Rulează: python -m sync.import_historical $ARGS"
-          eval python -m sync.import_historical $ARGS
+          echo "Rulează: python -m sync.verify_dataset_freshness --reference-date ${{ github.event.inputs.reference_date }}"
+          python -m sync.verify_dataset_freshness --reference-date "${{ github.event.inputs.reference_date }}"
