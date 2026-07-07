@@ -1,6 +1,20 @@
 """
 ================================================================================
-FOOTBALL ORACLE — Mappings & Normalization (v1.2)
+FOOTBALL ORACLE — Mappings & Normalization (v1.3)
+CHANGES v1.3:
+  - [FIX] Eliminate din _STRIP_SUFFIXES suffixele generice " fc", " cf",
+    " united", " city" — aceeasi clasa de risc ca fuzzy-matching-ul eliminat
+    in v1.2 (o echipa necunoscuta terminata in "FC"/"United"/"City" putea
+    fi trunchiata gresit si coincide accidental, dupa stripping, cu un alias
+    existent). Restul suffixelor (" football club", " sc", " sv", " ac",
+    " bc", " afc", " fk", " sk", " bk", " if", " hk", " gd") raman
+    neschimbate — risc considerat mai mic, decizie separata, neinclusa
+    in acest pas.
+  - _STRIP_PREFIXES ("fc ","cf ","ac ","sc ","fk ","sk ","afc ") NU a fost
+    atins in acest pas. Are aceeasi clasa de risc ca suffixele de mai sus
+    (ex. "FC Vreo Echipa Necunoscuta" -> "Vreo Echipa Necunoscuta" ar putea
+    coincide accidental cu un alias existent), dar ramane decizie separata,
+    la cerere explicita — nu s-a schimbat nimic aici deocamdata.
 CHANGES v1.2:
   - [FIX] Eliminat fuzzy prefix-matching din normalize_team_name() — cauza
     coliziunii "Paris FC" -> "Paris Saint-Germain" (si a altor 140+ cazuri
@@ -147,9 +161,10 @@ for _canonical, _aliases in TEAM_ALIASES.items():
     for _alias in _aliases:
         ALIAS_TO_CANONICAL[_alias.lower()] = _canonical
 
+# [FIX v1.3] " fc", " cf", " united", " city" eliminate — vezi CHANGES v1.3.
 _STRIP_SUFFIXES = [
-    " football club"," fc"," cf"," sc"," sv"," ac"," bc",
-    " afc"," fk"," sk"," bk"," if"," hk"," gd"," united"," city",
+    " football club"," sc"," sv"," ac"," bc",
+    " afc"," fk"," sk"," bk"," if"," hk"," gd",
 ]
 _STRIP_PREFIXES = ["fc ","cf ","ac ","sc ","fk ","sk ","afc "]
 
@@ -172,12 +187,10 @@ def normalize_team_name(name: str) -> str:
     if stripped in ALIAS_TO_CANONICAL: return ALIAS_TO_CANONICAL[stripped]
     # [FIX v1.2] Elimin fuzzy prefix-matching ("alias.startswith(stripped)").
     # Era responsabil pentru coliziuni sistemice: orice echipa NECUNOSCUTA a
-    # carei denumire, dupa stripping de sufixe generice (FC/SC/United/City...),
-    # se intampla sa fie un prefix al unui alias existent, era mapata GRESIT
-    # la acel alias (ex: "Paris FC" -> "Paris Saint-Germain", pentru ca
-    # "paris" e prefix comun dupa strip). Scanul sistemic a identificat 141+
-    # astfel de coliziuni potentiale (Saudi FC->Saudi Arabia, Inter FC->Inter
-    # Milan, Union FC->Union Berlin, Rapid FC->Rapid Bucuresti, etc).
+    # carei denumire, dupa stripping de sufixe generice, se intampla sa fie
+    # un prefix al unui alias existent, era mapata GRESIT la acel alias
+    # (ex: "Paris FC" -> "Paris Saint-Germain"). Scanul sistemic a identificat
+    # 141+ astfel de coliziuni potentiale.
     # Fara potrivire exacta (alias explicit sau alias dupa strip suffix/
     # prefix), o echipa necunoscuta ramane NEmodificata — mai bine sa nu fie
     # normalizata deloc, decat sa fie unita gresit cu alt club.
