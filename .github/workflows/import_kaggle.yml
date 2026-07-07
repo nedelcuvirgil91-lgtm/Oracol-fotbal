@@ -1,36 +1,61 @@
-Run ARGS=""
-Rulează: python -m sync.import_historical  --dry-run --limit 500
-2026-07-07 11:28:05,703 INFO Inspectez dataset-ul principal Kaggle inainte de import...
-Downloading to /home/runner/.cache/kagglehub/datasets/adamgbor/club-football-match-data-2000-2025/3.archive...
+name: Football Oracle — Import Historical Kaggle Data
 
-  0%|          | 0.00/14.4M [00:00<?, ?B/s]
-Extracting files...
-100%|██████████| 14.4M/14.4M [00:00<00:00, 157MB/s]
-2026-07-07 11:28:06,632 INFO Dataset 'adamgbor/club-football-match-data-2000-2025' disponibil local la: /home/runner/.cache/kagglehub/datasets/adamgbor/club-football-match-data-2000-2025/versions/3
-2026-07-07 11:28:06,669 WARNING Fisierul 'EloRatings.csv' nu are campuri recunoscute pentru: ['home_team', 'away_team']. Coloanele existente sunt: ['date', 'club', 'country', 'elo']
-2026-07-07 11:28:06,801 INFO Fisierul 'Matches.csv' contine campuri optionale recunoscute: {'home_goals': 'FTHome', 'away_goals': 'FTAway', 'odds_home': 'OddHome', 'odds_draw': 'OddDraw', 'odds_away': 'OddAway', 'home_elo': 'HomeElo', 'away_elo': 'AwayElo'}
-2026-07-07 11:28:06,801 INFO Inspectie 'adamgbor/club-football-match-data-2000-2025': 2 fisiere CSV gasite.
-2026-07-07 11:28:06,801 INFO   - EloRatings.csv: 245033 randuri, 4 coloane, 9.4 MB
-2026-07-07 11:28:06,801 INFO   - Matches.csv: 230557 randuri, 48 coloane, 41.8 MB
-2026-07-07 11:28:06,801 INFO Fisier 'EloRatings.csv' clasificat ca: elo_snapshot
-2026-07-07 11:28:06,801 INFO Fisier 'Matches.csv' clasificat ca: matches
-2026-07-07 11:28:06,801 INFO === DRY RUN — validare completa, ZERO scrieri in Supabase ===
-2026-07-07 11:28:06,971 INFO === Raport import: Matches -> match_history ===
-2026-07-07 11:28:06,971 INFO   Randuri detectate        : 501
-2026-07-07 11:28:06,971 INFO   Randuri valide            : 500
-2026-07-07 11:28:06,971 INFO   Randuri respinse          : 0
-2026-07-07 11:28:06,971 INFO   Scrise efectiv in Supabase: 0
-2026-07-07 11:28:06,971 INFO   Erori la UPSERT           : 0
-2026-07-07 11:28:06,971 INFO   Echipe distincte          : 256
-2026-07-07 11:28:06,971 INFO   Competitii/coduri distincte: 13 (['B1', 'D1', 'D2', 'E0', 'E1', 'E2', 'F1', 'F2', 'I2', 'N1', 'P1', 'SP2', 'T1'])
-2026-07-07 11:28:06,971 INFO   Interval date             : 2000-07-28 -> 2000-09-09
-2026-07-07 11:28:07,041 INFO === Raport import: EloRatings -> elo_history ===
-2026-07-07 11:28:07,041 INFO   Randuri detectate        : 501
-2026-07-07 11:28:07,041 INFO   Randuri valide            : 500
-2026-07-07 11:28:07,041 INFO   Randuri respinse          : 0
-2026-07-07 11:28:07,041 INFO   Scrise efectiv in Supabase: 0
-2026-07-07 11:28:07,041 INFO   Erori la UPSERT           : 0
-2026-07-07 11:28:07,041 INFO   Echipe distincte          : 413
-2026-07-07 11:28:07,041 INFO   Competitii/coduri distincte: 19 (['AUT', 'BEL', 'DEN', 'ENG', 'ESP', 'FIN', 'FRA', 'GER', 'GRE', 'ITA', 'NED', 'NOR', 'POL', 'POR', 'ROM', 'RUS', 'SCO', 'SWE', 'TUR'])
-2026-07-07 11:28:07,041 INFO   Interval date             : 2000-07-01 -> 2000-07-15
-2026-07-07 11:28:07,041 INFO DRY RUN — sync_status NU este atins (garantie zero-scriere).
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (fără scriere în Supabase)"
+        required: false
+        default: "true"
+        type: boolean
+      limit:
+        description: "0 = fără limită (import complet). Orice altă valoare limitează, pt. testare"
+        required: false
+        default: "0"
+        type: string
+
+jobs:
+  import-historical:
+    runs-on: ubuntu-latest
+    # NOTA: ~9.500 request-uri HTTP catre Supabase la scara completa
+    # (batch de 50 randuri), estimare 30-50 min doar pentru retea.
+    # 90 min = marja de siguranta, nu o cifra exacta masurata.
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Show installed versions
+        run: |
+          echo "Python: $(python --version)"
+          echo "----"
+          pip show pandas | grep -E "Name|Version"
+          echo "----"
+          pip show kagglehub | grep -E "Name|Version"
+
+      - name: Run historical import
+        env:
+          KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+          KAGGLE_TOKEN: ${{ secrets.KAGGLE_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          if [ "${{ github.event.inputs.limit }}" != "0" ] && [ -n "${{ github.event.inputs.limit }}" ]; then
+            ARGS="$ARGS --limit ${{ github.event.inputs.limit }}"
+          fi
+          echo "Rulează: python -m sync.import_historical $ARGS"
+          eval python -m sync.import_historical $ARGS
