@@ -65,8 +65,10 @@ def upsert_matches_bulk(rows: list[dict]) -> tuple[int, int]:
 
     ok = 0
     errors = 0
-    # Batch de câte 50 pentru a evita timeout-uri
-    batch_size = 50
+    # Batch de 250 (marit de la 50) — reduce ~5x request-urile HTTP catre
+    # Supabase la importuri de volum mare (ex. import_historical.py, 230k+
+    # randuri). Payload-ul ramane mic (zeci de KB), sub limitele PostgREST.
+    batch_size = 250
     for i in range(0, len(rows), batch_size):
         batch = rows[i:i + batch_size]
         try:
@@ -268,7 +270,10 @@ def upsert_elo_history_bulk(rows: list[dict]) -> tuple[int, int]:
         return 0, len(rows)
     ok = 0
     errors = 0
-    batch_size = 50
+    # Batch de 250 (marit de la 50) — reduce ~5x request-urile HTTP catre
+    # Supabase la importuri de volum mare (ex. import_historical.py, 245k+
+    # randuri). Payload-ul ramane mic (zeci de KB), sub limitele PostgREST.
+    batch_size = 250
     for i in range(0, len(rows), batch_size):
         batch = rows[i:i + batch_size]
         try:
