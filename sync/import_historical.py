@@ -316,7 +316,7 @@ def import_elo_history(summary: CsvSummary, dry_run: bool = False, limit: int | 
         )
 
     usecols = [c for c in [date_col, team_col, elo_col, country_col] if c]
-    seen_team_dates: set[str] = set()
+    seen_team_dates: dict[str, str] = {}
     rows_processed_total = 0
 
     for chunk in pd.read_csv(summary.path, usecols=usecols, dtype=str, chunksize=CHUNK_SIZE):
@@ -359,10 +359,17 @@ def import_elo_history(summary: CsvSummary, dry_run: bool = False, limit: int | 
                 country_value = _safe_str(r.get(country_col)) if country_col else ""
 
                 dedup_key = f"{team}||{snapshot_date}"
+                current_raw = _safe_str(r[team_col])
                 if dedup_key in seen_team_dates:
-                    stats.note_duplicate(f"{dedup_key} (raw='{r[team_col]}')")
+                    first_raw = seen_team_dates[dedup_key]
+                    if first_raw == current_raw:
+                        stats.note_duplicate(f"{dedup_key} [duplicat real, raw identic: '{current_raw}']")
+                    else:
+                        stats.note_duplicate(
+                            f"{dedup_key} [COLIZIUNE normalizare: '{first_raw}' vs '{current_raw}']"
+                        )
                 else:
-                    seen_team_dates.add(dedup_key)
+                    seen_team_dates[dedup_key] = current_raw
 
                 row = {
                     "team": team,
