@@ -67,6 +67,7 @@ class ImportStats:
         self.rows_written = 0
         self.upsert_errors = 0
         self.rejection_reasons: dict[str, int] = {}
+        self.invalid_date_examples: list[str] = []
         self.duplicate_keys_count = 0
         self.duplicate_key_examples: list[str] = []
         self.distinct_teams: set[str] = set()
@@ -75,6 +76,10 @@ class ImportStats:
 
     def reject(self, reason: str) -> None:
         self.rejection_reasons[reason] = self.rejection_reasons.get(reason, 0) + 1
+
+    def note_invalid_date_example(self, raw_value: str) -> None:
+        if len(self.invalid_date_examples) < MAX_DUPLICATE_EXAMPLES:
+            self.invalid_date_examples.append(repr(raw_value))
 
     def note_duplicate(self, key: str) -> None:
         self.duplicate_keys_count += 1
@@ -89,6 +94,8 @@ class ImportStats:
         logger.info("  Randuri respinse          : %d", total_rejected)
         for reason, count in sorted(self.rejection_reasons.items()):
             logger.info("      - %-22s: %d", reason, count)
+        if self.invalid_date_examples:
+            logger.info("      Exemple date nevalide: %s", self.invalid_date_examples)
         logger.info("  Scrise efectiv in Supabase: %d", self.rows_written)
         logger.info("  Erori la UPSERT           : %d", self.upsert_errors)
         if self.duplicate_keys_count:
@@ -134,6 +141,31 @@ def _generate_fixture_id(home_team: str, away_team: str, kickoff_date: str) -> s
     return f"kaggle_{digest}"
 
 
+def _safe_int(value) -> int | None:
+    """
+    Converteste o valoare (citita ca str din CSV) la int, sau None daca
+    lipseste. IMPORTANT: cu dtype=str la citire, valorile lipsa din pandas
+    raman float('nan') (nu devin literal stringul "nan"), deci o comparatie
+    directa cu "nan" NU le prinde. pd.isna() e singura verificare corecta.
+    Nu arunca niciodata exceptie — un camp numeric lipsa nu trebuie sa
+    compromita restul randului (teams/data/rezultat raman valide).
+    """
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except (TypeError, ValueError):
+        pass
+    text = str(value).strip().lower()
+    if text in ("", "nan", "none"):
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
 def import_matches(summary: CsvSummary, dry_run: bool = False, limit: int | None = None) -> ImportStats:
     """
     Importa fisierul de meciuri (detectat automat) in match_history.
@@ -161,7 +193,7 @@ def import_matches(summary: CsvSummary, dry_run: bool = False, limit: int | None
         if limit is not None and rows_processed_total >= limit:
             break
 
-        chunk["_parsed_date"] = pd.to_datetime(chunk["MatchDate"], dayfirst=True, errors="coerce")
+        chunk["_parsed_date"] = pd.to_datetime(chunk["MatchDate"], errors="coerce")
 
         batch_rows: list[dict] = []
         for _, r in chunk.iterrows():
@@ -172,6 +204,7 @@ def import_matches(summary: CsvSummary, dry_run: bool = False, limit: int | None
 
             if pd.isna(r["_parsed_date"]):
                 stats.reject("invalid_date")
+                stats.note_invalid_date_example(r.get("MatchDate"))
                 continue
 
             try:
@@ -201,14 +234,18 @@ def import_matches(summary: CsvSummary, dry_run: bool = False, limit: int | None
                     "used_for_training": True,
                 }
 
-                if r.get("FTHome") not in (None, "", "nan"):
-                    row["actual_home_goals"] = int(float(r["FTHome"]))
-                if r.get("FTAway") not in (None, "", "nan"):
-                    row["actual_away_goals"] = int(float(r["FTAway"]))
-                if r.get("HomeElo") not in (None, "", "nan"):
-                    row["home_elo"] = int(float(r["HomeElo"]))
-                if r.get("AwayElo") not in (None, "", "nan"):
-                    row["away_elo"] = int(float(r["AwayElo"]))
+                home_goals = _safe_int(r.get("FTHome"))
+                away_goals = _safe_int(r.get("FTAway"))
+                home_elo_val = _safe_int(r.get("HomeElo"))
+                away_elo_val = _safe_int(r.get("AwayElo"))
+                if home_goals is not None:
+                    row["actual_home_goals"] = home_goals
+                if away_goals is not None:
+                    row["actual_away_goals"] = away_goals
+                if home_elo_val is not None:
+                    row["home_elo"] = home_elo_val
+                if away_elo_val is not None:
+                    row["away_elo"] = away_elo_val
 
                 batch_rows.append(row)
                 stats.rows_valid += 1
@@ -259,7 +296,7 @@ def import_elo_history(summary: CsvSummary, dry_run: bool = False, limit: int | 
         if limit is not None and rows_processed_total >= limit:
             break
 
-        chunk["_parsed_date"] = pd.to_datetime(chunk[date_col], dayfirst=True, errors="coerce")
+        chunk["_parsed_date"] = pd.to_datetime(chunk[date_col], errors="coerce")
 
         batch_rows: list[dict] = []
         for _, r in chunk.iterrows():
@@ -270,6 +307,7 @@ def import_elo_history(summary: CsvSummary, dry_run: bool = False, limit: int | 
 
             if pd.isna(r["_parsed_date"]):
                 stats.reject("invalid_date")
+                stats.note_invalid_date_example(r.get(date_col))
                 continue
 
             try:
@@ -280,7 +318,10 @@ def import_elo_history(summary: CsvSummary, dry_run: bool = False, limit: int | 
                     stats.reject("missing_team_name")
                     continue
 
-                elo_value = int(float(r[elo_col]))
+                elo_value = _safe_int(r.get(elo_col))
+                if elo_value is None:
+                    stats.reject("missing_elo_value")
+                    continue
                 country_value = (r.get(country_col) or "").strip() if country_col else ""
 
                 dedup_key = f"{team}||{snapshot_date}"
