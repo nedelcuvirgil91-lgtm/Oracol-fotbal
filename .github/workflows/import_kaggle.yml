@@ -17,7 +17,10 @@ on:
 jobs:
   import-historical:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # NOTA: ~9.500 request-uri HTTP catre Supabase la scara completa
+    # (batch de 50 randuri), estimare 30-50 min doar pentru retea.
+    # 90 min = marja de siguranta, nu o cifra exacta masurata.
+    timeout-minutes: 90
 
     steps:
       - name: Checkout repository
