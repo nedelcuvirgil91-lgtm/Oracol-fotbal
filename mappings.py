@@ -383,7 +383,9 @@ LEAGUE_ALIASES: dict[str, list[str]] = {
     "Serie A":           ["I1", "Italy", "SA"],
     "Bundesliga":        ["D1", "Germany", "BL1"],
     "Ligue 1":           ["F1", "France", "FL1"],
-    "Romania SuperLiga": ["Romania", "Liga 1", "Liga I"],
+    # ROM verificat direct in Supabase (echipe: CFR Cluj, FCSB, Farul
+    # Constanta, Rapid Bucuresti, UTA Arad, Universitatea Craiova) — nu presupus.
+    "Romania SuperLiga": ["Romania", "ROM", "Liga 1", "Liga I"],
     # ── Competitii UEFA / mondiale — coduri FD_COMPETITIONS + denumiri
     #    oficiale folosite de football-data.org in raspunsul API
     "Champions League":  ["CL", "UEFA Champions League", "UCL"],
