@@ -525,19 +525,17 @@ elif nav == "portfolio":
                 st.markdown("**Actualizează pariu**")
                 row_idx=st.selectbox("Pariu",pending_df.index.tolist(),format_func=lambda i:f"#{i} {pending_df.loc[i,'Match']} — {pending_df.loc[i,'Selection']}")
                 new_res=st.selectbox("Rezultat nou",["W","L","V"])
-                rc1,rc2=st.columns(2)
-                with rc1: ah=st.number_input("Goluri acasă",0,20,0,1)
-                with rc2: aa=st.number_input("Goluri oaspeți",0,20,0,1)
-                do_rc=st.checkbox("Recalibrare automată",value=True)
+                # [FIX v1.1] League Learning nu mai depinde de Portfolio — recalibrarea
+                # ponderilor se face automat, pentru TOATE meciurile, prin
+                # sync/sync_results.py (job zilnic), nu prin confirmarea manuală a
+                # unui pariu. Portfolio rămâne doar jurnal de pariuri: câmpurile de
+                # scor + checkbox-ul "Recalibrare automată" au fost eliminate.
                 if st.form_submit_button("✅ Actualizează",use_container_width=True):
                     full=pd.read_csv(PORTFOLIO_PATH)
-                    ov=float(full.loc[row_idx,"Odds"]); sv=float(full.loc[row_idx,"Stake"]); fid_u=str(full.loc[row_idx,"FixtureID"])
+                    ov=float(full.loc[row_idx,"Odds"]); sv=float(full.loc[row_idx,"Stake"])
                     pnl_v=round(sv*(ov-1),2) if new_res=="W" else (-round(sv,2) if new_res=="L" else 0.0)
                     full.at[row_idx,"Result"]=new_res; full.at[row_idx,"PnL"]=pnl_v; full.to_csv(PORTFOLIO_PATH,index=False)
                     st.success(f"✅ #{row_idx} → {new_res}  P&L=€{pnl_v:+.2f}")
-                    if do_rc and fid_u!="manual":
-                        rc_res=engine.update_weights_from_result(fid_u,int(ah),int(aa))
-                        st.success(f"🧠 Recalibrat! Eroare: {rc_res['combined_error']:.3f}") if rc_res.get("status")=="recalibrated" else st.info("🟢 Model precis.")
                     st.rerun()
 
 
