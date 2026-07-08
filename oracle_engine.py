@@ -42,6 +42,11 @@ except ModuleNotFoundError:
     print("[FATAL] mappings.py not found."); sys.exit(1)
 
 try:
+    from recalibration import recalibrate_weights, compute_recency_weight
+except ModuleNotFoundError:
+    print("[FATAL] recalibration.py not found."); sys.exit(1)
+
+try:
     from injury_manager import InjuryManager, TeamInjuryReport
     INJURY_MANAGER_AVAILABLE = True
 except ModuleNotFoundError:
@@ -95,6 +100,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "kelly_fraction":              0.25,
     "recalibration_learning_rate": 0.05,
     "recalibration_max_delta":     0.15,
+    "recency_half_life_days":      365,
     "elo_blend_weight":            0.35,
     "elo_sigmoid_scale":           400.0,
     "elo_reference":               1500.0,
@@ -1083,6 +1089,19 @@ class FootballOracleEngine:
     def update_weights_from_result(
         self, fixture_id: str, actual_home_goals: int, actual_away_goals: int
     ) -> dict:
+        """
+        [FIX v1.1] Wrapper subtire peste recalibration.recalibrate_weights() —
+        NU mai duplica logica de recalibrare inline (era o a doua
+        implementare separata de cea din recalibration.py, desi docstring-ul
+        modulului pretindea ca acesta e "wrapper subtire" — nu era). Acum
+        chiar este.
+
+        Ramane utilizabila manual (ex. pentru testare sau recalibrare
+        retroactiva punctuala), dar NU mai e parte din fluxul automat de
+        League Learning — acela ruleaza prin sync/sync_results.py, care
+        recalibreaza direct din match_history in Supabase, fara sa treaca
+        pe aici si fara sa depinda de cache-ul local de predictii.
+        """
         cache = self._load_prediction(fixture_id)
         if cache is None:
             return {"status": "error", "message": f"No cached prediction for {fixture_id}."}
@@ -1104,146 +1123,52 @@ class FootballOracleEngine:
                 "actual_result":     actual_result,
             })
 
-        pred_h   = float(cache.get("home_xg", 1.25))
-        pred_a   = float(cache.get("away_xg", 1.00))
-        league   = cache.get("league", "default")
-        home_err = actual_home_goals - pred_h
-        away_err = actual_away_goals - pred_a
-        combined = (abs(home_err) + abs(away_err)) / 2.0
-        avg_err  = (home_err + away_err) / 2.0
-        lr       = float(self.config.get("recalibration_learning_rate", 0.05))
-        max_d    = float(self.config.get("recalibration_max_delta",     0.15))
+        pred_h = float(cache.get("home_xg", 1.25))
+        pred_a = float(cache.get("away_xg", 1.00))
+        league = cache.get("league", "default")
+        lr     = float(self.config.get("recalibration_learning_rate", 0.05))
+        max_d  = float(self.config.get("recalibration_max_delta",     0.15))
 
-        if combined < 0.30:
-            return {
-                "status": "stable", "league": league,
-                "combined_error": round(combined, 4),
-                "message": "Model accurate.", "adjustments": {},
-            }
+        half_life = float(self.config.get("recency_half_life_days", 365))
+        recency   = compute_recency_weight(cache.get("kickoff_date"), half_life)
 
-        adjustments: dict = {}
-        reasons:     list = []
-
-        def _shift(name, cur, delta, lo=0.05, hi=0.95):
-            delta   = max(-max_d, min(max_d, delta))
-            new_val = max(lo, min(hi, cur + delta))
-            adjustments[name] = {"old": round(cur, 4), "delta": round(delta, 4), "new": round(new_val, 4)}
-            return new_val
-
-        lw_all = self.weights.setdefault("league_weights", {})
-        if league not in lw_all:
-            lw_all[league] = {
-                "form_weight":       float(self.weights.get("form_weight",       0.60)),
-                "dna_weight":        float(self.weights.get("dna_weight",        0.40)),
-                "goals_weight":      float(self.weights.get("goals_weight",      0.45)),
-                "shots_ot_weight":   float(self.weights.get("shots_ot_weight",   0.30)),
-                "possession_weight": float(self.weights.get("possession_weight", 0.25)),
-                "home_advantage":    float(self.weights.get("home_advantage",    1.07)),
-                "away_penalty":      float(self.weights.get("away_penalty",      0.95)),
-                "sample_count":      0,
-            }
-
-        lw        = lw_all[league]
-        sc        = int(lw.get("sample_count", 0))
-        lr_league = min(lr * max(1.0, 3.0 / (sc + 1)), lr * 3)
-        scale_l   = min(combined / 3.0, 1.0) * lr_league
-
-        fw  = float(lw.get("form_weight",       0.60))
-        dw  = float(lw.get("dna_weight",        0.40))
-        gw  = float(lw.get("goals_weight",      0.45))
-        sow = float(lw.get("shots_ot_weight",   0.30))
-        pw  = float(lw.get("possession_weight", 0.25))
-        ha  = float(lw.get("home_advantage",    1.07))
-        ap  = float(lw.get("away_penalty",      0.95))
-
-        if combined >= 0.50:
-            fw = _shift("form_weight", fw, -scale_l * 0.6, lo=0.10, hi=0.90)
-            dw = _shift("dna_weight",  dw, +scale_l * 0.6, lo=0.10, hi=0.90)
-            reasons.append(f"[{league}] Large error ({combined:.2f}) → DNA shift.")
-
-        if avg_err > 0.50:
-            gw  = _shift("goals_weight",    gw,  +scale_l * 0.5, lo=0.10, hi=0.80)
-            sow = _shift("shots_ot_weight", sow, +scale_l * 0.3, lo=0.05, hi=0.60)
-            if home_err > 0.5:
-                ha = _shift("home_advantage", ha, +scale_l * 0.2, lo=1.00, hi=1.20)
-            reasons.append(f"[{league}] Under-estimated.")
-        elif avg_err < -0.50:
-            gw = _shift("goals_weight",      gw, -scale_l * 0.4, lo=0.10, hi=0.80)
-            pw = _shift("possession_weight", pw, +scale_l * 0.3, lo=0.05, hi=0.50)
-            if home_err < -0.5:
-                ha = _shift("home_advantage", ha, -scale_l * 0.15, lo=1.00, hi=1.20)
-            reasons.append(f"[{league}] Over-estimated.")
-
-        t_comp = gw + sow + pw
-        if t_comp > 0:
-            gw  = round(gw  / t_comp, 4)
-            sow = round(sow / t_comp, 4)
-            pw  = round(pw  / t_comp, 4)
-        t_fd = fw + dw
-        if t_fd > 0:
-            fw = round(fw / t_fd, 4)
-            dw = round(dw / t_fd, 4)
-
-        lw_all[league].update({
-            "form_weight": fw, "dna_weight": dw, "goals_weight": gw,
-            "shots_ot_weight": sow, "possession_weight": pw,
-            "home_advantage": ha, "away_penalty": ap, "sample_count": sc + 1,
-        })
-
-        gfw  = float(self.weights.get("form_weight",       0.60))
-        gdw  = float(self.weights.get("dna_weight",        0.40))
-        ggw  = float(self.weights.get("goals_weight",      0.45))
-        gsow = float(self.weights.get("shots_ot_weight",   0.30))
-        gpw  = float(self.weights.get("possession_weight", 0.25))
-
-        self.weights.update({
-            "form_weight":       round(max(0.10, min(0.90, gfw  + (fw  - gfw)  * 0.25)), 4),
-            "dna_weight":        round(max(0.10, min(0.90, gdw  + (dw  - gdw)  * 0.25)), 4),
-            "goals_weight":      round(max(0.10, min(0.80, ggw  + (gw  - ggw)  * 0.25)), 4),
-            "shots_ot_weight":   round(max(0.05, min(0.60, gsow + (sow - gsow) * 0.25)), 4),
-            "possession_weight": round(max(0.05, min(0.50, gpw  + (pw  - gpw)  * 0.25)), 4),
-            "league_weights":    lw_all,
-        })
+        new_weights, result = recalibrate_weights(
+            self.weights,
+            league=league, pred_home_xg=pred_h, pred_away_xg=pred_a,
+            actual_home_goals=actual_home_goals, actual_away_goals=actual_away_goals,
+            fixture_id=fixture_id,
+            home_team=cache.get("home_team", ""), away_team=cache.get("away_team", ""),
+            learning_rate=lr, max_delta=max_d, recency_weight=recency,
+        )
+        self.weights = new_weights
         self._persist_weights()
 
-        reason  = "  |  ".join(reasons) or "Minor adjustment."
-        log_row = {
-            "fixture_id":     fixture_id,
-            "league":         league,
-            "sample_count":   sc + 1,
-            "home":           f"{cache.get('home_team', '')} ({pred_h:.2f} xG)",
-            "away":           f"{cache.get('away_team', '')} ({pred_a:.2f} xG)",
-            "actual":         f"{actual_home_goals}-{actual_away_goals}",
-            "combined_error": round(combined, 3),
-            "new_form_w":     fw,
-            "new_dna_w":      dw,
-            "home_advantage": ha,
-            "reason":         reason,
-        }
-
-        if self.use_supabase:
-            sb.append_recalibration_log(log_row)
-        else:
-            log_row_csv = {"timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"), **log_row}
-            exists = RECAL_LOG_PATH.exists()
-            with RECAL_LOG_PATH.open("a", newline="", encoding="utf-8") as f:
-                wr = csv.DictWriter(f, fieldnames=list(log_row_csv.keys()))
-                if not exists:
-                    wr.writeheader()
-                wr.writerow(log_row_csv)
+        if result.log_row is not None:
+            if self.use_supabase:
+                sb.append_recalibration_log(result.log_row)
+            else:
+                log_row_csv = {"timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M"), **result.log_row}
+                exists = RECAL_LOG_PATH.exists()
+                with RECAL_LOG_PATH.open("a", newline="", encoding="utf-8") as f:
+                    wr = csv.DictWriter(f, fieldnames=list(log_row_csv.keys()))
+                    if not exists:
+                        wr.writeheader()
+                    wr.writerow(log_row_csv)
 
         return {
-            "status":         "recalibrated",
+            "status":         result.status,
             "fixture_id":     fixture_id,
-            "pred_home_xg":   round(pred_h, 3),
-            "pred_away_xg":   round(pred_a, 3),
+            "league":         league,
+            "pred_home_xg":   result.pred_home_xg,
+            "pred_away_xg":   result.pred_away_xg,
             "actual_home":    actual_home_goals,
             "actual_away":    actual_away_goals,
-            "home_error":     round(home_err, 3),
-            "away_error":     round(away_err, 3),
-            "combined_error": round(combined, 3),
-            "adjustments":    adjustments,
-            "reason":         reason,
+            "home_error":     result.home_error,
+            "away_error":     result.away_error,
+            "combined_error": result.combined_error,
+            "adjustments":    result.adjustments,
+            "reason":         result.reason,
+            "recency_weight": round(recency, 4),
         }
 
     # ── ML training trigger (v3.0) ────────────────────────────────────────
