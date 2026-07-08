@@ -37,6 +37,8 @@ root = Path(__file__).parent.parent
 if str(root) not in sys.path:
     sys.path.insert(0, str(root))
 
+from feature_engine import compute_form_score, compute_h2h_modifier
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  [%(levelname)s]  %(name)s — %(message)s",
@@ -53,7 +55,6 @@ K_FACTOR_NEW   = 40
 
 # ── Parametri formă ───────────────────────────────────────────────────────────
 FORM_WINDOW    = 5      # ultimele N meciuri pentru formă
-RESULT_VALUES  = {"W": 1.0, "D": 0.4, "L": 0.0}
 
 
 def get_client():
@@ -228,13 +229,7 @@ class FormTracker:
             return 0.5  # formă neutră dacă nu avem date
 
         results = [r for r, _, _ in form]
-        weights = [2 ** i for i in range(len(results))]
-        total_w = sum(weights) or 1
-        score = sum(
-            RESULT_VALUES.get(r, 0.4) * weights[i]
-            for i, r in enumerate(results)
-        ) / total_w
-        return round(score, 4)
+        return compute_form_score(results)
 
     def calculate_ratings(self, team: str) -> tuple[float, float]:
         """
@@ -312,8 +307,7 @@ class H2HTracker:
         away_wins = sum(1 for h, _, _ in history if h == away)
         n = len(history)
 
-        dominance = (home_wins - away_wins) / n
-        modifier = round(dominance * 0.15, 4)
+        modifier = compute_h2h_modifier(home_wins, away_wins, n, weight=0.15)
         return modifier, n
 
     def process_match(
