@@ -21,7 +21,7 @@ CHANGES v3.0 (față de v2.3):
 """
 from __future__ import annotations
 
-import csv, json, logging, math, sys
+import csv, json, logging, sys
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -29,7 +29,6 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from scipy.stats import poisson
 
 try:
     from oracle_api import FootballOracleAPI
@@ -45,6 +44,18 @@ try:
     from recalibration import recalibrate_weights, compute_recency_weight
 except ModuleNotFoundError:
     print("[FATAL] recalibration.py not found."); sys.exit(1)
+
+try:
+    from feature_engine import (
+        compute_form_score,
+        compute_h2h_modifier,
+        elo_to_offensive_multiplier,
+        elo_to_defensive_multiplier,
+        calibrate_xg,
+        poisson_model,
+    )
+except ModuleNotFoundError:
+    print("[FATAL] feature_engine.py not found."); sys.exit(1)
 
 try:
     from injury_manager import InjuryManager, TeamInjuryReport
@@ -323,16 +334,14 @@ class FootballOracleEngine:
 
     # ── ELO sigmoid ───────────────────────────────────────────────────────
     def _elo_to_multiplier(self, elo: int) -> float:
-        ref    = float(self.config.get("elo_reference",    1500.0))
-        scale  = float(self.config.get("elo_sigmoid_scale", 400.0))
-        sigmoid = 1.0 / (1.0 + math.exp(-((elo - ref) / scale)))
-        return round(0.55 + sigmoid * 1.10, 4)
+        ref   = float(self.config.get("elo_reference",    1500.0))
+        scale = float(self.config.get("elo_sigmoid_scale", 400.0))
+        return elo_to_offensive_multiplier(elo, ref, scale)
 
     def _elo_to_defensive_multiplier(self, elo: int) -> float:
-        ref    = float(self.config.get("elo_reference",    1500.0))
-        scale  = float(self.config.get("elo_sigmoid_scale", 400.0))
-        sigmoid = 1.0 / (1.0 + math.exp(-((elo - ref) / scale)))
-        return round(1.80 - sigmoid * 1.20, 4)
+        ref   = float(self.config.get("elo_reference",    1500.0))
+        scale = float(self.config.get("elo_sigmoid_scale", 400.0))
+        return elo_to_defensive_multiplier(elo, ref, scale)
 
     # ── H2H — v2.3 folosește Free Live Football ───────────────────────────
     def _build_h2h(self, home_name: str, away_name: str, match: dict) -> H2HRecord:
@@ -394,8 +403,9 @@ class FootballOracleEngine:
                 draws += 1; last_5.append("D")
 
         n = len(meetings[:5])
-        dominance    = (home_wins - away_wins) / n
-        h2h_modifier = round(dominance * float(self.config.get("h2h_weight", 0.15)), 4)
+        h2h_modifier = compute_h2h_modifier(
+            home_wins, away_wins, n, weight=float(self.config.get("h2h_weight", 0.15))
+        )
         summary = (
             f"H2H ({n} meciuri): {home_wins}W {draws}D {away_wins}L | "
             f"Goluri: {round(home_g/n,1)}–{round(away_g/n,1)} | Ultimele: {''.join(last_5)}"
@@ -593,10 +603,7 @@ class FootballOracleEngine:
             data_quality = DATA_QUALITY_NEUTRAL
 
         # ── Form score ────────────────────────────────────────────────────
-        rv  = {"W": 1.0, "D": 0.4, "L": 0.0}
-        wts = [2 ** i for i in range(len(results))]
-        tw  = sum(wts) or 1
-        form_score = sum(rv.get(r, 0.4) * wts[i] for i, r in enumerate(results)) / tw
+        form_score = compute_form_score(results)
 
         off_rating = min(off_rating, o_cap)
         def_rating = min(def_rating, d_cap)
@@ -652,49 +659,32 @@ class FootballOracleEngine:
         baselines = w.get("league_baselines", {})
         baseline  = float(baselines.get(league, baselines.get("default", 1.25)))
         lw        = self._get_league_weights(league)
-        fw        = lw["form_weight"]
-        dw        = lw["dna_weight"]
         d_cap     = float(w.get("defensive_cap", 2.5))
-        home_adv  = lw["home_advantage"]
-        away_pen  = lw["away_penalty"]
 
-        away_def_mod  = 0.60 + (away_p.defensive_rating / d_cap) * 0.80
-        home_def_mod  = 0.60 + (home_p.defensive_rating / d_cap) * 0.80
-        home_form_mod = 0.80 + home_p.form_score * 0.40
-        away_form_mod = 0.80 + away_p.form_score * 0.40
-
-        home_xg = home_p.offensive_rating * away_def_mod * baseline * (fw * home_form_mod + dw) * home_adv
-        away_xg = away_p.offensive_rating * home_def_mod * baseline * (fw * away_form_mod + dw) * away_pen
-
-        if h2h and h2h.meetings >= 2:
-            home_xg = home_xg * (1 + h2h.h2h_modifier)
-            away_xg = away_xg * (1 - h2h.h2h_modifier)
-
-        if weather_penalty > 0:
-            home_xg *= (1 - weather_penalty)
-            away_xg *= (1 - weather_penalty)
-
-        home_xg = round(max(home_xg, 0.20), 4)
-        away_xg = round(max(away_xg, 0.20), 4)
+        home_xg, away_xg = calibrate_xg(
+            home_offensive_rating=home_p.offensive_rating,
+            home_defensive_rating=home_p.defensive_rating,
+            away_offensive_rating=away_p.offensive_rating,
+            away_defensive_rating=away_p.defensive_rating,
+            home_form_score=home_p.form_score,
+            away_form_score=away_p.form_score,
+            baseline=baseline,
+            form_weight=lw["form_weight"],
+            dna_weight=lw["dna_weight"],
+            home_advantage=lw["home_advantage"],
+            away_penalty=lw["away_penalty"],
+            defensive_cap=d_cap,
+            h2h_modifier=(h2h.h2h_modifier if h2h else 0.0),
+            h2h_meetings=(h2h.meetings if h2h else 0),
+            weather_penalty=weather_penalty,
+        )
         logger.info("[xG] home=%.3f  away=%.3f  (weather=%.3f)", home_xg, away_xg, weather_penalty)
         return home_xg, away_xg
 
     # ── Poisson model ─────────────────────────────────────────────────────
     def _poisson_model(self, home_xg: float, away_xg: float) -> tuple[float, float, float, list]:
-        max_g  = int(self.config.get("max_goals_poisson", 8))
-        matrix = np.zeros((max_g + 1, max_g + 1))
-        for hg in range(max_g + 1):
-            for ag in range(max_g + 1):
-                matrix[hg, ag] = poisson.pmf(hg, home_xg) * poisson.pmf(ag, away_xg)
-        ph     = float(np.sum(np.tril(matrix, -1)))
-        pd     = float(np.sum(np.diag(matrix)))
-        pa     = float(np.sum(np.triu(matrix,  1)))
-        scores = sorted(
-            [(hg, ag, round(matrix[hg, ag] * 100, 2))
-             for hg in range(max_g + 1) for ag in range(max_g + 1)],
-            key=lambda x: x[2], reverse=True,
-        )
-        return ph, pd, pa, scores[:6]
+        max_g = int(self.config.get("max_goals_poisson", 8))
+        return poisson_model(home_xg, away_xg, max_g)
 
     # ── Value bet helpers ─────────────────────────────────────────────────
     @staticmethod
