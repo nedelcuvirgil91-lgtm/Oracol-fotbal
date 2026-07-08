@@ -64,7 +64,7 @@ root = Path(__file__).parent.parent
 if str(root) not in sys.path:
     sys.path.insert(0, str(root))
 
-from mappings import normalize_team_name, match_key
+from mappings import normalize_team_name, normalize_league_name, match_key
 from database.queries import upsert_matches_bulk, upsert_elo_history_bulk, upsert_sync_status
 from sync.sources.kaggle import (
     MAIN_DATASET,
@@ -415,7 +415,7 @@ def import_matches(
                     stats.reject("missing_team_name")
                     continue
 
-                league_code = _safe_str(r.get("Division")) or None
+                league_code = normalize_league_name(_safe_str(r.get("Division")) or None)
                 fixture_id = _generate_fixture_id(home_team, away_team, kickoff_date)
 
                 if fixture_id in seen_fixture_ids:
@@ -492,9 +492,9 @@ def import_elo_history(
 ) -> ImportStats:
     """
     Importa fisierul de snapshot-uri ELO (detectat automat) in elo_history.
-    Coloana 'country' din Kaggle e salvata TEMPORAR in 'league' (ex. "England",
-    "Spain") — nu e o competitie reala, ci o tara. Va fi normalizata corect
-    cand se implementeaza normalize_league_name() si o structura de competitii.
+    Coloana 'country' din Kaggle (ex. "England", "Spain") e trecuta prin
+    normalize_league_name() inainte de a fi scrisa in 'league' — vezi
+    mappings.py CHANGES v1.4.
 
     Acelasi `cutoff_date` ca la import_matches() este aplicat aici, pentru
     consistenta (vezi HISTORICAL_SEASONS_BACK). Aceeasi logica de early-stop
@@ -589,10 +589,11 @@ def import_elo_history(
                     "source": "kaggle",
                 }
                 if country_value:
-                    # Temporar: 'country' (ex. "England") stocat direct in 'league'.
-                    # NU e o competitie reala — va fi normalizat ulterior.
-                    row["league"] = country_value
-                    stats.distinct_leagues.add(country_value)
+                    # [FIX v1.4] Normalizat prin normalize_league_name() —
+                    # nu mai e stocata bruta valoarea 'country' din Kaggle.
+                    normalized_league = normalize_league_name(country_value)
+                    row["league"] = normalized_league
+                    stats.distinct_leagues.add(normalized_league)
 
                 batch_rows.append(row)
                 stats.rows_valid += 1
