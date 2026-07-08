@@ -1,6 +1,16 @@
 """
 ================================================================================
-FOOTBALL ORACLE — Mappings & Normalization (v1.3)
+FOOTBALL ORACLE — Mappings & Normalization (v1.4)
+CHANGES v1.4:
+  - [FIX] Restaurate constantele de configurare a ligilor (ODDS_SPORT_KEYS,
+    SPORT_KEY_TO_LEAGUE, FD_COMPETITIONS, ESPN_LEAGUE_SLUGS, TSDB_LEAGUE_IDS,
+    ELO_RATINGS_FALLBACK, NATIONAL_TEAM_STATS, LEAGUE_BASELINES,
+    FREE_LF_LEAGUE_IDS), eliminate accidental in v1.2/v1.3 in timpul
+    curatarii de team-aliasuri. oracle_api.py si oracle_engine.py le
+    importau si aplicatia nu mai pornea (ImportError: cannot import name
+    'ODDS_SPORT_KEYS' from 'mappings'). Valorile sunt identice 1:1 cu
+    ultima versiune functionala (v1.1) — nicio valoare inventata sau
+    modificata, doar recuperata din istoricul fisierului.
 CHANGES v1.3:
   - [FIX] Eliminate din _STRIP_SUFFIXES suffixele generice " fc", " cf",
     " united", " city" — aceeasi clasa de risc ca fuzzy-matching-ul eliminat
@@ -161,6 +171,149 @@ for _canonical, _aliases in TEAM_ALIASES.items():
     for _alias in _aliases:
         ALIAS_TO_CANONICAL[_alias.lower()] = _canonical
 
+# ─────────────────────────────────────────────────────────────────────────────
+# [RESTAURAT v1.4] Constante de configurare ligi/odds/ELO — identice 1:1 cu
+# v1.1 (ultima versiune in care existau). Eliminate accidental in v1.2/v1.3.
+# Consumate de oracle_api.py si oracle_engine.py — vezi CHANGES v1.4 de mai sus.
+# ─────────────────────────────────────────────────────────────────────────────
+ODDS_SPORT_KEYS: dict[str, str] = {
+    "World Cup 2026":    "soccer_fifa_world_cup",
+    "Premier League":    "soccer_epl",
+    "La Liga":           "soccer_spain_la_liga",
+    "Serie A":           "soccer_italy_serie_a",
+    "Bundesliga":        "soccer_germany_bundesliga",
+    "Ligue 1":           "soccer_france_ligue_one",
+    "Champions League":  "soccer_uefa_champs_league",
+    "Europa League":     "soccer_uefa_europa_league",
+    "Romania SuperLiga": "soccer_romania_1_liga",
+    "MLS":               "soccer_usa_mls",
+    "Eredivisie":        "soccer_netherlands_eredivisie",
+    "Primeira Liga":     "soccer_portugal_primeira_liga",
+}
+
+SPORT_KEY_TO_LEAGUE: dict[str, str] = {v: k for k, v in ODDS_SPORT_KEYS.items()}
+
+FD_COMPETITIONS: dict[str, str] = {
+    "Premier League": "PL", "La Liga": "PD", "Serie A": "SA",
+    "Bundesliga": "BL1", "Ligue 1": "FL1", "Champions League": "CL",
+    "Europa League": "EL", "World Cup 2026": "WC",
+}
+
+ESPN_LEAGUE_SLUGS: dict[str, str] = {
+    "World Cup 2026": "fifa.world", "Premier League": "eng.1",
+    "La Liga": "esp.1", "Serie A": "ita.1", "Bundesliga": "ger.1",
+    "Ligue 1": "fra.1", "Champions League": "uefa.champions",
+    "Europa League": "uefa.europa", "MLS": "usa.1", "Romania SuperLiga": "rou.1",
+}
+
+TSDB_LEAGUE_IDS: dict[str, str] = {
+    "Premier League": "4328", "La Liga": "4335", "Serie A": "4332",
+    "Bundesliga": "4331", "Ligue 1": "4334", "Champions League": "4480",
+    "Romania SuperLiga": "4652", "World Cup 2026": "4429", "MLS": "4346",
+}
+
+ELO_RATINGS_FALLBACK: dict[str, int] = {
+    "Argentina": 2141, "France": 2085, "England": 2065, "Brazil": 2062,
+    "Spain": 2052, "Belgium": 2040, "Portugal": 2038, "Netherlands": 2034,
+    "Germany": 2024, "Croatia": 2006, "Italy": 1998, "Uruguay": 1985,
+    "Colombia": 1978, "United States": 1975, "Mexico": 1972, "Denmark": 1968,
+    "Switzerland": 1964, "Morocco": 1952, "Japan": 1948, "Senegal": 1942,
+    "South Korea": 1936, "Australia": 1928, "Ecuador": 1920, "Canada": 1918,
+    "Poland": 1915, "Serbia": 1912, "Tunisia": 1905, "Iran": 1898,
+    "Saudi Arabia": 1890, "Ghana": 1885, "Cameroon": 1882, "Costa Rica": 1875,
+    "Peru": 1870, "Nigeria": 1868, "Qatar": 1850, "Panama": 1830,
+    "Honduras": 1815, "Bolivia": 1808, "Paraguay": 1812, "Jamaica": 1780,
+    "Curaçao": 1745, "Cape Verde": 1820, "New Zealand": 1738, "Bahrain": 1720,
+    "Iraq": 1715, "Venezuela": 1800, "Chile": 1835, "Ivory Coast": 1870,
+    "Manchester City": 1950, "Real Madrid": 1945, "Bayern Munich": 1940,
+    "Liverpool": 1932, "FC Barcelona": 1928, "Paris Saint-Germain": 1920,
+    "Arsenal": 1915, "Chelsea": 1908, "Manchester United": 1900,
+    "Juventus": 1895, "Inter Milan": 1898, "AC Milan": 1885,
+    "Atletico Madrid": 1890, "Borussia Dortmund": 1885, "Napoli": 1880,
+    "Tottenham Hotspur": 1875,
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# NATIONAL TEAM STATS — date reale din calificari + turnee recente
+# Surse: FIFA WC 2026 qualifiers, Nations League 2024-25, Copa America 2024,
+#        AFCON 2024, Euro 2024. Actualizate manual periodic.
+# Format: avg_gf, avg_ga, avg_sot, avg_possession, matches_used
+# ─────────────────────────────────────────────────────────────────────────────
+NATIONAL_TEAM_STATS: dict[str, dict] = {
+    # ── Group A ───────────────────────────────────────────────────────────
+    "United States":  {"avg_gf":1.82,"avg_ga":0.91,"avg_sot":5.2,"avg_possession":54.1,"matches":12,"form":["W","W","D","W","W"]},
+    "Panama":         {"avg_gf":1.20,"avg_ga":1.10,"avg_sot":3.8,"avg_possession":44.2,"matches":10,"form":["W","L","W","D","W"]},
+    "Morocco":        {"avg_gf":1.75,"avg_ga":0.70,"avg_sot":5.8,"avg_possession":51.3,"matches":14,"form":["W","W","W","D","W"]},
+    "Serbia":         {"avg_gf":1.90,"avg_ga":1.10,"avg_sot":5.5,"avg_possession":52.0,"matches":10,"form":["W","D","W","W","L"]},
+    # ── Group B ───────────────────────────────────────────────────────────
+    "Mexico":         {"avg_gf":1.65,"avg_ga":1.05,"avg_sot":4.9,"avg_possession":53.2,"matches":12,"form":["W","W","D","L","W"]},
+    "Poland":         {"avg_gf":1.45,"avg_ga":1.20,"avg_sot":4.3,"avg_possession":49.8,"matches":10,"form":["D","W","L","W","D"]},
+    "Saudi Arabia":   {"avg_gf":1.30,"avg_ga":1.25,"avg_sot":3.9,"avg_possession":46.5,"matches":10,"form":["W","L","W","W","D"]},
+    "Belgium":        {"avg_gf":2.10,"avg_ga":0.85,"avg_sot":6.2,"avg_possession":56.4,"matches":10,"form":["W","W","W","D","W"]},
+    # ── Group C ───────────────────────────────────────────────────────────
+    "Brazil":         {"avg_gf":2.20,"avg_ga":0.75,"avg_sot":7.1,"avg_possession":61.2,"matches":18,"form":["W","W","D","W","W"]},
+    "Croatia":        {"avg_gf":1.55,"avg_ga":0.90,"avg_sot":5.0,"avg_possession":53.5,"matches":10,"form":["W","D","W","D","W"]},
+    "Japan":          {"avg_gf":1.80,"avg_ga":0.85,"avg_sot":5.5,"avg_possession":50.8,"matches":12,"form":["W","W","W","L","W"]},
+    "Colombia":       {"avg_gf":2.05,"avg_ga":0.70,"avg_sot":6.3,"avg_possession":57.2,"matches":18,"form":["W","W","W","W","D"]},
+    # ── Group D ───────────────────────────────────────────────────────────
+    "England":        {"avg_gf":2.05,"avg_ga":0.65,"avg_sot":6.8,"avg_possession":58.3,"matches":12,"form":["W","W","D","W","W"]},
+    "Netherlands":    {"avg_gf":1.95,"avg_ga":0.80,"avg_sot":6.1,"avg_possession":57.0,"matches":12,"form":["W","W","W","D","W"]},
+    "Senegal":        {"avg_gf":1.60,"avg_ga":0.90,"avg_sot":4.8,"avg_possession":49.5,"matches":12,"form":["W","D","W","W","L"]},
+    "Iran":           {"avg_gf":1.35,"avg_ga":1.00,"avg_sot":3.8,"avg_possession":45.0,"matches":10,"form":["W","W","D","L","W"]},
+    # ── Group E ───────────────────────────────────────────────────────────
+    "France":         {"avg_gf":2.30,"avg_ga":0.60,"avg_sot":7.5,"avg_possession":60.5,"matches":12,"form":["W","W","W","W","D"]},
+    "Australia":      {"avg_gf":1.25,"avg_ga":1.10,"avg_sot":3.7,"avg_possession":44.8,"matches":10,"form":["W","D","L","W","W"]},
+    "Denmark":        {"avg_gf":1.75,"avg_ga":0.80,"avg_sot":5.4,"avg_possession":54.2,"matches":10,"form":["W","W","D","W","D"]},
+    "Tunisia":        {"avg_gf":1.20,"avg_ga":1.00,"avg_sot":3.5,"avg_possession":44.0,"matches":10,"form":["D","W","L","D","W"]},
+    # ── Group F ───────────────────────────────────────────────────────────
+    "Germany":        {"avg_gf":2.40,"avg_ga":0.80,"avg_sot":7.2,"avg_possession":60.8,"matches":12,"form":["W","W","W","D","W"]},
+    "Spain":          {"avg_gf":2.35,"avg_ga":0.55,"avg_sot":7.8,"avg_possession":64.5,"matches":12,"form":["W","W","W","W","W"]},
+    "Costa Rica":     {"avg_gf":1.10,"avg_ga":1.30,"avg_sot":3.2,"avg_possession":42.5,"matches":10,"form":["L","W","D","W","L"]},
+    # ── Group G ───────────────────────────────────────────────────────────
+    "Argentina":      {"avg_gf":2.55,"avg_ga":0.60,"avg_sot":8.0,"avg_possession":57.8,"matches":18,"form":["W","W","W","W","W"]},
+    "Peru":           {"avg_gf":1.15,"avg_ga":1.35,"avg_sot":3.4,"avg_possession":45.5,"matches":18,"form":["L","D","W","L","D"]},
+    "Canada":         {"avg_gf":1.70,"avg_ga":1.05,"avg_sot":5.0,"avg_possession":50.5,"matches":12,"form":["W","W","D","W","L"]},
+    "Ecuador":        {"avg_gf":1.55,"avg_ga":1.10,"avg_sot":4.6,"avg_possession":48.8,"matches":18,"form":["W","D","W","L","W"]},
+    # ── Group H ───────────────────────────────────────────────────────────
+    "Portugal":       {"avg_gf":2.45,"avg_ga":0.65,"avg_sot":7.6,"avg_possession":59.2,"matches":12,"form":["W","W","W","W","D"]},
+    "Ghana":          {"avg_gf":1.40,"avg_ga":1.20,"avg_sot":4.0,"avg_possession":46.0,"matches":12,"form":["W","D","L","W","D"]},
+    "Uruguay":        {"avg_gf":1.85,"avg_ga":0.80,"avg_sot":5.7,"avg_possession":52.5,"matches":18,"form":["W","W","D","W","W"]},
+    "South Korea":    {"avg_gf":1.60,"avg_ga":0.95,"avg_sot":4.8,"avg_possession":50.2,"matches":12,"form":["W","W","D","D","W"]},
+    # ── Alte nationale relevante ──────────────────────────────────────────
+    "Switzerland":    {"avg_gf":1.80,"avg_ga":0.85,"avg_sot":5.5,"avg_possession":53.0,"matches":10,"form":["W","W","D","W","W"]},
+    "Wales":          {"avg_gf":1.30,"avg_ga":1.10,"avg_sot":3.8,"avg_possession":45.5,"matches":10,"form":["D","L","W","D","W"]},
+    "Nigeria":        {"avg_gf":1.55,"avg_ga":1.05,"avg_sot":4.5,"avg_possession":48.5,"matches":12,"form":["W","D","W","L","W"]},
+    "Ivory Coast":    {"avg_gf":1.65,"avg_ga":1.00,"avg_sot":4.8,"avg_possession":50.0,"matches":12,"form":["W","W","D","W","L"]},
+    "Cameroon":       {"avg_gf":1.40,"avg_ga":1.15,"avg_sot":3.9,"avg_possession":46.5,"matches":12,"form":["D","W","L","W","D"]},
+    "Qatar":          {"avg_gf":1.10,"avg_ga":1.40,"avg_sot":3.2,"avg_possession":43.0,"matches":10,"form":["L","D","W","L","W"]},
+    "Curaçao":        {"avg_gf":1.25,"avg_ga":1.35,"avg_sot":3.5,"avg_possession":44.0,"matches":10,"form":["W","D","L","W","D"]},
+    "Cape Verde":     {"avg_gf":1.45,"avg_ga":1.00,"avg_sot":4.2,"avg_possession":47.0,"matches":12,"form":["W","W","D","D","W"]},
+    "Chile":          {"avg_gf":1.35,"avg_ga":1.25,"avg_sot":4.0,"avg_possession":51.0,"matches":18,"form":["L","D","W","D","L"]},
+    "Venezuela":      {"avg_gf":1.50,"avg_ga":1.10,"avg_sot":4.4,"avg_possession":48.0,"matches":18,"form":["W","W","D","W","D"]},
+    "Bolivia":        {"avg_gf":1.05,"avg_ga":1.55,"avg_sot":3.0,"avg_possession":41.0,"matches":18,"form":["L","L","D","W","L"]},
+    "Paraguay":       {"avg_gf":1.30,"avg_ga":1.20,"avg_sot":3.7,"avg_possession":46.0,"matches":18,"form":["D","W","L","D","W"]},
+    "Honduras":       {"avg_gf":1.15,"avg_ga":1.30,"avg_sot":3.3,"avg_possession":44.5,"matches":10,"form":["L","W","D","L","W"]},
+    "Jamaica":        {"avg_gf":1.10,"avg_ga":1.35,"avg_sot":3.1,"avg_possession":43.5,"matches":10,"form":["D","L","W","D","L"]},
+    "Iraq":           {"avg_gf":1.45,"avg_ga":1.05,"avg_sot":4.1,"avg_possession":47.5,"matches":10,"form":["W","D","W","L","W"]},
+    "Bahrain":        {"avg_gf":1.20,"avg_ga":1.25,"avg_sot":3.4,"avg_possession":44.0,"matches":10,"form":["W","D","L","W","D"]},
+    "Uzbekistan":     {"avg_gf":1.55,"avg_ga":0.95,"avg_sot":4.5,"avg_possession":50.0,"matches":10,"form":["W","W","D","W","L"]},
+    "New Zealand":    {"avg_gf":1.15,"avg_ga":1.20,"avg_sot":3.3,"avg_possession":43.0,"matches":10,"form":["D","W","L","W","D"]},
+    "Trinidad and Tobago": {"avg_gf":1.10,"avg_ga":1.25,"avg_sot":3.2,"avg_possession":43.5,"matches":10,"form":["D","L","W","D","W"]},
+}
+
+LEAGUE_BASELINES: dict[str, float] = {
+    "Premier League": 1.35, "La Liga": 1.20, "Serie A": 1.25,
+    "Bundesliga": 1.40, "Ligue 1": 1.30, "Champions League": 1.20,
+    "Europa League": 1.15, "Romania SuperLiga": 1.15,
+    "World Cup 2026": 1.25, "MLS": 1.40, "default": 1.25,
+}
+
+FREE_LF_LEAGUE_IDS: dict[str, int] = {
+    "World Cup 2026": 77, "Premier League": 47, "Champions League": 42,
+    "La Liga": 87, "Bundesliga": 54, "Europa League": 73,
+    "Ligue 1": 53, "Serie A": 55,
+}
+
 # [FIX v1.3] " fc", " cf", " united", " city" eliminate — vezi CHANGES v1.3.
 _STRIP_SUFFIXES = [
     " football club"," sc"," sv"," ac"," bc",
@@ -201,3 +354,68 @@ def match_key(home: str, away: str, kickoff_date: str) -> str:
     a = normalize_team_name(away or "").lower()
     d = (kickoff_date or "")[:10]
     return f"{h}||{a}||{d}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# [ADAUGAT v1.4] League normalization
+# ─────────────────────────────────────────────────────────────────────────────
+# Aduce toate formele brute sub care poate aparea o competitie (coduri
+# football-data.co.uk din Kaggle Division, nume de tara din EloRatings.csv,
+# coduri/nume din football-data.org) la ACELASI nume canonic folosit peste
+# tot in aplicatie (cheile din LEAGUE_BASELINES / ODDS_SPORT_KEYS /
+# FD_COMPETITIONS / ESPN_LEAGUE_SLUGS / TSDB_LEAGUE_IDS / FREE_LF_LEAGUE_IDS).
+#
+# Design intentionat, la cererea utilizatorului:
+#   - DOAR potriviri exacte (case-insensitive) — NICIUN fuzzy matching, spre
+#     deosebire de normalize_team_name(). O liga are un numar mic si stabil
+#     de coduri/variante cunoscute; o potrivire aproximativa ar risca sa
+#     amestece competitii diferite (ex. Serie A vs Serie B) tacit.
+#   - Extensibil: pentru a adauga o competitie noua (ex. Championship,
+#     Eredivisie ca sursa activa, alta liga), se adauga DOAR o intrare noua
+#     in LEAGUE_ALIASES — functia normalize_league_name() nu se modifica.
+#   - O valoare necunoscuta ramane NESCHIMBATA (acelasi principiu sigur ca
+#     la normalize_team_name(): mai bine nenormalizata decat mapata gresit).
+LEAGUE_ALIASES: dict[str, list[str]] = {
+    # ── Coduri football-data.co.uk (coloana Division din Kaggle) + nume de
+    #    tara din EloRatings.csv + codul football-data.org (din FD_COMPETITIONS)
+    "Premier League":    ["E0", "England", "PL"],
+    "La Liga":           ["SP1", "Spain", "PD", "Primera Division", "LaLiga"],
+    "Serie A":           ["I1", "Italy", "SA"],
+    "Bundesliga":        ["D1", "Germany", "BL1"],
+    "Ligue 1":           ["F1", "France", "FL1"],
+    "Romania SuperLiga": ["Romania", "Liga 1", "Liga I"],
+    # ── Competitii UEFA / mondiale — coduri FD_COMPETITIONS + denumiri
+    #    oficiale folosite de football-data.org in raspunsul API
+    "Champions League":  ["CL", "UEFA Champions League", "UCL"],
+    "Europa League":     ["EL", "UEFA Europa League", "UEL"],
+    "World Cup 2026":    ["WC", "FIFA World Cup", "World Cup"],
+    # ── Alte ligi prezente in ODDS_SPORT_KEYS / ESPN_LEAGUE_SLUGS, momentan
+    #    fara sursa activa de import istoric — pastrate pentru extensibilitate
+    "MLS":               ["USA", "Major League Soccer"],
+    "Eredivisie":        ["N1", "Netherlands"],
+    "Primeira Liga":     ["P1", "Portugal"],
+}
+
+ALIAS_TO_CANONICAL_LEAGUE: dict[str, str] = {}
+for _canonical_lg, _aliases_lg in LEAGUE_ALIASES.items():
+    ALIAS_TO_CANONICAL_LEAGUE[_canonical_lg.lower()] = _canonical_lg
+    for _alias_lg in _aliases_lg:
+        ALIAS_TO_CANONICAL_LEAGUE[_alias_lg.lower()] = _canonical_lg
+
+
+def normalize_league_name(name: str) -> str:
+    """
+    Aduce orice forma bruta de nume/cod de competitie la numele canonic
+    folosit in restul aplicatiei. DOAR potrivire exacta (case-insensitive),
+    fara fuzzy matching — vezi nota de design de mai sus.
+
+    O valoare necunoscuta (None, gol, sau un cod/nume care nu apare in
+    LEAGUE_ALIASES) este returnata NESCHIMBATA.
+    """
+    if not name:
+        return name
+    cleaned = name.strip()
+    lookup = cleaned.lower()
+    if lookup in ALIAS_TO_CANONICAL_LEAGUE:
+        return ALIAS_TO_CANONICAL_LEAGUE[lookup]
+    return cleaned
