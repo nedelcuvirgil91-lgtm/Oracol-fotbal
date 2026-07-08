@@ -78,6 +78,90 @@ COMPETITION_TO_LEAGUE = {
     "CL":  "Champions League",
 }
 
+# [ADAUGAT v1.1] Fallback minim daca model_config nu exista inca in Supabase
+# / config.json — identic ca valori cu DEFAULT_CONFIG din oracle_engine.py,
+# doar cele 3 chei de care are nevoie recalibrarea (nu duplica intreg
+# DEFAULT_CONFIG, ca sa nu existe doua liste complete de config care se pot
+# dezalinia in timp — ambele citesc oricum aceeasi sursa reala, model_config).
+_RECAL_CONFIG_DEFAULTS = {
+    "recalibration_learning_rate": 0.05,
+    "recalibration_max_delta":     0.15,
+    "recency_half_life_days":      365,
+}
+
+
+def _recalibrate_for_result(match_row: dict, r: dict) -> None:
+    """
+    [ADAUGAT v1.1] Recalibreaza automat league_weights pentru meciul
+    tocmai completat cu rezultatul real — fara nicio interventie manuala,
+    fara Portfolio. Foloseste EXACT aceeasi functie pura (recalibrate_weights,
+    din recalibration.py) ca fluxul live din oracle_engine.py — o singura
+    sursa de adevar pentru algoritmul de invatare.
+
+    match_row: randul din match_history gasit de update_results_in_supabase()
+               (contine home_xg_pred / away_xg_pred — predictia salvata la
+               momentul evaluate_match()).
+    r:         rezultatul real descarcat de fetch_yesterday_results()
+               (contine home_goals / away_goals / league / kickoff_date).
+
+    Nu arunca exceptii in afara — un esec de recalibrare (ex. Supabase
+    indisponibil temporar) nu trebuie sa opreasca restul jobului zilnic de
+    sincronizare a rezultatelor.
+    """
+    pred_h = match_row.get("home_xg_pred")
+    pred_a = match_row.get("away_xg_pred")
+    if pred_h is None or pred_a is None:
+        # Meciul nu a fost niciodata predictionat live (nu exista xG salvat) —
+        # nimic de recalibrat pentru el.
+        logger.debug(
+            "[SyncResults] Fara home_xg_pred/away_xg_pred pentru %s vs %s — sar peste recalibrare.",
+            r.get("home_team"), r.get("away_team"),
+        )
+        return
+
+    try:
+        from supabase_client import load_weights, save_weights, load_config, append_recalibration_log
+        from recalibration import recalibrate_weights, compute_recency_weight
+
+        cfg = load_config(_RECAL_CONFIG_DEFAULTS)
+        lr        = float(cfg.get("recalibration_learning_rate", 0.05))
+        max_d     = float(cfg.get("recalibration_max_delta",     0.15))
+        half_life = float(cfg.get("recency_half_life_days",      365))
+
+        weights = load_weights({"league_weights": {}})
+        recency = compute_recency_weight(r.get("kickoff_date"), half_life)
+
+        new_weights, result = recalibrate_weights(
+            weights,
+            league=r["league"], pred_home_xg=float(pred_h), pred_away_xg=float(pred_a),
+            actual_home_goals=r["home_goals"], actual_away_goals=r["away_goals"],
+            fixture_id=str(match_row.get("fixture_id", "")),
+            home_team=r.get("home_team", ""), away_team=r.get("away_team", ""),
+            learning_rate=lr, max_delta=max_d, recency_weight=recency,
+        )
+
+        if not save_weights(new_weights):
+            logger.warning(
+                "[SyncResults] save_weights a esuat pentru %s vs %s — recalibrarea NU a fost persistata.",
+                r.get("home_team"), r.get("away_team"),
+            )
+            return
+
+        if result.log_row is not None:
+            append_recalibration_log(result.log_row)
+
+        logger.info(
+            "[SyncResults] League Learning: %s vs %s [%s] → %s (sample #%d, eroare=%.3f, recency=%.3f)",
+            r.get("home_team"), r.get("away_team"), r["league"],
+            result.status, new_weights["league_weights"][r["league"]]["sample_count"],
+            result.combined_error, recency,
+        )
+    except Exception as exc:
+        logger.error(
+            "[SyncResults] Recalibrare automata esuata pentru %s vs %s: %s",
+            r.get("home_team"), r.get("away_team"), exc,
+        )
+
 
 def fetch_yesterday_results(target_date: str | None = None) -> list[dict]:
     """
@@ -172,7 +256,7 @@ def update_results_in_supabase(results: list[dict]) -> tuple[int, int]:
             # Căutăm meciul în match_history fără scor
             res = (
                 client.table("match_history")
-                .select("id,fixture_id")
+                .select("id,fixture_id,home_xg_pred,away_xg_pred")
                 .eq("home_team",    r["home_team"])
                 .eq("away_team",    r["away_team"])
                 .eq("league",       r["league"])
@@ -189,7 +273,7 @@ def update_results_in_supabase(results: list[dict]) -> tuple[int, int]:
                 if fd_fixture_id:
                     res2 = (
                         client.table("match_history")
-                        .select("id,fixture_id")
+                        .select("id,fixture_id,home_xg_pred,away_xg_pred")
                         .eq("fixture_id", fd_fixture_id)
                         .is_("actual_result", "null")
                         .execute()
@@ -204,14 +288,32 @@ def update_results_in_supabase(results: list[dict]) -> tuple[int, int]:
                 not_found += 1
                 continue
 
-            # Actualizăm primul rând găsit
-            match_id = rows[0]["id"]
-            client.table("match_history").update({
-                "actual_home_goals": r["home_goals"],
-                "actual_away_goals": r["away_goals"],
-                "actual_result":     r["actual_result"],
-                "backfill_done":     False,  # va fi procesat de backfill
-            }).eq("id", match_id).execute()
+            # [FIX v1.1] Pot exista MAI MULTE randuri pentru acelasi meci real
+            # (predictionat separat de surse diferite — ex. ESPN si Odds API,
+            # fiecare cu propriul fixture_id). Scriem rezultatul real pe TOATE
+            # (niciun rand nu ramane orfan, cu actual_result null la nesfarsit),
+            # dar recalibram League Learning O SINGURA DATA, dintr-un singur
+            # rand ales determinist (cel cu id-ul cel mai mic — prima predictie
+            # facuta pentru acel meci) — ca sa nu invatam de doua ori din
+            # acelasi rezultat real.
+            rows_sorted   = sorted(rows, key=lambda x: x["id"])
+            canonical_row = rows_sorted[0]
+
+            if len(rows_sorted) > 1:
+                logger.info(
+                    "[SyncResults] %d predictii duplicate gasite pentru %s vs %s (%s) — "
+                    "actualizez scorul pe toate, recalibrez o singura data din id=%s.",
+                    len(rows_sorted), r["home_team"], r["away_team"], r["kickoff_date"],
+                    canonical_row["id"],
+                )
+
+            for row in rows_sorted:
+                client.table("match_history").update({
+                    "actual_home_goals": r["home_goals"],
+                    "actual_away_goals": r["away_goals"],
+                    "actual_result":     r["actual_result"],
+                    "backfill_done":     False,  # va fi procesat de backfill
+                }).eq("id", row["id"]).execute()
 
             updated += 1
             logger.debug(
@@ -219,6 +321,13 @@ def update_results_in_supabase(results: list[dict]) -> tuple[int, int]:
                 r["home_team"], r["away_team"],
                 r["home_goals"], r["away_goals"], r["actual_result"]
             )
+
+            # [ADAUGAT v1.1] Recalibrare AUTOMATA — League Learning nu mai
+            # depinde de Portfolio sau de vreo confirmare manuala. Daca acest
+            # meci a fost predictionat live (home_xg_pred/away_xg_pred exista),
+            # recalibram ponderile chiar aici, fara nicio interventie umana.
+            # Doar din randul canonic — vezi nota de mai sus despre duplicate.
+            _recalibrate_for_result(canonical_row, r)
 
         except Exception as exc:
             logger.error("[SyncResults] Update failed pentru %s vs %s: %s",
