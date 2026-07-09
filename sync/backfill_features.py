@@ -30,7 +30,7 @@ import argparse
 import logging
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 root = Path(__file__).parent.parent
@@ -333,6 +333,131 @@ class H2HTracker:
         self.history[key].append((winner, home_goals, away_goals))
         # Păstrăm ultimele 10 meciuri H2H
         self.history[key] = self.history[key][-10:]
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# CALCULUL CLASAMENTULUI RETROSPECTIV
+# ════════════════════════════════════════════════════════════════════════════
+
+# Convenția de sezon (start 1 iulie) reutilizează EXACT aceeași regulă folosită
+# de _compute_season_cutoff_date() din sync/import_historical.py — nu se
+# inventează o a doua definiție de "sezon" în proiect. Diferența e de scop:
+# acolo se calculează O SINGURĂ dată cutoff-ul global (câte sezoane înapoi se
+# importă), aici se calculează, per meci, ANUL de start al sezonului căruia îi
+# aparține acel meci — o funcție diferită, dar aceeași regulă (1 iulie).
+# [NOTĂ ARHITECTURALĂ] Ar fi mai curat ca formula anului de start să fie
+# extrasă într-un helper comun, importat de ambele module — nu s-a făcut aici
+# ca să nu se modifice sync/import_historical.py în afara scopului cerut.
+
+def _season_start_year(kickoff_date: str) -> int:
+    """Anul de start al sezonului (ex. 2024 pentru sezonul 2024-2025),
+    pe baza convenției de sezon fotbalistic = 1 iulie - 30 iunie."""
+    d = date.fromisoformat(str(kickoff_date)[:10])
+    return d.year if d >= date(d.year, 7, 1) else d.year - 1
+
+
+class StandingsTracker:
+    """
+    Reconstruiește clasamentul cronologic (puncte, meciuri jucate, golaveraj)
+    per (ligă, sezon, echipă), procesând meciurile în ordine cronologică.
+
+    La fiecare meci, returnează clasamentul ÎNAINTE de acel meci — exact
+    același model ca ELOTracker.get_elos_before_match() → process_match().
+
+    [IMPORTANT — compatibilitate cu izolarea pe ligă] La fel ca ELOTracker/
+    FormTracker/H2HTracker, acest tracker NU distinge singur între ligi — dacă
+    e alimentat cu un flux cronologic care amestecă mai multe ligi (cazul
+    run_backfill() FĂRĂ --league), rezultatul ar fi corect DOAR dacă `league`
+    e trecut corect la fiecare apel (cheia internă include liga). Rămâne însă
+    responsabilitatea apelantului să nu amestece sezoane/ligi diferite ca și
+    cum ar fi aceeași competiție — acest tracker respectă izolarea DACĂ i se
+    dă liga corectă per meci, dar nu o poate detecta singur dacă apelantul
+    greșește. Pattern identic cu izolarea deja folosită în
+    sync/bootstrap_league_learning.py (tracker-e proaspete per ligă).
+
+    [FALLBACK — decizie explicită, nu ascunsă] Pentru o echipă fără niciun
+    meci jucat în sezonul curent (primul ei meci din sezon — inclusiv echipe
+    promovate), get_standings_before() returnează rank=None și ppg=None,
+    NU o valoare neutră implicită. Alegerea fallback-ului (ex. "mijlocul
+    clasamentului" sau altă valoare) e o decizie de arhitectură separată,
+    pentru stratul care consumă acest tracker (feature_engine.py), nu ceva
+    de ascuns aici — la fel cum ELOTracker ISI ALEGE explicit 1500 ca
+    default, dar acolo a fost o decizie asumată, nu o valoare arbitrară.
+    """
+
+    def __init__(self):
+        # {(league, season_start_year, team): {"points", "played", "gf", "ga"}}
+        self.table: dict[tuple, dict] = {}
+
+    def _key(self, league: str, season_year: int, team: str) -> tuple:
+        return (league, season_year, team)
+
+    def _ensure(self, league: str, season_year: int, team: str) -> dict:
+        key = self._key(league, season_year, team)
+        if key not in self.table:
+            self.table[key] = {"points": 0, "played": 0, "gf": 0, "ga": 0}
+        return self.table[key]
+
+    def _rank(self, league: str, season_year: int, team: str) -> int | None:
+        """Rank 1-indexat, tie-break standard (puncte, apoi golaveraj, apoi
+        goluri marcate) — identic cu regula folosită în clasamentele reale."""
+        entries = [
+            (k[2], v) for k, v in self.table.items()
+            if k[0] == league and k[1] == season_year
+        ]
+        if not entries:
+            return None
+        ranked = sorted(
+            entries,
+            key=lambda kv: (-kv[1]["points"], -(kv[1]["gf"] - kv[1]["ga"]), -kv[1]["gf"]),
+        )
+        for i, (t, _) in enumerate(ranked):
+            if t == team:
+                return i + 1
+        return None
+
+    def get_standings_before(self, league: str, kickoff_date: str, home: str, away: str) -> dict:
+        """Returnează clasamentul ÎNAINTE de acest meci pentru ambele echipe.
+        Trebuie apelat înainte de process_match() pentru ACELAȘI meci."""
+        season_year = _season_start_year(kickoff_date)
+        home_key = self._key(league, season_year, home)
+        away_key = self._key(league, season_year, away)
+        home_stats = self.table.get(home_key, {"points": 0, "played": 0, "gf": 0, "ga": 0})
+        away_stats = self.table.get(away_key, {"points": 0, "played": 0, "gf": 0, "ga": 0})
+
+        home_ppg = round(home_stats["points"] / home_stats["played"], 4) if home_stats["played"] > 0 else None
+        away_ppg = round(away_stats["points"] / away_stats["played"], 4) if away_stats["played"] > 0 else None
+
+        return {
+            "season_year": season_year,
+            "home_rank": self._rank(league, season_year, home),
+            "away_rank": self._rank(league, season_year, away),
+            "home_points": home_stats["points"], "home_played": home_stats["played"],
+            "away_points": away_stats["points"], "away_played": away_stats["played"],
+            "home_ppg": home_ppg, "away_ppg": away_ppg,
+            "n_teams_so_far": len({k[2] for k in self.table if k[0] == league and k[1] == season_year}),
+        }
+
+    def process_match(
+        self, league: str, kickoff_date: str, home: str, away: str,
+        home_goals: int, away_goals: int, result: str,
+    ) -> None:
+        """Actualizează clasamentul DUPĂ ce am citit starea 'înainte' (vezi
+        get_standings_before) — aceeași ordine ca la ELOTracker/FormTracker."""
+        season_year = _season_start_year(kickoff_date)
+        home_stats = self._ensure(league, season_year, home)
+        away_stats = self._ensure(league, season_year, away)
+
+        home_stats["played"] += 1
+        away_stats["played"] += 1
+        home_stats["gf"] += home_goals
+        home_stats["ga"] += away_goals
+        away_stats["gf"] += away_goals
+        away_stats["ga"] += home_goals
+
+        pts_home, pts_away = {"H": (3, 0), "A": (0, 3)}.get(result, (1, 1))
+        home_stats["points"] += pts_home
+        away_stats["points"] += pts_away
 
 
 # ════════════════════════════════════════════════════════════════════════════
