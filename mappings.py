@@ -389,8 +389,8 @@ LEAGUE_ALIASES: dict[str, list[str]] = {
     "Romania SuperLiga": ["Romania", "ROM", "Liga 1", "Liga I"],
     # ── Competitii UEFA / mondiale — coduri FD_COMPETITIONS + denumiri
     #    oficiale folosite de football-data.org in raspunsul API
-    "Champions League":  ["CL", "UEFA Champions League", "UCL"],
-    "Europa League":     ["EL", "UEFA Europa League", "UEL"],
+    "Champions League":  ["CL", "UEFA Champions League", "UCL", "uefa-champions-league"],
+    "Europa League":     ["EL", "UEFA Europa League", "UEL", "uefa-europa-league"],
     "World Cup 2026":    ["WC", "FIFA World Cup", "World Cup"],
     # ── Alte ligi prezente in ODDS_SPORT_KEYS / ESPN_LEAGUE_SLUGS, momentan
     #    fara sursa activa de import istoric — pastrate pentru extensibilitate
