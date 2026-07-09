@@ -210,6 +210,47 @@ def append_recalibration_log(row: dict) -> bool:
         return False
 
 
+def append_recalibration_log_batch(rows: list[dict]) -> tuple[int, int]:
+    """
+    Insereaza in Supabase mai multe randuri de recalibration_log intr-un
+    singur request (sau in cateva request-uri, daca `rows` e foarte mare).
+    Folosit de sync/bootstrap_league_learning.py, care ruleaza recalibrare
+    peste zeci de mii de meciuri si nu isi permite un round-trip HTTP per meci.
+
+    Returneaza (nr_randuri_inserate, nr_erori). Trimite in chunk-uri de 500
+    ca sa ramana sub limitele obisnuite de payload ale PostgREST.
+    """
+    client = get_client()
+    if client is None:
+        return 0, 0
+
+    mapped = [{
+        "fixture_id":     r.get("fixture_id"),
+        "league":         r.get("league"),
+        "sample_count":   r.get("sample_count"),
+        "home_team_info": r.get("home"),
+        "away_team_info": r.get("away"),
+        "actual_score":   r.get("actual"),
+        "combined_error": r.get("combined_error"),
+        "new_form_w":     r.get("new_form_w"),
+        "new_dna_w":      r.get("new_dna_w"),
+        "home_advantage": r.get("home_advantage"),
+        "reason":         r.get("reason"),
+    } for r in rows]
+
+    ok, errors = 0, 0
+    chunk_size = 500
+    for i in range(0, len(mapped), chunk_size):
+        chunk = mapped[i:i + chunk_size]
+        try:
+            client.table("recalibration_log").insert(chunk).execute()
+            ok += len(chunk)
+        except Exception as exc:
+            logger.error("[Supabase] append_recalibration_log_batch chunk %d failed: %s", i, exc)
+            errors += len(chunk)
+    return ok, errors
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # MATCH HISTORY (dataset ML)
 # ════════════════════════════════════════════════════════════════════════════
