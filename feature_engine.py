@@ -135,6 +135,88 @@ def calibrate_xg(
     return home_xg, away_xg
 
 
+# ── Rezolvare ponderi per-ligă (blend global ↔ per-ligă auto-învățat) ────────
+
+def resolve_league_weights(weights: dict, league: str) -> dict:
+    """
+    Face blend între ponderile globale și cele specifice unei ligi, ponderat
+    de `sample_count` (cu cât liga a acumulat mai multe rezultate reale, cu
+    atât ponderile ei proprii cântăresc mai mult, saturând la sample_count=5).
+
+    Matematică pură, identică cu cea folosită anterior inline în
+    oracle_engine._get_league_weights(). `weights` este dict-ul complet de
+    ponderi (global + league_weights), la fel ca self.weights din motorul live.
+    """
+    lw_all = weights.get("league_weights", {})
+    lw     = lw_all.get(league, lw_all.get("default", {}))
+    sc     = int(lw.get("sample_count", 0))
+    alpha  = min(sc / 5.0, 1.0)
+
+    def _blend(key, default):
+        lv = float(lw.get(key, weights.get(key, default)))
+        gv = float(weights.get(key, default))
+        return alpha * lv + (1 - alpha) * gv
+
+    return {
+        "form_weight":       _blend("form_weight",       0.60),
+        "dna_weight":        _blend("dna_weight",        0.40),
+        "goals_weight":      _blend("goals_weight",      0.45),
+        "shots_ot_weight":   _blend("shots_ot_weight",   0.30),
+        "possession_weight": _blend("possession_weight", 0.25),
+        "home_advantage":    _blend("home_advantage",    1.07),
+        "away_penalty":      _blend("away_penalty",      0.95),
+        "sample_count":      sc,
+    }
+
+
+# ── Rating ofensiv/defensiv dintr-un set de statistici medii ─────────────────
+
+def compute_team_offdef_rating(
+    avg_goals_for: float,
+    avg_goals_against: float,
+    avg_shots_on_target: float,
+    avg_possession: float,
+    goals_weight: float,
+    shots_ot_weight: float,
+    possession_weight: float,
+    offensive_cap: float,
+    defensive_cap: float,
+    elo_offensive_multiplier: float | None = None,
+    elo_defensive_multiplier: float | None = None,
+    elo_blend_weight: float = 0.35,
+) -> tuple[float, float]:
+    """
+    Calculează ratingul ofensiv/defensiv al unei echipe din media statisticilor
+    (goluri, șuturi pe poartă, posesie), blendat opțional cu multiplicatorul
+    ELO. Matematică pură, identică cu blocul "Compute ratings din stats" din
+    oracle_engine._build_profile().
+
+    Dacă `elo_offensive_multiplier`/`elo_defensive_multiplier` sunt None,
+    ratingul e folosit neblendat (echivalent cu elo_off is None în live).
+    """
+    g_norm   = min(avg_goals_for  / 2.0, 1.0) * 1.5
+    sot_norm = min(avg_shots_on_target / 6.0, 1.0) * 1.5
+    pos_norm = max(0.0, min(((avg_possession - 30.0) / 40.0) * 0.5, 0.5))
+
+    off_stat = min(
+        g_norm * goals_weight + sot_norm * shots_ot_weight + pos_norm * possession_weight
+        + avg_goals_for * 0.2,
+        offensive_cap,
+    )
+    def_stat = min(avg_goals_against, defensive_cap)
+
+    if elo_offensive_multiplier is not None:
+        off_rating = round((1 - elo_blend_weight) * off_stat + elo_blend_weight * elo_offensive_multiplier, 4)
+        def_rating = round((1 - elo_blend_weight) * def_stat + elo_blend_weight * elo_defensive_multiplier, 4)
+    else:
+        off_rating = round(off_stat, 4)
+        def_rating = round(def_stat, 4)
+
+    off_rating = min(off_rating, offensive_cap)
+    def_rating = min(def_rating, defensive_cap)
+    return off_rating, def_rating
+
+
 # ── Model Poisson ──────────────────────────────────────────────────────────────
 
 def poisson_model(home_xg: float, away_xg: float, max_goals: int = 8) -> tuple[float, float, float, list]:
