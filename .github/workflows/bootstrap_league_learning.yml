@@ -1,0 +1,50 @@
+name: Football Oracle — Bootstrap League Learning
+
+on:
+  # Rulare manuală cu parametri (nu e programată/recurentă — se rulează
+  # o dată sau ocazional, când vrei să reconstruiești model_weights)
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Procesează doar primele N meciuri (gol = toate meciurile)"
+        required: false
+        default: ""
+        type: string
+      dry_run:
+        description: "Dry run (fără scriere în Supabase)"
+        required: false
+        default: "true"
+        type: boolean
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run bootstrap league learning
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.limit }}" ]; then
+            ARGS="$ARGS --limit ${{ github.event.inputs.limit }}"
+          fi
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          echo "Rulează: python sync/bootstrap_league_learning.py $ARGS"
+          eval python sync/bootstrap_league_learning.py $ARGS
