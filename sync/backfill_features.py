@@ -54,7 +54,10 @@ K_FACTOR_BASE  = 32
 K_FACTOR_NEW   = 40
 
 # ── Parametri formă ───────────────────────────────────────────────────────────
-FORM_WINDOW    = 5      # ultimele N meciuri pentru formă
+FORM_WINDOW    = 10     # ultimele N meciuri pentru formă (mărit de la 5 la 10 —
+                        # decizie bazată pe replay-ul complet Premier League,
+                        # 760 meciuri: Brier 0.6312→0.6047, testat 5-15,
+                        # câștigul devine neglijabil după ~10-11)
 
 
 def get_client():
