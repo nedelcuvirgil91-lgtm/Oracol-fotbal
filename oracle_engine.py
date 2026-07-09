@@ -53,6 +53,8 @@ try:
         elo_to_defensive_multiplier,
         calibrate_xg,
         poisson_model,
+        resolve_league_weights,
+        compute_team_offdef_rating,
     )
 except ModuleNotFoundError:
     print("[FATAL] feature_engine.py not found."); sys.exit(1)
@@ -559,19 +561,20 @@ class FootballOracleEngine:
             sot_w = float(w.get("shots_ot_weight",   0.30))
             pos_w = float(w.get("possession_weight", 0.25))
 
-            g_norm   = min(gf  / 2.0, 1.0) * 1.5
-            sot_norm = min(sot / 6.0, 1.0) * 1.5
-            pos_norm = max(0.0, min(((pos - 30.0) / 40.0) * 0.5, 0.5))
-
-            off_stat = min(g_norm * g_w + sot_norm * sot_w + pos_norm * pos_w + gf * 0.2, o_cap)
-            def_stat = min(ga, d_cap)
-
-            if elo_off is not None:
-                off_rating = round((1 - elo_blend) * off_stat + elo_blend * elo_off, 4)
-                def_rating = round((1 - elo_blend) * def_stat + elo_blend * elo_def, 4)
-            else:
-                off_rating = round(off_stat, 4)
-                def_rating = round(def_stat, 4)
+            off_rating, def_rating = compute_team_offdef_rating(
+                avg_goals_for=gf,
+                avg_goals_against=ga,
+                avg_shots_on_target=sot,
+                avg_possession=pos,
+                goals_weight=g_w,
+                shots_ot_weight=sot_w,
+                possession_weight=pos_w,
+                offensive_cap=o_cap,
+                defensive_cap=d_cap,
+                elo_offensive_multiplier=elo_off,
+                elo_defensive_multiplier=elo_def,
+                elo_blend_weight=elo_blend,
+            )
 
         # ── Level 5: ELO only ─────────────────────────────────────────────
         elif elo_off is not None:
@@ -624,27 +627,7 @@ class FootballOracleEngine:
 
     # ── League weights (cold-start blending) ──────────────────────────────
     def _get_league_weights(self, league: str) -> dict:
-        lw_all = self.weights.get("league_weights", {})
-        lw     = lw_all.get(league, lw_all.get("default", {}))
-        sc     = int(lw.get("sample_count", 0))
-        alpha  = min(sc / 5.0, 1.0)
-        gw     = self.weights
-
-        def _blend(key, default):
-            lv = float(lw.get(key, gw.get(key, default)))
-            gv = float(gw.get(key, default))
-            return alpha * lv + (1 - alpha) * gv
-
-        return {
-            "form_weight":       _blend("form_weight",       0.60),
-            "dna_weight":        _blend("dna_weight",        0.40),
-            "goals_weight":      _blend("goals_weight",      0.45),
-            "shots_ot_weight":   _blend("shots_ot_weight",   0.30),
-            "possession_weight": _blend("possession_weight", 0.25),
-            "home_advantage":    _blend("home_advantage",    1.07),
-            "away_penalty":      _blend("away_penalty",      0.95),
-            "sample_count":      sc,
-        }
+        return resolve_league_weights(self.weights, league)
 
     # ── xG calibration ────────────────────────────────────────────────────
     def _calibrate_xg(
