@@ -6,7 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       limit:
-        description: "Procesează doar primele N meciuri (gol = toate meciurile)"
+        description: "Procesează doar primele N meciuri DIN FIECARE ligă (gol = toate meciurile din fereastra de sezoane)"
+        required: false
+        default: ""
+        type: string
+      seasons_back:
+        description: "Câte sezoane în urmă (gol = default-ul din script, 5)"
         required: false
         default: ""
         type: string
@@ -42,6 +47,9 @@ jobs:
           ARGS=""
           if [ -n "${{ github.event.inputs.limit }}" ]; then
             ARGS="$ARGS --limit ${{ github.event.inputs.limit }}"
+          fi
+          if [ -n "${{ github.event.inputs.seasons_back }}" ]; then
+            ARGS="$ARGS --seasons-back ${{ github.event.inputs.seasons_back }}"
           fi
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             ARGS="$ARGS --dry-run"
