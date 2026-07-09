@@ -37,7 +37,10 @@ root = Path(__file__).parent.parent
 if str(root) not in sys.path:
     sys.path.insert(0, str(root))
 
-from feature_engine import compute_form_score, compute_h2h_modifier
+from feature_engine import (
+    compute_form_score, compute_h2h_modifier, compute_team_offdef_rating,
+    elo_to_offensive_multiplier, elo_to_defensive_multiplier, resolve_league_weights,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -234,23 +237,15 @@ class FormTracker:
         results = [r for r, _, _ in form]
         return compute_form_score(results)
 
-    def calculate_ratings(self, team: str) -> tuple[float, float]:
-        """
-        Calculează rating ofensiv și defensiv din forma recentă.
-        Returnează (offensive_rating, defensive_rating).
-        """
-        form = self.get_form(team)
-        if not form:
-            return 1.0, 1.0
-
-        avg_gf = sum(gf for _, gf, _ in form) / len(form)
-        avg_ga = sum(ga for _, _, ga in form) / len(form)
-
-        # Rating ofensiv: normalizat față de media ligii (1.25 goluri/meci)
-        off_rating = round(min(avg_gf / 1.25, 3.5), 4)
-        def_rating = round(min(avg_ga, 2.5), 4)
-
-        return off_rating, def_rating
+    # [ELIMINAT — v3] calculate_ratings() folosea o formulă simplificată proprie
+    # (min(avg_gf/1.25, 3.5) / min(avg_ga, 2.5)), DUPLICATĂ față de
+    # compute_team_offdef_rating() din feature_engine.py — aceeași folosită de
+    # motorul live (oracle_engine._build_profile) și de bootstrap
+    # (acum team_pre_match_rating(), mai jos). Cele două formule divergeau:
+    # aceasta din urmă ignora complet goals_weight/shots_ot_weight/
+    # possession_weight și blend-ul ELO. Eliminată ca sursă duplicată de
+    # adevăr — vezi team_pre_match_rating() pentru înlocuitor, folosit acum
+    # uniform de live, backfill ȘI bootstrap.
 
     def process_match(
         self, home: str, away: str,
@@ -461,6 +456,78 @@ class StandingsTracker:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# RATING OFENSIV/DEFENSIV PRE-MECI — SURSĂ UNICĂ (live/backfill/bootstrap)
+# ════════════════════════════════════════════════════════════════════════════
+
+def team_pre_match_rating(
+    team: str, league: str,
+    elo_tracker: "ELOTracker", form_tracker: "FormTracker",
+    weights: dict, config: dict,
+) -> tuple[float, float, float, int]:
+    """
+    Calculează (offensive_rating, defensive_rating, form_score, elo_before)
+    pentru o echipă, ÎNAINTE de meciul curent.
+
+    [UNIFICARE — v3] Această funcție e acum SINGURA cale prin care se
+    calculează offensive/defensive rating în afara fluxului live — folosită
+    IDENTIC de run_backfill() (mai jos) ȘI de
+    sync/bootstrap_league_learning.py (care o importă de aici, nu mai are
+    propria copie). Înainte, backfill folosea o formulă proprie simplificată
+    (FormTracker.calculate_ratings(), eliminată) care ignora complet
+    goals_weight/shots_ot_weight/possession_weight și blend-ul ELO —
+    o divergență de model deja documentată în feature_engine.py, acum
+    rezolvată. Matematica de transformare (compute_team_offdef_rating) e
+    identică cu cea din oracle_engine._build_profile() — fluxul live diferă
+    doar prin SURSA datelor brute (API extern vs istoric replay-uit local),
+    nu prin formulă.
+
+    Fallback identic cu cascada live: dacă echipa nu are încă niciun meci
+    în istoricul acestei ligi → Level "ELO only" (fără formă, fără blend
+    din statistici — ELO există mereu, chiar la valoarea inițială 1500).
+
+    `elo_tracker`/`form_tracker` trebuie scopate la o singură ligă (replay
+    independent) — la fel ca în sync/bootstrap_league_learning.py — altfel
+    "istoricul" folosit ar amesteca competiții diferite.
+    """
+    elo_before = round(elo_tracker.get_elo(team))
+    elo_off = elo_to_offensive_multiplier(
+        elo_before, config.get("elo_reference", 1500.0), config.get("elo_sigmoid_scale", 400.0)
+    )
+    elo_def = elo_to_defensive_multiplier(
+        elo_before, config.get("elo_reference", 1500.0), config.get("elo_sigmoid_scale", 400.0)
+    )
+
+    form = form_tracker.get_form(team)
+    lw = resolve_league_weights(weights, league)
+    baselines = weights.get("league_baselines", {})
+    baseline = float(baselines.get(league, baselines.get("default", 1.25)))
+
+    if form:
+        avg_gf = sum(gf for _, gf, _ in form) / len(form)
+        avg_ga = sum(ga for _, _, ga in form) / len(form)
+        avg_sot = avg_gf * 0.45   # proxy — șuturi pe poartă absente 100% din Kaggle
+        avg_pos = 50.0            # neutru — posesie absentă 100% din Kaggle
+
+        off_rating, def_rating = compute_team_offdef_rating(
+            avg_goals_for=avg_gf, avg_goals_against=avg_ga,
+            avg_shots_on_target=avg_sot, avg_possession=avg_pos,
+            goals_weight=lw["goals_weight"], shots_ot_weight=lw["shots_ot_weight"],
+            possession_weight=lw["possession_weight"],
+            offensive_cap=float(weights.get("offensive_cap", 3.5)),
+            defensive_cap=float(weights.get("defensive_cap", 2.5)),
+            elo_offensive_multiplier=elo_off, elo_defensive_multiplier=elo_def,
+            elo_blend_weight=float(config.get("elo_blend_weight", 0.35)),
+        )
+        form_score = form_tracker.calculate_form_score(team)
+    else:
+        off_rating = round(elo_off * baseline, 4)
+        def_rating = round(elo_def, 4)
+        form_score = 0.0
+
+    return off_rating, def_rating, form_score, elo_before
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # ORCHESTRATORUL PRINCIPAL
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -468,6 +535,8 @@ def run_backfill(
     league: str | None = None,
     batch_size: int = 50,
     dry_run: bool = False,
+    weights: dict | None = None,
+    config: dict | None = None,
 ) -> dict:
     """
     Procesează toate meciurile din match_history și completează feature-urile ML.
@@ -480,7 +549,28 @@ def run_backfill(
        b. Dacă meciul nu e deja procesat (backfill_done=False), salvează feature-urile
        c. Actualizează ELO/formă/H2H cu rezultatul meciului
     4. Meciurile deja procesate (backfill_done=True) sară la pasul c direct
+
+    [UNIFICARE — v3] `weights`/`config`: dacă nu sunt date explicit, se
+    încarcă din Supabase (model_weights/model_config — sursa reală de adevăr
+    în producție), cu DEFAULT_WEIGHTS/DEFAULT_CONFIG din oracle_engine.py ca
+    fallback — EXACT aceeași strategie de încărcare ca la pornirea motorului
+    live (oracle_engine.FootballOracleEngine.__init__). Necesare acum pentru
+    team_pre_match_rating() (goals_weight/shots_ot_weight/possession_weight/
+    elo_blend_weight/league_baselines) — înainte, backfill nu avea nevoie de
+    ponderi deloc, fiindcă folosea formula proprie simplificată (eliminată).
     """
+    if weights is None or config is None:
+        from oracle_engine import DEFAULT_WEIGHTS, DEFAULT_CONFIG
+        try:
+            import supabase_client as sb
+            if weights is None:
+                weights = sb.load_weights(DEFAULT_WEIGHTS) if sb.is_available() else dict(DEFAULT_WEIGHTS)
+            if config is None:
+                config = sb.load_config(DEFAULT_CONFIG) if sb.is_available() else dict(DEFAULT_CONFIG)
+        except ModuleNotFoundError:
+            weights = weights if weights is not None else dict(DEFAULT_WEIGHTS)
+            config = config if config is not None else dict(DEFAULT_CONFIG)
+
     start_time = time.time()
     logger.info("═" * 60)
     logger.info("  FOOTBALL ORACLE — Backfill Features")
@@ -527,11 +617,14 @@ def run_backfill(
             continue
 
         # Citim feature-urile ÎNAINTE de meci
+        match_league = match.get("league", "") or (league or "")
         home_elo, away_elo = elo_tracker.get_elos_before_match(home, away)
-        home_form  = form_tracker.calculate_form_score(home)
-        away_form  = form_tracker.calculate_form_score(away)
-        home_off, home_def = form_tracker.calculate_ratings(home)
-        away_off, away_def = form_tracker.calculate_ratings(away)
+        home_off, home_def, home_form, _ = team_pre_match_rating(
+            home, match_league, elo_tracker, form_tracker, weights, config
+        )
+        away_off, away_def, away_form, _ = team_pre_match_rating(
+            away, match_league, elo_tracker, form_tracker, weights, config
+        )
         h2h_mod, h2h_meet  = h2h_tracker.get_h2h_before(home, away)
 
         # Dacă meciul nu e deja procesat, adăugăm la lista de update-uri
