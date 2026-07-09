@@ -484,6 +484,138 @@ def import_matches(
     return stats
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# [ADAUGAT] Import UEFA Champions League / Europa League — sursa "European
+# Soccer Data" (Kaggle, willfitzhugh/european-soccer-data)
+# ════════════════════════════════════════════════════════════════════════════
+#
+# Format STRUCTURAL DIFERIT fata de sursa principala (adamgbor): un rand per
+# ECHIPA per meci (coloane Team/Opponent/Team_Score/Opponent_Score/Location),
+# nu un rand per meci cu HomeTeam/AwayTeam. Cele doua randuri ale aceluiasi
+# meci sunt perspective oglindite (Location="Home" / Location="Away") — se
+# retine DOAR randul cu Location=="Home", care are deja Team=echipa gazda,
+# Opponent=echipa oaspete, Team_Score/Opponent_Score=scorul complet (90 min;
+# Home_Score_AET/Away_Score_AET separat, mostly null, ignorate la acest pas).
+#
+# Verificat manual (nu presupus): acoperirea reala a fisierului pentru UCL/UEL
+# se opreste in feb-mar 2023, desi descrierea Kaggle sugereaza acoperire
+# "pana azi" — deci acest import umple DOAR fereastra 2021-07-01 -> ~2023-03,
+# nu toate cele "5 sezoane" cerute. Diferenta (2023-24 -> azi) ramane un gol
+# real de date, netratat aici.
+#
+# Reutilizeaza IDENTIC: _generate_fixture_id(), normalize_team_name(),
+# normalize_league_name(), _safe_int(), _safe_str(), ImportStats,
+# _safe_upsert(), upsert_matches_bulk() — nicio logica noua duplicata fata
+# de import_matches().
+
+_UEFA_UNDERSTOOD_COMPETITIONS = {
+    "uefa-champions-league": "Champions League",
+    "uefa-europa-league": "Europa League",
+}
+
+
+def import_uefa_team_perspective_matches(
+    csv_path: Path,
+    dry_run: bool = False,
+    limit: int | None = None,
+    cutoff_date: date | None = None,
+) -> ImportStats:
+    """
+    Importa meciurile UEFA Champions League / Europa League din fisierul
+    "European Soccer Data" (format un-rand-per-echipa) in match_history.
+
+    `csv_path` e calea locala catre Full_Dataset.csv (fisier furnizat manual,
+    NU descarcat automat prin kagglehub — sursa e separata de
+    sync.sources.kaggle, de aceea `csv_path` e explicit, nu un CsvSummary).
+    """
+    stats = ImportStats("UEFA (European Soccer Data) -> match_history")
+    stats.cutoff_date = cutoff_date
+    stats.dry_run = dry_run
+
+    usecols = [
+        "Round", "Date", "Team", "Team_Score", "Opponent_Score",
+        "Opponent", "Location", "Competition",
+    ]
+    df = pd.read_csv(csv_path, usecols=usecols, dtype=str)
+    stats.total_rows_in_file = len(df)
+
+    df = df[df["Competition"].isin(_UEFA_UNDERSTOOD_COMPETITIONS)]
+    df = df[df["Location"] == "Home"]  # o singura perspectiva per meci
+
+    seen_fixture_ids: set[str] = set()
+    batch_rows: list[dict] = []
+    rows_processed = 0
+
+    for _, r in df.iterrows():
+        stats.rows_seen += 1
+        if limit is not None and rows_processed >= limit:
+            break
+        rows_processed += 1
+
+        parsed_date = pd.to_datetime(_safe_str(r["Date"]), format="%d/%m/%Y", errors="coerce")
+        if pd.isna(parsed_date):
+            stats.reject("invalid_date")
+            stats.note_invalid_date_example(r.get("Date"))
+            continue
+
+        match_date = parsed_date.date()
+        if cutoff_date is not None and match_date < cutoff_date:
+            stats.reject("before_cutoff")
+            continue
+
+        home_team = normalize_team_name(_safe_str(r["Team"]))
+        away_team = normalize_team_name(_safe_str(r["Opponent"]))
+        if not home_team or not away_team:
+            stats.reject("missing_team_name")
+            continue
+
+        home_goals = _safe_int(r.get("Team_Score"))
+        away_goals = _safe_int(r.get("Opponent_Score"))
+        if home_goals is None or away_goals is None:
+            stats.reject("missing_score")
+            continue
+
+        if home_goals > away_goals:
+            actual_result = "H"
+        elif home_goals < away_goals:
+            actual_result = "A"
+        else:
+            actual_result = "D"
+
+        kickoff_date = match_date.strftime("%Y-%m-%d")
+        league_code = normalize_league_name(_safe_str(r["Competition"]))
+        fixture_id = _generate_fixture_id(home_team, away_team, kickoff_date)
+
+        if fixture_id in seen_fixture_ids:
+            stats.note_duplicate(fixture_id)
+            continue
+        seen_fixture_ids.add(fixture_id)
+
+        batch_rows.append({
+            "fixture_id": fixture_id,
+            "home_team": home_team,
+            "away_team": away_team,
+            "league": league_code,
+            "kickoff_date": kickoff_date,
+            "actual_home_goals": home_goals,
+            "actual_away_goals": away_goals,
+            "actual_result": actual_result,
+            "used_for_training": True,
+        })
+        stats.rows_valid += 1
+        stats.distinct_teams.add(home_team)
+        stats.distinct_teams.add(away_team)
+        stats.distinct_leagues.add(league_code)
+        stats.dates.append(kickoff_date)
+
+    if batch_rows:
+        written, errors = _safe_upsert(dry_run, upsert_matches_bulk, batch_rows)
+        stats.rows_written += written
+        stats.upsert_errors += errors
+
+    return stats
+
+
 def import_elo_history(
     summary: CsvSummary,
     dry_run: bool = False,
