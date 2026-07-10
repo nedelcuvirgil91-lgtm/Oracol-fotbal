@@ -16,7 +16,6 @@ Surse de date:
 from __future__ import annotations
 import json, logging, random, sys, time
 from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 from requests import Session
 from requests.adapters import HTTPAdapter
@@ -36,7 +35,7 @@ except ImportError:
 
 from mappings import (
     ODDS_SPORT_KEYS, SPORT_KEY_TO_LEAGUE, FD_COMPETITIONS,
-    ESPN_LEAGUE_SLUGS, TSDB_LEAGUE_IDS, LEAGUE_BASELINES,
+    ESPN_LEAGUE_SLUGS, TSDB_LEAGUE_IDS,
     ELO_RATINGS_FALLBACK, FREE_LF_LEAGUE_IDS,
     normalize_team_name, match_key,
 )
@@ -58,13 +57,6 @@ FREE_LF_URL        = "https://free-api-live-football-data.p.rapidapi.com"
 FREE_LF_HOST       = "free-api-live-football-data.p.rapidapi.com"
 
 DEFAULT_SEASON = 2026
-
-# ── Căi cache disc ────────────────────────────────────────────────────────────
-BASE_DIR          = Path(__file__).parent
-CACHE_DIR         = BASE_DIR / "cache"
-CACHE_DIR.mkdir(exist_ok=True)
-ELO_CACHE_PATH    = CACHE_DIR / "elo_cache.json"
-SCORES_CACHE_PATH = CACHE_DIR / "scores_cache.json"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -94,27 +86,11 @@ def _build_session() -> Session:
     return s
 
 # ── Helpers cache disc ────────────────────────────────────────────────────────
-def _disc_load(path: Path) -> dict:
-    try:
-        if path.exists():
-            return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        pass
-    return {}
-
-def _disc_save(path: Path, data: dict) -> None:
-    try:
-        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-    except Exception as exc:
-        logger.warning("[DiscCache] Save failed %s: %s", path.name, exc)
-
-def _disc_fresh(path: Path, max_age_hours: int = 24) -> bool:
-    try:
-        if not path.exists(): return False
-        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
-        return (datetime.now(timezone.utc) - mtime).total_seconds() < max_age_hours * 3600
-    except Exception:
-        return False
+# [ELIMINAT — mort dupa reparatie] _disc_load/_disc_save/_disc_fresh si
+# ELO_CACHE_PATH/SCORES_CACHE_PATH — inlocuite complet de CacheManager
+# (_cget/_cset), care acopera identic aceleasi cazuri (elo: TTL 24h,
+# odds_scores: TTL prin categoria "odds"), plus persistare Supabase (L2),
+# pe care mecanismul vechi nu o avea deloc.
 
 # ── Fixture-uri demo ──────────────────────────────────────────────────────────
 _WC2026_FIXTURES = [
@@ -158,8 +134,6 @@ class FootballOracleAPI:
         self._ttl = 30
         self._dead_keys: set[str] = set()
         self._freelf_exhausted: bool = False
-        self._elo_cache:    dict[str, int]  = _disc_load(ELO_CACHE_PATH)
-        self._scores_cache: dict[str, list] = _disc_load(SCORES_CACHE_PATH)
         self._active_sport_keys: set[str]   = set()
         # [REPARAT] Inainte, _cget/_cset foloseau DOAR self._mem (dict simplu,
         # in memorie, per-instanta) - complet deconectat de CacheManager
@@ -625,10 +599,11 @@ class FootballOracleAPI:
     # ── Odds API — scores (formă recentă fallback) ────────────────────────
     def _fetch_scores_odds_api(self, sport_key: str, days_back: int = 3) -> list[dict]:
         if sport_key in self._dead_keys: return []
-        disc_key = f"{sport_key}_{days_back}"
-        if _disc_fresh(SCORES_CACHE_PATH, max_age_hours=6):
-            disc = _disc_load(SCORES_CACHE_PATH)
-            if disc_key in disc: return disc[disc_key]
+        # [REPARAT] Ocolea complet CacheManager, folosind doar un fisier disc
+        # separat (scores_cache.json) - gasit prin audit final, dupa deploy.
+        cache_key = f"odds_scores_{sport_key}_{days_back}"
+        cached = self._cget(cache_key)
+        if cached is not None: return cached
         data = self._get(
             f"{ODDS_API_URL}/sports/{sport_key}/scores",
             params={"apiKey": ODDS_API_KEY, "daysFrom": days_back},
@@ -655,8 +630,7 @@ class FootballOracleAPI:
                     "source": "the-odds-api-scores",
                 })
             except (KeyError, TypeError, ValueError): continue
-        disc = _disc_load(SCORES_CACHE_PATH); disc[disc_key] = results
-        _disc_save(SCORES_CACHE_PATH, disc)
+        self._cset(cache_key, results)
         return results
 
     def get_team_recent_form(self, team_name: str, league: str, days_back: int = 14) -> list[dict]:
@@ -872,13 +846,14 @@ class FootballOracleAPI:
 
     # ── ELO ratings ───────────────────────────────────────────────────────
     def _fetch_elo_ratings(self) -> dict[str, int]:
-        mem = self._cget("elo_ratings")
-        if mem is not None: return mem
-        if _disc_fresh(ELO_CACHE_PATH, max_age_hours=24) and self._elo_cache:
-            self._cset("elo_ratings", self._elo_cache); return self._elo_cache
+        # [REPARAT] Elimin stratul redundant (_disc_fresh + self._elo_cache) -
+        # CacheManager (prin _cget, categoria "elo", TTL 24h) acoperea deja
+        # exact acelasi caz, dublat inutil. O singura sursa de adevar acum.
+        cached = self._cget("elo_ratings")
+        if cached is not None: return cached
         if not BS4_AVAILABLE:
             fallback = dict(ELO_RATINGS_FALLBACK)
-            self._elo_cache = fallback; self._cset("elo_ratings", fallback); return fallback
+            self._cset("elo_ratings", fallback); return fallback
         try:
             r = self._s.get(ELO_URL,
                             headers={"User-Agent": _ua(), "Accept-Language": "en-US,en;q=0.9"},
@@ -898,13 +873,12 @@ class FootballOracleAPI:
                         if canonical and elo_val > 0: ratings[canonical] = elo_val
                     except (ValueError, IndexError): continue
             if not ratings: ratings = dict(ELO_RATINGS_FALLBACK)
-            _disc_save(ELO_CACHE_PATH, ratings)
-            self._elo_cache = ratings; self._cset("elo_ratings", ratings)
+            self._cset("elo_ratings", ratings)
             return ratings
         except Exception as exc:
             logger.error("[ELO] Scrape failed: %s", exc)
             fallback = dict(ELO_RATINGS_FALLBACK)
-            self._elo_cache = fallback; self._cset("elo_ratings", fallback); return fallback
+            self._cset("elo_ratings", fallback); return fallback
 
     def get_elo_rating(self, team_name: str) -> int | None:
         canonical = normalize_team_name(team_name)
