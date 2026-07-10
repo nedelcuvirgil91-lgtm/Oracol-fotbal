@@ -49,6 +49,20 @@ PROVIDERS: dict[str, dict] = {
     # se adauga o cheie reala prin add_key("apifootball", cheie, limit, label)
     # - health check-ul din football_providers.ApiFootballProvider respecta
     # asta corect (blocheaza orice request pana exista o cheie).
+    # [ADAUGAT] football-data.org — cheia era hardcodata direct in oracle_api.py
+    # (FOOTBALL_DATA_KEY), migrata aici pt consistenta cu restul providerilor.
+    # NOTA: planul gratuit e limitat la 10 req/MINUT, nu per luna/zi - acelasi
+    # tip de discrepanta ca la API-Football (ciclul acestui sistem e lunar).
+    # Pun un plafon lunar generos, fara sa presupun un numar exact - impunerea
+    # reala a limitei de minut ramane pe seama raspunsurilor 429, deja
+    # gestionate gratios in cod.
+    "footballdata": {
+        "name": "football-data.org",
+        "host": "api.football-data.org",
+        "base_url": "https://api.football-data.org/v4",
+        "header_key": "X-Auth-Token", "header_host": None,
+        "keys": [{"key": "3934542be32c47f88a194f9eec0f44a1", "limit": 10000, "label": "FootballData-Key1"}],
+    },
     "apifootball": {
         "name": "API-Football (api-sports.io)",
         "host": "v3.football.api-sports.io",
