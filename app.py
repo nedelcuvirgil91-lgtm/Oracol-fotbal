@@ -128,14 +128,6 @@ def load_engine():
     except Exception as exc:
         return str(exc)
 
-@st.cache_resource(show_spinner=False)
-def load_apifootball_provider():
-    # Sigur de cache-uit: verificat ca ApiFootballProvider nu tine nicio
-    # stare per-cerere (doar key_manager/cache partajate + o sesiune HTTP
-    # lazy) - vezi football_providers.py. Acelasi tipar ca load_engine().
-    from football_providers import ApiFootballProvider
-    return ApiFootballProvider()
-
 def _load_json(path):
     if not path.exists(): return {}
     try: return json.loads(path.read_text(encoding="utf-8"))
@@ -634,23 +626,5 @@ elif nav == "settings":
             engine.api.clear_cache(); st.cache_resource.clear()
             if "all_matches" in st.session_state: del st.session_state["all_matches"]
             st.toast("Cache șters!",icon="🗑️")
-
-        st.markdown("---")
-        st.caption("⚠️ TEMPORAR — validare live API-Football (injuries/coaches). De eliminat după confirmare.")
-        if st.button("🔍 Testează API-Football (Arsenal, team_id=42)"):
-            import time as _time
-            fp = load_apifootball_provider()
-            # raspuns BRUT, nefiltrat de normalizare - folosim chei de cache
-            # unice (cu timestamp) ca sa ocolim orice cache vechi si sa vedem
-            # exact ce raspunde API-ul acum
-            nonce = str(int(_time.time()))
-            with st.spinner("Apelez /coachs (raw)..."):
-                raw_coachs = fp._get("coachs", {"team": 42}, "coaches", f"diag_coachs_{nonce}")
-            st.write("**Răspuns BRUT /coachs:**", raw_coachs)
-            with st.spinner("Apelez /injuries (raw)..."):
-                raw_injuries = fp._get("injuries", {"team": 42}, "injuries", f"diag_injuries_{nonce}")
-            st.write("**Răspuns BRUT /injuries:**", raw_injuries)
-            if raw_coachs is None and raw_injuries is None:
-                st.error("Ambele None — HTTP nu a fost ok (vezi log-urile pt cod status exact).")
 
         st.markdown(f'<div style="font-size:.7rem;color:var(--t3);margin-top:.5rem;">Python {sys.version[:6]} · Football Oracle v3.0</div>',unsafe_allow_html=True)
