@@ -268,19 +268,41 @@ def upsert_match_history(row: dict) -> bool:
 
 
 def get_training_data(only_with_results: bool = True) -> list[dict]:
-    """Returnează toate meciurile din istoric care au rezultat real cunoscut."""
+    """
+    Returnează TOATE meciurile din istoric care au rezultat real cunoscut.
+
+    [REPARAT] Inainte facea un singur select("*") fara paginare - Supabase/
+    PostgREST limiteaza implicit orice astfel de cerere la 1000 randuri
+    (confirmat oficial: https://supabase.com/docs, "Max Rows" - implicit
+    1000, configurabil doar din Dashboard). Asta insemna ca modelul ML se
+    antrena mereu pe doar 1000 din cele 50000+ meciuri eligibile reale -
+    gasit prin audit direct (count real vs samples_used din ml_model_status).
+
+    Acum pagineaza explicit cu .range(), in bucla, pana cand o pagina
+    intoarce mai putin decat page_size (semn ca s-a ajuns la ultima pagina).
+    """
     client = get_client()
     if client is None:
         return []
+    page_size = 1000
+    all_rows: list[dict] = []
+    start = 0
     try:
-        q = client.table("match_history").select("*")
-        if only_with_results:
-            q = q.not_.is_("actual_result", "null")
-        res = q.execute()
-        return res.data or []
+        while True:
+            q = client.table("match_history").select("*")
+            if only_with_results:
+                q = q.not_.is_("actual_result", "null")
+            q = q.order("fixture_id").range(start, start + page_size - 1)
+            res = q.execute()
+            page = res.data or []
+            all_rows.extend(page)
+            if len(page) < page_size:
+                break
+            start += page_size
+        return all_rows
     except Exception as exc:
-        logger.error("[Supabase] get_training_data failed: %s", exc)
-        return []
+        logger.error("[Supabase] get_training_data failed (după %d rânduri): %s", len(all_rows), exc)
+        return all_rows
 
 
 def count_training_samples() -> int:
