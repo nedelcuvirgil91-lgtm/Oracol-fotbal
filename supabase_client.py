@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 logger = logging.getLogger("FootballOracle.Supabase")
@@ -333,4 +333,202 @@ def save_ml_status(trained_at: str, samples_used: int, accuracy: float | None,
         return True
     except Exception as exc:
         logger.error("[Supabase] save_ml_status failed: %s", exc)
+        return False
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# [ADAUGAT] CACHE PERSISTENT (Nivel 2) — vezi architecture/ADR-003-cache.md
+# ════════════════════════════════════════════════════════════════════════════
+# Sursă comună între toate instanțele (telefon, PC, GitHub Actions, Streamlit
+# Cloud). Cheia de CITIRE ignoră deliberat `provider` — dacă există ORICE
+# răspuns valid pentru (category, cache_key), indiferent cine l-a produs,
+# nu se mai face un request nou. `provider` se păstrează la SCRIERE, doar
+# ca metadată de trasabilitate/audit, nu ca parte a deciziei de reutilizare.
+
+def get_cached_response(category: str, cache_key: str) -> dict | None:
+    """Citire agnostică de provider — vezi nota de mai sus. Returnează
+    payload_json (dict) dacă există un răspuns încă valid, altfel None."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("api_cache")
+            .select("payload_json,expires_at,provider")
+            .eq("category", category)
+            .eq("cache_key", cache_key)
+            .gt("expires_at", datetime.now(timezone.utc).isoformat())
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0]["payload_json"] if rows else None
+    except Exception as exc:
+        logger.debug("[Supabase] get_cached_response failed: %s", exc)
+        return None
+
+
+def set_cached_response(
+    provider: str, category: str, cache_key: str, payload: dict,
+    ttl_hours: float, etag: str | None = None,
+    source_latency_ms: float | None = None, http_status: int | None = None,
+) -> bool:
+    """Scrie/actualizează un răspuns în cache-ul persistent. `provider` e
+    salvat doar ca metadată — nu afectează cheia de citire (vezi mai sus)."""
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        now = datetime.now(timezone.utc)
+        expires_iso = (now + timedelta(hours=ttl_hours)).isoformat()
+        client.table("api_cache").upsert({
+            "provider": provider, "category": category, "cache_key": cache_key,
+            "payload_json": payload, "etag": etag,
+            "source_latency_ms": source_latency_ms, "http_status": http_status,
+            "created_at": now.isoformat(), "expires_at": expires_iso,
+        }, on_conflict="provider,category,cache_key").execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Supabase] set_cached_response failed: %s", exc)
+        return False
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# [ADAUGAT] ACOPERIRE PROVIDERI PER LIGĂ — league_provider_coverage
+# ════════════════════════════════════════════════════════════════════════════
+# Stare runtime, actualizată periodic — complementară cu LEAGUE_PROVIDERS din
+# mappings.py (cunoștința statică, confirmată manual din documentație).
+
+def get_league_provider_coverage(league: str | None = None) -> list[dict]:
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        q = client.table("league_provider_coverage").select("*")
+        if league is not None:
+            q = q.eq("league", league)
+        res = q.execute()
+        return res.data or []
+    except Exception as exc:
+        logger.error("[Supabase] get_league_provider_coverage failed: %s", exc)
+        return []
+
+
+def set_league_provider_coverage(
+    league: str, provider: str, covered: bool | None, category: str = "general",
+) -> bool:
+    """`covered=None` înseamnă explicit „necunoscut" — distinct de False."""
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("league_provider_coverage").upsert({
+            "league": league, "provider": provider, "category": category,
+            "covered": covered, "checked_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="league,provider,category").execute()
+        return True
+    except Exception as exc:
+        logger.error("[Supabase] set_league_provider_coverage failed: %s", exc)
+        return False
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# [ADAUGAT] QUOTA PROVIDERI — api_provider_status (vezi ADR-003)
+# ════════════════════════════════════════════════════════════════════════════
+# Extinde key_manager.py, care azi ține quota DOAR local (key_usage.json) —
+# risc de depășire reală a cotei dacă rulează din mai multe instanțe/
+# dispozitive (telefon/PC/GitHub Actions) fără sincronizare. Ciclul e LUNAR
+# (nu zilnic), identic cu key_manager._reset_if_new_month().
+
+def get_all_provider_usage(month: str) -> dict[str, dict[str, int]]:
+    """Returnează {provider: {key_label: used}} pt luna data."""
+    client = get_client()
+    if client is None:
+        return {}
+    try:
+        res = (
+            client.table("api_provider_status")
+            .select("provider,api_key_label,used")
+            .eq("month", month)
+            .execute()
+        )
+        result: dict[str, dict[str, int]] = {}
+        for row in res.data or []:
+            result.setdefault(row["provider"], {})[row["api_key_label"]] = row["used"]
+        return result
+    except Exception as exc:
+        logger.warning("[Supabase] get_all_provider_usage failed: %s", exc)
+        return {}
+
+
+def set_provider_usage(provider: str, api_key_label: str, month: str, used: int, quota_limit: int) -> bool:
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("api_provider_status").upsert({
+            "provider": provider, "api_key_label": api_key_label, "month": month,
+            "used": used, "quota_limit": quota_limit,
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="provider,api_key_label,month").execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Supabase] set_provider_usage failed: %s", exc)
+        return False
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# [ADAUGAT] OBSERVABILITATE PROVIDERI — provider_metrics (vezi ADR-003)
+# ════════════════════════════════════════════════════════════════════════════
+# NOTĂ DE SCOP: `cache_hits`/`cache_misses` sunt in schema, dar NU sunt încă
+# populate de acest apel — instrumentat doar la nivelul _get() din
+# oracle_api.py (un singur punct de trecere pt toate request-urile HTTP
+# reale), care nu vede deloc cache-ul (cache-ul e verificat ÎNAINTE, la
+# nivelul metodelor de nivel inalt din oracle_api.py). Popularea reala a
+# cache_hits/cache_misses ar necesita instrumentarea separata a
+# cache_manager.py (CacheManager.get/.set) - ramane follow-up, nu ascuns.
+
+def record_provider_call(provider: str, endpoint: str, success: bool, latency_ms: float) -> bool:
+    """Read-then-write (2 round-trip-uri) - acceptabil la volumul actual de
+    request-uri (zeci-sute, nu mii/secunda), consistent cu restul proiectului
+    (fara coada/async, vezi ADR-003)."""
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        res = (
+            client.table("provider_metrics").select("*")
+            .eq("provider", provider).eq("endpoint", endpoint)
+            .limit(1).execute()
+        )
+        rows = res.data or []
+        now = datetime.now(timezone.utc).isoformat()
+
+        if rows:
+            row = rows[0]
+            calls = row["calls"] + 1
+            errors = row["errors"] + (0 if success else 1)
+            prev_avg = row.get("avg_latency_ms") or 0.0
+            new_avg = (prev_avg * row["calls"] + latency_ms) / calls
+            consecutive_failures = 0 if success else row.get("consecutive_failures", 0) + 1
+            update = {
+                "calls": calls, "errors": errors, "avg_latency_ms": new_avg,
+                "consecutive_failures": consecutive_failures, "last_call": now,
+            }
+            update["last_success" if success else "last_failure"] = now
+            client.table("provider_metrics").update(update).eq("provider", provider).eq("endpoint", endpoint).execute()
+        else:
+            client.table("provider_metrics").insert({
+                "provider": provider, "endpoint": endpoint,
+                "calls": 1, "cache_hits": 0, "cache_misses": 0,
+                "errors": 0 if success else 1, "avg_latency_ms": latency_ms,
+                "consecutive_failures": 0 if success else 1,
+                "last_call": now,
+                "last_success": now if success else None,
+                "last_failure": None if success else now,
+            }).execute()
+        return True
+    except Exception as exc:
+        logger.debug("[Supabase] record_provider_call failed: %s", exc)
         return False
