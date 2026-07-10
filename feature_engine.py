@@ -91,6 +91,33 @@ def elo_to_defensive_multiplier(elo: float, reference: float = 1500.0, scale: fl
     return round(1.80 - sigmoid * 1.20, 4)
 
 
+# ── Rest days / fixture congestion → multiplicator ───────────────────────────
+# NOTĂ: transformare PURĂ (rest_days brut -> multiplicator xG). Sursa
+# rest_days (calculul zilelor de odihnă) rămâne treaba RestDaysTracker din
+# sync/backfill_features.py — aceeași separare stare/matematică ca la ELO.
+
+def rest_days_modifier(
+    rest_days: int | None,
+    threshold_days: int = 4,
+    penalty: float = 0.05,
+) -> float:
+    """
+    Multiplicator xG pentru o echipă, pe baza zilelor de odihnă înainte de
+    meci. Dacă `rest_days` e None (nicio informație — primul meci cunoscut
+    al echipei) sau >= `threshold_days`, returnează 1.0 (neutru, fără
+    penalizare). Sub prag (relansare rapidă — ex. jocuri la 2-3 zile
+    distanță, tipic pentru echipe cu calendar european încărcat), aplică o
+    penalizare fixă `penalty` (ex. 0.05 = -5% xG).
+
+    Nu face nicio presupunere asupra unui bonus pentru odihnă foarte lungă
+    (>threshold) — literatura pe acest efect ("lipsă de ritm") e mult mai
+    puțin robustă decât cea pe oboseala de congestie, deci nu e modelată.
+    """
+    if rest_days is None or rest_days >= threshold_days:
+        return 1.0
+    return round(1.0 - penalty, 4)
+
+
 # ── Calibrare xG ──────────────────────────────────────────────────────────────
 
 def calibrate_xg(
