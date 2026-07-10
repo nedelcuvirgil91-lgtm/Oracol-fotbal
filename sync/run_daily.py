@@ -10,8 +10,10 @@ Rulat de GitHub Actions la 03:00 UTC în fiecare zi.
 Flux de execuție:
   1. Sincronizează meciuri noi (football-data.org + openfootball)
   2. Calculează ELO intern din rezultatele noi
-  3. Verifică dacă trebuie reantrenat modelul ML
-  4. Afișează raport de sincronizare
+  3. Evaluează experimentele shadow active (shadow_testing.py — vezi
+     architecture/ADR-004-continuous-learning.md pt ordinea completă)
+  4. Verifică dacă trebuie reantrenat modelul ML
+  5. Afișează raport de sincronizare
 
 Folosire:
   python sync/run_daily.py              # rulare completă
@@ -119,7 +121,7 @@ def run(
         print("  ⚠️  DRY RUN — nicio scriere în Supabase\n")
 
     # ── Pasul 0: Rezultate de ieri ────────────────────────────────────────
-    print("▶  Pasul 0/3 — Rezultate meciuri de ieri...")
+    print("▶  Pasul 0/4 — Rezultate meciuri de ieri...")
 
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
@@ -137,7 +139,7 @@ def run(
             print(f"  ⚠️  Eroare la sync rezultate: {exc}")
 
     # ── Pasul 1: Sincronizare meciuri ─────────────────────────────────────
-    print("▶  Pasul 1/3 — Sincronizare meciuri istorice...")
+    print("▶  Pasul 1/4 — Sincronizare meciuri istorice...")
 
     if not dry_run:
         from sync.sync_matches import sync_all
@@ -160,7 +162,7 @@ def run(
     _print_sync_report(sync_reports)
 
     # ── Pasul 2: Recalculare ELO ──────────────────────────────────────────
-    print("\n▶  Pasul 2/3 — Recalculare ELO...")
+    print("\n▶  Pasul 2/4 — Recalculare ELO...")
 
     if skip_elo:
         print("  ℹ️  ELO sărit (--no-elo)")
@@ -183,8 +185,49 @@ def run(
 
     _print_elo_report(elo_teams, elo_duration)
 
-    # ── Pasul 3: ML retraining ────────────────────────────────────────────
-    print("\n▶  Pasul 3/3 — Verificare / reantrenare ML...")
+    # ── Pasul 3: Evaluare experimente shadow ──────────────────────────────
+    # [ADAUGAT] Vezi architecture/ADR-004-continuous-learning.md — ordinea
+    # corectă e ELO/formă/standings -> shadow evaluation -> ML retraining,
+    # NU recalibrare automată per-meci (deja discutat, dezactivat separat).
+    print("\n▶  Pasul 3/4 — Evaluare experimente shadow...")
+
+    if dry_run:
+        print("  ℹ️  Sărit (dry run)")
+        shadow_eval_results = []
+    else:
+        try:
+            import shadow_testing
+            shadow_eval_results = shadow_testing.evaluate_all_active_experiments()
+            if shadow_eval_results:
+                for r in shadow_eval_results:
+                    print(f"  ✅ {r['experiment_name']}/{r['experiment_version']}: "
+                          f"status={r['status']} (n={r['n_matches_evaluated']})")
+            else:
+                print("  ℹ️  Niciun experiment activ de evaluat")
+            from database.queries import upsert_sync_status
+            upsert_sync_status(
+                source="experiment_evaluation",
+                last_sync=datetime.now(timezone.utc).isoformat(),
+                matches_added=0, matches_updated=len(shadow_eval_results),
+                status="ok",
+                notes=f"{len(shadow_eval_results)} experimente evaluate",
+            )
+        except Exception as exc:
+            logger.error("[DailySync] evaluate_all_active_experiments failed: %s", exc)
+            shadow_eval_results = []
+            try:
+                from database.queries import upsert_sync_status
+                upsert_sync_status(
+                    source="experiment_evaluation",
+                    last_sync=datetime.now(timezone.utc).isoformat(),
+                    matches_added=0, matches_updated=0,
+                    status="error", notes=str(exc),
+                )
+            except Exception:
+                pass
+
+    # ── Pasul 4: ML retraining ────────────────────────────────────────────
+    print("\n▶  Pasul 4/4 — Verificare / reantrenare ML...")
 
     if skip_ml:
         ml_status = {"status": "skipped", "message": "--no-ml flag"}
