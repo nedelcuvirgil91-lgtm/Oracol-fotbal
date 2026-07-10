@@ -73,7 +73,7 @@ class FootballDataProvider(ABC):
     endpoint-uri, URL-uri sau headere HTTP ale niciunui provider concret."""
 
     @abstractmethod
-    def get_injuries(self, team_name: str, team_id: int | str, league: str) -> list[Injury]:
+    def get_injuries(self, team_name: str, team_id: int | str, league: str, season: int | None = None) -> list[Injury]:
         ...
 
     @abstractmethod
@@ -234,12 +234,21 @@ class ApiFootballProvider(FootballDataProvider):
             return None
 
     # ── Injuries ──────────────────────────────────────────────────────────
-    def get_injuries(self, team_name: str, team_id: int | str, league: str) -> list[Injury]:
+    def get_injuries(self, team_name: str, team_id: int | str, league: str, season: int | None = None) -> list[Injury]:
+        # [REPARAT] Descoperit live: API-Football intoarce HTTP 200 cu
+        # {"errors":{"season":"The Season field is required."}} daca lipseste
+        # 'season' - nu era documentat/confirmat inainte, gasit direct din
+        # payload-ul real cache-uit in productie.
         if not self._covered(league, "api_football"):
             return []
-        cache_key = f"{league}:{team_id}:injuries"
-        raw = self._get("injuries", {"team": team_id}, "injuries", cache_key)
+        if season is None:
+            from datetime import date as _date
+            season = _date.today().year
+        cache_key = f"{league}:{team_id}:injuries:{season}"
+        raw = self._get("injuries", {"team": team_id, "season": season}, "injuries", cache_key)
         if not raw or "response" not in raw:
+            if raw and raw.get("errors"):
+                logger.warning("[ApiFootball] /injuries a intors erori: %r", raw["errors"])
             return []
         results = []
         for item in raw["response"]:
