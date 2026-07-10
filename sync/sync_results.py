@@ -69,14 +69,14 @@ def _rate_limited_get(url: str, params: dict | None = None) -> dict | None:
         return None
 
 
-COMPETITION_TO_LEAGUE = {
-    "PL":  "Premier League",
-    "PD":  "La Liga",
-    "SA":  "Serie A",
-    "BL1": "Bundesliga",
-    "FL1": "Ligue 1",
-    "CL":  "Champions League",
-}
+# [FIX] COMPETITION_TO_LEAGUE nu mai e o copie manuală, independentă — era
+# exact cauza descoperită prin audit: lipseau "EL"->Europa League și
+# "WC"->World Cup 2026 pentru că această copie nu fusese actualizată quando
+# FD_COMPETITIONS (mappings.py) a fost extins ulterior. Acum se derivă direct
+# din sursa canonică — imposibil să se mai desincronizeze. Vezi
+# architecture/ADR-001-league-providers.md.
+from mappings import FD_COMPETITIONS
+COMPETITION_TO_LEAGUE = {v: k for k, v in FD_COMPETITIONS.items()}
 
 # [ADAUGAT v1.1] Fallback minim daca model_config nu exista inca in Supabase
 # / config.json — identic ca valori cu DEFAULT_CONFIG din oracle_engine.py,
