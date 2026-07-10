@@ -5,9 +5,8 @@ FOOTBALL ORACLE — API Key Manager v1.0
 """
 from __future__ import annotations
 import json, logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger("FootballOracle.KeyManager")
 
