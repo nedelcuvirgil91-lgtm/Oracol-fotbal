@@ -22,6 +22,7 @@ def test_health_check_gate_blocks_when_no_key_configured():
     assert p._healthy() is False
     assert p.get_injuries("Arsenal", 42, "Premier League") == []
     assert p.get_coaches("Arsenal", 42) == []
+    assert p.resolve_team_id("Arsenal") is None
 
 
 def test_apifootball_key_now_configured_in_key_manager():
