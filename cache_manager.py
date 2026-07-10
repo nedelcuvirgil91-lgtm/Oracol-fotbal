@@ -4,10 +4,9 @@ FOOTBALL ORACLE — Cache Manager v1.0
 ================================================================================
 """
 from __future__ import annotations
-import json, logging, os, shutil
+import json, logging, os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
 
 logger = logging.getLogger("FootballOracle.Cache")
 
