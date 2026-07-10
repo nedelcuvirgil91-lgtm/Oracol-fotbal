@@ -1043,18 +1043,24 @@ class FootballOracleAPI:
             target = (today + timedelta(days=i)).isoformat()
             for league in comps:
                 if league in FREE_LF_LEAGUE_IDS:
+                    logger.info("[WeekLoop] FreeLF start: %s / %s", league, target)
                     _add(self._fetch_freelf_matches(target, league))
+                    logger.info("[WeekLoop] FreeLF done:  %s / %s", league, target)
 
         # 3. football-data.org fallback
         fd_codes = [FD_COMPETITIONS[c] for c in comps if c in FD_COMPETITIONS] or None
+        logger.info("[WeekLoop] football-data.org start")
         _add(self._fetch_matches_fd(d_from, d_to, fd_codes))
+        logger.info("[WeekLoop] football-data.org done")
 
         # 4. ESPN fallback
         for i in range(min(days_ahead, 7)):
             target = (today + timedelta(days=i)).isoformat()
             for league in comps:
                 if ESPN_LEAGUE_SLUGS.get(league):
+                    logger.info("[WeekLoop] ESPN start: %s / %s", league, target)
                     _add(self._fetch_matches_espn(league, target))
+                    logger.info("[WeekLoop] ESPN done:  %s / %s", league, target)
 
         # 5. TheSportsDB fallback
         if len(matches) < 5:
