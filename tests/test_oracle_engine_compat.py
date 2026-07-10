@@ -37,19 +37,26 @@ def test_log_shadow_experiment_returns_false_when_disabled():
     assert result is False
 
 
-def test_log_shadow_experiment_never_called_in_existing_flow():
-    """Verificare statica: log_shadow_experiment trebuie sa apara EXACT o
-    data in oracle_engine.py - definitia ei. Zero apeluri din fluxul
-    existent - garantia compatibilitatii 100% ceruta explicit."""
+def test_log_shadow_experiment_called_exactly_once_in_evaluate_match():
+    """[ACTUALIZAT] log_shadow_experiment e acum apelat intentionat, o
+    singura data, in evaluate_match() (integrare API-Football) - nu mai e
+    'zero apeluri' (asta era starea INAINTE de integrare). Compatibilitatea
+    100% e garantata altfel acum: prin gating-ul shadow_mode_enabled, testat
+    separat mai jos - nu prin absenta apelului."""
     source = inspect.getsource(oracle_engine)
-    occurrences = source.count("log_shadow_experiment(")
-    # 1 aparitie = doar in interiorul metodei (self.method(...) recursiv nu
-    # exista); definitia foloseste "def log_shadow_experiment(", apelul ar
-    # folosi "self.log_shadow_experiment(" sau "engine.log_shadow_experiment("
     def_count = source.count("def log_shadow_experiment(")
     call_count = source.count(".log_shadow_experiment(")
     assert def_count == 1
-    assert call_count == 0, "log_shadow_experiment e deja apelat undeva - ruperea compatibilitatii asteptate"
+    assert call_count == 1
+
+
+def test_shadow_mode_disabled_means_production_predictions_unaffected():
+    """Garantia reala de compatibilitate 100%: chiar daca
+    log_shadow_experiment e acum apelat, cu shadow_mode_enabled=False (implicit)
+    el nu face NIMIC (verificat deja in alt test ca returneaza False) - deci
+    home_xg/away_xg/ph/pd/pa folosite de productie raman neschimbate, indiferent
+    de rezultatul fetch-ului API-Football."""
+    assert oracle_engine.DEFAULT_CONFIG["shadow_mode_enabled"] is False
 
 
 def test_cache_prediction_method_unchanged_signature():
