@@ -21,6 +21,42 @@ def test_get_coaches_blocked_by_health_check():
     assert p.get_coaches("Arsenal", 42) == []
 
 
+def test_oracle_api_cache_wired_to_cache_manager():
+    """Regresie: _cget/_cset din oracle_api.py trebuie sa delege la
+    CacheManager (L1/L2), NU la vechiul dict self._mem (deconectat, gasit
+    prin audit dupa deploy - vezi log-ul cu apeluri ESPN repetate)."""
+    import tempfile
+    import cache_manager
+    import oracle_api
+
+    tmp_dir = tempfile.mkdtemp()
+    api1 = oracle_api.FootballOracleAPI.__new__(oracle_api.FootballOracleAPI)
+    api1._cache_mgr = cache_manager.CacheManager(base_dir=tmp_dir)
+    api1._mem = {}
+    api1._ttl = 30
+    api1._cset("espn_eng.1_2024-01-01", [{"x": 1}])
+
+    # instanta NOUA - simuleaza un rerun Streamlit; inainte de fix, self._mem
+    # gol ar fi facut cache-ul sa dispara complet intre instante
+    api2 = oracle_api.FootballOracleAPI.__new__(oracle_api.FootballOracleAPI)
+    api2._cache_mgr = cache_manager.CacheManager(base_dir=tmp_dir)
+    api2._mem = {}
+    api2._ttl = 30
+    assert api2._cget("espn_eng.1_2024-01-01") == [{"x": 1}]
+
+
+def test_oracle_api_category_mapping():
+    import oracle_api
+    api = oracle_api.FootballOracleAPI.__new__(oracle_api.FootballOracleAPI)
+    assert api._category_for_key("freelf_standings_Premier League") == "standings"
+    assert api._category_for_key("freelf_h2h_123") == "h2h"
+    assert api._category_for_key("freelf_lineup_123_home") == "lineups"
+    assert api._category_for_key("odds_soccer_epl") == "odds"
+    assert api._category_for_key("espn_eng.1_2024-01-01") == "matches"
+    assert api._provider_for_key("espn_eng.1_2024-01-01") == "espn"
+    assert api._provider_for_key("freelf_standings_x") == "freelivefootball"
+
+
 def test_coverage_blocks_unknown_league():
     p = _provider()
     assert p._covered("Liga Complet Necunoscuta", "api_football") is False
