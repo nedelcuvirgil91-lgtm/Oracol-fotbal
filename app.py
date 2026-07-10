@@ -626,4 +626,19 @@ elif nav == "settings":
             engine.api.clear_cache(); st.cache_resource.clear()
             if "all_matches" in st.session_state: del st.session_state["all_matches"]
             st.toast("Cache șters!",icon="🗑️")
+
+        st.markdown("---")
+        st.caption("⚠️ TEMPORAR — validare live API-Football (injuries/coaches). De eliminat după confirmare.")
+        if st.button("🔍 Testează API-Football (Arsenal, team_id=42)"):
+            from football_providers import ApiFootballProvider
+            fp = ApiFootballProvider()
+            with st.spinner("Apelez /coachs..."):
+                coaches = fp.get_coaches("Arsenal", 42)
+            st.write("**Coaches:**", coaches)
+            with st.spinner("Apelez /injuries..."):
+                injuries = fp.get_injuries("Arsenal", 42, "Premier League")
+            st.write("**Injuries:**", injuries)
+            if not coaches and not injuries:
+                st.warning("Ambele goale — verifică log-urile Streamlit Cloud pentru motivul exact (rate limit, structură neașteptată, etc.)")
+
         st.markdown(f'<div style="font-size:.7rem;color:var(--t3);margin-top:.5rem;">Python {sys.version[:6]} · Football Oracle v3.0</div>',unsafe_allow_html=True)
