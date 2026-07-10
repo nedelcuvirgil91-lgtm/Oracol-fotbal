@@ -14,7 +14,7 @@ Surse de date:
 ================================================================================
 """
 from __future__ import annotations
-import json, logging, random, sys
+import json, logging, random, sys, time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -171,20 +171,59 @@ class FootballOracleAPI:
         self._mem[key] = (val, datetime.now(timezone.utc))
 
     # ── Low-level HTTP ────────────────────────────────────────────────────
+    # [ADAUGAT] Mapare host -> nume provider, pt observabilitate (provider_metrics).
+    # Reutilizeaza constantele de URL deja existente - nu introduce coduri noi.
+    _PROVIDER_HOST_MAP = (
+        (FREE_LF_URL, "freelivefootball"),
+        (ODDS_API_URL, "oddsapi"),
+        (FOOTBALL_DATA_URL, "footballdata"),
+        (THESPORTSDB_URL, "thesportsdb"),
+        (ESPN_API_URL, "espn"),
+        (WEATHER_URL, "weatherapi"),
+        (ELO_URL, "eloratings"),
+    )
+
+    def _detect_provider_endpoint(self, url: str) -> tuple[str, str]:
+        for prefix, name in self._PROVIDER_HOST_MAP:
+            if url.startswith(prefix):
+                rest = url[len(prefix):].lstrip("/")
+                endpoint = rest.split("?")[0].split("/")[0] or "root"
+                return name, endpoint
+        return "unknown", "unknown"
+
+    def _record_metric(self, url: str, success: bool, latency_ms: float) -> None:
+        # Best-effort, nu blocheaza fluxul principal daca esueaza (acelasi
+        # principiu de degradare gratioasa folosit peste tot in proiect).
+        try:
+            provider, endpoint = self._detect_provider_endpoint(url)
+            import supabase_client as _sb
+            _sb.record_provider_call(provider, endpoint, success, latency_ms)
+        except Exception:
+            pass
+
     def _get(self, url: str, headers=None, params=None, timeout: int = 12):
+        start = time.monotonic()
         try:
             r = self._s.get(url, headers=headers or {}, params=params or {}, timeout=timeout)
-            if r.status_code == 404: logger.warning("[HTTP 404] %s", url[:80]); return None
-            if r.status_code == 403: logger.warning("[HTTP 403] %s", url[:80]); return None
+            latency_ms = (time.monotonic() - start) * 1000
+            if r.status_code == 404:
+                logger.warning("[HTTP 404] %s", url[:80]); self._record_metric(url, False, latency_ms); return None
+            if r.status_code == 403:
+                logger.warning("[HTTP 403] %s", url[:80]); self._record_metric(url, False, latency_ms); return None
             if r.status_code == 429:
                 logger.warning("[HTTP 429] %s", url[:80])
+                self._record_metric(url, False, latency_ms)
                 if FREE_LF_HOST in url:
                     self._freelf_exhausted = True
                     logger.warning("[FreeLF] Limita 429 — trecem pe fallback ESPN/demo.")
                 return None
-            if not r.ok: logger.warning("[HTTP %s] %s", r.status_code, url[:80]); return None
+            if not r.ok:
+                logger.warning("[HTTP %s] %s", r.status_code, url[:80]); self._record_metric(url, False, latency_ms); return None
+            self._record_metric(url, True, latency_ms)
             return r.json()
         except Exception as exc:
+            latency_ms = (time.monotonic() - start) * 1000
+            self._record_metric(url, False, latency_ms)
             logger.error("[HTTP] %s → %s", url[:80], exc); return None
 
     def _free_lf_get(self, path: str, params=None):
