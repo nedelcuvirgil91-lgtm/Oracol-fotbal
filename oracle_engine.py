@@ -66,6 +66,12 @@ except ModuleNotFoundError:
     INJURY_MANAGER_AVAILABLE = False
 
 try:
+    from football_providers import ApiFootballProvider
+    API_FOOTBALL_AVAILABLE = True
+except ModuleNotFoundError:
+    API_FOOTBALL_AVAILABLE = False
+
+try:
     from cache_manager import get_cache
     CACHE_MANAGER_AVAILABLE = True
 except ModuleNotFoundError:
@@ -313,6 +319,9 @@ class FootballOracleEngine:
             InjuryManager(api=self.api, cache=self.cache)
             if INJURY_MANAGER_AVAILABLE else None
         )
+        # [ADAUGAT] API-Football (injuries + coaches) - vezi ADR-002/ADR-003.
+        # Foloseste aceleasi key_manager/cache singleton-uri deja existente.
+        self.apifootball = ApiFootballProvider() if API_FOOTBALL_AVAILABLE else None
 
         self.ml = MLPredictorEngine() if ML_MODULE_AVAILABLE else None
         if self.ml and self.use_supabase:
@@ -870,6 +879,30 @@ class FootballOracleEngine:
             home_xg, home_xg_pre, away_xg, away_xg_pre,
         )
 
+        # ── API-Football: injuries + coaches (colectare automată) ──────────
+        # [ADAUGAT] Foloseste automat providerul cand e nevoie de injuries/
+        # coaches - conform integrarii cerute. NU modifica home_xg/away_xg
+        # (productia ramane neschimbata) - datele merg doar in shadow log
+        # (gated de shadow_mode_enabled), consistent cu ADR-002.
+        apifootball_metadata: dict = {}
+        if self.apifootball:
+            try:
+                home_id = self.apifootball.resolve_team_id(home_name)
+                away_id = self.apifootball.resolve_team_id(away_name)
+                af_home_injuries = self.apifootball.get_injuries(home_name, home_id, league) if home_id else []
+                af_away_injuries = self.apifootball.get_injuries(away_name, away_id, league) if away_id else []
+                af_home_coaches  = self.apifootball.get_coaches(home_name, home_id) if home_id else []
+                af_away_coaches  = self.apifootball.get_coaches(away_name, away_id) if away_id else []
+                apifootball_metadata = {
+                    "home_team_id": home_id, "away_team_id": away_id,
+                    "home_injuries": [vars(i) for i in af_home_injuries],
+                    "away_injuries": [vars(i) for i in af_away_injuries],
+                    "home_coaches": [vars(c) for c in af_home_coaches],
+                    "away_coaches": [vars(c) for c in af_away_coaches],
+                }
+            except Exception as exc:
+                logger.warning("[ApiFootball] Colectare eșuată pentru %s vs %s: %s", home_name, away_name, exc)
+
         ph, pd, pa, top_scores = self._poisson_model(home_xg, away_xg)
 
         # ── Monte Carlo ───────────────────────────────────────────────────
@@ -980,6 +1013,19 @@ class FootballOracleEngine:
             ml_samples_used=ml_samples_used,
         )
         self._cache_prediction(pred, home_p, away_p, h2h, w_pen, mc)
+
+        # [ADAUGAT] Shadow log pt datele API-Football colectate mai sus -
+        # nu face nimic daca shadow_mode_enabled=False (implicit), deci
+        # productia ramane 100% neschimbata. Foloseste predictia FINALA
+        # (ph/pd/pa) - acest experiment inca nu propune o varianta
+        # alternativa de xG, doar capteaza contextul pt analiza viitoare.
+        if self.apifootball and apifootball_metadata:
+            self.log_shadow_experiment(
+                pred=pred, experiment_name="apifootball_injuries_coaches", experiment_version="v1",
+                home_xg=home_xg, away_xg=away_xg, prob_home=ph, prob_draw=pd, prob_away=pa,
+                feature_metadata=apifootball_metadata, processing_stage="final",
+            )
+
         return pred
 
     # ── Utility methods ───────────────────────────────────────────────────
