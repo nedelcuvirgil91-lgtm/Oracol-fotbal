@@ -27,6 +27,8 @@ try:
 except ImportError:
     CACHE_MANAGER_AVAILABLE = False
 
+from key_manager import get_key_manager
+
 try:
     from bs4 import BeautifulSoup
     BS4_AVAILABLE = True
@@ -42,7 +44,7 @@ from mappings import (
 
 # ── Chei API ──────────────────────────────────────────────────────────────────
 ODDS_API_KEY       = "b0e2ab9bcda1d9f4c5ddfe1063c81cd7"
-FOOTBALL_DATA_KEY  = "3934542be32c47f88a194f9eec0f44a1"
+# [ELIMINAT] FOOTBALL_DATA_KEY hardcodat - migrat in key_manager.py (provider "footballdata")
 WEATHER_API_KEY    = "48a5b54b8ced45cc924153231263005"
 RAPIDAPI_KEY       = "2ff60d8248msh65d53a6d077e4abp145f79jsn980ab63d585f"
 
@@ -142,6 +144,7 @@ class FootballOracleAPI:
         # gestionate aici (FreeLF, ESPN, football-data.org, Odds API) - fiecare
         # instanta noua (fiecare rerun Streamlit) pornea cu cache gol.
         self._cache_mgr = get_cache() if CACHE_MANAGER_AVAILABLE else None
+        self._key_manager = get_key_manager()
         self._validate_api_keys()
         logger.info("FootballOracleAPI v2.3 initialised.")
 
@@ -659,7 +662,7 @@ class FootballOracleAPI:
         if comp_codes: params["competitions"] = ",".join(comp_codes)
         data = self._get(
             f"{FOOTBALL_DATA_URL}/matches",
-            headers={"X-Auth-Token": FOOTBALL_DATA_KEY}, params=params,
+            headers=self._key_manager.get_headers("footballdata") or {}, params=params,
         )
         if not data: return []
         results: list[dict] = []
@@ -696,7 +699,7 @@ class FootballOracleAPI:
         if cached is None:
             cached = self._get(
                 f"{FOOTBALL_DATA_URL}/competitions/{comp_code}/standings",
-                headers={"X-Auth-Token": FOOTBALL_DATA_KEY},
+                headers=self._key_manager.get_headers("footballdata") or {},
             )
             if cached: self._cset(cache_key, cached)
         if not cached: return None
