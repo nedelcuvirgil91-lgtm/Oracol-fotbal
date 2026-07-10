@@ -16,6 +16,7 @@ CATEGORY_TTL: dict[str, float] = {
     "corners": 24.0, "cards": 24.0, "injuries": 2.0,
     "lineups": 1.0, "standings": 12.0, "odds": 4.0,
     "elo": 24.0, "events": 0.5,
+    "coaches": 72.0,  # [ADAUGAT] schimba rar - TTL lung (3 zile)
 }
 
 class CacheManager:
@@ -44,13 +45,40 @@ class CacheManager:
 
     def get(self, category, key):
         path = self._path(category, key)
-        if not self._is_fresh(path, category): return None
+        if self._is_fresh(path, category):
+            try:
+                return json.loads(path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        # [ADAUGAT] Nivel 2 — cache persistent Supabase, comun tuturor
+        # instanțelor (telefon/PC/GitHub Actions/Streamlit Cloud). Citirea
+        # ignoră deliberat providerul — vezi architecture/ADR-003-cache.md.
+        # Degradare grațioasă dacă Supabase e indisponibil (returnează None,
+        # exact comportamentul de dinainte).
         try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            return data
-        except Exception: return None
+            import supabase_client as _sb
+            payload = _sb.get_cached_response(category, key)
+        except Exception:
+            payload = None
+        if payload is None:
+            return None
+        envelope = {
+            "_cached_at": datetime.now(timezone.utc).isoformat(),
+            "_category": category, "_key": key,
+            "_ttl_hours": CATEGORY_TTL.get(category, 24.0),
+            "data": payload,
+        }
+        # write-through: populează L1 local, ca urmatoarea citire din acest
+        # proces sa nu mai loveasca Supabase deloc
+        try:
+            tmp_path = path.with_suffix(".tmp")
+            tmp_path.write_text(json.dumps(envelope, indent=2, ensure_ascii=False), encoding="utf-8")
+            tmp_path.replace(path)
+        except Exception:
+            pass
+        return envelope
 
-    def set(self, category, key, data):
+    def set(self, category, key, data, provider="unknown"):
         if data is None: return False
         path = self._path(category, key)
         tmp_path = path.with_suffix(".tmp")
@@ -63,10 +91,22 @@ class CacheManager:
             }
             tmp_path.write_text(json.dumps(envelope, indent=2, ensure_ascii=False), encoding="utf-8")
             tmp_path.replace(path)
-            return True
+            local_ok = True
         except Exception:
             if tmp_path.exists(): tmp_path.unlink(missing_ok=True)
-            return False
+            local_ok = False
+        # [ADAUGAT] scrie si in Nivelul 2 (Supabase) - sursa comuna. Esecul
+        # aici NU trebuie sa afecteze rezultatul local (degradare gratioasa,
+        # consistent cu restul proiectului).
+        try:
+            import supabase_client as _sb
+            _sb.set_cached_response(
+                provider=provider, category=category, cache_key=key,
+                payload=data, ttl_hours=CATEGORY_TTL.get(category, 24.0),
+            )
+        except Exception:
+            pass
+        return local_ok
 
     def get_raw(self, category, key):
         result = self.get(category, key)
