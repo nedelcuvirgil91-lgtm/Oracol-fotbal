@@ -165,22 +165,40 @@ def _recalibrate_for_result(match_row: dict, r: dict) -> None:
         )
 
 
-def fetch_yesterday_results(target_date: str | None = None) -> list[dict]:
+def fetch_yesterday_results(target_date: str | None = None, days_back: int = 7) -> list[dict]:
     """
-    Descarcă rezultatele meciurilor terminate într-o zi specifică.
-    target_date: format YYYY-MM-DD (default: ieri)
-    """
-    if target_date is None:
-        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
-        target_date = yesterday.isoformat()
+    Descarcă rezultatele meciurilor terminate într-o FEREASTRĂ de zile, nu
+    doar o singură zi fixă.
 
-    logger.info("[SyncResults] Descarcă rezultate pentru %s", target_date)
+    [REPARAT] Inainte verifica STRICT "ieri" (o singura zi) - daca job-ul
+    zilnic esua sau ligile lipseau din COMPETITION_TO_LEAGUE (bug deja
+    reparat separat), acele zile erau pierdute definitiv, fara nicio
+    recuperare posibila. Confirmat cu date reale: 16 meciuri World Cup 2026
+    ramasesera blocate fara actual_result din exact acest motiv.
+
+    Acum verifică ultimele `days_back` zile (implicit 7) la fiecare rulare -
+    sigur si idempotent, fiindca update_results_in_supabase() ignora deja
+    meciurile care au deja actual_result (.is_("actual_result","null")) -
+    re-verificarea zilelor deja rezolvate nu duplica nimic, doar recupereaza
+    ce a fost ratat.
+
+    target_date: daca dat explicit, verifica DOAR acea zi (comportament
+    vechi, pastrat pt teste/debugging punctual). Altfel, fereastra glisanta.
+    """
+    if target_date is not None:
+        date_from = date_to = target_date
+    else:
+        today = datetime.now(timezone.utc).date()
+        date_to = (today - timedelta(days=1)).isoformat()
+        date_from = (today - timedelta(days=days_back)).isoformat()
+
+    logger.info("[SyncResults] Descarcă rezultate din intervalul %s → %s", date_from, date_to)
 
     data = _rate_limited_get(
         f"{FD_BASE_URL}/matches",
         params={
-            "dateFrom": target_date,
-            "dateTo":   target_date,
+            "dateFrom": date_from,
+            "dateTo":   date_to,
             "status":   "FINISHED",
         }
     )
@@ -218,7 +236,7 @@ def fetch_yesterday_results(target_date: str | None = None) -> list[dict]:
             )
 
             utc_date    = match.get("utcDate", "")
-            kickoff_date = utc_date[:10] if utc_date else target_date
+            kickoff_date = utc_date[:10] if utc_date else date_to
 
             results.append({
                 "fd_id":           match.get("id"),
@@ -234,8 +252,8 @@ def fetch_yesterday_results(target_date: str | None = None) -> list[dict]:
             logger.debug("[SyncResults] Parse error: %s", exc)
             continue
 
-    logger.info("[SyncResults] %d meciuri terminate găsite pentru %s",
-                len(results), target_date)
+    logger.info("[SyncResults] %d meciuri terminate găsite în intervalul %s → %s",
+                len(results), date_from, date_to)
     return results
 
 
@@ -342,7 +360,10 @@ def update_results_in_supabase(results: list[dict]) -> tuple[int, int]:
 
 def sync_yesterday_results() -> dict:
     """
-    Funcția principală — descarcă și salvează rezultatele de ieri.
+    Funcția principală — descarcă și salvează rezultatele din ultimele zile
+    (fereastră glisantă, implicit 7 zile — vezi fetch_yesterday_results()).
+    Numele funcției a rămas neschimbat (run_daily.py o importă exact așa),
+    deși acum acoperă mai mult decât "ieri" — vezi ADR-004.
     Apelată din run_daily.py.
     """
     results = fetch_yesterday_results()
