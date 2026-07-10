@@ -4,8 +4,8 @@ FOOTBALL ORACLE v4.0 — Football-Data.org Source
 ================================================================================
 Module: sync/sources/football_data.py
 
-Descarcă rezultate și statistici din football-data.org folosind cheia API
-existentă (3934542be32c47f88a194f9eec0f44a1).
+Descarcă rezultate și statistici din football-data.org, folosind cheia
+gestionată centralizat în key_manager.py (provider "footballdata").
 
 Rate limit: 10 requests/minut pe planul gratuit.
 Scriptul respectă automat acest limit cu pauze între cereri.
@@ -32,10 +32,12 @@ from typing import Iterator
 
 import requests
 
+from key_manager import get_key_manager
+
 logger = logging.getLogger("FootballOracle.Sync.FootballData")
 
 FD_BASE_URL = "https://api.football-data.org/v4"
-FD_API_KEY  = "3934542be32c47f88a194f9eec0f44a1"
+# [ELIMINAT] FD_API_KEY hardcodat - migrat in key_manager.py (provider "footballdata")
 
 # Mapare ligă Football Oracle → cod competition football-data.org
 COMPETITION_CODES: dict[str, str] = {
@@ -68,7 +70,7 @@ def _rate_limited_get(url: str, params: dict | None = None) -> dict | None:
     try:
         resp = requests.get(
             url,
-            headers={"X-Auth-Token": FD_API_KEY},
+            headers=get_key_manager().get_headers("footballdata") or {},
             params=params or {},
             timeout=15,
         )
