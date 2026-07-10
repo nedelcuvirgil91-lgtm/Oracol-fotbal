@@ -120,7 +120,17 @@ class ApiFootballProvider(FootballDataProvider):
     def _get_session(self):
         if self._session is None:
             from requests import Session
-            self._session = Session()
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.retry import Retry
+            # [REPARAT] Aceeasi configurare de retry ca oracle_api.py._build_session()
+            # - inainte sesiunea asta nu avea deloc retry, inconsistent cu restul.
+            s = Session()
+            r = Retry(total=3, backoff_factor=0.5,
+                      status_forcelist=(429, 500, 502, 503, 504),
+                      allowed_methods=["GET"], raise_on_status=False)
+            a = HTTPAdapter(max_retries=r)
+            s.mount("https://", a); s.mount("http://", a)
+            self._session = s
         return self._session
 
     # ── Health + coverage — verificate ÎNAINTE de orice altceva ──────────
@@ -184,6 +194,44 @@ class ApiFootballProvider(FootballDataProvider):
             self._cache.set(cache_category, cache_key, data, provider=self.PROVIDER_ID)
 
         return data
+
+    # ── Rezolvare ID echipă (necesar pentru get_injuries/get_coaches) ────
+    def resolve_team_id(self, team_name: str) -> int | None:
+        """
+        API-Football identifică echipele prin ID-ul lui numeric propriu,
+        diferit de ID-urile FreeLF/ESPN/football-data.org deja folosite în
+        proiect — nu exista nicaieri altundeva o mapare nume->ID pt acest
+        provider, de aceea rezolvarea se face live, prin `/teams?search=`.
+
+        [NOTĂ DE INCERTITUDINE] Structura `/teams` NU a fost confirmată
+        dintr-un payload real (aceeași limitare ca la `/injuries`) — parsare
+        defensivă, cache-uit pe termen lung (720h) fiindcă ID-urile de
+        echipă nu se schimbă practic niciodată, deci un rezultat greșit
+        cache-uit ar persista mult — motiv în plus să fie validat live cât
+        mai curând posibil.
+        """
+        if not self._healthy():
+            return None
+        cache_key = f"team_id:{team_name.strip().lower()}"
+        raw = self._get("teams", {"search": team_name}, "teams", cache_key)
+        if not raw or not raw.get("response"):
+            return None
+        first = raw["response"][0]
+        if not isinstance(first, dict):
+            logger.warning("[ApiFootball] /teams — element neasteptat (nu e dict): %r", first)
+            return None
+        team_obj = first.get("team") or {}
+        team_id = team_obj.get("id")
+        if team_id is None:
+            logger.warning(
+                "[ApiFootball] /teams — nu s-a gasit 'team.id' in raspuns pt %r, "
+                "structura reala difera de presupunere: %r", team_name, first
+            )
+            return None
+        try:
+            return int(team_id)
+        except (TypeError, ValueError):
+            return None
 
     # ── Injuries ──────────────────────────────────────────────────────────
     def get_injuries(self, team_name: str, team_id: int | str, league: str) -> list[Injury]:
