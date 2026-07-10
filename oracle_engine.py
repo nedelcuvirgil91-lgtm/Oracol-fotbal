@@ -889,8 +889,15 @@ class FootballOracleEngine:
             try:
                 home_id = self.apifootball.resolve_team_id(home_name)
                 away_id = self.apifootball.resolve_team_id(away_name)
-                af_home_injuries = self.apifootball.get_injuries(home_name, home_id, league) if home_id else []
-                af_away_injuries = self.apifootball.get_injuries(away_name, away_id, league) if away_id else []
+                kickoff = match.get("kickoff_date") or ""
+                try:
+                    ko_year = int(kickoff[:4]) if kickoff else date.today().year
+                    ko_month = int(kickoff[5:7]) if len(kickoff) >= 7 else 7
+                    season_year = ko_year if ko_month >= 7 else ko_year - 1
+                except (ValueError, TypeError):
+                    season_year = date.today().year
+                af_home_injuries = self.apifootball.get_injuries(home_name, home_id, league, season_year) if home_id else []
+                af_away_injuries = self.apifootball.get_injuries(away_name, away_id, league, season_year) if away_id else []
                 af_home_coaches  = self.apifootball.get_coaches(home_name, home_id) if home_id else []
                 af_away_coaches  = self.apifootball.get_coaches(away_name, away_id) if away_id else []
                 apifootball_metadata = {
