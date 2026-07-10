@@ -456,6 +456,47 @@ class StandingsTracker:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# REST DAYS / FIXTURE CONGESTION
+# ════════════════════════════════════════════════════════════════════════════
+
+class RestDaysTracker:
+    """
+    Urmărește data ULTIMULUI meci jucat de fiecare echipă, INDIFERENT de
+    competiție — calculează zile de odihnă înainte de meciul curent.
+
+    [DECIZIE ARHITECTURALĂ — diferită de ELOTracker/FormTracker/StandingsTracker]
+    Acelea sunt izolate per ligă (corect — formă/ELO/clasament sunt semnale
+    specifice unei competiții). Oboseala fizică NU e specifică unei competiții:
+    o echipă care joacă marți în Champions League e obosită sâmbătă în
+    campionatul intern, indiferent cum sunt izolate celelalte tracker-e.
+    De aceea acest tracker trebuie alimentat cu fluxul GLOBAL de meciuri ale
+    unei echipe (toate competițiile), nu cu fluxul izolat per-ligă al
+    bootstrap-ului. Dacă e folosit într-un backfill filtrat pe o singură
+    ligă (--league), valoarea calculată va fi incompletă (nu vede meciurile
+    din alte competiții) — limitare cunoscută, nu ascunsă.
+
+    La fiecare meci, returnează zilele de odihnă ÎNAINTE de acel meci
+    (None dacă echipa nu are niciun meci anterior cunoscut).
+    """
+
+    def __init__(self):
+        self.last_match_date: dict[str, str] = {}  # team -> "YYYY-MM-DD"
+
+    def get_rest_days_before(self, team: str, kickoff_date: str) -> int | None:
+        last = self.last_match_date.get(team)
+        if last is None:
+            return None
+        d_last = date.fromisoformat(last)
+        d_now = date.fromisoformat(str(kickoff_date)[:10])
+        return (d_now - d_last).days
+
+    def process_match(self, home: str, away: str, kickoff_date: str) -> None:
+        kd = str(kickoff_date)[:10]
+        self.last_match_date[home] = kd
+        self.last_match_date[away] = kd
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # RATING OFENSIV/DEFENSIV PRE-MECI — SURSĂ UNICĂ (live/backfill/bootstrap)
 # ════════════════════════════════════════════════════════════════════════════
 
