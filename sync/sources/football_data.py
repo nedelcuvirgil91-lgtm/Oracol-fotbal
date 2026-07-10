@@ -50,7 +50,10 @@ COMPETITION_CODES: dict[str, str] = {
 }
 
 # Sezoane disponibile (format football-data.org: YYYY)
-SEASONS = [2021, 2022, 2023, 2024]
+# [REPARAT] Lipsea 2025 (sezonul 2025-26) - de aceea toate ligile europene se
+# opreau la mai 2025 in match_history, gasit prin audit direct in Supabase.
+# 2026 (sezonul 2026-27) nu are inca date - incepe in august.
+SEASONS = [2021, 2022, 2023, 2024, 2025]
 
 # Rate limit: 10 requests/minut → 6 secunde între cereri
 REQUEST_INTERVAL = 6.1
