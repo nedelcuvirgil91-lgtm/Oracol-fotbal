@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 import time
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from cache_manager import get_cache
 from key_manager import get_key_manager
