@@ -17,6 +17,8 @@ CATEGORY_TTL: dict[str, float] = {
     "lineups": 1.0, "standings": 12.0, "odds": 4.0,
     "elo": 24.0, "events": 0.5,
     "coaches": 72.0,  # [ADAUGAT] schimba rar - TTL lung (3 zile)
+    "matches": 1.0,   # [ADAUGAT] liste de meciuri (FreeLF/ESPN/agregat) - status live, schimba des
+    "stats": 2.0,     # [ADAUGAT] statistici per-meci (xG, posesie) - schimba pana la final
 }
 
 class CacheManager:
