@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import csv, json, logging, sys
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -60,7 +60,7 @@ except ModuleNotFoundError:
     print("[FATAL] feature_engine.py not found."); sys.exit(1)
 
 try:
-    from injury_manager import InjuryManager, TeamInjuryReport
+    from injury_manager import InjuryManager
     INJURY_MANAGER_AVAILABLE = True
 except ModuleNotFoundError:
     INJURY_MANAGER_AVAILABLE = False
@@ -84,7 +84,7 @@ except ModuleNotFoundError:
     SUPABASE_MODULE_AVAILABLE = False
 
 try:
-    from ml_predictor import MLPredictorEngine, blend_predictions, FEATURE_COLUMNS
+    from ml_predictor import MLPredictorEngine, blend_predictions
     ML_MODULE_AVAILABLE = True
 except ModuleNotFoundError:
     ML_MODULE_AVAILABLE = False
