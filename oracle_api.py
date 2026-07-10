@@ -23,6 +23,12 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 try:
+    from cache_manager import get_cache
+    CACHE_MANAGER_AVAILABLE = True
+except ImportError:
+    CACHE_MANAGER_AVAILABLE = False
+
+try:
     from bs4 import BeautifulSoup
     BS4_AVAILABLE = True
 except ImportError:
@@ -155,11 +161,49 @@ class FootballOracleAPI:
         self._elo_cache:    dict[str, int]  = _disc_load(ELO_CACHE_PATH)
         self._scores_cache: dict[str, list] = _disc_load(SCORES_CACHE_PATH)
         self._active_sport_keys: set[str]   = set()
+        # [REPARAT] Inainte, _cget/_cset foloseau DOAR self._mem (dict simplu,
+        # in memorie, per-instanta) - complet deconectat de CacheManager
+        # (L1 disc + L2 Supabase, construit separat). Asta insemna ca "reducerea
+        # apelurilor catre API-uri" nu functiona real pt niciuna din sursele
+        # gestionate aici (FreeLF, ESPN, football-data.org, Odds API) - fiecare
+        # instanta noua (fiecare rerun Streamlit) pornea cu cache gol.
+        self._cache_mgr = get_cache() if CACHE_MANAGER_AVAILABLE else None
         self._validate_api_keys()
         logger.info("FootballOracleAPI v2.3 initialised.")
 
-    # ── Memory cache ──────────────────────────────────────────────────────
+    # ── Cache — L1 (disc) + L2 (Supabase), prin CacheManager ──────────────
+    # Fallback pe self._mem DOAR daca CacheManager nu e disponibil deloc
+    # (nu ar trebui sa se intample in productie - e mereu importabil local).
+    _CATEGORY_PREFIXES = (
+        ("freelf_standings_", "standings"), ("standings_", "standings"),
+        ("freelf_form_", "form"),
+        ("freelf_stats_", "stats"),
+        ("freelf_h2h_", "h2h"),
+        ("freelf_lineup_", "lineups"),
+        ("odds_", "odds"), ("events_", "odds"),
+    )
+    _PROVIDER_PREFIXES = (
+        ("freelf_", "freelivefootball"), ("espn_", "espn"),
+        ("odds_", "oddsapi"), ("events_", "oddsapi"),
+        ("standings_", "footballdata"),
+    )
+
+    def _category_for_key(self, key: str) -> str:
+        for prefix, category in self._CATEGORY_PREFIXES:
+            if key.startswith(prefix):
+                return category
+        return "matches"  # freelf_matches_, espn_*, week_* - liste de meciuri
+
+    def _provider_for_key(self, key: str) -> str:
+        for prefix, provider in self._PROVIDER_PREFIXES:
+            if key.startswith(prefix):
+                return provider
+        return "multi"  # ex. week_ combina mai multe surse deodata
+
     def _cget(self, key: str) -> Any | None:
+        if self._cache_mgr is not None:
+            return self._cache_mgr.get_raw(self._category_for_key(key), key)
+        # fallback — doar daca CacheManager nu exista deloc
         if key in self._mem:
             v, ts = self._mem[key]
             ttl = 240 if key.startswith("odds_") else self._ttl
@@ -168,6 +212,12 @@ class FootballOracleAPI:
         return None
 
     def _cset(self, key: str, val: Any) -> None:
+        if self._cache_mgr is not None:
+            self._cache_mgr.set(
+                self._category_for_key(key), key, val,
+                provider=self._provider_for_key(key),
+            )
+            return
         self._mem[key] = (val, datetime.now(timezone.utc))
 
     # ── Low-level HTTP ────────────────────────────────────────────────────
