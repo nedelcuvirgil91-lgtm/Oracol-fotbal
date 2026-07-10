@@ -40,6 +40,7 @@ CHANGES v1.2:
 """
 from __future__ import annotations
 import re, unicodedata
+from dataclasses import dataclass
 
 TEAM_ALIASES: dict[str, list[str]] = {
     "United States": ["USA","US","U.S.A.","United States of America","USMNT"],
@@ -173,45 +174,203 @@ for _canonical, _aliases in TEAM_ALIASES.items():
         ALIAS_TO_CANONICAL[_alias.lower()] = _canonical
 
 # ─────────────────────────────────────────────────────────────────────────────
-# [RESTAURAT v1.4] Constante de configurare ligi/odds/ELO — identice 1:1 cu
-# v1.1 (ultima versiune in care existau). Eliminate accidental in v1.2/v1.3.
-# Consumate de oracle_api.py si oracle_engine.py — vezi CHANGES v1.4 de mai sus.
 # ─────────────────────────────────────────────────────────────────────────────
-ODDS_SPORT_KEYS: dict[str, str] = {
-    "World Cup 2026":    "soccer_fifa_world_cup",
-    "Premier League":    "soccer_epl",
-    "La Liga":           "soccer_spain_la_liga",
-    "Serie A":           "soccer_italy_serie_a",
-    "Bundesliga":        "soccer_germany_bundesliga",
-    "Ligue 1":           "soccer_france_ligue_one",
-    "Champions League":  "soccer_uefa_champs_league",
-    "Europa League":     "soccer_uefa_europa_league",
-    "Romania SuperLiga": "soccer_romania_1_liga",
-    "MLS":               "soccer_usa_mls",
-    "Eredivisie":        "soccer_netherlands_eredivisie",
-    "Primeira Liga":     "soccer_portugal_primeira_liga",
+# [ADAUGAT] LEAGUE_PROVIDERS — SURSA CANONICĂ UNICĂ pentru toate mapările de
+# competiții pe provideri externi. Vezi architecture/ADR-001-league-providers.md
+# pentru motivația completă a acestei decizii.
+#
+# Înainte existau 5+ dicționare manuale separate (ODDS_SPORT_KEYS,
+# FD_COMPETITIONS, ESPN_LEAGUE_SLUGS, TSDB_LEAGUE_IDS, FREE_LF_LEAGUE_IDS) +
+# o a 6-a copie manuală, independentă, in sync/sync_results.py
+# (COMPETITION_TO_LEAGUE) — care s-a desincronizat exact așa cum era de
+# așteptat (lipseau Europa League și World Cup 2026, descoperit prin audit).
+#
+# De acum, toate dicționarele de mai jos sunt GENERATE din LEAGUE_PROVIDERS,
+# nu scrise manual — o singură sursă de adevăr, imposibil de desincronizat.
+#
+# `provider_ids`: codul/ID-ul/slug-ul folosit de fiecare provider extern.
+# `supported`: True (confirmat suportat), False (confirmat NEsuportat oficial,
+#   verificat direct la sursă) sau "necunoscut" (neconfirmat încă — NU se
+#   inventează niciodată o valoare aici doar ca să umplem golul).
+#
+# NOTĂ: "api_football" e inclus ca provider pt toate ligile, dar cu
+# id=None/"necunoscut" peste tot — API-Football nu e încă integrat în cod,
+# deci nu are sens verificat per-ligă până la integrarea reală (Etapa 6).
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class LeagueDefinition:
+    name: str
+    provider_ids: dict[str, str | int | None]
+    supported: dict[str, bool | str]
+
+
+LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
+    "Premier League": LeagueDefinition(
+        name="Premier League",
+        provider_ids={"football_data": "PL", "espn": "eng.1", "tsdb": "4328",
+                       "odds": "soccer_epl", "freelf": 47, "api_football": None},
+        supported={"football_data": True, "espn": True, "tsdb": True,
+                    "odds": True, "freelf": True, "api_football": "necunoscut"},
+    ),
+    "La Liga": LeagueDefinition(
+        name="La Liga",
+        provider_ids={"football_data": "PD", "espn": "esp.1", "tsdb": "4335",
+                       "odds": "soccer_spain_la_liga", "freelf": 87, "api_football": None},
+        supported={"football_data": True, "espn": True, "tsdb": True,
+                    "odds": True, "freelf": True, "api_football": "necunoscut"},
+    ),
+    "Serie A": LeagueDefinition(
+        name="Serie A",
+        provider_ids={"football_data": "SA", "espn": "ita.1", "tsdb": "4332",
+                       "odds": "soccer_italy_serie_a", "freelf": 55, "api_football": None},
+        supported={"football_data": True, "espn": True, "tsdb": True,
+                    "odds": True, "freelf": True, "api_football": "necunoscut"},
+    ),
+    "Bundesliga": LeagueDefinition(
+        name="Bundesliga",
+        provider_ids={"football_data": "BL1", "espn": "ger.1", "tsdb": "4331",
+                       "odds": "soccer_germany_bundesliga", "freelf": 54, "api_football": None},
+        supported={"football_data": True, "espn": True, "tsdb": True,
+                    "odds": True, "freelf": True, "api_football": "necunoscut"},
+    ),
+    "Ligue 1": LeagueDefinition(
+        name="Ligue 1",
+        provider_ids={"football_data": "FL1", "espn": "fra.1", "tsdb": "4334",
+                       "odds": "soccer_france_ligue_one", "freelf": 53, "api_football": None},
+        supported={"football_data": True, "espn": True, "tsdb": True,
+                    "odds": True, "freelf": True, "api_football": "necunoscut"},
+    ),
+    "Champions League": LeagueDefinition(
+        name="Champions League",
+        provider_ids={"football_data": "CL", "espn": "uefa.champions", "tsdb": "4480",
+                       "odds": "soccer_uefa_champs_league", "freelf": 42, "api_football": None},
+        supported={"football_data": True, "espn": True, "tsdb": True,
+                    "odds": True, "freelf": True, "api_football": "necunoscut"},
+    ),
+    "Europa League": LeagueDefinition(
+        name="Europa League",
+        # tsdb=4481 confirmat prin audit (lipsea inainte); football_data
+        # ramane "necunoscut" - codul EL exista in catalogul general al
+        # providerului, dar planul gratuit documentat public (12 competitii)
+        # nu-l listeaza explicit - de verificat cu cheia reala a proiectului.
+        provider_ids={"football_data": "EL", "espn": "uefa.europa", "tsdb": "4481",
+                       "odds": "soccer_uefa_europa_league", "freelf": 73, "api_football": None},
+        supported={"football_data": "necunoscut", "espn": True, "tsdb": True,
+                    "odds": True, "freelf": True, "api_football": "necunoscut"},
+    ),
+    "Romania SuperLiga": LeagueDefinition(
+        name="Romania SuperLiga",
+        provider_ids={"football_data": None, "espn": "rou.1", "tsdb": "4652",
+                       "odds": "soccer_romania_1_liga", "freelf": None, "api_football": None},
+        supported={
+            "football_data": False,  # CONFIRMAT: planul gratuit football-data.org
+                                      # acopera exact 12 competitii publicate oficial,
+                                      # Romania nu e printre ele
+            "espn": True, "tsdb": True, "odds": True,
+            "freelf": "necunoscut", "api_football": "necunoscut",
+        },
+    ),
+    "World Cup 2026": LeagueDefinition(
+        name="World Cup 2026",
+        provider_ids={"football_data": "WC", "espn": "fifa.world", "tsdb": "4429",
+                       "odds": "soccer_fifa_world_cup", "freelf": 77, "api_football": None},
+        supported={"football_data": True, "espn": True, "tsdb": True,
+                    "odds": True, "freelf": True, "api_football": "necunoscut"},
+    ),
+    "MLS": LeagueDefinition(
+        name="MLS",
+        # MLS ramane exclus din BOOTSTRAP_LEAGUES (decizie deliberata,
+        # aplicatia nu prevede acest campionat) - prezent aici doar pt
+        # normalizare generala de nume, consistent cu LEAGUE_ALIASES.
+        provider_ids={"football_data": None, "espn": "usa.1", "tsdb": "4346",
+                       "odds": "soccer_usa_mls", "freelf": None, "api_football": None},
+        supported={"football_data": False, "espn": True, "tsdb": True,
+                    "odds": True, "freelf": False, "api_football": "necunoscut"},
+    ),
+    "Conference League": LeagueDefinition(
+        name="Conference League",
+        # Adaugat acum, integral, ca sa nu fie tratat separat ulterior.
+        # tsdb=5071 si espn="uefa.europa.conf" confirmate prin audit direct.
+        # odds: competitia exista confirmat la provider ("Soccer: UEFA Europa
+        # Conference League" listata explicit), dar codul exact sport_key
+        # nu a putut fi confirmat din surse publice - "necunoscut", nu inventat.
+        provider_ids={"football_data": None, "espn": "uefa.europa.conf", "tsdb": "5071",
+                       "odds": None, "freelf": None, "api_football": None},
+        supported={
+            "football_data": False,  # acelasi motiv ca Romania - nu e in cele 12 competitii gratuite
+            "espn": True, "tsdb": True,
+            "odds": "necunoscut", "freelf": "necunoscut", "api_football": "necunoscut",
+        },
+    ),
 }
 
+# ── Dictionare derivate — generate, NU scrise manual (elimina desincronizarea) ──
+ODDS_SPORT_KEYS: dict[str, str] = {
+    lg: d.provider_ids["odds"] for lg, d in LEAGUE_PROVIDERS.items()
+    if d.provider_ids.get("odds") is not None
+}
 SPORT_KEY_TO_LEAGUE: dict[str, str] = {v: k for k, v in ODDS_SPORT_KEYS.items()}
 
 FD_COMPETITIONS: dict[str, str] = {
-    "Premier League": "PL", "La Liga": "PD", "Serie A": "SA",
-    "Bundesliga": "BL1", "Ligue 1": "FL1", "Champions League": "CL",
-    "Europa League": "EL", "World Cup 2026": "WC",
+    lg: d.provider_ids["football_data"] for lg, d in LEAGUE_PROVIDERS.items()
+    if d.provider_ids.get("football_data") is not None
 }
 
 ESPN_LEAGUE_SLUGS: dict[str, str] = {
-    "World Cup 2026": "fifa.world", "Premier League": "eng.1",
-    "La Liga": "esp.1", "Serie A": "ita.1", "Bundesliga": "ger.1",
-    "Ligue 1": "fra.1", "Champions League": "uefa.champions",
-    "Europa League": "uefa.europa", "MLS": "usa.1", "Romania SuperLiga": "rou.1",
+    lg: d.provider_ids["espn"] for lg, d in LEAGUE_PROVIDERS.items()
+    if d.provider_ids.get("espn") is not None
 }
 
 TSDB_LEAGUE_IDS: dict[str, str] = {
-    "Premier League": "4328", "La Liga": "4335", "Serie A": "4332",
-    "Bundesliga": "4331", "Ligue 1": "4334", "Champions League": "4480",
-    "Romania SuperLiga": "4652", "World Cup 2026": "4429", "MLS": "4346",
+    lg: d.provider_ids["tsdb"] for lg, d in LEAGUE_PROVIDERS.items()
+    if d.provider_ids.get("tsdb") is not None
 }
+
+
+def verify_league_coverage(bootstrap_leagues: list[str] | None = None) -> dict[str, list[str]]:
+    """
+    Audit automat — compară LEAGUE_PROVIDERS cu lista de ligi active
+    (implicit BOOTSTRAP_LEAGUES) și raportează problemele, separat pe
+    severitate. Gândit să ruleze în CI (vezi ADR-001).
+
+    Returnează {"errors": [...], "warnings": [...]}. CI trebuie să eșueze
+    DOAR pe "errors" (provideri obligatorii lipsă/neconfirmați) — "warnings"
+    (provideri opționali încă neconfirmați, ex. freelf/api_football pt o
+    ligă nouă) sunt tolerate temporar, nu blochează.
+
+    Provideri obligatorii (cel puțin unul confirmat True, altfel liga nu
+    poate intra deloc în bucla de învățare continuă): football_data, espn, tsdb.
+    Provideri opționali: odds, freelf, api_football.
+    """
+    if bootstrap_leagues is None:
+        from sync.bootstrap_league_learning import BOOTSTRAP_LEAGUES as bootstrap_leagues
+
+    REQUIRED = ("football_data", "espn", "tsdb")
+    OPTIONAL = ("odds", "freelf", "api_football")
+
+    errors: list[str] = []
+    warnings: list[str] = []
+
+    for league in bootstrap_leagues:
+        if league not in LEAGUE_PROVIDERS:
+            errors.append(f"{league}: absentă complet din LEAGUE_PROVIDERS")
+            continue
+        supported = LEAGUE_PROVIDERS[league].supported
+        if not any(supported.get(p) is True for p in REQUIRED):
+            errors.append(
+                f"{league}: niciun provider obligatoriu (football_data/espn/tsdb) "
+                f"confirmat suportat — liga nu poate primi rezultate automate"
+            )
+        for p in REQUIRED:
+            if supported.get(p) == "necunoscut":
+                warnings.append(f"{league}/{p}: provider obligatoriu neconfirmat (nici True, nici False)")
+        for p in OPTIONAL:
+            if supported.get(p) == "necunoscut":
+                warnings.append(f"{league}/{p}: provider opțional neconfirmat")
+
+    return {"errors": errors, "warnings": warnings}
+
 
 ELO_RATINGS_FALLBACK: dict[str, int] = {
     "Argentina": 2141, "France": 2085, "England": 2065, "Brazil": 2062,
@@ -310,9 +469,8 @@ LEAGUE_BASELINES: dict[str, float] = {
 }
 
 FREE_LF_LEAGUE_IDS: dict[str, int] = {
-    "World Cup 2026": 77, "Premier League": 47, "Champions League": 42,
-    "La Liga": 87, "Bundesliga": 54, "Europa League": 73,
-    "Ligue 1": 53, "Serie A": 55,
+    lg: d.provider_ids["freelf"] for lg, d in LEAGUE_PROVIDERS.items()
+    if d.provider_ids.get("freelf") is not None
 }
 
 # [FIX v1.3] " fc", " cf", " united", " city" eliminate — vezi CHANGES v1.3.
@@ -391,6 +549,7 @@ LEAGUE_ALIASES: dict[str, list[str]] = {
     #    oficiale folosite de football-data.org in raspunsul API
     "Champions League":  ["CL", "UEFA Champions League", "UCL", "uefa-champions-league"],
     "Europa League":     ["EL", "UEFA Europa League", "UEL", "uefa-europa-league"],
+    "Conference League": ["UECL", "UEFA Conference League", "UEFA Europa Conference League", "Europa Conference League"],
     "World Cup 2026":    ["WC", "FIFA World Cup", "World Cup"],
     # ── Alte ligi prezente in ODDS_SPORT_KEYS / ESPN_LEAGUE_SLUGS, momentan
     #    fara sursa activa de import istoric — pastrate pentru extensibilitate
