@@ -163,12 +163,16 @@ class FootballOracleAPI:
     )
 
     def _category_for_key(self, key: str) -> str:
+        if key == "elo_ratings":
+            return "elo"
         for prefix, category in self._CATEGORY_PREFIXES:
             if key.startswith(prefix):
                 return category
         return "matches"  # freelf_matches_, espn_*, week_* - liste de meciuri
 
     def _provider_for_key(self, key: str) -> str:
+        if key == "elo_ratings":
+            return "eloratings"
         for prefix, provider in self._PROVIDER_PREFIXES:
             if key.startswith(prefix):
                 return provider
