@@ -45,6 +45,18 @@ PROVIDERS: dict[str, dict] = {
         "header_key": None, "header_host": None,
         "keys": [{"key": "48a5b54b8ced45cc924153231263005", "limit": 1000000, "label": "Weather-Key1"}],
     },
+    # [ADAUGAT] API-Football (api-sports.io) — fara nicio cheie reala inca.
+    # `keys: []` inseamna is_available("apifootball") returneaza False pana
+    # se adauga o cheie reala prin add_key("apifootball", cheie, limit, label)
+    # - health check-ul din football_providers.ApiFootballProvider respecta
+    # asta corect (blocheaza orice request pana exista o cheie).
+    "apifootball": {
+        "name": "API-Football (api-sports.io)",
+        "host": "v3.football.api-sports.io",
+        "base_url": "https://v3.football.api-sports.io",
+        "header_key": "x-apisports-key", "header_host": None,
+        "keys": [],
+    },
 }
 
 WARN_THRESHOLD      = 0.80
@@ -58,10 +70,38 @@ class APIKeyManager:
         self._reset_if_new_month()
 
     def _load_usage(self):
+        local = {"month": date.today().strftime("%Y-%m"), "providers": {}}
         if KEY_USAGE_PATH.exists():
-            try: return json.loads(KEY_USAGE_PATH.read_text(encoding="utf-8"))
-            except Exception: pass
-        return {"month": date.today().strftime("%Y-%m"), "providers": {}}
+            try:
+                local = json.loads(KEY_USAGE_PATH.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
+        # [ADAUGAT] Nivel Supabase — sursa comuna intre instante (telefon/PC/
+        # GitHub Actions). Fara asta, fiecare instanta isi tine propria
+        # quota locala, fara sa stie de request-urile facute de celelalte -
+        # risc real de depasire a cotei zilnice/lunare. Degradare gratioasa
+        # daca Supabase nu e disponibil (ramane doar local, ca inainte).
+        try:
+            import supabase_client as _sb
+            month = local.get("month", date.today().strftime("%Y-%m"))
+            remote = _sb.get_all_provider_usage(month)
+        except Exception:
+            remote = {}
+
+        if remote:
+            merged_providers = dict(local.get("providers", {}))
+            for provider, keys in remote.items():
+                merged_providers.setdefault(provider, {})
+                for label, used in keys.items():
+                    # MAX, nu suprascriere - o alta instanta poate fi mai la zi,
+                    # dar nu vrem sa pierdem incrementari facute doar local
+                    # inainte ca Supabase sa fi fost disponibil.
+                    local_used = merged_providers[provider].get(label, 0)
+                    merged_providers[provider][label] = max(local_used, used)
+            local["providers"] = merged_providers
+
+        return local
 
     def _save_usage(self):
         try: KEY_USAGE_PATH.write_text(json.dumps(self._usage, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -80,8 +120,18 @@ class APIKeyManager:
         if "providers" not in self._usage: self._usage["providers"] = {}
         if provider not in self._usage["providers"]: self._usage["providers"][provider] = {}
         prev = self._usage["providers"][provider].get(key_label, 0)
-        self._usage["providers"][provider][key_label] = prev + 1
+        new_used = prev + 1
+        self._usage["providers"][provider][key_label] = new_used
         self._save_usage()
+        # [ADAUGAT] write-through Supabase - best-effort, nu blocheaza fluxul
+        # local daca esueaza (acelasi principiu de degradare gratioasa).
+        try:
+            import supabase_client as _sb
+            prov_def = PROVIDERS.get(provider, {})
+            limit = next((kd["limit"] for kd in prov_def.get("keys", []) if kd["label"] == key_label), 0)
+            _sb.set_provider_usage(provider, key_label, self._usage.get("month", ""), new_used, limit)
+        except Exception:
+            pass
 
     def _get_active_key(self, provider):
         prov = PROVIDERS.get(provider)
