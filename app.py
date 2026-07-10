@@ -13,6 +13,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+import supabase_client as sb
+
 st.set_page_config(
     page_title="Football Oracle",
     page_icon="⚽",
@@ -546,8 +548,13 @@ elif nav == "settings":
     st.markdown('<div class="section-bar"><div class="section-bar-title">⚙️ Setări model</div></div>', unsafe_allow_html=True)
     t1,t2,t3,t4=st.tabs(["🎛 Weights","⚡ Config","🧠 League Learning","🔍 Diagnostics"])
     with t1:
-        w=_load_json(WEIGHTS_PATH)
-        if not w: st.warning("weights.json lipsă.")
+        # [REPARAT] Inainte citea direct din weights.json, ignorand Supabase
+        # complet - arata valori vechi cand Supabase e sursa reala activa.
+        # Acum citeste din engine.weights (deja incarcat corect, Supabase-
+        # first, cu weights.json doar fallback - vezi FootballOracleEngine.__init__).
+        w = engine.weights
+        if not w:
+            st.warning("Ponderi indisponibile (nici Supabase, nici weights.json local).")
         else:
             with st.form("wf"):
                 wc1,wc2=st.columns(2)
@@ -563,10 +570,25 @@ elif nav == "settings":
                     nel=st.slider("elo_blend_weight",.10,.60,float(w.get("elo_blend_weight",.35)),.05)
                 if st.form_submit_button("💾 Salvează",use_container_width=True):
                     w.update({"form_weight":nfw,"dna_weight":ndw,"goals_weight":ngw,"shots_ot_weight":nsow,"possession_weight":npw,"home_advantage":nha,"away_penalty":nap,"elo_blend_weight":nel})
-                    _save_json(WEIGHTS_PATH,w); engine.weights=w; st.success("✅ Salvat.")
+                    # [REPARAT] Supabase (model_weights) e SURSA CANONICA -
+                    # se scrie acolo daca e activ. weights.json local se
+                    # actualizeaza mereu, DAR doar ca fallback/oglinda pt
+                    # modul offline - nu mai e niciodata sursa principala.
+                    engine.weights = w
+                    saved_remote = engine.use_supabase and sb.save_weights(w)
+                    _save_json(WEIGHTS_PATH, w)
+                    if engine.use_supabase and not saved_remote:
+                        st.error("⚠️ Salvare Supabase eșuată — s-a păstrat doar local (fallback), NU e sincronizat pe cloud.")
+                    elif saved_remote:
+                        st.success("✅ Salvat în Supabase (sursa canonică) + local (fallback).")
+                    else:
+                        st.warning("✅ Salvat doar local — Supabase indisponibil, NU e sursa activă acum.")
     with t2:
-        cfg=_load_json(CONFIG_PATH)
-        if not cfg: st.warning("config.json lipsă.")
+        # [REPARAT] Identic cu t1 - citeste din engine.config (deja incarcat
+        # corect, Supabase-first), nu direct din config.json.
+        cfg = engine.config
+        if not cfg:
+            st.warning("Config indisponibil (nici Supabase, nici config.json local).")
         else:
             with st.form("cf"):
                 cc1,cc2=st.columns(2)
@@ -580,7 +602,15 @@ elif nav == "settings":
                     nlr=st.slider("learning_rate",.01,.20,float(cfg.get("recalibration_learning_rate",.05)),.01)
                 if st.form_submit_button("💾 Salvează",use_container_width=True):
                     cfg.update({"value_bet_threshold_pct":round(nt,1),"max_goals_poisson":int(nmg),"last_n_fixtures":int(nln),"stake_default":round(nsd,2),"kelly_fraction":round(nkf,2),"recalibration_learning_rate":round(nlr,3)})
-                    _save_json(CONFIG_PATH,cfg); engine.config=cfg; st.success("✅ Salvat.")
+                    engine.config = cfg
+                    saved_remote = engine.use_supabase and sb.save_config(cfg)
+                    _save_json(CONFIG_PATH, cfg)
+                    if engine.use_supabase and not saved_remote:
+                        st.error("⚠️ Salvare Supabase eșuată — s-a păstrat doar local (fallback).")
+                    elif saved_remote:
+                        st.success("✅ Salvat în Supabase (sursa canonică) + local (fallback).")
+                    else:
+                        st.warning("✅ Salvat doar local — Supabase indisponibil.")
     with t3:
         ldf=engine.get_league_learning_stats()
         st.dataframe(ldf,use_container_width=True,hide_index=True) if not ldf.empty else st.info("Fără date de calibrare.")
