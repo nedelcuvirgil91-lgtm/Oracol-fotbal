@@ -99,6 +99,22 @@ def test_normalize_coach_confirmed_structure():
     assert coach.source_provider == "apifootball"
 
 
+def test_get_injuries_sends_season_param():
+    """Regresie directa pe descoperirea live: API-Football intoarce HTTP 200
+    cu {"errors":{"season":"..."}} daca lipseste 'season'. Confirma ca
+    parametrul e acum trimis, nu doar 'team'."""
+    p = _provider()
+    captured_params = {}
+    original_get = p._get
+    def spy_get(path, params, category, cache_key):
+        captured_params.update(params)
+        return {"response": []}
+    p._get = spy_get
+    p.get_injuries("Arsenal", 42, "Premier League", season=2025)
+    assert captured_params.get("season") == 2025
+    assert captured_params.get("team") == 42
+
+
 def test_normalize_injury_assumed_structure():
     p = _provider()
     sample = {
