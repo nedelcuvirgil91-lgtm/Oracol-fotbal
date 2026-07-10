@@ -121,6 +121,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "h2h_lookback_days":           1095,
     "monte_carlo_simulations":     10000,
     "ml_blend_weight":             0.35,
+    # [ADAUGAT] Shadow testing - vezi architecture/ADR-002-shadow-testing.md.
+    # Implicit OPRIT - nicio schimbare de comportament fara activare explicita.
+    "shadow_mode_enabled":         False,
 }
 
 DEFAULT_WEIGHTS: dict[str, Any] = {
@@ -1047,6 +1050,41 @@ class FootballOracleEngine:
                 "mc_prob_draw": mlf["mc_prob_draw"],
                 "mc_prob_away": mlf["mc_prob_away"],
             })
+
+    # [ADAUGAT] Hook generic de shadow testing — vezi shadow_testing.py /
+    # architecture/ADR-002-shadow-testing.md. NU e apelat încă de nimic în
+    # fluxul curent (niciun experiment activ până la integrarea reală a
+    # unui feature nou — Etapa 6) — există aici, gata de folosit, ca orice
+    # experiment viitor (injuries, coaches, player stats, SofaScore etc.)
+    # să nu reinventeze gating-ul pe `shadow_mode_enabled` sau construcția
+    # câmpurilor standard (fixture_id, ligă, echipe, dată).
+    def log_shadow_experiment(
+        self, pred: MatchPrediction, experiment_name: str, experiment_version: str,
+        home_xg: float, away_xg: float, prob_home: float, prob_draw: float, prob_away: float,
+        feature_metadata: dict | None = None, processing_stage: str = "final",
+        experiment_group: str = "treatment",
+    ) -> bool:
+        """Nu face nimic dacă shadow_mode_enabled=False (implicit) — zero
+        impact asupra producției. `baseline_model_version` se calculează
+        automat din predicția de producție curentă (pred), nu trebuie dat
+        explicit de apelant."""
+        if not self.config.get("shadow_mode_enabled", False):
+            return False
+        try:
+            import shadow_testing
+            return shadow_testing.log_shadow_prediction(
+                fixture_id=pred.fixture_id,
+                experiment_name=experiment_name, experiment_version=experiment_version,
+                home_xg=home_xg, away_xg=away_xg,
+                prob_home=prob_home, prob_draw=prob_draw, prob_away=prob_away,
+                feature_metadata=feature_metadata, experiment_group=experiment_group,
+                processing_stage=processing_stage,
+                league=pred.league, home_team=pred.home_team, away_team=pred.away_team,
+                kickoff_date=pred.kickoff_date,
+            )
+        except Exception as exc:
+            logger.debug("[ShadowTesting] log_shadow_experiment failed: %s", exc)
+            return False
 
     def _load_prediction(self, fixture_id: str) -> dict | None:
         safe_id = str(fixture_id).replace("/", "_")
