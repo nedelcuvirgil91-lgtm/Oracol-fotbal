@@ -54,7 +54,16 @@ PROVIDERS: dict[str, dict] = {
         "host": "v3.football.api-sports.io",
         "base_url": "https://v3.football.api-sports.io",
         "header_key": "x-apisports-key", "header_host": None,
-        "keys": [],
+        # [NOTA] API-Football e 100 request-uri/ZI (plan gratuit), dar acest
+        # sistem are ciclu de reset LUNAR (_reset_if_new_month). Un limit=100
+        # literal ar bloca aplicatia dupa doar 100 apeluri din toata luna, nu
+        # 100/zi cum e realitatea - subutilizare severa (~1/30 din capacitate).
+        # Folosesc echivalentul lunar aproximativ (100 x ~30 zile); impunerea
+        # REALA a limitei zilnice ramane pe seama raspunsurilor 429 de la
+        # provider, deja gestionate gratios in cod (validat live pe FreeLF).
+        # Nu construiesc un tracker zilnic separat - exact "fara sistem
+        # complex", cum ai cerut.
+        "keys": [{"key": "c4e7610bf0334935d0f90801863e1801", "limit": 3000, "label": "ApiFootball-Key1"}],
     },
 }
 
