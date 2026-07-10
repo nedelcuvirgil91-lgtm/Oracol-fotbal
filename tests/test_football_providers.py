@@ -6,19 +6,32 @@ def _provider():
     return ApiFootballProvider(key_manager=get_key_manager())
 
 
-def test_apifootball_unavailable_without_key():
-    km = get_key_manager()
-    assert km.is_available("apifootball") is False
+class _FakeKeyManagerNoKey:
+    """Simuleaza un provider fara nicio cheie configurata - izolat de starea
+    reala globala (care acum ARE o cheie API-Football validă). Testeaza
+    logica de gating, nu starea curenta a proiectului."""
+    def is_available(self, provider_id): return False
+    def get_headers(self, provider_id): return None
+    def record_request(self, provider_id): pass
 
 
-def test_get_injuries_blocked_by_health_check():
-    p = _provider()
+def test_health_check_gate_blocks_when_no_key_configured():
+    """Regresie izolata: logica de gating trebuie sa blocheze orice request
+    daca providerul nu are nicio cheie - indiferent de starea reala globala."""
+    p = ApiFootballProvider(key_manager=_FakeKeyManagerNoKey())
+    assert p._healthy() is False
     assert p.get_injuries("Arsenal", 42, "Premier League") == []
-
-
-def test_get_coaches_blocked_by_health_check():
-    p = _provider()
     assert p.get_coaches("Arsenal", 42) == []
+
+
+def test_apifootball_key_now_configured_in_key_manager():
+    """Confirma integrarea reala: cheia traieste DOAR in key_manager.py,
+    niciodata hardcodata in football_providers.py sau alte module."""
+    km = get_key_manager()
+    assert km.is_available("apifootball") is True
+    headers = km.get_headers("apifootball")
+    assert headers is not None
+    assert "x-apisports-key" in headers
 
 
 def test_oracle_api_cache_wired_to_cache_manager():
