@@ -291,6 +291,14 @@ class MatchPrediction:
     ml_confidence:            float = 0.0
     ml_blend_label:           str   = "poisson-only"
     ml_samples_used:          int   = 0
+    # ── De-vig (Prioritatea #2 — Value Betting Engine) ────────────────────
+    # Probabilitatea "fair" (fara marja bookmaker-ului), separata explicit
+    # de impl_*_pct (bruta, 1/cota) - vezi _devig_probabilities(). Suma
+    # celor trei e normalizata la 1.0. edge_*_pct/value_bets/EV o folosesc
+    # pe aceasta, NU pe impl_*_pct.
+    fair_home_pct:            float = 0.0
+    fair_draw_pct:            float = 0.0
+    fair_away_pct:            float = 0.0
 
 
 class FootballOracleEngine:
@@ -687,6 +695,26 @@ class FootballOracleEngine:
         return 0.0 if odds <= 1.0 else 1.0 / odds
 
     @staticmethod
+    def _devig_probabilities(impl_h: float, impl_d: float, impl_a: float) -> tuple[float, float, float]:
+        """
+        Normalizează probabilitățile implicite BRUTE (1/cotă) astfel încât
+        suma lor să fie exact 1.0 — elimină marja bookmaker-ului
+        (overround/vig). La orice bookmaker real, suma celor trei
+        probabilități brute depășește mereu 100% (tipic 105-108%) — fără
+        această normalizare, motorul de Value Betting compară modelul
+        propriu cu o probabilitate artificial umflată de marjă, nu cu
+        piața reală ("fair"), ceea ce subestimează sistematic edge-ul real.
+
+        Caz limită: dacă suma e 0 (toate cele trei cote lipsă/invalide),
+        returnează (0.0, 0.0, 0.0) — fără împărțire la zero, fără valori
+        inventate.
+        """
+        total = impl_h + impl_d + impl_a
+        if total <= 0:
+            return 0.0, 0.0, 0.0
+        return impl_h / total, impl_d / total, impl_a / total
+
+    @staticmethod
     def _edge(model_p: float, impl_p: float) -> float:
         if impl_p <= 0:
             return 0.0
@@ -950,9 +978,13 @@ class FootballOracleEngine:
         bk_n = match.get("odds_source") or "N/A"
 
         impl_h = self._implied(bk_h); impl_d = self._implied(bk_d); impl_a = self._implied(bk_a)
-        edge_h = self._edge(ph, impl_h) if bk_h > 1 else 0.0
-        edge_d = self._edge(pd, impl_d) if bk_d > 1 else 0.0
-        edge_a = self._edge(pa, impl_a) if bk_a > 1 else 0.0
+        # [MODIFICAT] de-vig — vezi Prioritatea #2. impl_* rămân brute (afișate
+        # ca atare în UI, neschimbate — fără regresie). fair_* sunt folosite
+        # de acum pentru TOATE calculele de edge/EV/value bets/Kelly.
+        fair_h, fair_d, fair_a = self._devig_probabilities(impl_h, impl_d, impl_a)
+        edge_h = self._edge(ph, fair_h) if bk_h > 1 else 0.0
+        edge_d = self._edge(pd, fair_d) if bk_d > 1 else 0.0
+        edge_a = self._edge(pa, fair_a) if bk_a > 1 else 0.0
 
         threshold  = float(self.config.get("value_bet_threshold_pct", 5.0))
         value_bets: list[dict] = []
@@ -988,6 +1020,8 @@ class FootballOracleEngine:
             bk_home_odds=bk_h, bk_draw_odds=bk_d, bk_away_odds=bk_a, bookmaker_name=bk_n,
             impl_home_pct=round(impl_h * 100, 2), impl_draw_pct=round(impl_d * 100, 2),
             impl_away_pct=round(impl_a * 100, 2),
+            fair_home_pct=round(fair_h * 100, 2), fair_draw_pct=round(fair_d * 100, 2),
+            fair_away_pct=round(fair_a * 100, 2),
             edge_home_pct=edge_h, edge_draw_pct=edge_d, edge_away_pct=edge_a,
             value_bets=value_bets, weather_note=w_note, weather_penalty=w_pen,
             kelly_stakes=kelly,
