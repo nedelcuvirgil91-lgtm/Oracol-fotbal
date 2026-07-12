@@ -1,0 +1,39 @@
+name: Football Oracle — Probă API-Football Statistics
+
+on:
+  workflow_dispatch:
+    inputs:
+      leagues:
+        description: "Ligi separate prin virgulă (gol = toate cele 7 din PROBE_TEAMS)"
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run API-Football statistics probe (discovery, nu integrare)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.leagues }}" ]; then
+            ARGS="--leagues \"${{ github.event.inputs.leagues }}\""
+          fi
+          eval python sync/poc_api_football_statistics.py $ARGS

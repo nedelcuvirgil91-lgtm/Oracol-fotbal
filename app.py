@@ -935,6 +935,39 @@ elif nav == "settings":
             st.caption("Fără date încă — deschide tab-ul VALUE BETS pentru a genera statistici.")
 
         st.markdown("---")
+        st.markdown('<span class="sub-label">🔬 Sondaj API-Football — /fixtures/statistics (discovery, nu integrare)</span>', unsafe_allow_html=True)
+        # [ADAUGAT] Complet izolat de Prediction Engine — vezi
+        # diagnostics_api_football.py. NU rulează automat (consumă quota
+        # reală API-Football, comună cu injuries/coaches din producție) —
+        # doar la apăsarea explicită a butonului.
+        st.caption("Verifică dacă /fixtures/statistics există pe planul nostru și ce câmpuri livrează (posesie, șuturi, cornere, cartonașe, xG). Nu scrie nimic în match_history.")
+        if st.button("🔬 Rulează sondajul acum"):
+            from diagnostics_api_football import run_probe
+            with st.spinner("Sondez API-Football (poate dura ~15s, 3 apeluri/ligă)..."):
+                st.session_state["api_football_probe_report"] = run_probe()
+
+        probe_report = st.session_state.get("api_football_probe_report")
+        if probe_report:
+            st.caption(f"Ultimul sondaj: {probe_report.generated_at} · {probe_report.quota_note}")
+            for r in probe_report.leagues:
+                with st.expander(f"{r.league} — {r.verdict}", expanded=(r.verdict != "ok")):
+                    st.caption(f"Echipă probă: {r.team_name}")
+                    if r.fixture_id:
+                        st.caption(f"Fixture: {r.home_team} vs {r.away_team} ({(r.fixture_date or '')[:10]})")
+                    stat_probe = r.statistics_probe
+                    if stat_probe:
+                        st.caption(f"HTTP: {stat_probe.http_status} ({stat_probe.latency_ms} ms)")
+                    if r.verdict == "ok":
+                        for fc in r.field_checks:
+                            label = f"{fc.label}" + (f' — "{fc.matched_raw_type}"' if fc.matched_raw_type else "")
+                            (st.success if fc.found else st.error)(("✓ " if fc.found else "✗ ") + label)
+                        st.caption(f"Toate câmpurile brute găsite: {', '.join(r.all_raw_types_found)}")
+                    else:
+                        st.warning(f"{r.verdict} — {r.verdict_detail}")
+        else:
+            st.caption("Fără sondaj rulat încă în această sesiune.")
+
+        st.markdown("---")
         st.markdown('<span class="sub-label">Module încărcate</span>', unsafe_allow_html=True)
         mods=[("mappings.py","mappings"),("cache_manager.py","cache_manager"),("key_manager.py","key_manager"),("injury_manager.py","injury_manager"),("oracle_api.py","oracle_api"),("oracle_engine.py","oracle_engine")]
         mc1,mc2=st.columns(2)
