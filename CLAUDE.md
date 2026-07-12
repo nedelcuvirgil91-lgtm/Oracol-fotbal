@@ -8,6 +8,24 @@ Football Oracle e o platformă personală de predicție și analiză a pariurilo
 
 Disclaimer de proiect (nu al acestui document): instrument de analiză statistică personală, nu consultanță financiară.
 
+## Current Implementation Status — Learning Core
+
+✔ Model Registry
+✔ LearningAlgorithm interface
+✔ XGBoost Adapter
+✔ ProductionChampion Adapter
+✔ Training Runner (manual)
+✔ CLI train.py
+
+In Progress
+- Challenger Runner
+
+Not Implemented
+- Promotion Engine
+- Champion Manager
+- Automatic Promotion
+- Daily Scheduler integration
+
 ## Filosofia proiectului
 
 **„Verificat, nu presupus."** Orice pretenție de îmbunătățire (feature nou, algoritm nou, ipoteză nouă) se demonstrează cu test de ablație pe date reale, nu se acceptă din intuiție — vezi `docs/03_ENGINE/REST_DAYS_VALIDATION.md` ca exemplu de rigoare: un feature cu fundament teoretic solid, respins explicit după ce testul măsurat n-a arătat câștig.
