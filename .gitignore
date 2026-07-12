@@ -1,0 +1,81 @@
+# ── Python ────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ── Medii virtuale ───────────────────────────────────────────────────────
+venv/
+env/
+.venv/
+ENV/
+
+# ── Streamlit ────────────────────────────────────────────────────────────
+.streamlit/secrets.toml
+
+# ── Cache-uri generate la runtime (CacheManager L1) ─────────────────────
+# NU versiona nimic din cache/ - e populat automat, la runtime, de
+# CacheManager (categorii: matches, odds, elo, form, stats, h2h, lineups,
+# standings, seasons, teams, corners, cards, events). Confirmat: aceste
+# subfoldere apar goale doar pentru ca sunt create automat la instantiere,
+# nu contin cod sursa.
+cache/
+predictions/
+
+# ── Modele ML / artefacte de antrenare ──────────────────────────────────
+*.pkl
+*.joblib
+*.h5
+*.model
+model_cache/
+
+# ── Fișiere locale de configurare / stare ───────────────────────────────
+config.json
+weights.json
+cache/key_usage.json
+
+# ── Secrete / chei API ───────────────────────────────────────────────────
+.env
+.env.local
+*.pem
+*.key
+secrets.toml
+
+# ── Arhive și descărcări ─────────────────────────────────────────────────
+*.zip
+*.tar.gz
+*.tar
+
+# ── Baze de date locale ───────────────────────────────────────────────────
+*.sqlite
+*.sqlite3
+*.db
+
+# ── Jupyter / notebook checkpoints ───────────────────────────────────────
+.ipynb_checkpoints/
+
+# ── IDE / editor ──────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# ── Logs ──────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── Teste / coverage ──────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+tests/_stubs/kagglehub.py
+
+# ── Kaggle (chei/credentiale locale) ─────────────────────────────────────
+.kaggle/
+kaggle.json
