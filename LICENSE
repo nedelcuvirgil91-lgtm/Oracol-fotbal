@@ -1,0 +1,35 @@
+Copyright (c) 2026 Football Oracle Project. Toate drepturile rezervate.
+
+Acest software și documentația asociată ("Software-ul") sunt proprietate
+privată. Nu este acordată nicio licență publică de utilizare, copiere,
+modificare, distribuire sau sub-licențiere a Software-ului sau a oricărei
+părți din acesta, cu excepția persoanelor autorizate explicit de deținătorul
+drepturilor de autor.
+
+Software-ul este furnizat "ca atare", fără nicio garanție de orice fel,
+explicită sau implicită, inclusiv, dar fără a se limita la garanțiile de
+vandabilitate, adecvare pentru un anumit scop și neîncălcare a drepturilor
+terților. În nicio circumstanță autorul sau deținătorii drepturilor de autor
+nu vor fi răspunzători pentru nicio reclamație, daune sau altă răspundere,
+fie în cadrul unei acțiuni contractuale, delictuale sau de altă natură,
+rezultată din, sau în legătură cu Software-ul sau utilizarea sau alte
+tranzacții din Software.
+
+Acest software efectuează analiză statistică a datelor sportive și nu
+constituie consultanță financiară sau de pariuri. Pariurile sportive implică
+risc financiar real.
+
+---
+
+## De ce această licență (Proprietary, nu MIT/Apache/GPL)
+
+Proiectul e, la acest moment, un instrument personal, cu chei API și
+configurații specifice unui singur utilizator/cont — nepotrivit pentru
+distribuție publică imediată sub o licență open-source permisivă.
+
+**Tranziție viitoare**: dacă proiectul devine open-source, recomand **MIT**
+(permisivă, simplă, compatibilă cu majoritatea dependințelor folosite —
+Streamlit, XGBoost, scikit-learn, Supabase — toate au licențe permisive
+compatibile). Schimbarea licenței, când va avea loc, necesită o decizie
+explicită a deținătorului drepturilor de autor și o actualizare directă a
+acestui fișier — nu se întâmplă implicit.
