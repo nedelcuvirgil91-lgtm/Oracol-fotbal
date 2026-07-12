@@ -7,9 +7,9 @@ Acest document reprezintă registrul oficial al tuturor specificațiilor tehnice
 
 | Document | Version | ADR | Status | Frozen Date |
 | :--- | :--- | :--- | :--- | :--- |
-| ARCHITECTURE.md | 1.0.0 | Frozen via ADR-001 | FROZEN | 2026-07-10 |
-| DATABASE_SPEC.md | 1.0.0 | Frozen via ADR-002 | FROZEN | 2026-07-10 |
-| PIPELINE_SPEC.md | 1.0.0 | Frozen via ADR-003 | FROZEN | 2026-07-10 |
+| ARCHITECTURE.md | 1.0.0 | Frozen via ADR-007 | FROZEN | 2026-07-10 |
+| DATABASE_SPEC.md | 1.0.0 | Frozen via ADR-008 | FROZEN | 2026-07-10 |
+| PIPELINE_SPEC.md | 1.0.0 | Frozen via ADR-009 | FROZEN | 2026-07-10 |
 | ENGINE_SPEC.md | 1.0.0 | — | FROZEN | 2026-07-11 |
 | CONFIG_SPEC.md | 1.0.0 | — | FROZEN | 2026-07-11 |
 | ODDS_PERSISTENCE_DESIGN.md | 1.0.0 | Frozen via ADR-005; Clarified by ADR-006 | FROZEN | 2026-07-11 |
