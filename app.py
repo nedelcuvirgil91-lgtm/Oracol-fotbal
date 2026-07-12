@@ -612,9 +612,136 @@ elif nav == "settings":
                     else:
                         st.warning("✅ Salvat doar local — Supabase indisponibil.")
     with t3:
+        st.markdown('<span class="sub-label">Stare model ML</span>', unsafe_allow_html=True)
+
+        if "ml_train_result" in st.session_state:
+            res = st.session_state.pop("ml_train_result")
+            if res.get("status") == "trained":
+                st.success(f"✅ Model antrenat — {res.get('samples_used')} meciuri, "
+                           f"accuracy={res.get('accuracy')}, log_loss={res.get('log_loss')}.")
+            elif res.get("status") == "insufficient_data":
+                st.warning(f"ℹ️ {res.get('message', 'Date insuficiente pentru antrenare.')}")
+            else:
+                st.error(f"⚠️ {res.get('message', 'Antrenare eșuată.')}")
+
+        ml_status = engine.get_ml_status()
+        if not ml_status.get("available"):
+            st.warning("Modulul ML indisponibil (ml_predictor.py lipsește).")
+        else:
+            mc1, mc2, mc3, mc4 = st.columns(4)
+            acc = ml_status.get("accuracy")
+            ll  = ml_status.get("log_loss")
+            mc1.metric("Accuracy", f"{acc*100:.1f}%" if acc is not None else "N/A")
+            mc2.metric("Log-loss", f"{ll:.3f}" if ll is not None else "N/A")
+            mc3.metric("Samples antrenare", ml_status.get("samples_used", 0))
+            mc4.metric("Versiune model", ml_status.get("model_version", 0))
+
+            last_trained = ml_status.get("last_trained_at")
+            supa_note = "" if ml_status.get("supabase_connected") else "  ·  ⚠️ Supabase indisponibil — status posibil neactualizat"
+            st.caption(f"Ultima antrenare: {last_trained or 'niciodată'}{supa_note}")
+
+            # [ADAUGAT] Progres — reutilizează database.queries.get_ml_sample_count(),
+            # deja folosit de sync/run_daily.py pentru decizia de reantrenare automată.
+            try:
+                from database.queries import get_ml_sample_count
+                current_samples = get_ml_sample_count()
+            except Exception:
+                current_samples = 0
+
+            min_required = ml_status.get("min_samples_required", 30)
+            samples_used = ml_status.get("samples_used", 0)
+            if samples_used == 0:
+                target = min_required
+                progress_label = f"Progres până la prima antrenare: {current_samples}/{target}"
+            else:
+                target = samples_used + 20
+                progress_label = f"Progres până la următoarea reantrenare: {current_samples}/{target}"
+            st.progress(min(current_samples / target, 1.0) if target else 0.0, text=progress_label)
+
+            if st.button("🎓 Antrenează ML acum", use_container_width=True):
+                with st.spinner("Antrenare ML în curs..."):
+                    result = engine.retrain_ml_model()
+                st.session_state["ml_train_result"] = result
+                st.rerun()
+
+        st.markdown("---")
+        st.markdown('<span class="sub-label">League Learning — ponderi per ligă</span>', unsafe_allow_html=True)
         ldf=engine.get_league_learning_stats()
-        st.dataframe(ldf,use_container_width=True,hide_index=True) if not ldf.empty else st.info("Fără date de calibrare.")
+        # [FIX] Expresia ternară anterioară era o instrucțiune "goală" — Streamlit
+        # "magic" o afișa automat, ca text (repr-ul DeltaGenerator întors de
+        # st.dataframe()), vizibil ca text urât în UI. if/else explicit, nu expresie.
+        if ldf.empty:
+            st.info("Fără date de calibrare.")
+        else:
+            st.dataframe(ldf, use_container_width=True, hide_index=True)
     with t4:
+        st.markdown('<span class="sub-label">Ultima sincronizare</span>', unsafe_allow_html=True)
+        from database.queries import get_sync_status
+        sync_sources = [
+            ("football_data",        "Meciuri — football-data.org"),
+            ("openfootball",         "Meciuri — openfootball"),
+            ("experiment_evaluation", "Evaluare experimente shadow"),
+            ("odds_persistence",      "Persistare cote"),
+        ]
+        sync_rows = []
+        for source_key, label in sync_sources:
+            status = get_sync_status(source_key) or {}
+            sync_rows.append({
+                "Sursă":         label,
+                "Ultima rulare": status.get("last_sync", "—"),
+                "Status":        status.get("status", "fără date"),
+                "Note":          status.get("notes", ""),
+            })
+        st.dataframe(pd.DataFrame(sync_rows), use_container_width=True, hide_index=True)
+        error_rows = [r for r in sync_rows if r["Status"] not in ("ok", "fără date")]
+        if error_rows:
+            st.warning(f"⚠️ {len(error_rows)} sursă/surse cu status diferit de „ok\" — vezi tabelul de mai sus.")
+
+        st.markdown("---")
+        ds1, ds2 = st.columns(2)
+        with ds1:
+            st.markdown('<span class="sub-label">Stare ML</span>', unsafe_allow_html=True)
+            ml_status = engine.get_ml_status()
+            if ml_status.get("available"):
+                st.caption(
+                    f"Model v{ml_status.get('model_version', 0)} · {ml_status.get('samples_used', 0)} samples · "
+                    f"accuracy={ml_status.get('accuracy')} · "
+                    f"ultima antrenare: {ml_status.get('last_trained_at') or 'niciodată'}"
+                )
+            else:
+                st.caption("Modul ML indisponibil.")
+        with ds2:
+            st.markdown('<span class="sub-label">Stare cache local</span>', unsafe_allow_html=True)
+            cache_stats = engine.cache.stats() if engine.cache else None
+            if cache_stats:
+                st.caption(
+                    f"{cache_stats.get('total_files', 0)} fișiere · "
+                    f"{cache_stats.get('stale_files', 0)} expirate · "
+                    f"{cache_stats.get('total_size_kb', 0):.1f} KB"
+                )
+            else:
+                st.caption("Cache indisponibil.")
+
+        st.markdown("---")
+        st.markdown('<span class="sub-label">Status provideri</span>', unsafe_allow_html=True)
+        # [ADAUGAT] Foloseste get_provider_metrics() - infrastructura ADR-003
+        # exista deja (record_provider_call, apelat din oracle_api.py si
+        # football_providers.py), dar nu era citita nicaieri pana acum.
+        provider_metrics = sb.get_provider_metrics()
+        if provider_metrics:
+            pm_df = pd.DataFrame(provider_metrics)
+            pm_cols = [c for c in ["provider", "endpoint", "calls", "errors",
+                                    "consecutive_failures", "avg_latency_ms",
+                                    "last_success", "last_failure"] if c in pm_df.columns]
+            st.dataframe(pm_df[pm_cols], use_container_width=True, hide_index=True)
+            degraded = sorted({m["provider"] for m in provider_metrics if (m.get("consecutive_failures") or 0) >= 3})
+            if degraded:
+                st.warning(f"⚠️ Provideri cu eșecuri consecutive: {', '.join(degraded)}")
+        else:
+            st.caption("Fără date de sănătate provideri încă (necesită Supabase activ + apeluri recente).")
+
+        st.markdown("---")
+        st.markdown('<span class="sub-label">Module încărcate</span>', unsafe_allow_html=True)
         mods=[("mappings.py","mappings"),("cache_manager.py","cache_manager"),("key_manager.py","key_manager"),("injury_manager.py","injury_manager"),("oracle_api.py","oracle_api"),("oracle_engine.py","oracle_engine")]
         mc1,mc2=st.columns(2)
         for i,(fn,mod) in enumerate(mods):

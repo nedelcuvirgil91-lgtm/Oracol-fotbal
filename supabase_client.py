@@ -553,3 +553,21 @@ def record_provider_call(provider: str, endpoint: str, success: bool, latency_ms
     except Exception as exc:
         logger.debug("[Supabase] record_provider_call failed: %s", exc)
         return False
+
+
+def get_provider_metrics() -> list[dict]:
+    """[ADAUGAT] Citește provider_metrics (calls/errors/consecutive_failures/
+    avg_latency_ms/last_success/last_failure) — scris deja de
+    record_provider_call() din oracle_api.py/football_providers.py, dar
+    niciodată citit înainte de acest apel (gol găsit la audit — infrastructura
+    ADR-003 de observabilitate exista pe jumătate, doar scriere, fără citire).
+    Read-only, aditiv."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = client.table("provider_metrics").select("*").execute()
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Supabase] get_provider_metrics failed: %s", exc)
+        return []
