@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import sys
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -166,14 +167,51 @@ engine = engine_obj
 
 # ── NAV ──────────────────────────────────────────────────────────────────────
 if "nav" not in st.session_state: st.session_state["nav"] = "matches"
-cn1, cn2, cn3 = st.columns(3)
+cn1, cn2, cn3, cn4 = st.columns(4)
 with cn1:
     if st.button("⚽  MECIURI", use_container_width=True): st.session_state["nav"] = "matches"; st.rerun()
 with cn2:
-    if st.button("📊  PORTFOLIO", use_container_width=True): st.session_state["nav"] = "portfolio"; st.rerun()
+    if st.button("💰  VALUE BETS", use_container_width=True): st.session_state["nav"] = "value_bets"; st.rerun()
 with cn3:
+    if st.button("📊  PORTFOLIO", use_container_width=True): st.session_state["nav"] = "portfolio"; st.rerun()
+with cn4:
     if st.button("⚙️  SETĂRI", use_container_width=True): st.session_state["nav"] = "settings"; st.rerun()
 nav = st.session_state["nav"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CACHE PREDICȚII — la nivel de sesiune Streamlit, partajat între cardul de
+# meci individual și Value Betting Dashboard. Un meci deja analizat (din
+# oricare din cele două ecrane) nu se recalculează până nu expiră TTL-ul —
+# vezi cerința sprintului: "nu vreau ca dashboard-ul să devină dependent de
+# apeluri live pentru fiecare refresh".
+# ─────────────────────────────────────────────────────────────────────────────
+PREDICTION_CACHE_TTL_SECONDS = 900  # 15 min — suficient pt o sesiune de analiză
+
+
+def _cache_prediction(fixture_id: str, pred) -> None:
+    st.session_state[f"pred_{fixture_id}"] = {"pred": pred, "cached_at": time.time()}
+
+
+def _read_cached_prediction(fixture_id: str):
+    """Citire FĂRĂ verificare de prospețime — folosită de cardul de meci
+    individual: o predicție deja deschisă rămâne vizibilă până la închidere
+    explicită (✕), indiferent de vârstă (comportament neschimbat față de
+    versiunea anterioară a UI-ului)."""
+    entry = st.session_state.get(f"pred_{fixture_id}")
+    return entry.get("pred") if entry else None
+
+
+def _read_fresh_cached_prediction(fixture_id: str, ttl: float = PREDICTION_CACHE_TTL_SECONDS):
+    """Citire CU verificare de prospețime (TTL) — folosită de Value Betting
+    Dashboard: o predicție prea veche trebuie recalculată, nu doar reafișată,
+    ca lista de value bets să nu rămână permanent pe date vechi."""
+    entry = st.session_state.get(f"pred_{fixture_id}")
+    if entry is None:
+        return None
+    if time.time() - entry.get("cached_at", 0) > ttl:
+        return None
+    return entry.get("pred")
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # VIEW 1 — MECIURI
@@ -217,12 +255,12 @@ def _render_match_card(match: dict, engine) -> None:
                 pred = engine.evaluate_match(match)
             if pred is None:
                 st.error("Analiză eșuată — date insuficiente."); return
-            st.session_state[f"pred_{fid}"] = pred
+            _cache_prediction(fid, pred)
     with cb:
         if st.button("✕", key=f"close_{fid}", help="Închide"):
             if f"pred_{fid}" in st.session_state: del st.session_state[f"pred_{fid}"]
 
-    pred = st.session_state.get(f"pred_{fid}")
+    pred = _read_cached_prediction(fid)
     if pred is None: return
 
     # ── xG ────────────────────────────────────────────────────────────────
@@ -514,6 +552,80 @@ if nav == "matches":
         st.session_state["force_reload"] = True
         if "all_matches" in st.session_state: del st.session_state["all_matches"]
         st.rerun()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# VIEW — VALUE BETS (Top Value Bets Today)
+# ═════════════════════════════════════════════════════════════════════════════
+# [ADAUGAT] Agregă value bets peste toate meciurile de azi. Regulă explicită
+# a sprintului: NU dependent de apeluri live la fiecare refresh — folosește
+# întâi cache-ul de sesiune (all_matches + predicții deja calculate), și
+# recalculează DOAR meciurile neanalizate sau cu cache expirat (vezi
+# PREDICTION_CACHE_TTL_SECONDS). Implementare simplă, sincronă — fără
+# paralelizare, fără precomputare (optimizări lăsate pentru un sprint separat,
+# dacă timpul de încărcare chiar devine o problemă reală, nu presupusă).
+elif nav == "value_bets":
+    from value_dashboard import collect_value_bets
+
+    st.markdown('<div class="section-bar"><div class="section-bar-title">💰 Top Value Bets — Azi</div></div>',
+                unsafe_allow_html=True)
+
+    # Reutilizează lista deja încărcată de VIEW 1 (MECIURI), dacă există în
+    # sesiune — un singur fetch live per sesiune, nu unul separat per ecran.
+    if "all_matches" not in st.session_state:
+        with st.spinner("📡 Se încarcă meciurile..."):
+            all_matches = engine.api.get_matches_for_week(
+                days_ahead=7, competitions=[c["key"] for c in COMPETITIONS_META]
+            )
+        st.session_state["all_matches"] = all_matches
+    else:
+        all_matches = st.session_state["all_matches"]
+
+    today_iso     = date.today().isoformat()
+    today_matches = [m for m in all_matches if m.get("kickoff_date", "") == today_iso]
+
+    if not today_matches:
+        st.info("Niciun meci azi în competițiile urmărite.")
+    else:
+        force_refresh = st.button("🔄 Recalculează tot (ignoră cache-ul)")
+
+        predictions: list = []
+        n_reused = n_computed = 0
+        with st.spinner(f"Analizez {len(today_matches)} meciuri de azi..."):
+            for match in today_matches:
+                fid  = match.get("fixture_id", "?")
+                pred = None if force_refresh else _read_fresh_cached_prediction(fid)
+                if pred is not None:
+                    n_reused += 1
+                else:
+                    pred = engine.evaluate_match(match)
+                    n_computed += 1
+                    if pred is not None:
+                        _cache_prediction(fid, pred)
+                predictions.append(pred)
+
+        st.caption(f"{n_reused} din cache · {n_computed} recalculate acum · "
+                   f"TTL cache: {PREDICTION_CACHE_TTL_SECONDS // 60} min")
+
+        rows = collect_value_bets(predictions)
+
+        if not rows:
+            threshold = engine.config.get("value_bet_threshold_pct", 5.0)
+            st.info(f"Niciun value bet peste pragul configurat ({threshold}%) pentru meciurile de azi.")
+        else:
+            table = pd.DataFrame([{
+                "Meci":         f"{r.home_team} - {r.away_team}",
+                "Oră":          r.kickoff_utc[11:16] if len(r.kickoff_utc) > 16 else "TBA",
+                "Ligă":         r.league,
+                "Piață":        r.market,
+                "Selecție":     r.selection,
+                "Edge %":       r.edge_pct,
+                "Prob. model":  f"{r.model_prob_pct:.1f}%",
+                "Cotă":         r.bk_odds,
+                "Kelly stake":  f"€{r.kelly_stake:.2f}" if r.kelly_stake is not None else "—",
+                "Rating":       r.rating,
+            } for r in rows])
+            st.dataframe(table, use_container_width=True, hide_index=True)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
