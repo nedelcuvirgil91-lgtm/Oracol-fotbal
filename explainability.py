@@ -50,16 +50,36 @@ from feature_engine import (
 class ExplanationStage:
     """O treaptă din cascadă — probabilitatea Home DUPĂ ce acest factor a
     fost adăugat, plus contribuția lui marginală (delta față de treapta
-    anterioară), în puncte procentuale."""
+    anterioară), în puncte procentuale.
+
+    `detail` — valorile brute care au produs acest impact (ex. rating ELO al
+    fiecărei echipe, bilanț formă W-D-L, număr de accidentări) — toate citite
+    direct din TeamProfile/H2HRecord/MatchPrediction, niciodată inventate.
+    Gol ({}) pentru treptele fără o valoare brută semnificativă de arătat."""
     factor:          str
     prob_home_after: float
     delta_pct:       float
+    detail:          dict[str, str] = field(default_factory=dict)
 
 
 @dataclass
 class MatchExplanation:
     stages:           list[ExplanationStage] = field(default_factory=list)
     final_prob_home:  float = 0.0  # trebuie sa coincida (in limita rotunjirii) cu pred.prob_home_win
+
+
+def _form_record(results: list[str]) -> str:
+    """Bilanț W-D-L dintr-o listă de rezultate recente — omite categoriile
+    cu zero apariții (ex. 4 victorii + 1 egal, fără nicio înfrângere, se
+    arată "4W-1D", nu "4W-1D-0L")."""
+    w, d, losses = results.count("W"), results.count("D"), results.count("L")
+    parts = [f"{n}{code}" for n, code in ((w, "W"), (d, "D"), (losses, "L")) if n]
+    return "-".join(parts) if parts else "fără date recente"
+
+
+def _injury_count(report) -> int:
+    absences = getattr(report, "absences", None)
+    return len(absences) if absences else 0
 
 
 def _stage_prob_home(home_off, home_def, away_off, away_def, home_form, away_form,
@@ -121,45 +141,63 @@ def explain_prediction(pred, weights: dict, config: dict) -> MatchExplanation | 
     stages: list[ExplanationStage] = []
     prev_ph: float | None = None
 
-    def _add(name: str, ph: float) -> None:
+    def _add(name: str, ph: float, detail: dict[str, str] | None = None) -> None:
         nonlocal prev_ph
         delta = ph if prev_ph is None else ph - prev_ph
         stages.append(ExplanationStage(factor=name, prob_home_after=round(ph, 4),
-                                        delta_pct=round(delta * 100, 2)))
+                                        delta_pct=round(delta * 100, 2), detail=detail or {}))
         prev_ph = ph
 
     common = dict(baseline=baseline, form_w=lw["form_weight"], dna_w=lw["dna_weight"],
                   d_cap=d_cap, max_goals=max_goals)
+    home_team, away_team = pred.home_team, pred.away_team
 
     # Treapta 0 — bază neutră: doar statistici brute, fără ELO/formă/avantaj/H2H/vreme.
     _add("Bază (statistici brute)", _stage_prob_home(
         home_off_stats, home_def_stats, away_off_stats, away_def_stats,
         0.5, 0.5, home_adv=1.0, away_pen=1.0, h2h_mod=0.0, h2h_meet=0, weather_pen=0.0, **common))
 
-    # + ELO
+    # + ELO — valoare brută: rating ELO curent al fiecărei echipe.
     _add("ELO", _stage_prob_home(
         home_off_elo, home_def_elo, away_off_elo, away_def_elo,
-        0.5, 0.5, home_adv=1.0, away_pen=1.0, h2h_mod=0.0, h2h_meet=0, weather_pen=0.0, **common))
+        0.5, 0.5, home_adv=1.0, away_pen=1.0, h2h_mod=0.0, h2h_meet=0, weather_pen=0.0, **common),
+        detail={
+            home_team: str(home_p.elo_rating) if home_p.elo_rating else "necunoscut",
+            away_team: str(away_p.elo_rating) if away_p.elo_rating else "necunoscut",
+        })
 
-    # + Formă reală
+    # + Formă reală — valoare brută: bilanț W-D-L pe meciurile recente.
     _add("Formă", _stage_prob_home(
         home_off_elo, home_def_elo, away_off_elo, away_def_elo,
         home_p.form_score, away_p.form_score,
-        home_adv=1.0, away_pen=1.0, h2h_mod=0.0, h2h_meet=0, weather_pen=0.0, **common))
+        home_adv=1.0, away_pen=1.0, h2h_mod=0.0, h2h_meet=0, weather_pen=0.0, **common),
+        detail={
+            home_team: _form_record(home_p.form_results),
+            away_team: _form_record(away_p.form_results),
+        })
 
-    # + Avantaj teren real
+    # + Avantaj teren real — valoare brută: multiplicatorii efectiv folosiți.
     _add("Avantaj teren", _stage_prob_home(
         home_off_elo, home_def_elo, away_off_elo, away_def_elo,
         home_p.form_score, away_p.form_score,
         home_adv=lw["home_advantage"], away_pen=lw["away_penalty"],
-        h2h_mod=0.0, h2h_meet=0, weather_pen=0.0, **common))
+        h2h_mod=0.0, h2h_meet=0, weather_pen=0.0, **common),
+        detail={
+            "multiplicator gazdă":   f"{lw['home_advantage']:.2f}×",
+            "penalizare oaspete":    f"{lw['away_penalty']:.2f}×",
+        })
 
-    # + H2H real
+    # + H2H real — valoare brută: numărul de întâlniri + bilanțul direct.
+    h2h_detail = (
+        {"întâlniri directe": str(h2h_meet), "bilanț (gazdă V-E-Î)": f"{h2h.home_wins}-{h2h.draws}-{h2h.away_wins}"}
+        if h2h and h2h_meet > 0 else {"întâlniri directe": "0 (fără istoric H2H)"}
+    )
     _add("H2H", _stage_prob_home(
         home_off_elo, home_def_elo, away_off_elo, away_def_elo,
         home_p.form_score, away_p.form_score,
         home_adv=lw["home_advantage"], away_pen=lw["away_penalty"],
-        h2h_mod=h2h_mod, h2h_meet=h2h_meet, weather_pen=0.0, **common))
+        h2h_mod=h2h_mod, h2h_meet=h2h_meet, weather_pen=0.0, **common),
+        detail=h2h_detail)
 
     # + Vreme (doar dacă penalizarea e nenulă — altfel treapta n-ar adăuga informație)
     if weather_pen > 0:
@@ -167,12 +205,19 @@ def explain_prediction(pred, weights: dict, config: dict) -> MatchExplanation | 
             home_off_elo, home_def_elo, away_off_elo, away_def_elo,
             home_p.form_score, away_p.form_score,
             home_adv=lw["home_advantage"], away_pen=lw["away_penalty"],
-            h2h_mod=h2h_mod, h2h_meet=h2h_meet, weather_pen=weather_pen, **common))
+            h2h_mod=h2h_mod, h2h_meet=h2h_meet, weather_pen=weather_pen, **common),
+            detail={"penalizare xG": f"-{weather_pen*100:.0f}%", "notă": pred.weather_note or ""})
 
     # + Accidentări — xG REAL, post-injury, deja calculat de evaluate_match()
     # (aplicat, în pipeline-ul real, DUPĂ H2H/vreme — vezi nota din header).
+    # Valoare brută: numărul de absențe raportate per echipă.
+    home_inj_n = _injury_count(pred.home_injury_report)
+    away_inj_n = _injury_count(pred.away_injury_report)
     ph_inj, pd_inj, pa_inj, _ = poisson_model(pred.home_xg, pred.away_xg, max_goals)
-    _add("Accidentări", ph_inj)
+    _add("Accidentări", ph_inj, detail={
+        home_team: f"{home_inj_n} titular(i) indisponibil(i)" if home_inj_n else "fără absențe raportate",
+        away_team: f"{away_inj_n} titular(i) indisponibil(i)" if away_inj_n else "fără absențe raportate",
+    })
     ph_current, pd_current, pa_current = ph_inj, pd_inj, pa_inj
 
     # + Blend ML (dacă activ) — folosește exact blend_predictions() real.
@@ -184,6 +229,9 @@ def explain_prediction(pred, weights: dict, config: dict) -> MatchExplanation | 
         )
         ml_weight = float(config.get("ml_blend_weight", 0.35))
         ph_final, _, _, _ = blend_predictions((ph_current, pd_current, pa_current), ml_pred, ml_weight)
-        _add("Model ML", ph_final)
+        _add("Model ML", ph_final, detail={
+            "samples antrenare": str(pred.ml_samples_used),
+            "încredere model":   f"{pred.ml_confidence*100:.0f}%",
+        })
 
     return MatchExplanation(stages=stages, final_prob_home=round(prev_ph, 4))

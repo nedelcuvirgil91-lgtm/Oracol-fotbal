@@ -260,18 +260,22 @@ def _render_match_card(match: dict, engine) -> None:
             st.caption("Explicație indisponibilă pentru acest meci (profil de echipă incomplet).")
         else:
             for i, stage in enumerate(explanation.stages):
+                detail_html = ""
+                if stage.detail:
+                    items = " · ".join(f"{k}: {v}" for k, v in stage.detail.items())
+                    detail_html = f"<div style='padding:0 0 .2rem 0;font-size:.72rem;color:var(--t3);'>{items}</div>"
                 if i == 0:
                     st.markdown(
-                        f"<div style='padding:.15rem 0;color:var(--t3);'>{stage.factor}: "
-                        f"<b>{stage.prob_home_after*100:.1f}%</b></div>",
+                        f"<div style='padding:.15rem 0 0 0;color:var(--t3);'>{stage.factor}: "
+                        f"<b>{stage.prob_home_after*100:.1f}%</b></div>{detail_html}",
                         unsafe_allow_html=True,
                     )
                 else:
                     sign  = "+" if stage.delta_pct >= 0 else ""
                     color = "#00e676" if stage.delta_pct >= 0 else "#ff3d57"
                     st.markdown(
-                        f"<div style='padding:.15rem 0;'>{stage.factor}: "
-                        f"<span style='color:{color};font-weight:600;'>{sign}{stage.delta_pct:.1f}%</span></div>",
+                        f"<div style='padding:.15rem 0 0 0;'>{stage.factor}: "
+                        f"<span style='color:{color};font-weight:600;'>{sign}{stage.delta_pct:.1f}%</span></div>{detail_html}",
                         unsafe_allow_html=True,
                     )
             st.markdown(

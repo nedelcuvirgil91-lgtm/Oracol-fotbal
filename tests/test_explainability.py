@@ -189,3 +189,80 @@ def test_explanation_returns_none_without_team_profiles():
                        H2HRecord.empty("A", "B"), DEFAULT_WEIGHTS, DEFAULT_CONFIG)
     pred.home_profile = None
     assert explain_prediction(pred, DEFAULT_WEIGHTS, DEFAULT_CONFIG) is None
+
+
+def test_explanation_elo_stage_shows_real_ratings():
+    home_p = _profile("Home FC", elo=1780, form_score=0.6)
+    away_p = _profile("Away FC", elo=1520, form_score=0.5)
+    pred = _make_pred(home_p, away_p, H2HRecord.empty("Home FC", "Away FC"), DEFAULT_WEIGHTS, DEFAULT_CONFIG)
+
+    explanation = explain_prediction(pred, DEFAULT_WEIGHTS, DEFAULT_CONFIG)
+
+    elo_stage = next(s for s in explanation.stages if s.factor == "ELO")
+    assert elo_stage.detail["Home FC"] == "1780"
+    assert elo_stage.detail["Away FC"] == "1520"
+
+
+def test_explanation_form_stage_shows_real_wdl_record():
+    home_p = _profile("Home FC", elo=1600, form_score=0.6)
+    home_p.form_results = ["W", "W", "D", "W", "W"]
+    away_p = _profile("Away FC", elo=1600, form_score=0.4)
+    away_p.form_results = ["L", "D", "L", "W", "L"]
+    pred = _make_pred(home_p, away_p, H2HRecord.empty("Home FC", "Away FC"), DEFAULT_WEIGHTS, DEFAULT_CONFIG)
+
+    explanation = explain_prediction(pred, DEFAULT_WEIGHTS, DEFAULT_CONFIG)
+
+    form_stage = next(s for s in explanation.stages if s.factor == "Formă")
+    assert form_stage.detail["Home FC"] == "4W-1D"
+    assert form_stage.detail["Away FC"] == "1W-1D-3L"
+
+
+def test_explanation_h2h_stage_shows_meetings_and_record():
+    home_p = _profile("Home FC", elo=1600, form_score=0.5)
+    away_p = _profile("Away FC", elo=1550, form_score=0.5)
+    h2h = H2HRecord(home_team="Home FC", away_team="Away FC", meetings=5, home_wins=3, draws=1,
+                     away_wins=1, home_goals_avg=2.0, away_goals_avg=1.0, last_5=[],
+                     h2h_modifier=0.05, summary="")
+    pred = _make_pred(home_p, away_p, h2h, DEFAULT_WEIGHTS, DEFAULT_CONFIG)
+
+    explanation = explain_prediction(pred, DEFAULT_WEIGHTS, DEFAULT_CONFIG)
+
+    h2h_stage = next(s for s in explanation.stages if s.factor == "H2H")
+    assert h2h_stage.detail["întâlniri directe"] == "5"
+    assert h2h_stage.detail["bilanț (gazdă V-E-Î)"] == "3-1-1"
+
+
+def test_explanation_ml_stage_shows_samples_and_confidence():
+    home_p = _profile("Home FC", elo=1600, form_score=0.5)
+    away_p = _profile("Away FC", elo=1580, form_score=0.5)
+    pred = _make_pred(home_p, away_p, H2HRecord.empty("Home FC", "Away FC"), DEFAULT_WEIGHTS, DEFAULT_CONFIG,
+                       ml_active=True, ml_probs=(0.5, 0.25, 0.25), ml_samples=180)
+    pred.ml_confidence = 0.71
+
+    explanation = explain_prediction(pred, DEFAULT_WEIGHTS, DEFAULT_CONFIG)
+
+    ml_stage = next(s for s in explanation.stages if s.factor == "Model ML")
+    assert ml_stage.detail["samples antrenare"] == "180"
+    assert ml_stage.detail["încredere model"] == "71%"
+
+
+def test_explanation_injury_stage_shows_real_absence_count():
+    from injury_manager import PlayerAbsence, TeamInjuryReport
+
+    home_p = _profile("Home FC", elo=1600, form_score=0.6)
+    away_p = _profile("Away FC", elo=1550, form_score=0.5)
+    pred = _make_pred(home_p, away_p, H2HRecord.empty("Home FC", "Away FC"), DEFAULT_WEIGHTS, DEFAULT_CONFIG,
+                       inject_injury=True)
+
+    absence = PlayerAbsence(player_id=1, name="Titular X", position="FWD", minutes_played=900,
+                             market_value=30_000_000, absence_type="injury", certainty=1.0,
+                             xg_impact=0.1, impact_label="key", note="")
+    pred.home_injury_report = TeamInjuryReport(team_name="Home FC", team_id="h1",
+                                                absences=[absence, absence], has_key_absences=True)
+    pred.away_injury_report = TeamInjuryReport(team_name="Away FC", team_id="a1", absences=[])
+
+    explanation = explain_prediction(pred, DEFAULT_WEIGHTS, DEFAULT_CONFIG)
+
+    injury_stage = next(s for s in explanation.stages if s.factor == "Accidentări")
+    assert injury_stage.detail["Home FC"] == "2 titular(i) indisponibil(i)"
+    assert injury_stage.detail["Away FC"] == "fără absențe raportate"
