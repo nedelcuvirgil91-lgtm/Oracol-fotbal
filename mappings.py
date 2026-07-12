@@ -150,7 +150,7 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "Universitatea Craiova": ["CS Universitatea Craiova","U Craiova"],
     "Farul Constanța": ["FC Farul Constanța","Farul"],
     "Petrolul Ploiești": ["FC Petrolul Ploiești","Petrolul"],
-    "Dinamo București": ["FC Dinamo București"],
+    "Din. Bucuresti": ["Dinamo Bucuresti", "Dinamo București", "FC Dinamo București"],
     "UTA Arad": ["FC UTA Arad","UTA"],
     "Inter Miami": ["Inter Miami CF","Club Internacional de Fútbol Miami"],
     "LA Galaxy": ["Los Angeles Galaxy"],
