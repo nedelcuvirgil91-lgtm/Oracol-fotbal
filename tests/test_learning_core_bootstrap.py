@@ -8,6 +8,8 @@ def test_register_default_algorithms_idempotent():
     try:
         register_default_algorithms()
         register_default_algorithms()  # nu trebuie să arunce a doua oară
-        assert ("xgboost_v1", "1") in model_registry.list_available()
+        available = model_registry.list_available()
+        assert ("xgboost_v1", "1") in available
+        assert ("production_champion", "1") in available
     finally:
         model_registry._clear_registry_for_tests()

@@ -12,6 +12,7 @@ Idempotent: apeluri repetate nu aruncă eroare.
 from __future__ import annotations
 
 from learning_core import model_registry
+from learning_core.algorithms.production_champion import ProductionChampionAdapter
 from learning_core.algorithms.xgboost_v1 import XGBoostV1Algorithm
 
 
@@ -20,3 +21,8 @@ def register_default_algorithms() -> None:
         model_registry.get("xgboost_v1", "1")
     except KeyError:
         model_registry.register(XGBoostV1Algorithm())
+
+    try:
+        model_registry.get("production_champion", "1")
+    except KeyError:
+        model_registry.register(ProductionChampionAdapter())
