@@ -245,6 +245,41 @@ def _render_match_card(match: dict, engine) -> None:
         + "</div>", unsafe_allow_html=True
     )
 
+    # ── Explainability ─────────────────────────────────────────────────────
+    # [ADAUGAT] De ce arată predicția așa — cascadă de ablație reală (nu
+    # estimare), vezi explainability.py. Zero atingere oracle_engine.py.
+    with st.expander("🔎 De ce această predicție?"):
+        try:
+            from explainability import explain_prediction
+            explanation = explain_prediction(pred, engine.weights, engine.config)
+        except Exception as exc:
+            explanation = None
+            st.caption(f"Explicație indisponibilă: {exc}")
+
+        if explanation is None:
+            st.caption("Explicație indisponibilă pentru acest meci (profil de echipă incomplet).")
+        else:
+            for i, stage in enumerate(explanation.stages):
+                if i == 0:
+                    st.markdown(
+                        f"<div style='padding:.15rem 0;color:var(--t3);'>{stage.factor}: "
+                        f"<b>{stage.prob_home_after*100:.1f}%</b></div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    sign  = "+" if stage.delta_pct >= 0 else ""
+                    color = "#00e676" if stage.delta_pct >= 0 else "#ff3d57"
+                    st.markdown(
+                        f"<div style='padding:.15rem 0;'>{stage.factor}: "
+                        f"<span style='color:{color};font-weight:600;'>{sign}{stage.delta_pct:.1f}%</span></div>",
+                        unsafe_allow_html=True,
+                    )
+            st.markdown(
+                f"<div style='padding:.4rem 0;border-top:1px solid var(--border);margin-top:.3rem;'>"
+                f"→ Probabilitate finală {home[:14]}: <b>{explanation.final_prob_home*100:.1f}%</b></div>",
+                unsafe_allow_html=True,
+            )
+
     # ── Scoruri ───────────────────────────────────────────────────────────
     st.markdown('<span class="sub-label">Scoruri probabile</span>', unsafe_allow_html=True)
     sc_html = '<div style="padding:0 1.5rem;">'
