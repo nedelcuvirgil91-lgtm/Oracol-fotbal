@@ -12,8 +12,10 @@ Flux de execuție:
   2. Calculează ELO intern din rezultatele noi
   3. Evaluează experimentele shadow active (shadow_testing.py — vezi
      architecture/ADR-004-continuous-learning.md pt ordinea completă)
-  4. Verifică dacă trebuie reantrenat modelul ML
-  5. Afișează raport de sincronizare
+  4. Persistă cote de piață (odds_history) — vezi
+     docs/03_ENGINE/ODDS_PERSISTENCE_DESIGN.md (Frozen, ADR-005, ADR-006)
+  5. Verifică dacă trebuie reantrenat modelul ML
+  6. Afișează raport de sincronizare
 
 Folosire:
   python sync/run_daily.py              # rulare completă
@@ -121,7 +123,7 @@ def run(
         print("  ⚠️  DRY RUN — nicio scriere în Supabase\n")
 
     # ── Pasul 0: Rezultate de ieri ────────────────────────────────────────
-    print("▶  Pasul 0/4 — Rezultate meciuri de ieri...")
+    print("▶  Pasul 0/5 — Rezultate meciuri de ieri...")
 
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
@@ -139,7 +141,7 @@ def run(
             print(f"  ⚠️  Eroare la sync rezultate: {exc}")
 
     # ── Pasul 1: Sincronizare meciuri ─────────────────────────────────────
-    print("▶  Pasul 1/4 — Sincronizare meciuri istorice...")
+    print("▶  Pasul 1/5 — Sincronizare meciuri istorice...")
 
     if not dry_run:
         from sync.sync_matches import sync_all
@@ -162,7 +164,7 @@ def run(
     _print_sync_report(sync_reports)
 
     # ── Pasul 2: Recalculare ELO ──────────────────────────────────────────
-    print("\n▶  Pasul 2/4 — Recalculare ELO...")
+    print("\n▶  Pasul 2/5 — Recalculare ELO...")
 
     if skip_elo:
         print("  ℹ️  ELO sărit (--no-elo)")
@@ -189,7 +191,7 @@ def run(
     # [ADAUGAT] Vezi architecture/ADR-004-continuous-learning.md — ordinea
     # corectă e ELO/formă/standings -> shadow evaluation -> ML retraining,
     # NU recalibrare automată per-meci (deja discutat, dezactivat separat).
-    print("\n▶  Pasul 3/4 — Evaluare experimente shadow...")
+    print("\n▶  Pasul 3/5 — Evaluare experimente shadow...")
 
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
@@ -226,8 +228,52 @@ def run(
             except Exception:
                 pass
 
-    # ── Pasul 4: ML retraining ────────────────────────────────────────────
-    print("\n▶  Pasul 4/4 — Verificare / reantrenare ML...")
+    # ── Pasul 4: Persistare cote de piață (odds_history) ──────────────────
+    # [ADAUGAT] Conform docs/03_ENGINE/ODDS_PERSISTENCE_DESIGN.md (Frozen,
+    # ADR-005, ADR-006). Domain service independent - vezi services/.
+    print("\n▶  Pasul 4/5 — Persistare cote de piață (odds_history)...")
+
+    if dry_run:
+        print("  ℹ️  Sărit (dry run)")
+    else:
+        try:
+            from oracle_api import FootballOracleAPI
+            from services.odds_persistence_service import OddsPersistenceService
+
+            api = FootballOracleAPI()
+            matches_with_odds = api.get_matches_for_week(days_ahead=7)
+            odds_service = OddsPersistenceService()
+            odds_result = odds_service.persist_odds_snapshot(matches_with_odds)
+
+            print(f"  ✅ {odds_result.attempted} meciuri verificate, {odds_result.written} scrieri efective")
+            print(f"     ({odds_result.skipped_ineligible} kickoff trecut, "
+                  f"{odds_result.skipped_invalid} date invalide, "
+                  f"{odds_result.skipped_no_odds} fără cote, "
+                  f"{len(odds_result.errors)} erori)")
+
+            from database.queries import upsert_sync_status
+            upsert_sync_status(
+                source="odds_persistence",
+                last_sync=datetime.now(timezone.utc).isoformat(),
+                matches_added=0, matches_updated=odds_result.written,
+                status="ok" if not odds_result.errors else "partial",
+                notes=f"{odds_result.written} scrise / {odds_result.attempted} verificate",
+            )
+        except Exception as exc:
+            logger.error("[DailySync] OddsPersistenceService failed: %s", exc)
+            try:
+                from database.queries import upsert_sync_status
+                upsert_sync_status(
+                    source="odds_persistence",
+                    last_sync=datetime.now(timezone.utc).isoformat(),
+                    matches_added=0, matches_updated=0,
+                    status="error", notes=str(exc),
+                )
+            except Exception:
+                pass
+
+    # ── Pasul 5: ML retraining ────────────────────────────────────────────
+    print("\n▶  Pasul 5/5 — Verificare / reantrenare ML...")
 
     if skip_ml:
         ml_status = {"status": "skipped", "message": "--no-ml flag"}
