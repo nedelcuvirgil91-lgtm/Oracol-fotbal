@@ -1,8 +1,10 @@
 """Teste pentru diagnostics_api_football.py — sondaj discovery pentru
 /fixtures/statistics, fără rețea reală (mock pe requests.get), fără
-Supabase. Verifică: parsare fericită, degradare grațioasă la fiecare pas
-(fără cheie, eșec HTTP la fiecare etapă, structură neașteptată), și că
-sondajul se oprește onest fără să inventeze pași ulteriori."""
+Supabase (cache fals, în memorie). Verifică: parsare fericită, degradare
+grațioasă la fiecare pas (fără cheie, eșec HTTP la fiecare etapă, structură
+neașteptată), oprire onestă fără pași inventați, ȘI optimizarea de quota —
+cache pentru team_id/fixture_id/verdict 403-404, astfel încât o verificare
+repetată să coste 1 apel sau 0, nu 3."""
 from __future__ import annotations
 
 import json
@@ -36,6 +38,21 @@ class _FakeKeyManager:
 
     def record_request(self, provider):
         self.recorded += 1
+
+
+class _FakeCache:
+    """Cache în memorie, izolat per test — nu atinge disc sau Supabase."""
+    def __init__(self, seed: dict | None = None):
+        self._store: dict[tuple[str, str], object] = dict(seed or {})
+        self.set_calls: list[tuple[str, str, object]] = []
+
+    def get_raw(self, category, key):
+        return self._store.get((category, key))
+
+    def set(self, category, key, data, provider="unknown"):
+        self._store[(category, key)] = data
+        self.set_calls.append((category, key, data))
+        return True
 
 
 TEAMS_OK = {"response": [{"team": {"id": 42, "name": "Arsenal"}}]}
@@ -85,9 +102,10 @@ def test_probe_league_happy_path_all_fields_found(monkeypatch):
     }, calls))
 
     km = _FakeKeyManager()
-    result = daf.probe_league("Premier League", "Arsenal", key_manager=km)
+    result = daf.probe_league("Premier League", "Arsenal", key_manager=km, cache=_FakeCache())
 
     assert result.verdict == "ok"
+    assert result.team_id == 42
     assert result.fixture_id == 999
     assert result.home_team == "Arsenal" and result.away_team == "Chelsea"
     found = {fc.label: fc.found for fc in result.field_checks}
@@ -97,6 +115,7 @@ def test_probe_league_happy_path_all_fields_found(monkeypatch):
     assert found["xG"] is False  # nu apare deloc în răspuns
     assert "Something Unrecognized" in result.all_raw_types_found  # transparență totală
     assert km.recorded == 3
+    assert len(calls) == 3
 
 
 def test_probe_league_missing_some_fields_reported_honestly(monkeypatch):
@@ -107,7 +126,7 @@ def test_probe_league_missing_some_fields_reported_honestly(monkeypatch):
         "fixtures/statistics": _FakeResp(200, STATS_MISSING_SOME),
     }, calls))
 
-    result = daf.probe_league("Premier League", "Arsenal", key_manager=_FakeKeyManager())
+    result = daf.probe_league("Premier League", "Arsenal", key_manager=_FakeKeyManager(), cache=_FakeCache())
 
     assert result.verdict == "ok"
     found = {fc.label: fc.found for fc in result.field_checks}
@@ -120,7 +139,8 @@ def test_probe_league_no_key_configured_makes_zero_http_calls(monkeypatch):
         raise AssertionError("nu ar trebui făcut niciun apel HTTP fără cheie")
     monkeypatch.setattr(daf.requests, "get", fail_get)
 
-    result = daf.probe_league("Premier League", "Arsenal", key_manager=_FakeKeyManager(available=False))
+    result = daf.probe_league("Premier League", "Arsenal",
+                               key_manager=_FakeKeyManager(available=False), cache=_FakeCache())
 
     assert result.verdict == "fara_cheie"
     assert result.resolve_team_probe is None
@@ -134,7 +154,7 @@ def test_probe_league_statistics_403_reports_plan_message(monkeypatch):
         "fixtures/statistics": _FakeResp(403, {"errors": {"plan": "Your plan does not include fixture statistics."}}),
     }, calls))
 
-    result = daf.probe_league("Premier League", "Arsenal", key_manager=_FakeKeyManager())
+    result = daf.probe_league("Premier League", "Arsenal", key_manager=_FakeKeyManager(), cache=_FakeCache())
 
     assert result.verdict == "statistics_http_error"
     assert result.statistics_probe.http_status == 403
@@ -149,7 +169,7 @@ def test_probe_league_statistics_404_no_error_body(monkeypatch):
         "fixtures/statistics": _FakeResp(404, text=""),
     }, calls))
 
-    result = daf.probe_league("Premier League", "Arsenal", key_manager=_FakeKeyManager())
+    result = daf.probe_league("Premier League", "Arsenal", key_manager=_FakeKeyManager(), cache=_FakeCache())
 
     assert result.verdict == "statistics_http_error"
     assert result.statistics_probe.http_status == 404
@@ -163,7 +183,7 @@ def test_probe_league_unexpected_structure_does_not_crash(monkeypatch):
         "fixtures/statistics": _FakeResp(200, {"response": [{"team": {"id": 42}, "totally_different_shape": True}]}),
     }, calls))
 
-    result = daf.probe_league("Premier League", "Arsenal", key_manager=_FakeKeyManager())
+    result = daf.probe_league("Premier League", "Arsenal", key_manager=_FakeKeyManager(), cache=_FakeCache())
 
     assert result.verdict == "structura_neasteptata"
     assert result.all_raw_types_found == []
@@ -175,7 +195,7 @@ def test_probe_league_stops_after_resolve_team_failure_no_further_calls(monkeypa
         "teams": _FakeResp(500, text="internal error"),
     }, calls))
 
-    result = daf.probe_league("Premier League", "Arsenal", key_manager=_FakeKeyManager())
+    result = daf.probe_league("Premier League", "Arsenal", key_manager=_FakeKeyManager(), cache=_FakeCache())
 
     assert result.verdict == "resolve_team_esuat"
     assert result.fixture_lookup_probe is None
@@ -183,10 +203,115 @@ def test_probe_league_stops_after_resolve_team_failure_no_further_calls(monkeypa
     assert len(calls) == 1  # niciun apel suplimentar, nu inventează pași
 
 
+# ── Optimizare de quota — cache team_id / fixture_id / verdict 403-404 ──────
+
+def test_probe_league_reuses_cached_team_id_skips_teams_call(monkeypatch):
+    """team_id deja în cache (aceeași cheie ca ApiFootballProvider.resolve_team_id)
+    -> /teams NU se mai apelează."""
+    calls: list = []
+    monkeypatch.setattr(daf.requests, "get", _fake_get({
+        "fixtures": _FakeResp(200, FIXTURES_OK),
+        "fixtures/statistics": _FakeResp(200, STATS_FULL),
+    }, calls))
+    cache = _FakeCache(seed={("teams", "team_id:arsenal"): TEAMS_OK})
+
+    km = _FakeKeyManager()
+    result = daf.probe_league("Premier League", "Arsenal", key_manager=km, cache=cache)
+
+    assert result.verdict == "ok"
+    assert result.team_id == 42
+    assert result.team_id_from_cache is True
+    assert result.resolve_team_probe is None
+    assert "teams" not in [c.split("/")[-1] for c in calls if c.endswith("/teams")]
+    assert km.recorded == 2  # doar fixtures + statistics, nu teams
+
+
+def test_probe_league_reuses_cached_team_and_fixture_id_costs_one_call(monkeypatch):
+    """team_id ȘI fixture_id deja în cache -> un singur apel real, la
+    /fixtures/statistics. Exact optimizarea cerută: 3 apeluri -> 1."""
+    calls: list = []
+    monkeypatch.setattr(daf.requests, "get", _fake_get({
+        "fixtures/statistics": _FakeResp(200, STATS_FULL),
+    }, calls))
+    cache = _FakeCache(seed={
+        ("teams", "team_id:arsenal"): TEAMS_OK,
+        ("api_football_probe", "last_fixture:42"): {
+            "fixture_id": 999, "home_team": "Arsenal", "away_team": "Chelsea",
+            "fixture_date": "2026-07-01T18:00:00+00:00",
+        },
+    })
+
+    km = _FakeKeyManager()
+    result = daf.probe_league("Premier League", "Arsenal", key_manager=km, cache=cache)
+
+    assert result.verdict == "ok"
+    assert result.team_id_from_cache is True
+    assert result.fixture_id_from_cache is True
+    assert result.fixture_id == 999
+    assert len(calls) == 1
+    assert km.recorded == 1
+
+
+def test_probe_league_writes_team_id_and_fixture_id_to_cache_after_fresh_calls(monkeypatch):
+    calls: list = []
+    monkeypatch.setattr(daf.requests, "get", _fake_get({
+        "teams": _FakeResp(200, TEAMS_OK),
+        "fixtures": _FakeResp(200, FIXTURES_OK),
+        "fixtures/statistics": _FakeResp(200, STATS_FULL),
+    }, calls))
+    cache = _FakeCache()
+
+    daf.probe_league("Premier League", "Arsenal", key_manager=_FakeKeyManager(), cache=cache)
+
+    assert cache.get_raw("teams", "team_id:arsenal") == TEAMS_OK
+    fx = cache.get_raw("api_football_probe", "last_fixture:42")
+    assert fx["fixture_id"] == 999 and fx["home_team"] == "Arsenal"
+
+
+def test_probe_league_caches_403_verdict_and_next_call_makes_zero_http_calls(monkeypatch):
+    """Primul apel: 403, se cache-uiește verdictul. Al doilea apel (aceeași
+    echipă, cache 'cald'): 0 apeluri HTTP la /fixtures/statistics."""
+    calls: list = []
+    monkeypatch.setattr(daf.requests, "get", _fake_get({
+        "teams": _FakeResp(200, TEAMS_OK),
+        "fixtures": _FakeResp(200, FIXTURES_OK),
+        "fixtures/statistics": _FakeResp(403, {"errors": {"plan": "not included"}}),
+    }, calls))
+    cache = _FakeCache()
+
+    r1 = daf.probe_league("Premier League", "Arsenal", key_manager=_FakeKeyManager(), cache=cache)
+    assert r1.verdict == "statistics_http_error"
+    assert len(calls) == 3  # prima dată: toate cele 3
+
+    calls.clear()
+    r2 = daf.probe_league("Premier League", "Arsenal", key_manager=_FakeKeyManager(), cache=cache)
+
+    assert r2.verdict == "statistics_http_error"
+    assert r2.statistics_result_from_cache is True
+    assert len(calls) == 0  # a doua oară: ZERO apeluri — team_id + fixture_id + verdict, toate din cache
+    assert "[rezultat din cache" in r2.verdict_detail
+
+
+def test_probe_league_does_not_cache_non_403_404_statistics_errors(monkeypatch):
+    """Un 500 (eroare tranzitorie) NU trebuie cache-uit — merită reîncercat,
+    spre deosebire de 403/404 (structural, nu se schimbă de pe-o zi pe alta)."""
+    calls: list = []
+    monkeypatch.setattr(daf.requests, "get", _fake_get({
+        "teams": _FakeResp(200, TEAMS_OK),
+        "fixtures": _FakeResp(200, FIXTURES_OK),
+        "fixtures/statistics": _FakeResp(500, text="server error"),
+    }, calls))
+    cache = _FakeCache()
+
+    daf.probe_league("Premier League", "Arsenal", key_manager=_FakeKeyManager(), cache=cache)
+
+    assert cache.get_raw("api_football_probe", "statistics_verdict:999") is None
+
+
 def test_run_probe_calls_probe_league_once_per_configured_league(monkeypatch):
     seen: list[tuple[str, str]] = []
 
-    def fake_probe_league(league, team, key_manager=None):
+    def fake_probe_league(league, team, key_manager=None, cache=None):
         seen.append((league, team))
         return daf.LeagueProbeResult(league=league, team_name=team, verdict="ok")
 

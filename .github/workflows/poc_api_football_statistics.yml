@@ -3,11 +3,19 @@ name: Football Oracle — Probă API-Football Statistics
 on:
   workflow_dispatch:
     inputs:
-      leagues:
-        description: "Ligi separate prin virgulă (gol = toate cele 7 din PROBE_TEAMS)"
-        required: false
-        default: ""
-        type: string
+      league:
+        description: "Ligă de verificat (selecție manuală — optimizare de quota)"
+        required: true
+        default: "Premier League"
+        type: choice
+        options:
+          - "Premier League"
+          - "La Liga"
+          - "Serie A"
+          - "Bundesliga"
+          - "Ligue 1"
+          - "Romania SuperLiga"
+          - "MLS"
 
 jobs:
   probe:
@@ -29,11 +37,12 @@ jobs:
 
       - name: Run API-Football statistics probe (discovery, nu integrare)
         env:
+          # Necesar pentru ca cache-ul (team_id/fixture_id/verdict 403-404)
+          # să supraviețuiască între rulări separate ale acestui workflow —
+          # fiecare rulare e un runner efemer, fără disc local persistent.
+          # Fără Supabase, optimizarea de quota funcționează doar în cadrul
+          # aceleiași rulări, nu între rulări.
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: |
-          ARGS=""
-          if [ -n "${{ github.event.inputs.leagues }}" ]; then
-            ARGS="--leagues \"${{ github.event.inputs.leagues }}\""
-          fi
-          eval python sync/poc_api_football_statistics.py $ARGS
+          python sync/poc_api_football_statistics.py --league "${{ github.event.inputs.league }}"

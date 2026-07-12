@@ -941,16 +941,28 @@ elif nav == "settings":
         # reală API-Football, comună cu injuries/coaches din producție) —
         # doar la apăsarea explicită a butonului.
         st.caption("Verifică dacă /fixtures/statistics există pe planul nostru și ce câmpuri livrează (posesie, șuturi, cornere, cartonașe, xG). Nu scrie nimic în match_history.")
+        # [OPTIMIZARE QUOTA] Selecție manuală, o singură ligă — nu mai
+        # rulează implicit pe toate cele 7. team_id/fixture_id/verdict
+        # 403-404 sunt cache-uite (vezi diagnostics_api_football.py) — o
+        # verificare repetată, în aceeași fereastră, costă 1 apel sau 0.
+        from diagnostics_api_football import PROBE_TEAMS
+        probe_league_choice = st.selectbox("Ligă de verificat", sorted(PROBE_TEAMS.keys()), key="api_football_probe_league")
         if st.button("🔬 Rulează sondajul acum"):
             from diagnostics_api_football import run_probe
-            with st.spinner("Sondez API-Football (poate dura ~15s, 3 apeluri/ligă)..."):
-                st.session_state["api_football_probe_report"] = run_probe()
+            with st.spinner(f"Sondez API-Football pentru {probe_league_choice}..."):
+                st.session_state["api_football_probe_report"] = run_probe(leagues=[probe_league_choice])
 
         probe_report = st.session_state.get("api_football_probe_report")
         if probe_report:
             st.caption(f"Ultimul sondaj: {probe_report.generated_at} · {probe_report.quota_note}")
             for r in probe_report.leagues:
-                with st.expander(f"{r.league} — {r.verdict}", expanded=(r.verdict != "ok")):
+                cache_bits = [b for b, flag in (
+                    ("team_id din cache", r.team_id_from_cache),
+                    ("fixture_id din cache", r.fixture_id_from_cache),
+                    ("verdict din cache — 0 apeluri", r.statistics_result_from_cache),
+                ) if flag]
+                title = f"{r.league} — {r.verdict}" + (f" [{', '.join(cache_bits)}]" if cache_bits else "")
+                with st.expander(title, expanded=(r.verdict != "ok")):
                     st.caption(f"Echipă probă: {r.team_name}")
                     if r.fixture_id:
                         st.caption(f"Fixture: {r.home_team} vs {r.away_team} ({(r.fixture_date or '')[:10]})")

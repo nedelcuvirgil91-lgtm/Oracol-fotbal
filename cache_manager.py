@@ -19,6 +19,7 @@ CATEGORY_TTL: dict[str, float] = {
     "matches": 1.0,   # [ADAUGAT] liste de meciuri (FreeLF/ESPN/agregat) - status live, schimba des
     "stats": 2.0,     # [ADAUGAT] statistici per-meci (xG, posesie) - schimba pana la final
     "teams": 720.0,   # [ADAUGAT] rezolvare nume->ID provider (ex. API-Football) - practic permanent (30 zile)
+    "api_football_probe": 24.0,  # [ADAUGAT] sondaj discovery /fixtures/statistics - fixture_id + verdict 403/404, nu productie
 }
 
 class CacheManager:

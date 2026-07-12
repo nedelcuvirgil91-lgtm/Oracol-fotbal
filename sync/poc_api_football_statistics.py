@@ -7,9 +7,11 @@ Module: sync/poc_api_football_statistics.py
 Wrapper subțire peste diagnostics_api_football.py — Discovery & Instrumentation,
 NU integrare. Nu scrie în match_history, nu atinge Prediction Engine.
 
+Selecție manuală, o singură ligă per rulare (optimizare de quota — vezi
+diagnostics_api_football.py). Nu mai există "implicit toate ligile".
+
 Rulare:
-  python sync/poc_api_football_statistics.py
-  python sync/poc_api_football_statistics.py --leagues "Premier League,La Liga"
+  python sync/poc_api_football_statistics.py --league "Premier League"
 
 Rulat de obicei prin GitHub Actions (workflow_dispatch — vezi
 .github/workflows/poc_api_football_statistics.yml), unde există acces real la
@@ -32,18 +34,12 @@ from diagnostics_api_football import PROBE_TEAMS, format_report_text, run_probe
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sondaj API-Football /fixtures/statistics (discovery, nu integrare)")
     parser.add_argument(
-        "--leagues", default="",
-        help=f"Listă de ligi separate prin virgulă (implicit toate: {', '.join(PROBE_TEAMS.keys())})",
+        "--league", required=True, choices=sorted(PROBE_TEAMS.keys()),
+        help="O singură ligă de verificat (selecție manuală, obligatorie).",
     )
     args = parser.parse_args()
 
-    leagues = [l.strip() for l in args.leagues.split(",") if l.strip()] or None
-    unknown = [l for l in (leagues or []) if l not in PROBE_TEAMS]
-    if unknown:
-        print(f"⚠️  Ligi necunoscute (ignorate, nu sunt în PROBE_TEAMS): {unknown}")
-        leagues = [l for l in leagues if l in PROBE_TEAMS] or None
-
-    report = run_probe(leagues=leagues)
+    report = run_probe(leagues=[args.league])
     print(format_report_text(report))
 
 
