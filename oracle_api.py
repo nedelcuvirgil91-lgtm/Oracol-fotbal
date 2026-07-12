@@ -897,38 +897,92 @@ class FootballOracleAPI:
         return result
 
     # ── Odds ──────────────────────────────────────────────────────────────
+    def _fetch_market(self, sport_key: str, markets: str) -> list | None:
+        """Un singur apel către /odds cu setul de piețe dat — izolat, astfel
+        încât un eșec pe piețe suplimentare (ex. btts indisponibil pe planul
+        curent) nu poate afecta niciodată h2h, deja funcțional."""
+        return self._get(
+            f"{ODDS_API_URL}/sports/{sport_key}/odds",
+            params={"apiKey": ODDS_API_KEY, "regions": "eu",
+                    "markets": markets, "oddsFormat": "decimal"},
+        )
+
     def _fetch_odds(self, sport_key: str) -> dict[str, dict]:
         if sport_key in self._dead_keys: return {}
         cache_key = f"odds_{sport_key}"
         cached = self._cget(cache_key)
         if cached is not None: return cached
-        data = self._get(
-            f"{ODDS_API_URL}/sports/{sport_key}/odds",
-            params={"apiKey": ODDS_API_KEY, "regions": "eu",
-                    "markets": "h2h", "oddsFormat": "decimal"},
-        )
+
+        # [ADAUGAT] h2h + totals (Over/Under) într-un singur apel — totals e
+        # piață standard la fotbal, cost minim suplimentar de quota. Dacă
+        # eșuează integral (ex. cont fără acces la "totals"), fallback la h2h
+        # singur — exact comportamentul de dinainte, zero regresie pe piața
+        # deja folosită (vezi ADR-001 spirit: degradare grațioasă, nimic
+        # inventat).
+        data = self._fetch_market(sport_key, "h2h,totals")
+        if not isinstance(data, list):
+            data = self._fetch_market(sport_key, "h2h")
         if not isinstance(data, list):
             if data is None: self._dead_keys.add(sport_key)
             self._cset(cache_key, {}); return {}
+
+        # [ADAUGAT] btts — apel separat, best-effort, complet izolat: dacă
+        # piața nu există pe planul curent, eșuează fără să afecteze h2h/
+        # totals de mai sus. Potrivire pe ev["id"], stabil între apeluri
+        # succesive pentru același sport_key (aceeași convenție ca ev_id la
+        # h2h/totals).
+        btts_data = self._fetch_market(sport_key, "btts")
+        btts_by_id: dict[str, dict] = {}
+        if isinstance(btts_data, list):
+            for ev in btts_data:
+                btts_by_id[ev.get("id", "")] = ev
+
         result: dict[str, dict] = {}
         for ev in data:
             home   = normalize_team_name(ev.get("home_team", ""))
             away   = normalize_team_name(ev.get("away_team", ""))
             ev_id  = ev.get("id", "")
             bh = bd = ba = 0.0; bk_name = ""
+            over25 = under25 = 0.0
             for bk in ev.get("bookmakers", []):
                 for mkt in bk.get("markets", []):
-                    if mkt.get("key") != "h2h": continue
-                    om: dict[str, float] = {}
+                    key = mkt.get("key")
+                    if key == "h2h":
+                        om: dict[str, float] = {}
+                        for o in mkt.get("outcomes", []):
+                            om[normalize_team_name(o["name"])] = float(o.get("price", 0))
+                        h = om.get(home, 0.0); d = om.get("Draw", 0.0); a = om.get(away, 0.0)
+                        if h > bh: bh = h; bk_name = bk.get("title", "")
+                        if d > bd: bd = d
+                        if a > ba: ba = a
+                    elif key == "totals":
+                        # doar linia 2.5 — coincide cu markets-urile deja
+                        # calculate de Monte Carlo (prob_over25/prob_under25)
+                        for o in mkt.get("outcomes", []):
+                            if float(o.get("point", -1) or -1) != 2.5:
+                                continue
+                            price = float(o.get("price", 0))
+                            name  = (o.get("name") or "").lower()
+                            if name == "over" and price > over25: over25 = price
+                            elif name == "under" and price > under25: under25 = price
+
+            btts_yes = btts_no = 0.0
+            for bk in (btts_by_id.get(ev_id) or {}).get("bookmakers", []):
+                for mkt in bk.get("markets", []):
+                    if mkt.get("key") != "btts": continue
                     for o in mkt.get("outcomes", []):
-                        om[normalize_team_name(o["name"])] = float(o.get("price", 0))
-                    h = om.get(home, 0.0); d = om.get("Draw", 0.0); a = om.get(away, 0.0)
-                    if h > bh: bh = h; bk_name = bk.get("title", "")
-                    if d > bd: bd = d
-                    if a > ba: ba = a
+                        price = float(o.get("price", 0))
+                        name  = (o.get("name") or "").lower()
+                        if name in ("yes", "gg") and price > btts_yes: btts_yes = price
+                        elif name in ("no", "ng") and price > btts_no: btts_no = price
+
             if bh > 1.0:
-                entry = {"home": bh, "draw": bd, "away": ba,
-                         "bookmaker": bk_name, "ev_id": ev_id}
+                entry = {
+                    "home": bh, "draw": bd, "away": ba,
+                    "bookmaker": bk_name, "ev_id": ev_id,
+                    "over25": over25, "under25": under25,
+                    "btts_yes": btts_yes, "btts_no": btts_no,
+                }
                 result[f"{home}||{away}"] = entry
                 result[ev_id]             = entry
         self._cset(cache_key, result); return result
@@ -956,6 +1010,13 @@ class FootballOracleAPI:
                 m["away_odds"]  = odds["away"]
                 m["bookmaker"]  = odds.get("bookmaker", "")
                 m["odds_source"] = f"The Odds API ({odds.get('bookmaker','')})"
+                # [ADAUGAT] Piețe suplimentare — populate DOAR dacă găsite
+                # (>1.0), altfel rămân neatinse => _special_value_bets() le
+                # sare automat (bk_odds<=1.0), fără nicio valoare inventată.
+                if odds.get("over25", 0.0) > 1.0:   m["over25_odds"]   = odds["over25"]
+                if odds.get("under25", 0.0) > 1.0:  m["under25_odds"]  = odds["under25"]
+                if odds.get("btts_yes", 0.0) > 1.0: m["btts_yes_odds"] = odds["btts_yes"]
+                if odds.get("btts_no", 0.0) > 1.0:  m["btts_no_odds"]  = odds["btts_no"]
         return matches
 
     # ── Weather ───────────────────────────────────────────────────────────
