@@ -6,6 +6,7 @@ FOOTBALL ORACLE — v3.0  |  Sport Dashboard UI
 from __future__ import annotations
 
 import json
+import logging
 import sys
 import time
 from datetime import date, datetime, timedelta, timezone
@@ -15,6 +16,8 @@ import pandas as pd
 import streamlit as st
 
 import supabase_client as sb
+
+logger = logging.getLogger(__name__)
 
 st.set_page_config(
     page_title="Football Oracle",
@@ -591,18 +594,43 @@ elif nav == "value_bets":
 
         predictions: list = []
         n_reused = n_computed = 0
+        cache_hit_times: list[float] = []
+        live_compute_times: list[float] = []
+        t_loop_start = time.perf_counter()
         with st.spinner(f"Analizez {len(today_matches)} meciuri de azi..."):
             for match in today_matches:
                 fid  = match.get("fixture_id", "?")
+                t_match_start = time.perf_counter()
                 pred = None if force_refresh else _read_fresh_cached_prediction(fid)
                 if pred is not None:
                     n_reused += 1
+                    cache_hit_times.append(time.perf_counter() - t_match_start)
                 else:
                     pred = engine.evaluate_match(match)
                     n_computed += 1
+                    live_compute_times.append(time.perf_counter() - t_match_start)
                     if pred is not None:
                         _cache_prediction(fid, pred)
                 predictions.append(pred)
+        total_elapsed = time.perf_counter() - t_loop_start
+
+        # [ADAUGAT] Mini audit de performanță — doar loguri + Diagnostics, nu
+        # afișat utilizatorului (cerință explicită). Nu duplică infrastructura
+        # existentă de provider_metrics (vezi tab Diagnostics — "Status
+        # provideri"), care acoperă deja numărul de apeluri per provider.
+        avg_cache_s = sum(cache_hit_times) / len(cache_hit_times) if cache_hit_times else 0.0
+        avg_live_s  = sum(live_compute_times) / len(live_compute_times) if live_compute_times else 0.0
+        logger.info(
+            "[Perf][ValueBets] meciuri=%d din_cache=%d recalculate=%d timp_total=%.2fs "
+            "timp_mediu_cache=%.3fs timp_mediu_live=%.2fs",
+            len(today_matches), n_reused, n_computed, total_elapsed, avg_cache_s, avg_live_s,
+        )
+        st.session_state["perf_value_bets"] = {
+            "matches": len(today_matches), "from_cache": n_reused, "recomputed": n_computed,
+            "total_seconds": round(total_elapsed, 2),
+            "avg_cache_seconds": round(avg_cache_s, 3), "avg_live_seconds": round(avg_live_s, 2),
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
 
         st.caption(f"{n_reused} din cache · {n_computed} recalculate acum · "
                    f"TTL cache: {PREDICTION_CACHE_TTL_SECONDS // 60} min")
@@ -890,6 +918,21 @@ elif nav == "settings":
                 st.warning(f"⚠️ Provideri cu eșecuri consecutive: {', '.join(degraded)}")
         else:
             st.caption("Fără date de sănătate provideri încă (necesită Supabase activ + apeluri recente).")
+
+        st.markdown("---")
+        st.markdown('<span class="sub-label">Performanță — ultima rulare Value Bets</span>', unsafe_allow_html=True)
+        # [ADAUGAT] Mini audit de performanță (nefuncțional pentru utilizator,
+        # doar informativ) — populat de view-ul VALUE BETS la fiecare rulare.
+        perf = st.session_state.get("perf_value_bets")
+        if perf:
+            st.caption(
+                f"{perf['matches']} meciuri · {perf['from_cache']} din cache · {perf['recomputed']} recalculate · "
+                f"timp total {perf['total_seconds']}s · "
+                f"timp mediu/meci: {perf['avg_cache_seconds']}s (cache) / {perf['avg_live_seconds']}s (live) · "
+                f"la {perf['at']}"
+            )
+        else:
+            st.caption("Fără date încă — deschide tab-ul VALUE BETS pentru a genera statistici.")
 
         st.markdown("---")
         st.markdown('<span class="sub-label">Module încărcate</span>', unsafe_allow_html=True)

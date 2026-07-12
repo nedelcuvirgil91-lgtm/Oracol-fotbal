@@ -91,6 +91,14 @@ def test_value_bets_view_reuses_cached_predictions_without_recompute():
     assert list(df["Edge %"]) == [8.7, 6.3]
     assert df.iloc[0]["Edge %"] >= df.iloc[1]["Edge %"]
 
+    # mini audit de performanță — populat, nu afișat direct utilizatorului
+    # (doar în session_state, citit de tab-ul Diagnostics)
+    perf = at.session_state["perf_value_bets"]
+    assert perf["matches"] == 2
+    assert perf["from_cache"] == 2
+    assert perf["recomputed"] == 0
+    assert perf["avg_live_seconds"] == 0.0
+
 
 def test_value_bets_view_shows_empty_state_without_matches_today():
     at = AppTest.from_file("app.py", default_timeout=30)

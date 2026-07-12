@@ -973,9 +973,12 @@ class FootballOracleAPI:
             else:
                 url    = f"{WEATHER_URL}/forecast.json"
                 params = {"key": WEATHER_API_KEY, "q": city, "dt": target, "aqi": "no"}
-            r = self._s.get(url, params=params, timeout=10)
-            if not r.ok: return base
-            data = r.json()
+            # [REPARAT] Ruta prin _get() în loc de self._s.get() direct —
+            # singurul apel din get_weather() care ocolea instrumentarea
+            # provider_metrics (era numărat doar Odds/Injuries, niciodată
+            # Weather). Comportament păstrat: orice eșec întoarce `base`.
+            data = self._get(url, params=params, timeout=10)
+            if data is None: return base
             if target <= today:
                 cur       = data["current"]
                 temp_c    = cur["temp_c"]; condition = cur["condition"]["text"]
