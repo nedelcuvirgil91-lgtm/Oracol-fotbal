@@ -28,6 +28,15 @@ retrain_ml_model()), în afara Learning Core la v4.1.
 formatul deja consumat de evaluate_match()), NU un dict numeric de
 feature-uri precalculate. Deviație documentată explicit față de restul
 interfeței LearningAlgorithm — vezi nota din model_registry.py.
+
+Construcție ÎNTÂRZIATĂ (lazy), descoperită la verificare directă, nu
+presupusă: FootballOracleEngine() declanșează, prin
+FootballOracleAPI._validate_api_keys(), o încercare reală de apel de rețea
+la construcție (validare chei API live). Fără lazy loading, orice utilizare
+a Model Registry — inclusiv doar `register_default_algorithms()` sau
+listarea algoritmilor disponibili — ar plăti acest cost (câteva secunde de
+retry-uri + log de rețea), chiar dacă acest adaptor nu ajunge să fie folosit
+efectiv. Engine-ul se construiește abia la primul predict() real.
 ================================================================================
 """
 from __future__ import annotations
@@ -47,7 +56,14 @@ class ProductionChampionAdapter:
     league_scope = "all"
 
     def __init__(self) -> None:
-        self._engine = FootballOracleEngine()
+        self._engine: FootballOracleEngine | None = None
+
+    def _get_engine(self) -> FootballOracleEngine:
+        """Construiește engine-ul real doar la prima utilizare efectivă —
+        vezi nota de lazy loading din header-ul modulului."""
+        if self._engine is None:
+            self._engine = FootballOracleEngine()
+        return self._engine
 
     def fit(self, training_data: object = None) -> TrainingRunResult:
         """No-op — vezi nota de proiectare din header-ul modulului. Campionul
@@ -74,7 +90,7 @@ class ProductionChampionAdapter:
         oracle_engine.py) și degradează controlat, ca Training Runner-ul să
         nu se oprească la un singur meci cu date lipsă."""
         try:
-            pred = self._engine.evaluate_match(features)
+            pred = self._get_engine().evaluate_match(features)
         except (KeyError, TypeError) as exc:
             return (0.0, 0.0, 0.0, {"error": f"context de meci invalid/incomplet: {exc}"})
         if pred is None:
@@ -91,10 +107,11 @@ class ProductionChampionAdapter:
         return (pred.prob_home_win, pred.prob_draw, pred.prob_away_win, metadata)
 
     def describe(self) -> dict:
+        """Info statică — deliberat NU construiește engine-ul (evită costul
+        de rețea al lui FootballOracleEngine() doar pentru metadate)."""
         return {
             "algorithm_family": self.name,
             "algorithm_version": self.version,
             "wraps": "oracle_engine.FootballOracleEngine.evaluate_match",
-            "ml_blend_active": bool(self._engine.ml and self._engine.ml.is_trained),
-            "use_supabase": self._engine.use_supabase,
+            "engine_constructed": self._engine is not None,
         }

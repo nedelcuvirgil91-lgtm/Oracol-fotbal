@@ -26,6 +26,7 @@ ENV/
 # nu contin cod sursa.
 cache/
 predictions/
+learning_core/data/
 
 # ── Modele ML / artefacte de antrenare ──────────────────────────────────
 *.pkl
