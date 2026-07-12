@@ -954,6 +954,7 @@ class FootballOracleAPI:
                 m["home_odds"]  = odds["home"]
                 m["draw_odds"]  = odds["draw"]
                 m["away_odds"]  = odds["away"]
+                m["bookmaker"]  = odds.get("bookmaker", "")
                 m["odds_source"] = f"The Odds API ({odds.get('bookmaker','')})"
         return matches
 
