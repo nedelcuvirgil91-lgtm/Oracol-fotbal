@@ -89,6 +89,15 @@ _RECAL_CONFIG_DEFAULTS = {
     "recalibration_learning_rate": 0.05,
     "recalibration_max_delta":     0.15,
     "recency_half_life_days":      365,
+    # [ADAUGAT] Inchide golul din ADR-004: flag-ul era promis, niciodata
+    # implementat — recalibrarea rula necondiționat, la fiecare rezultat.
+    # Implicit True INTENȚIONAT (excepție de la regula generală "flag nou =
+    # implicit False") — motivul: acesta nu e un comportament NOU care se
+    # activează, e un comportament deja activ, dintotdeauna, în producție;
+    # implicit False ar fi oprit tăcut recalibrarea la acest commit, exact
+    # schimbarea de comportament implicit pe care nu trebuie s-o facem aici.
+    # Dezactivarea rămâne posibilă oricând, explicit, din model_config.
+    "auto_recalibration_enabled":  True,
 }
 
 
@@ -126,6 +135,17 @@ def _recalibrate_for_result(match_row: dict, r: dict) -> None:
         from recalibration import recalibrate_weights, compute_recency_weight
 
         cfg = load_config(_RECAL_CONFIG_DEFAULTS)
+
+        # [ADAUGAT] ADR-004 — recalibrarea automată respectă acum flag-ul
+        # promis. Implicit True (vezi nota de la _RECAL_CONFIG_DEFAULTS) —
+        # comportamentul de producție NU se schimbă prin acest commit.
+        if not cfg.get("auto_recalibration_enabled", True):
+            logger.info(
+                "[SyncResults] auto_recalibration_enabled=False — recalibrare sărită pentru %s vs %s.",
+                r.get("home_team"), r.get("away_team"),
+            )
+            return
+
         lr        = float(cfg.get("recalibration_learning_rate", 0.05))
         max_d     = float(cfg.get("recalibration_max_delta",     0.15))
         half_life = float(cfg.get("recency_half_life_days",      365))
