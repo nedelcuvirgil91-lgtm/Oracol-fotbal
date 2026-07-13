@@ -145,6 +145,11 @@ def _parse_match_json(
         # Normalizăm fixture_id — eliminăm caractere speciale
         fixture_id = re.sub(r"[^a-z0-9_]", "", fixture_id)[:120]
 
+        # [FIX 2026-07-13 — writer destructiv] home_elo/away_elo explicit None
+        # eliminate din payload — aceeași clasă de defect ca în football_data.py:
+        # la upsert pe fixture_id existent, None rescria cu NULL un ELO deja
+        # calculat. Cheile absente lasă coloanele neatinse (update) / NULL
+        # implicit (insert) — feature-urile rămân de completat incremental.
         return {
             "fixture_id":        fixture_id,
             "home_team":         home_name,
@@ -154,12 +159,8 @@ def _parse_match_json(
             "actual_home_goals": home_goals,
             "actual_away_goals": away_goals,
             "actual_result":     actual_result,
-            # Feature-uri vor fi calculate separat de calculate_elo.py
-            # Lăsăm null — vor fi completate incremental
             "home_xg_pred":      None,
             "away_xg_pred":      None,
-            "home_elo":          None,
-            "away_elo":          None,
             "used_for_training": True,
         }
     except Exception as exc:
