@@ -5,7 +5,7 @@ FOOTBALL ORACLE v4.0 — Backfill Historical Features
 Module: sync/backfill_features.py
 
 Calculează retrospectiv feature-urile ML pentru toate meciurile din
-match_history care nu au fost încă procesate (backfill_done = false).
+match_history care au cel puțin o coloană de feature NULL.
 
 Feature-uri calculate per meci (la momentul t al meciului):
   - ELO acasă/deplasare (calculat din toate meciurile ANTERIOARE acelui meci)
@@ -13,10 +13,28 @@ Feature-uri calculate per meci (la momentul t al meciului):
   - Rating ofensiv/defensiv (din forma recentă)
   - H2H modifier (din meciurile anterioare dintre cele două echipe)
 
-Strategia de resume:
-  - Meciurile procesate sunt marcate cu backfill_done = true
-  - La reluare, scriptul sare automat peste meciurile deja procesate
-  - Sigur să fie oprit și reluat oricând
+Strategia de resume — NON-DESTRUCTIVĂ, gating PER-COLOANĂ (v4.1):
+  [FIX] Înainte, gating-ul era per-rând (`backfill_done`): dacă fals, se
+  scriau toate cele 10 coloane necondiționat, inclusiv peste un `home_elo`
+  real deja existent (Kaggle) — asta a produs disjuncția completă demonstrată
+  în DATA_PIPELINE_INVESTIGATION_2026-07-12.md (0% din rânduri cu ELO ȘI
+  toate feature-urile simultan). Acum gating-ul e per-coloană: se calculează
+  întotdeauna toate cele 10 valori (calcul Python, ieftin), dar se scrie DOAR
+  subsetul ale cărui valori curente sunt NULL. O coloană deja populată nu
+  e niciodată suprascrisă, indiferent de `backfill_done`. Strategie proiectată
+  și documentată în BACKFILL_NON_DESTRUCTIVE_STRATEGY_2026-07-12.md — vezi
+  acel document pentru riscurile NEREZOLVATE de acest fix (§3.2 — ordinea
+  cronologică între rulări succesive cu istoric nou mai vechi; §3.4 —
+  offensive/defensive_rating folosesc mereu ELO-ul din replay-ul intern,
+  niciodată ELO-ul real stocat, chiar și după acest fix).
+  - Un rând cu toate cele 10 coloane deja populate e complet sărit (fără
+    niciun apel de UPDATE).
+  - `backfill_done` rămâne un indicator agregat pentru raportare rapidă
+    (setat True doar când, după scriere, toate cele 10 coloane sunt
+    populate — garantat prin construcție, fiindcă se scrie exact setul de
+    coloane care lipseau).
+  - Idempotent: o a doua rulare, fără date noi, nu mai scrie nimic.
+  - Sigur să fie oprit și reluat oricând.
 
 Rulare:
   python sync/backfill_features.py
@@ -62,6 +80,24 @@ FORM_WINDOW    = 10     # ultimele N meciuri pentru formă (mărit de la 5 la 10
                         # 760 meciuri: Brier 0.6312→0.6047, testat 5-15,
                         # câștigul devine neglijabil după ~10-11)
 
+# Cele 10 coloane de feature completate de acest script — sursă unică pentru
+# SELECT-ul din fetch_all_matches() și pentru gating-ul per-coloană din
+# run_backfill(). Nu conține niciodată actual_result/actual_home_goals/
+# actual_away_goals — scriptul nu rescrie și nu a rescris niciodată rezultate.
+FEATURE_COLUMNS: tuple[str, ...] = (
+    "home_elo", "away_elo",
+    "home_form_score", "away_form_score",
+    "home_offensive_rating", "home_defensive_rating",
+    "away_offensive_rating", "away_defensive_rating",
+    "h2h_modifier", "h2h_meetings",
+)
+
+
+def _missing_feature_columns(match: dict) -> list[str]:
+    """Subsetul din FEATURE_COLUMNS ale căror valori curente sunt NULL
+    pentru acest rând. Listă goală == rând complet, de sărit fără UPDATE."""
+    return [col for col in FEATURE_COLUMNS if match.get(col) is None]
+
 
 def get_client():
     from supabase_client import get_client as _gc
@@ -85,7 +121,7 @@ def fetch_all_matches(league: str | None = None) -> list[dict]:
             client.table("match_history")
             .select("id,fixture_id,home_team,away_team,league,kickoff_date,"
                     "actual_home_goals,actual_away_goals,actual_result,"
-                    "backfill_done")
+                    "backfill_done," + ",".join(FEATURE_COLUMNS))
             .not_.is_("actual_result", "null")
             .order("kickoff_date", desc=False)
             .order("id", desc=False)
@@ -582,14 +618,20 @@ def run_backfill(
     """
     Procesează toate meciurile din match_history și completează feature-urile ML.
 
-    Strategia:
-    1. Încarcă TOATE meciurile în ordine cronologică
+    Strategia (gating per-coloană, non-destructiv — v4.1):
+    1. Încarcă TOATE meciurile în ordine cronologică, cu toate cele 10
+       coloane de feature (pentru a putea verifica NULL per-coloană)
     2. Procesează-le unul câte unul, menținând starea ELO/formă/H2H
     3. Pentru fiecare meci:
-       a. Citește ELO/formă/H2H ÎNAINTE de meci (feature-uri ML)
-       b. Dacă meciul nu e deja procesat (backfill_done=False), salvează feature-urile
-       c. Actualizează ELO/formă/H2H cu rezultatul meciului
-    4. Meciurile deja procesate (backfill_done=True) sară la pasul c direct
+       a. Citește ELO/formă/H2H ÎNAINTE de meci (feature-uri ML) — se
+          calculează întotdeauna, indiferent de completitudinea rândului
+       b. Scrie DOAR coloanele ale căror valori curente sunt NULL — o
+          coloană deja populată nu e niciodată suprascrisă
+       c. Actualizează ELO/formă/H2H cu rezultatul meciului (întotdeauna,
+          indiferent dacă rândul a fost scris sau sărit — starea replay-ului
+          trebuie să avanseze pe toate meciurile, nu doar pe cele incomplete)
+    4. Un rând deja complet (toate cele 10 coloane populate) e sărit la
+       pasul b, fără niciun apel de UPDATE
 
     [UNIFICARE — v3] `weights`/`config`: dacă nu sunt date explicit, se
     încarcă din Supabase (model_weights/model_config — sursa reală de adevăr
@@ -626,11 +668,14 @@ def run_backfill(
         return {"status": "error", "message": "Niciun meci găsit"}
 
     total = len(all_matches)
-    already_done = sum(1 for m in all_matches if m.get("backfill_done"))
+    # [FIX v4.1] Completitudinea reală se verifică per-coloană (NULL check),
+    # nu prin flag-ul `backfill_done` — acesta poate fi inexact tocmai din
+    # cauza disjuncției pe care acest fix o repară (vezi header-ul modulului).
+    already_done = sum(1 for m in all_matches if not _missing_feature_columns(m))
     to_process = total - already_done
 
-    logger.info("[Backfill] Total meciuri: %d | Deja procesate: %d | De procesat: %d",
-                total, already_done, to_process)
+    logger.info("[Backfill] Total meciuri: %d | Deja complete (toate cele %d coloane): %d | De completat: %d",
+                total, len(FEATURE_COLUMNS), already_done, to_process)
 
     if to_process == 0:
         logger.info("[Backfill] Toate meciurile sunt deja procesate!")
@@ -668,9 +713,15 @@ def run_backfill(
         )
         h2h_mod, h2h_meet  = h2h_tracker.get_h2h_before(home, away)
 
-        # Dacă meciul nu e deja procesat, adăugăm la lista de update-uri
-        if not match.get("backfill_done"):
-            features = {
+        # [FIX v4.1] Gating per-coloană: se scrie DOAR subsetul de coloane
+        # ale căror valori curente sunt NULL — o coloană deja populată
+        # (ex. home_elo real din Kaggle) nu e niciodată inclusă în payload,
+        # deci nu e niciodată suprascrisă. Rândurile complete (toate cele
+        # 10 coloane deja populate) primesc missing == [] și sunt sărite
+        # complet, fără niciun apel de UPDATE.
+        missing = _missing_feature_columns(match)
+        if missing:
+            computed = {
                 "home_elo":               home_elo,
                 "away_elo":               away_elo,
                 "home_form_score":        home_form,
@@ -682,6 +733,7 @@ def run_backfill(
                 "h2h_modifier":           h2h_mod,
                 "h2h_meetings":           h2h_meet,
             }
+            features = {col: computed[col] for col in missing}
             pending_updates.append((match["id"], features))
 
         # Actualizăm starea tracker-elor (indiferent dacă meciul era deja procesat)
