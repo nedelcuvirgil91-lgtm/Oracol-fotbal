@@ -1,0 +1,50 @@
+name: Football Oracle — Backfill Match Stats
+
+on:
+  workflow_dispatch:
+    inputs:
+      league:
+        description: "Ligă (trebuie să existe în LEAGUE_DIVISION_CODES)"
+        required: true
+        default: "Premier League"
+        type: string
+      stats:
+        description: "Grup de statistici (trebuie să existe în STAT_GROUPS)"
+        required: true
+        default: "shots"
+        type: string
+      dry_run:
+        description: "Dry run (fără scriere în Supabase)"
+        required: false
+        default: "true"
+        type: boolean
+
+jobs:
+  backfill-match-stats:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run match stats backfill
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          ARGS="--league \"${{ github.event.inputs.league }}\" --stats \"${{ github.event.inputs.stats }}\""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          echo "Rulează: python sync/backfill_match_stats.py $ARGS"
+          eval python sync/backfill_match_stats.py $ARGS
