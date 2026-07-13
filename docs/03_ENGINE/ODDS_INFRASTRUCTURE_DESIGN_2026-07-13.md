@@ -1,6 +1,8 @@
 # ODDS_INFRASTRUCTURE_DESIGN_2026-07-13.md — Football Oracle
 
-**Status**: Arhitectură propusă — zero cod. Companion la `ODDS_PERSISTENCE_DESIGN.md` (Frozen, ADR-005/006), nu îl înlocuiește și nu-l modifică. Acela guvernează captura **live** (The Odds API, deja activă — 8 rânduri azi). Acest document guvernează backfill-ul **istoric** (football-data.co.uk), ca extensie compatibilă, nu ca sistem paralel.
+**Status**: Arhitectură aprobată — zero cod încă. Companion la `ODDS_PERSISTENCE_DESIGN.md` (Frozen, ADR-005/006), nu îl înlocuiește și nu-l modifică. Acela guvernează captura **live** (The Odds API, deja activă — 8 rânduri azi). Acest document guvernează backfill-ul **istoric** (football-data.co.uk), ca extensie compatibilă, nu ca sistem paralel. Extinderea de schemă (Provenance, §3.1) și regimul temporal dual sunt formalizate în **ADR-010** — obligatoriu, nu opțional, conform deciziei arhitectului.
+
+**Odds Infrastructure e primul modul al Knowledge Engine** — nu doar infrastructură pentru Value Betting. Cotele devin parte din memoria permanentă a Football Oracle. Analitice viitoare (Closing Line Value, Market Drift, Market Efficiency, Calibration vs Market, Market Surprise, Betting Bias, evoluția pieței înaintea meciului) **nu se implementează acum**, dar schema (§3.1, Provenance) e proiectată explicit ca ele să fie posibile mai târziu fără nicio modificare suplimentară de tabelă — doar interogări/view-uri noi peste date deja existente.
 
 ---
 
@@ -31,9 +33,22 @@ Verificat împotriva celor 5 cerințe, prin moștenire directă de la contractul
 - **Restart-safe** — fiecare `(fixture_id, bookmaker)` e o operațiune atomică independentă; o întrerupere lasă restul intact, reluarea reia exact de unde a rămas.
 - **Nu poate suprascrie accidental** — protecție **dublă**: gardă la nivel de aplicație (validare înainte de apel) ȘI trigger `odds_history_immutability_guard` la nivel de bază de date, care blochează necondiționat orice `UPDATE` pe `opening_*` sau orice `DELETE`, indiferent de client. Mai puternic decât ce am construit pentru `match_history` (acolo protecția era doar la nivel de aplicație).
 
-**Extensibilitate (cerința nouă)**: deja satisfăcută de schema existentă — `bookmaker` e discriminatorul, `UNIQUE(fixture_id, bookmaker)` există deja. O sursă viitoare (The Odds API pentru alt tip de cote, Pinnacle direct, orice altceva) intră ca rânduri noi cu alt `bookmaker`, fără nicio modificare a tabelei `odds_history`.
+**Extensibilitate prin provider**: satisfăcută de schema existentă — `bookmaker` e discriminatorul, `UNIQUE(fixture_id, bookmaker)` există deja. O sursă viitoare (The Odds API pentru alt tip de cote, Pinnacle direct, orice altceva) intră ca rânduri noi cu alt `bookmaker`, fără nicio modificare structurală suplimentară a tabelei — dincolo de coloanele de proveniență din §3.1, care sunt deja parte a acestui design, nu o extindere ulterioară.
 
-**Notă de guvernanță**: acest writer operează sub un regim temporal diferit de §9 din designul Frozen (eligibilitate = kickoff viitor, gândită pentru fluxul live). Backfill-ul istoric scrie valori finale, cunoscute, o singură dată — nu „captează" o piață activă. Nu contrazice regula §9 (n-o modifică, n-o ocolește pentru fixture-uri viitoare), dar e o utilizare nouă a primitivei de scriere, neacoperită explicit de documentul Frozen. **Recomand un ADR mic, dedicat**, înainte de implementare — nu pentru că schimbă schema sau contractul, ci pentru trasabilitate (regula de guvernanță a proiectului: „orice schimbare de contract... trece printr-un ADR, nu prin editare tăcută").
+### 3.1 Provenance (obligatoriu, ADR-010)
+
+Fiecare rând trebuie să răspundă nu doar „ce cotă e", ci „de unde provine". Patru coloane noi, aditive, imuabile după prima scriere (protejate de același trigger ca `opening_*`):
+
+| Coloană | Exemplu (backfill istoric) | Exemplu (live, retroactiv) |
+|---|---|---|
+| `provider` | `football-data.co.uk` | `the-odds-api` |
+| `import_type` | `historical_backfill` | `live_capture` |
+| `import_version` | `OddsBackfill_v1` | `OddsPersistenceService_v1` |
+| `imported_at` | momentul rulării backfill-ului | `opening_fetched_at` (aproximare, la completarea retroactivă) |
+
+`provider` ≠ `bookmaker`: primul e sursa de date (de unde am citit NOI cota), al doilea e casa de pariuri reală (a cui e cota). Cele 8 rânduri live deja scrise se completează retroactiv, NULL-only, fără nicio suprascriere — detaliile complete în ADR-010.
+
+**Notă de guvernanță**: acest writer operează sub un regim temporal diferit de §9 din designul Frozen (eligibilitate = kickoff viitor, gândită pentru fluxul live). Backfill-ul istoric scrie valori finale, cunoscute, o singură dată — nu „captează" o piață activă. Nu contrazice regula §9 (n-o modifică, n-o ocolește pentru fixture-uri viitoare). Formalizat prin **ADR-010** — obligatoriu, acoperă atât regimul temporal dual cât și extinderea de schemă din §3.1.
 
 ## 4. Integritatea
 
@@ -50,7 +65,8 @@ Verificat împotriva celor 5 cerințe, prin moștenire directă de la contractul
 4. Idempotență și restart-safety demonstrate prin rulare dublă (același pattern folosit la ELO — a doua rulare nu scrie nimic).
 5. Serviciul live (`odds_persistence_service.py`) confirmat neafectat — suita lui de teste rămâne verde, fără nicio modificare a codului lui.
 6. Confirmat că `odds_history` continuă să primească meciuri noi prin fluxul live existent (Obiectivul 4 din Sprint) — nu doar din backfill.
+7. Cele 4 coloane de proveniență (§3.1) populate 100% pe rândurile noi, plus completarea retroactivă a celor 8 rânduri live existente (ADR-010) — nicio scriere fără proveniență, de la primul rând.
 
 ---
 
-**Nu conține cod.** Aștept aprobarea acestei arhitecturi înainte de implementare.
+**Nu conține cod încă.** Arhitectură aprobată de Arhitectul Principal, condiționată de integrarea Provenance (§3.1) și ADR-010 — ambele integrate. Implementarea poate începe.
