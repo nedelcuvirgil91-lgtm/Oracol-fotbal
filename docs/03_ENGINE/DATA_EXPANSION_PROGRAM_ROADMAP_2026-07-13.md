@@ -4,6 +4,18 @@
 
 **Precondiție de intrare**: Odds Infrastructure v1.0 CLOSED (toate cele 4 etape, inclusiv vizibilitate în Streamlit — Regula #20).
 
+**Filozofie (actualizat)**: nu construim pe verticală (infrastructură după infrastructură) — construim pe **cicluri complete de valoare**. Fiecare sprint trebuie să lase în urmă: bază de date mai bogată, Knowledge Engine mai inteligent, model ML mai aproape de următorul ciclu de învățare, aplicație Streamlit mai utilă. Un sprint care produce doar cod invizibil **nu e complet**.
+
+**Două dimensiuni simultane, nu una singură**:
+- **Orizontală** — mai multe competiții, sezoane, ligi, bookmakeri, surse (Sprint 3 de mai jos).
+- **Verticală** — mai multă informație per meci existent, nu doar volum nou (Sprint 1 + Sprint 4 de mai jos).
+
+**Obligatoriu la închiderea fiecărui sprint** — patru întrebări, răspuns explicit „nimic" acolo unde e cazul, niciodată omis:
+1. Cu cât a devenit baza de date mai valoroasă?
+2. Cu cât a devenit modelul ML mai capabil să învețe?
+3. Ce funcționalitate nouă vede utilizatorul în Streamlit?
+4. Ce trebuie făcut în sprintul următor pentru cel mai mare câștig de valoare?
+
 ---
 
 ## Metodologia de scorare
