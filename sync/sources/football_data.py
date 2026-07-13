@@ -152,6 +152,12 @@ def _parse_match(match: dict, league: str) -> dict | None:
             odds_draw = odds.get("draw")
             odds_away = odds.get("awayWin")
 
+        # [FIX 2026-07-13 — writer destructiv] NU mai trimitem home_elo/away_elo
+        # explicit None: la upsert pe fixture_id existent, None RESCRIA cu NULL
+        # un ELO deja calculat de backfill (demonstrat: 1.059 rânduri re-anulate
+        # la sync-ul din 06:28, în timpul rulării de backfill). O cheie absentă
+        # lasă coloana neatinsă la update și NULL implicit la insert — identic
+        # pentru rânduri noi, non-destructiv pentru cele existente.
         return {
             "fixture_id":        fixture_id,
             "home_team":         home_team,
@@ -163,8 +169,6 @@ def _parse_match(match: dict, league: str) -> dict | None:
             "actual_result":     actual_result,
             "home_xg_pred":      home_xg,
             "away_xg_pred":      away_xg,
-            "home_elo":          None,
-            "away_elo":          None,
             "used_for_training": True,
         }
     except Exception as exc:

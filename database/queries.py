@@ -54,6 +54,21 @@ def upsert_match(row: dict) -> bool:
         return False
 
 
+def _strip_none_values(row: dict) -> dict:
+    """
+    [FIX 2026-07-13 — Protecția Writer-ilor] Elimină cheile cu valoare None
+    din payload-ul de upsert. La un upsert pe fixture_id existent, o cheie
+    explicit None RESCRIE coloana cu NULL — exact mecanismul care a distrus
+    ELO-ul calculat de backfill (1.059 rânduri re-anulate, demonstrat).
+    O cheie absentă e echivalentă la INSERT (coloana primește default NULL
+    oricum) și inofensivă la UPDATE (coloana rămâne neatinsă). Regula de
+    arhitectură: niciun writer de sync nu are voie să transforme o valoare
+    validată în NULL — garda e aplicată aici, la punctul unic de trecere,
+    ca nicio sursă viitoare cu chei None să nu poată reintroduce defectul.
+    """
+    return {k: v for k, v in row.items() if v is not None}
+
+
 def upsert_matches_bulk(rows: list[dict]) -> tuple[int, int]:
     """
     Inserează o listă de meciuri în bulk.
@@ -70,7 +85,7 @@ def upsert_matches_bulk(rows: list[dict]) -> tuple[int, int]:
     # randuri). Payload-ul ramane mic (zeci de KB), sub limitele PostgREST.
     batch_size = 250
     for i in range(0, len(rows), batch_size):
-        batch = rows[i:i + batch_size]
+        batch = [_strip_none_values(r) for r in rows[i:i + batch_size]]
         try:
             client.table("match_history").upsert(
                 batch, on_conflict="fixture_id"
@@ -86,21 +101,38 @@ def get_existing_fixture_ids(fixture_ids: list[str]) -> set[str]:
     """
     Returnează set-ul de fixture_id-uri care există deja în Supabase.
     Folosit pentru deduplicare înainte de inserare.
+
+    [FIX 2026-07-13 — eliminat fail-open] Înainte, ORICE excepție întorcea
+    set() gol — deduplicarea murea silențios și TOT setul preluat era
+    re-upsert-at peste rândurile existente (demonstrat: sync_status
+    fetched=5756, skipped=0, zi după zi — cauza directă a interogării cu
+    5.756 de id-uri într-un singur .in_(), peste limita de URL). Acum:
+    (1) interogarea e împărțită în chunk-uri, ca să nu mai atingă limita;
+    (2) la eroare NU se mai întoarce set gol — se propagă excepția
+    (fail-closed): apelanții din sync_matches.sync_all() o prind per-sursă
+    și abandonează sincronizarea acelei surse FĂRĂ nicio scriere, în loc
+    să scrie totul orbește.
     """
     client = get_client()
     if client is None:
+        # Fără client nu e posibilă nicio scriere ulterioară (upsert-ul
+        # no-op-uiește la rândul lui), deci nu există risc de re-upsert orb.
         return set()
-    try:
+
+    existing: set[str] = set()
+    # 200 id-uri per cerere — id-urile intră în query string (.in_), iar
+    # limita practică de URL la PostgREST e ~16KB; 200 × ~30 caractere ≈ 6KB.
+    chunk_size = 200
+    for i in range(0, len(fixture_ids), chunk_size):
+        chunk = fixture_ids[i:i + chunk_size]
         res = (
             client.table("match_history")
             .select("fixture_id")
-            .in_("fixture_id", fixture_ids)
+            .in_("fixture_id", chunk)
             .execute()
         )
-        return {row["fixture_id"] for row in (res.data or [])}
-    except Exception as exc:
-        logger.error("[Queries] get_existing_fixture_ids failed: %s", exc)
-        return set()
+        existing.update(row["fixture_id"] for row in (res.data or []))
+    return existing
 
 
 def count_matches_without_result() -> int:
