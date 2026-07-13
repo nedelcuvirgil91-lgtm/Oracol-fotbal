@@ -121,7 +121,8 @@ def fetch_all_matches(league: str | None = None) -> list[dict]:
             client.table("match_history")
             .select("id,fixture_id,home_team,away_team,league,kickoff_date,"
                     "actual_home_goals,actual_away_goals,actual_result,"
-                    "backfill_done," + ",".join(FEATURE_COLUMNS))
+                    "backfill_done,home_shots_on_target,away_shots_on_target,"
+                    + ",".join(FEATURE_COLUMNS))
             .not_.is_("actual_result", "null")
             .order("kickoff_date", desc=False)
             .order("id", desc=False)
@@ -305,6 +306,42 @@ class FormTracker:
         # Păstrăm doar ultimele 20 de meciuri (suficient pentru calcule)
         self.history[home] = self.history[home][-20:]
         self.history[away] = self.history[away][-20:]
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# ȘUTURI PE POARTĂ REALE (înlocuiește proxy-ul avg_gf*0.45, când există)
+# ════════════════════════════════════════════════════════════════════════════
+
+class ShotsTracker:
+    """
+    Urmărește șuturile pe poartă REALE (populate de MatchStatsBackfillService,
+    Task 1) pentru fiecare echipă, procesând meciurile în ordine cronologică —
+    identic ca disciplină cu FormTracker. La fiecare meci, returnează media
+    ÎNAINTE de acel meci, doar din meciuri cu valoare reală cunoscută.
+
+    O echipă fără niciun meci cu șuturi reale în istoric întoarce None —
+    apelantul păstrează fallback-ul sintetic (avg_gf*0.45), nu se aproximează
+    aici (Regula #8).
+    """
+
+    def __init__(self, window: int = FORM_WINDOW):
+        self.window = window
+        self.history: dict[str, list[float]] = {}
+
+    def get_avg_shots_on_target(self, team: str) -> float | None:
+        values = self.history.get(team, [])[-self.window:]
+        if not values:
+            return None
+        return sum(values) / len(values)
+
+    def process_match(self, home: str, away: str,
+                       home_sot: float | None, away_sot: float | None) -> None:
+        if home_sot is not None:
+            self.history.setdefault(home, []).append(float(home_sot))
+            self.history[home] = self.history[home][-20:]
+        if away_sot is not None:
+            self.history.setdefault(away, []).append(float(away_sot))
+            self.history[away] = self.history[away][-20:]
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -540,6 +577,7 @@ def team_pre_match_rating(
     team: str, league: str,
     elo_tracker: "ELOTracker", form_tracker: "FormTracker",
     weights: dict, config: dict,
+    shots_tracker: "ShotsTracker | None" = None,
 ) -> tuple[float, float, float, int]:
     """
     Calculează (offensive_rating, defensive_rating, form_score, elo_before)
@@ -582,7 +620,8 @@ def team_pre_match_rating(
     if form:
         avg_gf = sum(gf for _, gf, _ in form) / len(form)
         avg_ga = sum(ga for _, _, ga in form) / len(form)
-        avg_sot = avg_gf * 0.45   # proxy — șuturi pe poartă absente 100% din Kaggle
+        real_sot = shots_tracker.get_avg_shots_on_target(team) if shots_tracker else None
+        avg_sot = real_sot if real_sot is not None else avg_gf * 0.45  # proxy — fallback cand nu exista date reale
         avg_pos = 50.0            # neutru — posesie absentă 100% din Kaggle
 
         off_rating, def_rating = compute_team_offdef_rating(
@@ -682,9 +721,10 @@ def run_backfill(
         return {"status": "done", "processed": 0, "already_done": already_done}
 
     # 2. Inițializăm tracker-ele
-    elo_tracker  = ELOTracker()
-    form_tracker = FormTracker()
-    h2h_tracker  = H2HTracker()
+    elo_tracker   = ELOTracker()
+    form_tracker  = FormTracker()
+    h2h_tracker   = H2HTracker()
+    shots_tracker = ShotsTracker()
 
     # 3. Procesăm meciurile în ordine cronologică
     pending_updates: list[tuple[int, dict]] = []
@@ -706,10 +746,10 @@ def run_backfill(
         match_league = match.get("league", "") or (league or "")
         home_elo, away_elo = elo_tracker.get_elos_before_match(home, away)
         home_off, home_def, home_form, _ = team_pre_match_rating(
-            home, match_league, elo_tracker, form_tracker, weights, config
+            home, match_league, elo_tracker, form_tracker, weights, config, shots_tracker
         )
         away_off, away_def, away_form, _ = team_pre_match_rating(
-            away, match_league, elo_tracker, form_tracker, weights, config
+            away, match_league, elo_tracker, form_tracker, weights, config, shots_tracker
         )
         h2h_mod, h2h_meet  = h2h_tracker.get_h2h_before(home, away)
 
@@ -740,6 +780,7 @@ def run_backfill(
         elo_tracker.process_match(home, away, result)
         form_tracker.process_match(home, away, hg, ag, result)
         h2h_tracker.process_match(home, away, result, hg, ag)
+        shots_tracker.process_match(home, away, match.get("home_shots_on_target"), match.get("away_shots_on_target"))
 
         # Scriem în batch
         if len(pending_updates) >= batch_size:
