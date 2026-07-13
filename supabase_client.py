@@ -305,6 +305,40 @@ def get_training_data(only_with_results: bool = True) -> list[dict]:
         return all_rows
 
 
+def get_team_recent_shots(team: str, league: str, last_n: int = 5) -> list[dict]:
+    """
+    Ultimele `last_n` meciuri TERMINATE ale echipei `team` în liga `league`,
+    cu date reale de șuturi (home_shots/away_shots/*_on_target populate) —
+    sursă pentru avg_shots_ot real în TeamProfile (oracle_engine._build_profile),
+    înlocuind proxy-ul sintetic (avg_gf*0.45) cu date reale, unde există.
+
+    Zero scurgere temporală: doar meciuri cu actual_result populat (deci deja
+    terminate) — pentru un meci viitor de prezis, toate rândurile întoarse
+    sunt garantat din trecut. O echipă fără istoric relevant primește listă
+    goală — apelantul păstrează fallback-ul existent, nu se aproximează aici.
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("match_history")
+            .select("home_team,away_team,home_shots,away_shots,"
+                    "home_shots_on_target,away_shots_on_target,kickoff_date")
+            .eq("league", league)
+            .or_(f"home_team.eq.{team},away_team.eq.{team}")
+            .not_.is_("actual_result", "null")
+            .not_.is_("home_shots", "null")
+            .order("kickoff_date", desc=True)
+            .limit(last_n)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Supabase] get_team_recent_shots failed pentru %s/%s: %s", team, league, exc)
+        return []
+
+
 def count_training_samples() -> int:
     client = get_client()
     if client is None:

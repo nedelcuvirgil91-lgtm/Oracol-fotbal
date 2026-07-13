@@ -450,6 +450,7 @@ def _render_match_card(match: dict, engine) -> None:
                 <div class="dna-stat"><span class="dna-stat-k">DEF</span><span class="dna-stat-v">{hp.defensive_rating:.3f}</span></div>
                 <div class="dna-stat"><span class="dna-stat-k">Formă</span><span class="dna-stat-v">{"".join(hp.form_results[-5:]) or "N/A"}</span></div>
                 <div class="dna-stat"><span class="dna-stat-k">ELO</span><span class="dna-stat-v">{hp.elo_rating or "—"}</span></div>
+                <div class="dna-stat"><span class="dna-stat-k">Șuturi/meci</span><span class="dna-stat-v">{hp.avg_shots_ot:.1f}</span></div>
                 <div class="dna-stat"><span class="dna-stat-k">Sursă</span><span class="dna-stat-v" style="font-size:.6rem;">{hp.data_source}</span></div>
             </div>
             <div class="dna-box"><div class="dna-box-title">{away}</div>
@@ -458,6 +459,7 @@ def _render_match_card(match: dict, engine) -> None:
                 <div class="dna-stat"><span class="dna-stat-k">DEF</span><span class="dna-stat-v">{ap.defensive_rating:.3f}</span></div>
                 <div class="dna-stat"><span class="dna-stat-k">Formă</span><span class="dna-stat-v">{"".join(ap.form_results[-5:]) or "N/A"}</span></div>
                 <div class="dna-stat"><span class="dna-stat-k">ELO</span><span class="dna-stat-v">{ap.elo_rating or "—"}</span></div>
+                <div class="dna-stat"><span class="dna-stat-k">Șuturi/meci</span><span class="dna-stat-v">{ap.avg_shots_ot:.1f}</span></div>
                 <div class="dna-stat"><span class="dna-stat-k">Sursă</span><span class="dna-stat-v" style="font-size:.6rem;">{ap.data_source}</span></div>
             </div>
         </div>""", unsafe_allow_html=True)

@@ -440,6 +440,38 @@ class FootballOracleEngine:
         )
 
     # ── _build_profile — v2.3 cascade cu Free Live Football primar ────────
+    @staticmethod
+    def _real_avg_shots_on_target(canonical: str, league: str, last_n: int = 5) -> float | None:
+        """
+        Șuturi pe poartă REALE (nu proxy sintetic gf*0.45), din ultimele
+        `last_n` meciuri terminate ale echipei în match_history — populate
+        prin MatchStatsBackfillService (Premier League/La Liga/Serie A/
+        Bundesliga/Ligue 1). Întoarce None dacă nu există date reale — NU
+        se aproximează aici, apelantul păstrează fallback-ul sintetic
+        existent (Regula #8 — nicio stare necunoscută nu se aproximează).
+        """
+        if not SUPABASE_MODULE_AVAILABLE:
+            return None
+        try:
+            rows = sb.get_team_recent_shots(canonical, league, last_n=last_n)
+        except Exception:
+            return None
+        if not rows:
+            return None
+        values = []
+        for r in rows:
+            if r.get("home_team") == canonical:
+                v = r.get("home_shots_on_target")
+            elif r.get("away_team") == canonical:
+                v = r.get("away_shots_on_target")
+            else:
+                continue
+            if v is not None:
+                values.append(float(v))
+        if not values:
+            return None
+        return sum(values) / len(values)
+
     def _build_profile(self, team_id: str, team_name: str, league: str) -> TeamProfile:
         """
         Cascade:
@@ -457,6 +489,7 @@ class FootballOracleEngine:
         d_cap     = float(w.get("defensive_cap",  2.5))
         last_n    = int(self.config.get("last_n_fixtures", 5))
         canonical = normalize_team_name(team_name)
+        real_sot  = self._real_avg_shots_on_target(canonical, league, last_n)
 
         elo_raw   = self.api.get_elo_rating(canonical)
         elo_off   = self._elo_to_multiplier(elo_raw)           if elo_raw else None
@@ -497,7 +530,7 @@ class FootballOracleEngine:
             if season_entry:
                 gf     = season_entry.get("avg_gf", 1.25)
                 ga     = season_entry.get("avg_ga", 1.25)
-                sot    = gf * 0.45
+                sot    = real_sot if real_sot is not None else gf * 0.45
                 pos    = 50.0
                 played = season_entry.get("played", 5)
                 stats  = [
@@ -566,12 +599,12 @@ class FootballOracleEngine:
             if season_entry:
                 gf  = season_entry.get("avg_gf", sum(s["goals_for"]     for s in stats) / n)
                 ga  = season_entry.get("avg_ga", sum(s["goals_against"] for s in stats) / n)
-                sot = gf * 0.45
+                sot = real_sot if real_sot is not None else gf * 0.45
                 pos = 50.0
             else:
                 gf  = sum(s["goals_for"]                       for s in stats) / n
                 ga  = sum(s["goals_against"]                   for s in stats) / n
-                sot = sum(s.get("shots_on_goal", gf * 0.45)   for s in stats) / n
+                sot = real_sot if real_sot is not None else sum(s.get("shots_on_goal", gf * 0.45) for s in stats) / n
                 pos = sum(s.get("possession",    50.0)         for s in stats) / n
 
             form_source = recent_form if recent_form else stats
@@ -603,7 +636,7 @@ class FootballOracleEngine:
             def_rating = round(elo_def, 4)
             gf         = baseline * elo_off
             ga         = baseline * elo_def
-            sot        = gf * 0.45
+            sot        = real_sot if real_sot is not None else gf * 0.45
             pos        = 50.0
             n          = 0
             results    = []
@@ -618,7 +651,7 @@ class FootballOracleEngine:
             def_rating = round(baseline, 4)
             gf         = baseline
             ga         = baseline
-            sot        = gf * 0.45
+            sot        = real_sot if real_sot is not None else gf * 0.45
             pos        = 50.0
             n          = 0
             results    = []
