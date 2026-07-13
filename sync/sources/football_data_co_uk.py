@@ -51,6 +51,92 @@ def _is_valid_price(value) -> bool:
     return v > 1
 
 
+def _int_or_none(value):
+    if value in (None, ""):
+        return None
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
+# Coloană sursă (Matches.csv) -> câmp de ieșire. Un singur loc de adăugat o
+# statistică nouă — restul funcției nu se schimbă (Task 1: shots; Task 2:
+# corners/fouls/cartonașe/HT, adăugate aici, nu prin cod nou).
+_MATCH_STATS_FIELDS: dict[str, str] = {
+    "HomeShots": "home_shots", "AwayShots": "away_shots",
+    "HomeTarget": "home_shots_on_target", "AwayTarget": "away_shots_on_target",
+    "HomeFouls": "home_fouls", "AwayFouls": "away_fouls",
+    "HomeCorners": "home_corners", "AwayCorners": "away_corners",
+    "HomeYellow": "home_yellow_cards", "AwayYellow": "away_yellow_cards",
+    "HomeRed": "home_red_cards", "AwayRed": "away_red_cards",
+    "HTHome": "home_ht_goals", "HTAway": "away_ht_goals",
+}
+
+
+def fetch_football_data_co_uk_match_stats(division: str, season: str | None, min_date: str) -> list[dict]:
+    """
+    Importer generic de statistici de meci (nu cote) — același contract
+    (division, season, min_date) -> listă de rânduri, folosit de
+    MatchStatsBackfillService (services/match_stats_backfill_service.py).
+
+    Un rând per meci (nu per bookmaker). Fiecare câmp din `_MATCH_STATS_FIELDS`
+    apare în rezultat DOAR dacă valoarea sursă e parsabilă — o coloană lipsă/
+    nevalidă în sursă e omisă din dict, niciodată scrisă ca 0 sau aproximată.
+    Meciurile fără scor final cunoscut sunt sărite (fail-closed, la fel ca la
+    importer-ul de cote — fără scor nu poate fi verificat matching-ul).
+    """
+    resp = requests.get(MATCHES_CSV_URL, timeout=90)
+    resp.raise_for_status()
+    text = resp.content.decode("utf-8")
+
+    reader = csv.DictReader(io.StringIO(text))
+    fieldnames = reader.fieldnames or []
+    rows: list[dict] = []
+
+    for r in reader:
+        if r.get("Division") != division:
+            continue
+        match_date = (r.get("MatchDate") or "")[:10]
+        if not match_date or match_date < min_date:
+            continue
+
+        try:
+            home_goals = int(float(r["FTHome"]))
+            away_goals = int(float(r["FTAway"]))
+        except (ValueError, TypeError, KeyError):
+            continue  # scor necunoscut -> nu poate fi verificat, sarit
+
+        home_team_raw = r.get("HomeTeam", "")
+        away_team_raw = r.get("AwayTeam", "")
+        if not home_team_raw or not away_team_raw:
+            continue
+
+        row_repr = ",".join(f"{k}={r.get(k, '')}" for k in fieldnames)
+        row_hash = hashlib.sha256(row_repr.encode("utf-8")).hexdigest()
+
+        out = {
+            "match_date": match_date,
+            "home_team_raw": home_team_raw,
+            "away_team_raw": away_team_raw,
+            "home_goals": home_goals,
+            "away_goals": away_goals,
+            "source_hash": row_hash,
+            "source_url": MATCHES_CSV_URL,
+        }
+        for src_col, out_col in _MATCH_STATS_FIELDS.items():
+            val = _int_or_none(r.get(src_col))
+            if val is not None:
+                out[out_col] = val
+        rows.append(out)
+
+    logger.info(
+        "[FootballDataCoUk] statistici de meci division=%s min_date=%s: %d meciuri extrase",
+        division, min_date, len(rows),
+    )
+    return rows
+
+
 def fetch_football_data_co_uk_rows(division: str, season: str | None, min_date: str) -> list[dict]:
     """
     Importer generic — implementează contractul cerut de BackfillOddsService:

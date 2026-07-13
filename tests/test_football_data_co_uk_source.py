@@ -10,6 +10,16 @@ import sync.sources.football_data_co_uk as src
 
 _HEADER = "Division,MatchDate,HomeTeam,AwayTeam,FTHome,FTAway,OddHome,OddDraw,OddAway,MaxHome,MaxDraw,MaxAway"
 
+_STATS_HEADER = (
+    "Division,MatchDate,HomeTeam,AwayTeam,FTHome,FTAway,HTHome,HTAway,"
+    "HomeShots,AwayShots,HomeTarget,AwayTarget,HomeFouls,AwayFouls,"
+    "HomeCorners,AwayCorners,HomeYellow,AwayYellow,HomeRed,AwayRed"
+)
+
+
+def _stats_csv_text(*rows: str) -> str:
+    return "\n".join([_STATS_HEADER, *rows])
+
 
 def _iso_date(days_ago: int) -> str:
     return (datetime.now(timezone.utc).date() - timedelta(days=days_ago)).isoformat()
@@ -98,3 +108,51 @@ def test_different_row_content_produces_different_hash(monkeypatch):
     rows_b = src.fetch_football_data_co_uk_rows("X0", None, "2000-01-01")
 
     assert rows_a[0]["source_hash"] != rows_b[0]["source_hash"]
+
+
+def test_match_stats_extracts_one_row_per_match(monkeypatch):
+    recent = _iso_date(10)
+    text = _stats_csv_text(
+        f"X0,{recent},Team A,Team B,2,1,1,0,12,8,5,3,10,9,6,4,2,1,0,0",
+    )
+    monkeypatch.setattr(src.requests, "get", lambda *a, **k: _FakeResponse(text))
+
+    rows = src.fetch_football_data_co_uk_match_stats("X0", None, "2000-01-01")
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["home_shots"] == 12 and r["away_shots"] == 8
+    assert r["home_shots_on_target"] == 5 and r["away_shots_on_target"] == 3
+    assert r["home_fouls"] == 10 and r["away_fouls"] == 9
+    assert r["home_corners"] == 6 and r["away_corners"] == 4
+    assert r["home_yellow_cards"] == 2 and r["away_yellow_cards"] == 1
+    assert r["home_red_cards"] == 0 and r["away_red_cards"] == 0
+    assert r["home_ht_goals"] == 1 and r["away_ht_goals"] == 0
+
+
+def test_match_stats_missing_field_omitted_not_zeroed(monkeypatch):
+    """Un camp lipsa/nevalid in sursa nu apare deloc in rezultat -- nu e
+    scris ca 0 sau aproximat."""
+    recent = _iso_date(10)
+    text = _stats_csv_text(
+        f"X0,{recent},Team A,Team B,2,1,,,12,8,,,,,,,,,,",
+    )
+    monkeypatch.setattr(src.requests, "get", lambda *a, **k: _FakeResponse(text))
+
+    rows = src.fetch_football_data_co_uk_match_stats("X0", None, "2000-01-01")
+    assert len(rows) == 1
+    r = rows[0]
+    assert r["home_shots"] == 12 and r["away_shots"] == 8
+    for missing_col in ("home_shots_on_target", "away_shots_on_target", "home_fouls",
+                         "home_corners", "home_yellow_cards", "home_red_cards", "home_ht_goals"):
+        assert missing_col not in r
+
+
+def test_match_stats_missing_score_skipped(monkeypatch):
+    recent = _iso_date(10)
+    text = _stats_csv_text(
+        f"X0,{recent},Team A,Team B,,,1,0,12,8,5,3,10,9,6,4,2,1,0,0",
+    )
+    monkeypatch.setattr(src.requests, "get", lambda *a, **k: _FakeResponse(text))
+
+    rows = src.fetch_football_data_co_uk_match_stats("X0", None, "2000-01-01")
+    assert rows == []
