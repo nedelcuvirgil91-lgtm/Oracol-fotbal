@@ -921,6 +921,17 @@ class FootballOracleEngine:
             "away_elo":                away_p.elo_rating or 1500,
             "h2h_modifier":            h2h.h2h_modifier if h2h else 0.0,
             "h2h_meetings":            h2h.meetings if h2h else 0,
+            # [ADAUGAT — ADR-012] Aceeași derivare ca în ml_predictor.
+            # _fetch_training_dataframe(): diferență, nu medii brute
+            # stocate redundant. None dacă istoricul real lipsește pentru
+            # oricare echipă — XGBoost gestionează nativ (missing-value
+            # split), niciodată aproximat.
+            "corner_dominance":        (home_p.avg_corners - away_p.avg_corners)
+                                        if home_p.avg_corners is not None and away_p.avg_corners is not None
+                                        else None,
+            "card_diff":               (away_p.avg_yellow_cards - home_p.avg_yellow_cards)
+                                        if home_p.avg_yellow_cards is not None and away_p.avg_yellow_cards is not None
+                                        else None,
             "weather_penalty":         weather_penalty,
             "mc_prob_home":            mc["mc_prob_home"],
             "mc_prob_draw":            mc["mc_prob_draw"],

@@ -49,6 +49,8 @@ def _fresh_store():
             "home_offensive_rating": 1.1, "home_defensive_rating": 0.9,
             "away_offensive_rating": 1.0, "away_defensive_rating": 1.0,
             "h2h_modifier": 0.0, "h2h_meetings": 0,
+            "home_corner_avg_recent": 5.5, "away_corner_avg_recent": 4.5,
+            "home_card_avg_recent": 1.5, "away_card_avg_recent": 2.0,
         },
     }
 
@@ -103,14 +105,26 @@ def test_writes_only_null_columns(monkeypatch):
 
     calls_by_id = {mid: feats for mid, feats in fake.update_calls}
 
-    # id=1 era complet gol -> update-ul trebuie sa acopere toate cele 10 coloane
-    assert set(calls_by_id[1].keys()) == set(bf.FEATURE_COLUMNS)
+    # id=1 era complet gol -> update-ul trebuie sa acopere toate coloanele
+    # calculabile. Exceptie: cornere/cartonase raman None (Regula #8 — nicio
+    # stare necunoscuta nu se aproximeaza) pentru ca e primul meci din
+    # dataset pentru ambele echipe, deci CornerCardTracker nu are niciun
+    # istoric antecedent; o valoare None nu se scrie niciodata peste NULL.
+    cold_start_cols = {
+        "home_corner_avg_recent", "away_corner_avg_recent",
+        "home_card_avg_recent", "away_card_avg_recent",
+    }
+    assert set(calls_by_id[1].keys()) == set(bf.FEATURE_COLUMNS) - cold_start_cols
 
     # id=2 avea deja home_elo populat -> NU trebuie sa apara in payload-ul de update
     assert "home_elo" not in calls_by_id[2], (
         "home_elo era deja populat (valoare reala) si NU trebuia inclus in UPDATE"
     )
-    assert set(calls_by_id[2].keys()) == set(bf.FEATURE_COLUMNS) - {"home_elo"}
+    # Fixture-ul nu include deloc coloane brute de cornere/cartonase
+    # (home_corners/away_corners/etc.) pe niciun rand -> CornerCardTracker
+    # nu acumuleaza niciodata istoric real, deci cold_start_cols raman None
+    # si pentru id=2 (Regula #8, nu se scrie None peste NULL).
+    assert set(calls_by_id[2].keys()) == set(bf.FEATURE_COLUMNS) - {"home_elo"} - cold_start_cols
 
     # id=3 era deja complet -> nu trebuie sa aiba niciun apel de update
     assert 3 not in calls_by_id, "randul deja complet nu trebuie atins deloc"
@@ -158,7 +172,13 @@ def test_idempotent_second_run_writes_nothing(monkeypatch):
 
     assert fake.update_calls == [], "a doua rulare nu ar trebui sa emita niciun UPDATE"
     assert result_2["processed"] == 0
-    assert result_2["already_done"] == len(store)
+    # id=1 si id=2 nu au date brute de cornere/cartonase in fixture (nicio
+    # cheie home_corners/away_corners etc.) -> cele 4 coloane *_avg_recent
+    # raman permanent None (Regula #8, nu se aproximeaza), deci randurile
+    # raman "incomplete" strict dupa _missing_feature_columns chiar daca nu
+    # se mai emite niciun UPDATE pentru ele. Doar id=3 (populat explicit in
+    # fixture) e complet sub schema de 14 coloane.
+    assert result_2["already_done"] == 1
 
 
 def test_safe_resume_after_interruption(monkeypatch):

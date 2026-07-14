@@ -90,6 +90,11 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     "home_offensive_rating", "home_defensive_rating",
     "away_offensive_rating", "away_defensive_rating",
     "h2h_modifier", "h2h_meetings",
+    # [ADAUGAT — ADR-012] Medii reale de cornere/cartonașe, promovate la
+    # FEATURE_COLUMNS in ml_predictor.py dupa dovada de ablatie
+    # (docs/03_ENGINE/CORNER_CARD_DOMINANCE_ABLATION_2026-07-13.md).
+    "home_corner_avg_recent", "away_corner_avg_recent",
+    "home_card_avg_recent", "away_card_avg_recent",
 )
 
 
@@ -122,6 +127,7 @@ def fetch_all_matches(league: str | None = None) -> list[dict]:
             .select("id,fixture_id,home_team,away_team,league,kickoff_date,"
                     "actual_home_goals,actual_away_goals,actual_result,"
                     "backfill_done,home_shots_on_target,away_shots_on_target,"
+                    "home_corners,away_corners,home_yellow_cards,away_yellow_cards,"
                     + ",".join(FEATURE_COLUMNS))
             .not_.is_("actual_result", "null")
             .order("kickoff_date", desc=False)
@@ -342,6 +348,45 @@ class ShotsTracker:
         if away_sot is not None:
             self.history.setdefault(away, []).append(float(away_sot))
             self.history[away] = self.history[away][-20:]
+
+
+class CornerCardTracker:
+    """
+    Medie glisantă reală de cornere/cartonașe galbene per echipă — identică
+    ca disciplină cu ShotsTracker. Sursă pentru home_corner_avg_recent/
+    away_corner_avg_recent/home_card_avg_recent/away_card_avg_recent
+    (ADR-012), promovate la ml_predictor.FEATURE_COLUMNS după ablație
+    (docs/03_ENGINE/CORNER_CARD_DOMINANCE_ABLATION_2026-07-13.md).
+    """
+
+    def __init__(self, window: int = FORM_WINDOW):
+        self.window = window
+        self.corners: dict[str, list[float]] = {}
+        self.cards: dict[str, list[float]] = {}
+
+    def get_avg_corners(self, team: str) -> float | None:
+        values = self.corners.get(team, [])[-self.window:]
+        return sum(values) / len(values) if values else None
+
+    def get_avg_cards(self, team: str) -> float | None:
+        values = self.cards.get(team, [])[-self.window:]
+        return sum(values) / len(values) if values else None
+
+    def process_match(self, home: str, away: str,
+                       home_corners: float | None, away_corners: float | None,
+                       home_cards: float | None, away_cards: float | None) -> None:
+        if home_corners is not None:
+            self.corners.setdefault(home, []).append(float(home_corners))
+            self.corners[home] = self.corners[home][-20:]
+        if away_corners is not None:
+            self.corners.setdefault(away, []).append(float(away_corners))
+            self.corners[away] = self.corners[away][-20:]
+        if home_cards is not None:
+            self.cards.setdefault(home, []).append(float(home_cards))
+            self.cards[home] = self.cards[home][-20:]
+        if away_cards is not None:
+            self.cards.setdefault(away, []).append(float(away_cards))
+            self.cards[away] = self.cards[away][-20:]
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -721,10 +766,11 @@ def run_backfill(
         return {"status": "done", "processed": 0, "already_done": already_done}
 
     # 2. Inițializăm tracker-ele
-    elo_tracker   = ELOTracker()
-    form_tracker  = FormTracker()
-    h2h_tracker   = H2HTracker()
-    shots_tracker = ShotsTracker()
+    elo_tracker        = ELOTracker()
+    form_tracker       = FormTracker()
+    h2h_tracker        = H2HTracker()
+    shots_tracker      = ShotsTracker()
+    corner_card_tracker = CornerCardTracker()
 
     # 3. Procesăm meciurile în ordine cronologică
     pending_updates: list[tuple[int, dict]] = []
@@ -752,6 +798,10 @@ def run_backfill(
             away, match_league, elo_tracker, form_tracker, weights, config, shots_tracker
         )
         h2h_mod, h2h_meet  = h2h_tracker.get_h2h_before(home, away)
+        home_corner_avg = corner_card_tracker.get_avg_corners(home)
+        away_corner_avg = corner_card_tracker.get_avg_corners(away)
+        home_card_avg   = corner_card_tracker.get_avg_cards(home)
+        away_card_avg   = corner_card_tracker.get_avg_cards(away)
 
         # [FIX v4.1] Gating per-coloană: se scrie DOAR subsetul de coloane
         # ale căror valori curente sunt NULL — o coloană deja populată
@@ -772,15 +822,30 @@ def run_backfill(
                 "away_defensive_rating":  away_def,
                 "h2h_modifier":           h2h_mod,
                 "h2h_meetings":           h2h_meet,
+                "home_corner_avg_recent": home_corner_avg,
+                "away_corner_avg_recent": away_corner_avg,
+                "home_card_avg_recent":   home_card_avg,
+                "away_card_avg_recent":   away_card_avg,
             }
-            features = {col: computed[col] for col in missing}
-            pending_updates.append((match["id"], features))
+            # [Regula #13] Nu scriem None peste None — dacă tracker-ul de
+            # cornere/cartonașe nu are încă istoric real (ex. primul meci al
+            # unei echipe din dataset), valoarea calculată e None și rămâne
+            # None la infinit; scrierea ei ar genera UPDATE-uri redundante
+            # la fiecare rulare, fără să schimbe vreodată starea din DB.
+            features = {col: computed[col] for col in missing if computed[col] is not None}
+            if features:
+                pending_updates.append((match["id"], features))
 
         # Actualizăm starea tracker-elor (indiferent dacă meciul era deja procesat)
         elo_tracker.process_match(home, away, result)
         form_tracker.process_match(home, away, hg, ag, result)
         h2h_tracker.process_match(home, away, result, hg, ag)
         shots_tracker.process_match(home, away, match.get("home_shots_on_target"), match.get("away_shots_on_target"))
+        corner_card_tracker.process_match(
+            home, away,
+            match.get("home_corners"), match.get("away_corners"),
+            match.get("home_yellow_cards"), match.get("away_yellow_cards"),
+        )
 
         # Scriem în batch
         if len(pending_updates) >= batch_size:

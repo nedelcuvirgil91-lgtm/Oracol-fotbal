@@ -49,6 +49,13 @@ FEATURE_COLUMNS = [
     "home_form_score", "away_form_score",
     "home_elo", "away_elo",
     "h2h_modifier", "h2h_meetings",
+    # [ADAUGAT — ADR-012] Promovate prin test de ablație walk-forward pe
+    # 5.253 meciuri reale (docs/03_ENGINE/CORNER_CARD_DOMINANCE_ABLATION_
+    # 2026-07-13.md): acuratețe/log-loss/Brier îmbunătățite simultan.
+    # Calculate în _fetch_training_dataframe() din cele 4 coloane brute
+    # (home/away_corner_avg_recent, home/away_card_avg_recent) — nu
+    # stocate redundant ca atare în match_history.
+    "corner_dominance", "card_diff",
 ]
 
 RESULT_TO_LABEL = {"H": 0, "D": 1, "A": 2}
@@ -91,6 +98,18 @@ class MLPredictorEngine:
         if not rows:
             return None
         df = pd.DataFrame(rows)
+        # [ADAUGAT — ADR-012] corner_dominance/card_diff se calculează din
+        # cele 4 coloane brute, nu se citesc direct — dacă lipsesc brutele
+        # (meci fără istoric de cornere/cartonașe), rezultă NaN, gestionat
+        # nativ de XGBoost (missing-value split), niciodată aproximat.
+        if "home_corner_avg_recent" in df.columns and "away_corner_avg_recent" in df.columns:
+            df["corner_dominance"] = df["home_corner_avg_recent"] - df["away_corner_avg_recent"]
+        else:
+            df["corner_dominance"] = np.nan
+        if "home_card_avg_recent" in df.columns and "away_card_avg_recent" in df.columns:
+            df["card_diff"] = df["away_card_avg_recent"] - df["home_card_avg_recent"]
+        else:
+            df["card_diff"] = np.nan
         missing = [c for c in FEATURE_COLUMNS if c not in df.columns]
         for c in missing:
             df[c] = np.nan
