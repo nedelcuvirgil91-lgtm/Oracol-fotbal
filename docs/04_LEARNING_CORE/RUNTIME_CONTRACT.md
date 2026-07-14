@@ -2,7 +2,7 @@
 
 **Status**: FROZEN (via ADR-019)
 **Scope**: Contract normativ, nu ADR — descrie o regulă permanentă, nu o decizie punctuală
-**Precondiție pentru**: Pasul 6 (Champion Loading — încărcare + validare, fără schimbarea sursei servite) și Pasul 7B (switch-ul real de servire) din Implementation Contract al Learning Core
+**Precondiție pentru**: Pasul 6 (Champion Loading — încărcare + validare) și Pasul 7B (switch-ul real de servire, IMPLEMENTAT) din Implementation Contract al Learning Core
 
 ---
 
@@ -10,9 +10,7 @@
 
 Până la Pasul 4.5, invariantul de mai jos a existat DOAR în istoricul conversației dintre Chief Architect și Claude — niciodată transcris. Asta a fost identificat ca o lipsă reală la Architecture Gate Review (înainte de Pasul 5): un contract despre care depinde corectitudinea Promotion nu era trasabil în repo (încalcă Regula #9 CLAUDE.md — „orice rezultat trasabil complet până la sursă"). Acest document închide acel gol.
 
-**Runtime, azi (după Pasul 1-5), NU citește `model_champions` în niciun fel** — verificat exhaustiv, zero hit-uri în `oracle_engine.py` pentru `model_champions`/`challenger_manager`/`champion_comparison`, dincolo de hook-ul de Shadow Logging deja auditat (ADR-017). `FootballOracleEngine.__init__()` apelează necondiționat `self.ml.train()` la fiecare pornire de proces — complet neconștient de conceptul de Champion.
-
-Pasul 6 (Architecture Gate 6) introduce citirea + validarea, dar **NU schimbă ce servește Runtime** — vezi secțiunea „Pasul 6 vs. Pasul 7B" de mai jos. Acest document descrie contractul complet, valabil pentru ambii pași.
+**Din Pasul 7B, Runtime CITEȘTE și SERVEȘTE din `model_champions`, când e utilizabil** — `FootballOracleEngine._resolve_champion()` (o singură dată per construcție de proces) decide `self.ml_source` (`"champion"`/`"local"`/`"none"`) și seedează `self.ml` corespunzător. Fallback-ul pe antrenare locală (comportamentul din Pasul 0-6) rămâne intact pentru orice condiție nesatisfăcută.
 
 ## Invariantul de utilizabilitate (6 condiții simultane)
 
@@ -30,7 +28,7 @@ Dacă **oricare singură** dintre cele șase e falsă, Runtime tratează Champio
 ## Fallback-ul (arhitectură permanentă, nu scaffolding temporar)
 
 ```
-Champion load → succes (toate 6 condiții) → servește din Champion   [din Pasul 7B]
+Champion load → succes (toate 6 condiții) → servește din Champion
              → eșec (oricare condiție falsă)  → antrenează local → servește din modelul local
 ```
 
@@ -41,19 +39,22 @@ Acest fallback e o parte **permanentă** a arhitecturii — analog cascadei de f
 Nu un state machine cu tranziții observabile în timpul rulării — încărcarea e exclusiv la construcția procesului (o singură dată, sincron, blocant), deci nu există nicio fereastră în care procesul servește cereri „în timp ce încarcă". Trei stări terminale, exclusive, decise o singură dată:
 
 ```
-CHAMPION_ML   — Champion valid (toate 6 condiții), folosit pentru servire   [activ din Pasul 7B]
-LOCAL_ML      — Champion indisponibil/invalid, antrenare locală reușită     [comportamentul de azi]
-NO_ML         — ambele eșuate — Poisson/Monte Carlo pur                     [deja existent azi]
+CHAMPION_ML   — Champion valid (toate 6 condiții), folosit pentru servire
+LOCAL_ML      — Champion indisponibil/invalid, antrenare locală reușită (fallback)
+NO_ML         — ambele eșuate — Poisson/Monte Carlo pur
 ```
 
 „BOOTSTRAP", „CHAMPION_LOADING" și „ERROR" nu sunt stări reale — primele două sunt pași tranzitorii, neobservabili, în interiorul constructorului; „ERROR" colapsează în `NO_ML`, deja gestionat grațios azi.
 
-## Pasul 6 vs. Pasul 7B — separare explicită de responsabilitate
+## Pasul 6 vs. Pasul 7B — separare explicită de responsabilitate (istoric)
 
 Decizie explicită Chief Architect: fiecare gate validează o singură schimbare de responsabilitate.
 
-- **Pasul 6** — „Poate Runtime încărca și valida un Champion, în siguranță?" Introduce `learning_core/champion_loader.py` (cele 6 condiții) și seeding-ul complet al unui `MLPredictorEngine` candidat, dar rezultatul e folosit STRICT ca diagnostic (`champion_diagnostic`, `ml_source`) — `self.ml`, ce servește efectiv predicțiile, rămâne populat exclusiv din antrenarea locală, exact ca azi. Zero risc asupra utilizatorului, prin construcție — mecanismul e exercitat real, împotriva datelor reale, fără nicio cale prin care rezultatul lui să ajungă la predicția servită.
-- **Pasul 7B** — „Poate Runtime începe efectiv să servească din Champion?" Singura schimbare: `self.ml` devine candidatul deja validat/seedat în Pasul 6, în loc de rezultatul `train()` local. Gate arhitectural separat, neautorizat încă.
+- **Pasul 6** (închis) — „Poate Runtime încărca și valida un Champion, în siguranță?" A introdus `learning_core/champion_loader.py` (cele 6 condiții) și seeding-ul complet al unui `MLPredictorEngine` candidat, dar rezultatul era folosit STRICT ca diagnostic — `self.ml` rămânea populat exclusiv din antrenarea locală.
+- **Pasul 7B** (implementat, Architecture Gate 7B) — „Poate Runtime începe efectiv să servească din Champion?" **CHAMPION_ML e acum operațional**: `self.ml_source` poate lua valoarea `"champion"`, iar `self.ml` e seedat direct din Champion când toate 6 condiții sunt satisfăcute — vezi `FootballOracleEngine._resolve_champion()`. Invarianți impuși la acest gate:
+  - **`train()` nu e apelat niciodată când Champion reușește** — nu doar rezultatul ignorat, apelul însuși lipsește (`MLPredictorEngine.train()` are efect secundar Supabase, `sb.save_ml_status`, care ar corupe `ml_model_status` cu statistici ale unei antrenări locale ce nu servește efectiv).
+  - **Un singur apel** `champion_loader.load_champion_or_none()` per construcție — rezultatul alimentează simultan decizia de servire, `champion_diagnostic`, și seeding-ul (`seed_from_champion()`) — zero al doilea apel, zero cursă posibilă între diagnostic și ce chiar servește.
+  - **`status_summary()` e Champion-aware** — când modelul servit provine din Champion, `accuracy`/`log_loss`/`last_trained_at` provin din datele Champion-ului (`training_runs.walk_forward_metrics`/`created_at`, transportate prin `ChampionLoadResult`), niciodată din `ml_model_status` (tabelă legacy, exclusiv locală) — altfel operatorul ar vedea statistici ale altui model decât cel care servește.
 
 ## Ce NU descrie acest document
 

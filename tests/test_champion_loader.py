@@ -17,7 +17,11 @@ def _valid_champion(training_run_id="run-1"):
 
 
 def _valid_training_run(algorithm_version="1", samples_used=5000):
-    return {"algorithm_version": algorithm_version, "samples_used": samples_used}
+    return {
+        "algorithm_version": algorithm_version, "samples_used": samples_used,
+        "walk_forward_metrics": {"accuracy": 0.51, "log_loss": 1.01, "brier_score": 0.61},
+        "created_at": "2026-07-14T12:00:00Z",
+    }
 
 
 class _FakeModel:
@@ -43,6 +47,26 @@ def test_returns_result_when_all_six_conditions_met(happy_path):
     assert result.training_run_id == "run-1"
     assert result.samples_used == 5000
     assert result.algorithm_version == "1"
+    assert result.accuracy == 0.51
+    assert result.log_loss == 1.01
+    assert result.trained_at == "2026-07-14T12:00:00Z"
+
+
+def test_result_metadata_missing_gracefully_defaults_to_none(monkeypatch):
+    """Daca walk_forward_metrics/created_at lipsesc din training_run (randuri
+    vechi/incomplete), rezultatul tot se construieste, cu None, nu eroare."""
+    monkeypatch.setattr("supabase_client.get_active_champion", lambda family, scope: _valid_champion())
+    monkeypatch.setattr(
+        "supabase_client.get_training_run",
+        lambda tid: {"algorithm_version": "1", "samples_used": 100},
+    )
+    monkeypatch.setattr("learning_core.model_artifact_storage.load_model_artifact", lambda tid: _FakeModel())
+
+    result = cl.load_champion_or_none("xgboost_v1", "all")
+    assert result is not None
+    assert result.accuracy is None
+    assert result.log_loss is None
+    assert result.trained_at is None
 
 
 def test_returns_none_when_no_active_champion(monkeypatch):

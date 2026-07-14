@@ -1,7 +1,7 @@
 """
 ================================================================================
-FOOTBALL ORACLE — Learning Core: Champion Loader (Pasul 6, Implementation
-Contract) — vezi ADR-019/RUNTIME_CONTRACT.md, Architecture Gate 6
+FOOTBALL ORACLE — Learning Core: Champion Loader (Pasul 6/7B, Implementation
+Contract) — vezi ADR-019/RUNTIME_CONTRACT.md, Architecture Gate 6/7B
 ================================================================================
 Module: learning_core/champion_loader.py
 
@@ -11,16 +11,14 @@ există/activ, artefact există/valid, deserializare funcțională) plus
 `algorithm_version` compatibil (adăugat la Architecture Gate 6). None dacă
 oricare eșuează — niciodată o folosire parțială (Regula #8 CLAUDE.md).
 
-── Pasul 6 vs. Pasul 7B ─────────────────────────────────────────────────────
 Acest modul NU decide dacă rezultatul lui e folosit pentru servire — asta
-e responsabilitatea apelantului. În Pasul 6, `oracle_engine.py` îl folosește
-STRICT pentru diagnostic (`FootballOracleEngine.champion_diagnostic`) —
-`self.ml`, ce servește efectiv predicțiile, rămâne populat exclusiv din
-antrenarea locală. Switch-ul real de servire e Pasul 7B, gate arhitectural
-separat, neautorizat încă.
+e responsabilitatea apelantului (`oracle_engine.py`). Din Pasul 7B,
+`FootballOracleEngine._resolve_champion()` îl apelă exact O SINGURĂ DATĂ per
+construcție și seedează `self.ml` direct dacă reușește — vezi
+`ATOMICITY`-ul deciziei în `RUNTIME_CONTRACT.md`.
 
 Complet izolat: niciun alt fișier din proiect nu importă acest modul în
-afara `oracle_engine.py` (diagnostic only, Pasul 6) și propriului test.
+afara `oracle_engine.py` și propriului test.
 ================================================================================
 """
 from __future__ import annotations
@@ -40,6 +38,12 @@ class ChampionLoadResult:
     algorithm_family: str
     algorithm_version: str
     league_scope: str
+    # [ADAUGAT — Pasul 7B] Metadate pt status_summary() Champion-aware
+    # (Defectul B, Architecture Gate 7B) — niciodată folosite pentru decizie,
+    # doar transportate mai departe către ml_predictor.seed_from_champion().
+    accuracy: float | None
+    log_loss: float | None
+    trained_at: str | None
 
 
 def load_champion_or_none(algorithm_family: str, league_scope: str) -> ChampionLoadResult | None:
@@ -77,6 +81,8 @@ def load_champion_or_none(algorithm_family: str, league_scope: str) -> ChampionL
         probe = np.zeros((1, len(FEATURE_COLUMNS)))
         model.predict_proba(probe)  # Condiția 5: deserializare funcțională reală
 
+        walk_forward_metrics = training_run.get("walk_forward_metrics") or {}
+
         return ChampionLoadResult(
             training_run_id=champion["training_run_id"],
             model=model,
@@ -84,6 +90,9 @@ def load_champion_or_none(algorithm_family: str, league_scope: str) -> ChampionL
             algorithm_family=algorithm_family,
             algorithm_version=training_run.get("algorithm_version"),
             league_scope=league_scope,
+            accuracy=walk_forward_metrics.get("accuracy"),
+            log_loss=walk_forward_metrics.get("log_loss"),
+            trained_at=training_run.get("created_at"),
         )
     except Exception as exc:
         logger.warning("[ChampionLoader] load_champion_or_none eșuat pentru %s/%s: %s",

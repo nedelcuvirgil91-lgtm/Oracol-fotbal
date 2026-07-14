@@ -343,26 +343,7 @@ class FootballOracleEngine:
         # Foloseste aceleasi key_manager/cache singleton-uri deja existente.
         self.apifootball = ApiFootballProvider() if API_FOOTBALL_AVAILABLE else None
 
-        self.ml = MLPredictorEngine() if ML_MODULE_AVAILABLE else None
-        if self.ml and self.use_supabase:
-            train_result = self.ml.train()
-            logger.info("[ML] Inițializare: %s — %s", train_result.status, train_result.message)
-
-        # [ADAUGAT — Pasul 6, Implementation Contract Learning Core] Probă
-        # de Champion, STRICT diagnostic — vezi RUNTIME_CONTRACT.md ("Pasul 6
-        # vs. Pasul 7B") și ADR-019. NU înlocuiește self.ml — predicțiile
-        # servite continuă să vină exclusiv din antrenarea locală de mai sus.
-        # `ml_source` reflectă ce servește EFECTIV azi (local/none — "champion"
-        # nu apare aici încă, ca să nu sugereze fals că e folosit pentru
-        # servire). `champion_diagnostic` e o probă separată, izolată — formă
-        # FIXĂ, strict informativă (status/reason/training_run_id/
-        # algorithm_version/validated_at), fără nicio decizie/fallback/retry/
-        # statistică — recomandare explicită Chief Architect, ca să nu devină
-        # un al doilea runtime.
-        self.ml_source: str = "local" if (self.ml and self.ml.is_trained) else "none"
-        self.champion_diagnostic: dict = (
-            self._probe_champion() if self.use_supabase else self._champion_diagnostic_unavailable("no_supabase")
-        )
+        self._initialize_ml()
 
         logger.info(
             "FootballOracleEngine v3.0 ready. Supabase=%s Injuries=%s Cache=%s KeyMgr=%s ML=%s ml_source=%s champion_status=%s",
@@ -370,6 +351,44 @@ class FootballOracleEngine:
             KEY_MANAGER_AVAILABLE, ML_MODULE_AVAILABLE, self.ml_source,
             self.champion_diagnostic.get("status"),
         )
+
+    # [ADAUGAT — Pasul 7B, Implementation Contract Learning Core] Decizie
+    # UNICĂ Champion vs Local vs None — vezi RUNTIME_CONTRACT.md și
+    # ADR-019/Architecture Gate 7B. Extrasă din __init__ într-o metodă
+    # separată exact ca să fie testabilă direct (garda "Champion wins over
+    # Local" cere să poată mock-ui MLPredictorEngine.train() ca să ridice
+    # excepție dacă e apelat, fără să construiască un engine complet).
+    #
+    # UN singur apel către champion_loader (`_resolve_champion()`) —
+    # rezultatul lui alimentează SIMULTAN decizia de servire,
+    # `champion_diagnostic` și seeding-ul lui `self.ml` — zero al doilea
+    # apel, zero cursă posibilă între diagnostic și ce chiar servește.
+    #
+    # Invariant (Architecture Gate 7B): `train()` NU e apelat NICIODATĂ
+    # când Champion reușește — nu doar rezultatul ignorat, apelul însuși
+    # lipsește. Motiv: `train()` are efect secundar Supabase
+    # (`sb.save_ml_status`) care ar corupe `ml_model_status` cu
+    # statisticile antrenării locale, chiar dacă Champion e cel care
+    # servește efectiv (Defectul A, găsit la audit).
+    def _initialize_ml(self) -> None:
+        self.ml = MLPredictorEngine() if ML_MODULE_AVAILABLE else None
+
+        champion_result = None
+        if self.ml and self.use_supabase:
+            champion_result = self._resolve_champion()
+
+        if champion_result is not None:
+            self.ml_source = "champion"
+            self.champion_diagnostic = self._champion_diagnostic_from_result(champion_result)
+        elif self.ml and self.use_supabase:
+            train_result = self.ml.train()
+            logger.info("[ML] Inițializare: %s — %s", train_result.status, train_result.message)
+            self.ml_source = "local" if self.ml.is_trained else "none"
+            self.champion_diagnostic = self._champion_diagnostic_unavailable("no_valid_champion")
+        else:
+            self.ml_source = "none"
+            reason = "no_supabase" if not self.use_supabase else "ml_module_unavailable"
+            self.champion_diagnostic = self._champion_diagnostic_unavailable(reason)
 
     @staticmethod
     def _champion_diagnostic_unavailable(reason: str) -> dict:
@@ -379,38 +398,41 @@ class FootballOracleEngine:
             "validated_at": datetime.now(timezone.utc).isoformat(),
         }
 
-    def _probe_champion(self) -> dict:
-        """Încearcă să încarce și să valideze Champion-ul activ, STRICT pt
-        diagnostic (Pasul 6) — nu afectează self.ml. Populează complet un
-        MLPredictorEngine "candidat" (aceeași reprezentare internă ca un
-        model antrenat local — vezi ml_predictor.seed_from_champion(),
-        "Golul A" din Architecture Gate 6), pentru a dovedi mecanismul
-        capăt-la-capăt, apoi îl aruncă — întoarce EXCLUSIV forma fixă de
-        diagnostic (status/reason/training_run_id/algorithm_version/
-        validated_at), niciodată stare internă a candidatului (samples_used/
-        is_trained rămân interne, nu leacă în diagnostic). Niciodată nu
-        ridică excepție."""
+    @staticmethod
+    def _champion_diagnostic_from_result(result) -> dict:
+        return {
+            "status": "validated", "reason": None,
+            "training_run_id": result.training_run_id,
+            "algorithm_version": result.algorithm_version,
+            "validated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def _resolve_champion(self):
+        """UN singur apel către `champion_loader.load_champion_or_none()`
+        per construcție — dacă reușește, seedează `self.ml` DIRECT (Golul A,
+        Pasul 6) și întoarce rezultatul (folosit apoi pentru
+        `champion_diagnostic`, fără al doilea apel). None dacă Champion nu
+        e disponibil — `self.ml` rămâne neatins, apelantul cade pe
+        `train()`. `load_champion_or_none()` însuși nu ridică niciodată
+        excepție (contract propriu, testat) — try/except-ul de aici e
+        plasă de siguranță suplimentară pe cel mai sensibil punct din tot
+        Learning Core (primul care schimbă efectiv ce se servește)."""
         try:
-            from ml_predictor import _ALGORITHM_FAMILY, _LEAGUE_SCOPE, MLPredictorEngine
             from learning_core.champion_loader import load_champion_or_none
+            from ml_predictor import _ALGORITHM_FAMILY, _LEAGUE_SCOPE
 
             result = load_champion_or_none(_ALGORITHM_FAMILY, _LEAGUE_SCOPE)
             if result is None:
-                return self._champion_diagnostic_unavailable("no_valid_champion")
+                return None
 
-            candidate = MLPredictorEngine()
-            candidate.seed_from_champion(result.model, samples_used=result.samples_used)
-            assert candidate.is_trained  # dovada ca seeding-ul chiar functioneaza, nu doar returnat
-
-            return {
-                "status": "validated", "reason": None,
-                "training_run_id": result.training_run_id,
-                "algorithm_version": result.algorithm_version,
-                "validated_at": datetime.now(timezone.utc).isoformat(),
-            }
+            self.ml.seed_from_champion(
+                result.model, result.samples_used,
+                accuracy=result.accuracy, log_loss=result.log_loss, trained_at=result.trained_at,
+            )
+            return result
         except Exception as exc:
-            logger.warning("[Champion] Probă de diagnostic (Pasul 6) eșuată: %s", exc)
-            return self._champion_diagnostic_unavailable("probe_failed")
+            logger.warning("[Champion] Rezolvare eșuată neașteptat — fallback pe antrenare locală: %s", exc)
+            return None
 
     def _persist_weights(self) -> None:
         if self.use_supabase:

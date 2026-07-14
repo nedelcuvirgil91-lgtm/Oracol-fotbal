@@ -147,6 +147,14 @@ class MLPredictorEngine:
         self.samples_used: int = 0
         self.is_trained: bool = False
         self.last_train_status: str = "not_trained"
+        # [ADAUGAT — Pasul 7B] Metadate specifice sursei Champion — citite
+        # DOAR de status_summary() când last_train_status ==
+        # "trained_from_champion", ca să nu raporteze niciodată statisticile
+        # unei antrenări locale diferite de modelul care servește efectiv
+        # (Architecture Gate 7B, Defectul B).
+        self.champion_accuracy: float | None = None
+        self.champion_log_loss: float | None = None
+        self.champion_trained_at: str | None = None
 
     # [ADAUGAT — Pasul 6, Implementation Contract Learning Core] Populează
     # starea internă dintr-un model deja antrenat, încărcat dintr-un
@@ -157,13 +165,19 @@ class MLPredictorEngine:
     # (Chief Architect Review, Architecture Gate 6, "Golul A").
     #
     # Nu modifică NIMIC din train()/predict() — metodă complet aditivă.
-    def seed_from_champion(self, model, samples_used: int, model_version: int = 1) -> None:
+    def seed_from_champion(
+        self, model, samples_used: int, model_version: int = 1,
+        accuracy: float | None = None, log_loss: float | None = None, trained_at: str | None = None,
+    ) -> None:
         self.model = model
         self.model_version = model_version
         self.samples_used = samples_used
         self.feature_names = list(FEATURE_COLUMNS)
         self.is_trained = True
         self.last_train_status = "trained_from_champion"
+        self.champion_accuracy = accuracy
+        self.champion_log_loss = log_loss
+        self.champion_trained_at = trained_at
 
     # ── Pregătire date ──────────────────────────────────────────────────
     def _fetch_training_dataframe(self) -> pd.DataFrame | None:
@@ -409,6 +423,24 @@ class MLPredictorEngine:
 
     # ── Status pentru UI ─────────────────────────────────────────────────
     def status_summary(self) -> dict:
+        # [ADAUGAT — Pasul 7B] Champion-aware — Defectul B, Architecture
+        # Gate 7B: dacă modelul servit vine dintr-un Champion,
+        # accuracy/log_loss/last_trained_at trebuie să reflecte ACEL model,
+        # nu ml_model_status (tabelă legacy, scrisă exclusiv de antrenări
+        # locale — ar rămâne stale/greșită dacă am citi-o oricum). Nicio a
+        # doua sursă de adevăr concurentă: ramura aleasă e determinată
+        # exclusiv de last_train_status, populat o singură dată, fie de
+        # train(), fie de seed_from_champion().
+        if self.last_train_status == "trained_from_champion":
+            return {
+                "is_trained_this_session": self.is_trained,
+                "model_version": self.model_version,
+                "samples_used": self.samples_used,
+                "last_trained_at": self.champion_trained_at,
+                "accuracy": self.champion_accuracy,
+                "log_loss": self.champion_log_loss,
+                "min_samples_required": MIN_SAMPLES_TO_TRAIN,
+            }
         remote = sb.get_ml_status()
         return {
             "is_trained_this_session": self.is_trained,
