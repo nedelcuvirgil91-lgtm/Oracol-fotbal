@@ -130,6 +130,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # [ADAUGAT] Shadow testing - vezi architecture/ADR-002-shadow-testing.md.
     # Implicit OPRIT - nicio schimbare de comportament fara activare explicita.
     "shadow_mode_enabled":         False,
+    # [ADAUGAT — Pasul 3, Implementation Contract Learning Core] Shadow
+    # logging pt Challenger activ — vezi ADR-016. Flag DEDICAT, separat de
+    # shadow_mode_enabled (acela ramane legat exclusiv de experimentul
+    # apifootball_injuries_coaches). Implicit OPRIT.
+    "challenger_shadow_logging_enabled": False,
 }
 
 DEFAULT_WEIGHTS: dict[str, Any] = {
@@ -1166,6 +1171,16 @@ class FootballOracleEngine:
                 feature_metadata=apifootball_metadata, processing_stage="final",
             )
 
+        # [ADAUGAT — Pasul 3, Implementation Contract Learning Core] Shadow
+        # logging pt Challenger activ (daca exista) — flag DEDICAT
+        # (challenger_shadow_logging_enabled, implicit False), separat de
+        # shadow_mode_enabled. Zero impact asupra productiei: ruleaza dupa
+        # ce `pred` a fost deja construita complet mai sus, nu o modifica
+        # niciodata, iar rezultatul acestei metode e ignorat de apelant.
+        self._log_challenger_shadow(
+            pred, home_p, away_p, h2h, home_xg, away_xg, ph, pd, pa, mc, w_pen,
+        )
+
         return pred
 
     # ── Utility methods ───────────────────────────────────────────────────
@@ -1270,6 +1285,71 @@ class FootballOracleEngine:
             )
         except Exception as exc:
             logger.debug("[ShadowTesting] log_shadow_experiment failed: %s", exc)
+            return False
+
+    # [ADAUGAT — Pasul 3, Implementation Contract Learning Core] Shadow
+    # logging pt Challenger activ — vezi ADR-016 (Challenger FSM, Pasul 2) și
+    # docs/00_GOVERNANCE/ADR-017-challenger-shadow-logging.md. Flag DEDICAT
+    # (`challenger_shadow_logging_enabled`, implicit False) — NU reutilizează
+    # `shadow_mode_enabled`, care rămâne legat exclusiv de experimentul
+    # apifootball_injuries_coaches, fără nicio legătură cu Learning Core.
+    def _log_challenger_shadow(
+        self, pred: MatchPrediction, home_p: TeamProfile, away_p: TeamProfile,
+        h2h: H2HRecord, home_xg: float, away_xg: float,
+        ph: float, pd_: float, pa: float, mc: dict, weather_penalty: float,
+    ) -> bool:
+        """Nu face nimic dacă challenger_shadow_logging_enabled=False
+        (implicit) — return imediat, zero import, zero apel Supabase, zero
+        cost. Nu modifică NICIODATĂ `pred` — parametrii sunt folosiți doar
+        pentru a reconstrui feature-urile ML deja calculate mai sus
+        (_build_ml_features e pură, fără efecte secundare), nu pentru a
+        recalcula predicția servită. Orice eșec (fără Challenger activ,
+        artefact lipsă, eroare de inferență, Supabase indisponibil) e prins
+        aici — niciodată propagat către evaluate_match()."""
+        if not self.config.get("challenger_shadow_logging_enabled", False):
+            return False
+        try:
+            from ml_predictor import _ALGORITHM_FAMILY, _LEAGUE_SCOPE
+            from learning_core import challenger_manager
+
+            active = challenger_manager.get_active_challenger(_ALGORITHM_FAMILY, _LEAGUE_SCOPE)
+            if active is None:
+                return False
+
+            from learning_core.challenger_shadow import predict_with_challenger
+            ml_features = self._build_ml_features(
+                home_p, away_p, h2h, home_xg, away_xg, ph, pd_, pa, mc, weather_penalty,
+            )
+            challenger_probs = predict_with_challenger(ml_features, active["training_run_id"])
+            if challenger_probs is None:
+                return False
+            c_ph, c_pd, c_pa = challenger_probs
+
+            import shadow_testing
+            # treatment = predicția Challenger-ului (NU cea servită utilizatorului)
+            shadow_testing.log_shadow_prediction(
+                fixture_id=pred.fixture_id,
+                experiment_name=_ALGORITHM_FAMILY, experiment_version=active["training_run_id"],
+                home_xg=home_xg, away_xg=away_xg,
+                prob_home=c_ph, prob_draw=c_pd, prob_away=c_pa,
+                experiment_group="treatment", processing_stage="final",
+                league=pred.league, home_team=pred.home_team, away_team=pred.away_team,
+                kickoff_date=pred.kickoff_date,
+            )
+            # control = predicția reală de producție (pred), logată din nou
+            # doar pt comparația paired din shadow_testing.evaluate_experiment()
+            shadow_testing.log_shadow_prediction(
+                fixture_id=pred.fixture_id,
+                experiment_name=_ALGORITHM_FAMILY, experiment_version=active["training_run_id"],
+                home_xg=home_xg, away_xg=away_xg,
+                prob_home=pred.prob_home_win, prob_draw=pred.prob_draw, prob_away=pred.prob_away_win,
+                experiment_group="control", processing_stage="final",
+                league=pred.league, home_team=pred.home_team, away_team=pred.away_team,
+                kickoff_date=pred.kickoff_date,
+            )
+            return True
+        except Exception as exc:
+            logger.debug("[ChallengerShadow] _log_challenger_shadow failed: %s", exc)
             return False
 
     def _load_prediction(self, fixture_id: str) -> dict | None:

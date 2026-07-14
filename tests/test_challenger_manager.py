@@ -271,13 +271,18 @@ def test_get_challenger_and_get_active_challenger(fake_client):
     assert cm.get_active_challenger("xgboost_v1", "all") is None
 
 
-def test_module_has_zero_importers_outside_own_test():
-    """Pasul 2 e bookkeeping izolat, identic ca disciplina cu Pasul 1 —
-    niciun alt fisier de productie nu importa efectiv acest modul (mentiuni
-    in comentarii/docstring-uri, ca cea din supabase_client.py care explica
-    cine va fi apelantul viitor, nu conteaza drept import real)."""
+def test_module_has_single_known_importer():
+    """La inchiderea Pasului 2, acest modul avea ZERO importatori de
+    productie — invariant valabil doar pana la Pasul 3 (ADR-017), care l-a
+    conectat, deliberat si gated printr-un flag dedicat, in
+    oracle_engine.py (_log_challenger_shadow). Garda ramane utila sub o
+    forma mai stricta: NIMENI altcineva nu are voie sa importe modulul
+    direct — un al doilea scriitor necontrolat ar reintroduce exact
+    problema de ownership dublu pe care ADR-016 o elimina."""
     import ast
     import pathlib
+
+    ALLOWED_IMPORTERS = {"oracle_engine.py"}
 
     root = pathlib.Path(__file__).resolve().parent.parent
     offenders = []
@@ -285,6 +290,8 @@ def test_module_has_zero_importers_outside_own_test():
         if ".git" in path.parts:
             continue
         if path.name in ("challenger_manager.py", "test_challenger_manager.py"):
+            continue
+        if path.name in ALLOWED_IMPORTERS:
             continue
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"), filename=str(path))
@@ -301,4 +308,4 @@ def test_module_has_zero_importers_outside_own_test():
                 ):
                     offenders.append(str(path.relative_to(root)))
 
-    assert offenders == [], f"challenger_manager e importat in afara scopului Pasului 2: {offenders}"
+    assert offenders == [], f"challenger_manager e importat de un scriitor neasteptat: {offenders}"
