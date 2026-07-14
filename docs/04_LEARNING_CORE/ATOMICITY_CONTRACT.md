@@ -7,7 +7,7 @@
 
 ## Constatarea de la Architecture Gate Review
 
-Toate scrierile Supabase din acest proiect, fără nicio excepție de până acum (`training_runs`, `challengers`, `challenger_evaluations`, `model_config`, `model_weights` etc.), sunt apeluri PostgREST single-table (`client.table(...).insert()/.update()/.upsert()`) — fiecare, propriul request HTTP, propria tranzacție Postgres, independentă de oricare alta. Clientul Python Supabase (`supabase-py`/`postgrest-py`) **nu compune** mai multe asemenea apeluri într-o singură tranzacție atomică.
+Toate scrierile Supabase folosite de Learning Core până acum, fără nicio excepție (`training_runs`, `challengers`, `challenger_evaluations`, `model_config`, `model_weights` etc.), sunt apeluri PostgREST single-table (`client.table(...).insert()/.update()/.upsert()`) — fiecare, propriul request HTTP, propria tranzacție Postgres, independentă de oricare alta. Clientul Python Supabase (`supabase-py`/`postgrest-py`) **nu compune** mai multe asemenea apeluri într-o singură tranzacție atomică.
 
 „Promote Challenger" (vezi `PROMOTION_CONTRACT.md`) cere DOUĂ scrieri cuplate — supersedarea campionului vechi + inserarea celui nou, ȘI tranziția Challenger-ului la `PROMOTED` — ca UN singur fapt, niciodată observabil parțial. Compunerea a trei apeluri `.execute()` separate (UPDATE campion vechi, INSERT campion nou, UPDATE challenger) NU satisface această cerință — un crash între oricare două dintre ele ar lăsa o stare intermediară reală, persistată.
 
@@ -15,7 +15,7 @@ Toate scrierile Supabase din acest proiect, fără nicio excepție de până acu
 
 **Promotion e o singură tranzacție Postgres.** Mecanismul necesar pentru asta e o **funcție Postgres (RPC)**, apelată printr-un singur `client.rpc("promote_challenger", {...}).execute()` din Promotion Service.
 
-Acesta nu e „infrastructură în plus" sau un tipar nou introdus de dragul lui — e mecanismul minim necesar pentru a respecta un invariant deja acceptat (Contract #5, stabilit înainte de Pasul 1). Fără el, invariantul pur și simplu nu poate fi satisfăcut cu tiparele de cod deja folosite peste tot altundeva în acest proiect. RPC devine, prin această decizie, parte a arhitecturii Learning Core — primul asemenea obiect din proiect (toate migrările de până acum au creat doar tabele/indecși/trigger-e, niciodată funcții) — dar unul justificat de o cerință reală, nu speculativ.
+Acesta nu e „infrastructură în plus" sau un tipar nou introdus de dragul lui — e mecanismul minim necesar pentru a respecta un invariant deja acceptat (Contract #5, stabilit înainte de Pasul 1). **Corecție de acuratețe** (verificat, nu presupus — o afirmație anterioară din acest document, „primul asemenea obiect din proiect", era greșită): RPC NU e un tipar nou pentru proiect — `upsert_odds_snapshot` (`database/migrations/001_odds_history.sql:96-128`, apelat din `services/odds_persistence_service.py:197` și `services/odds_backfill_service.py:211`) e deja o funcție Postgres, deja apelată prin `client.rpc(...)`, exact pentru același motiv (o scriere care trebuie să rămână atomică, cu clauze care nu pot fi exprimate sigur prin `.upsert()` simplu). E primul precedent REAL, nu un tipar inventat pentru Learning Core — Promotion Service urmează acest precedent deja testat în producție, nu introduce unul nou.
 
 ## Diviziunea muncii: Python (Promotion Service) vs. RPC (Postgres)
 
