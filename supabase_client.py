@@ -426,6 +426,80 @@ def save_ml_status(trained_at: str, samples_used: int, accuracy: float | None,
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# LEARNING CORE — training_runs / model_champions (ADR-015)
+# ════════════════════════════════════════════════════════════════════════════
+# Istoric append-only de rulări de antrenare + pointer de campion activ per
+# (algorithm_family, league_scope). Nu suprascrie niciodată un rând existent
+# (spre deosebire de ml_model_status, care rămâne "status curent" pentru
+# afișare live — neschimbat, consumatorii lui existenți nu sunt atinși).
+
+def save_training_run(training_run_id: str, algorithm_name: str, algorithm_version: str,
+                       league_scope: str, status: str, samples_used: int,
+                       walk_forward_metrics: dict, message: str = "") -> bool:
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("training_runs").insert({
+            "training_run_id": training_run_id,
+            "algorithm_name": algorithm_name,
+            "algorithm_version": algorithm_version,
+            "league_scope": league_scope,
+            "status": status,
+            "samples_used": samples_used,
+            "walk_forward_metrics": walk_forward_metrics,
+            "message": message,
+        }).execute()
+        return True
+    except Exception as exc:
+        logger.error("[Supabase] save_training_run failed: %s", exc)
+        return False
+
+
+def get_training_run(training_run_id: str) -> dict | None:
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("training_runs")
+            .select("*")
+            .eq("training_run_id", training_run_id)
+            .single()
+            .execute()
+        )
+        return res.data or None
+    except Exception as exc:
+        logger.warning("[Supabase] get_training_run failed pentru %s: %s", training_run_id, exc)
+        return None
+
+
+def get_active_champion(algorithm_family: str, league_scope: str) -> dict | None:
+    """Campionul activ curent pentru (algorithm_family, league_scope) —
+    rândul cu superseded_at IS NULL, per invariantul din migrare (cel mult
+    unul). None dacă nu există niciun campion promovat încă — stare
+    legitimă, nu eroare (Regula #8, nu se aproximează)."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("model_champions")
+            .select("*")
+            .eq("algorithm_family", algorithm_family)
+            .eq("league_scope", league_scope)
+            .is_("superseded_at", "null")
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Supabase] get_active_champion failed pentru %s/%s: %s",
+                        algorithm_family, league_scope, exc)
+        return None
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # [ADAUGAT] CACHE PERSISTENT (Nivel 2) — vezi architecture/ADR-003-cache.md
 # ════════════════════════════════════════════════════════════════════════════
 # Sursă comună între toate instanțele (telefon, PC, GitHub Actions, Streamlit

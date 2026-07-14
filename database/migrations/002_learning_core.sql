@@ -5,11 +5,10 @@
 --   - docs/04_LEARNING_CORE/LEARNING_CORE_ARCHITECTURE.md §3.2 (Training Runner),
 --     §3.3 (Champion Registry), §5 (responsabilitatea fiecărei tabele)
 --
--- ATENȚIE — NU APLICATĂ ÎNCĂ ÎN SUPABASE. Acest fișier e artefact de cod,
--- versionat în GitHub pentru review, conform deciziei explicite a
--- proprietarului produsului. Nu se rulează `apply_migration`/`execute_sql`
--- până la aprobare separată — vezi CLAUDE.md, "Regulile bazelor de date"
--- ("Proiectul Supabase conectat e producție reală, nu sandbox").
+-- APLICATĂ — vezi docs/00_GOVERNANCE/ADR-015-training-run-history-and-champion-comparison.md.
+-- Aprobată explicit de proprietarul produsului (2026-07-14), după justificare
+-- punctuală (necesitate/impact/reversibilitate) pentru veriga "Comparare
+-- model nou vs. Champion" din lanțul de învățare continuă.
 --
 -- Idempotent: poate fi rulat pe o bază de date goală (creează tabelele de la
 -- zero) sau re-rulat fără eroare dacă obiectele există deja — exact tiparul

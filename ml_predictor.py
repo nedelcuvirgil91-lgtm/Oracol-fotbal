@@ -35,6 +35,54 @@ logger = logging.getLogger("FootballOracle.ML")
 
 MIN_SAMPLES_TO_TRAIN = 30  # sub acest prag, ML nu se activează — doar Poisson
 
+# [ADAUGAT — ADR-015] Identitate fixă pentru istoricul de antrenare — trebuie
+# să coincidă exact cu learning_core.algorithms.xgboost_v1.XGBoostV1Algorithm
+# (name/version/league_scope), fiindcă reprezintă același algoritm; train()
+# e apelat direct de fluxul de producție (run_daily.py, oracle_engine.py),
+# nu doar prin adaptorul Learning Core — de aceea înregistrarea se face aici,
+# nu doar în XGBoostV1Algorithm.fit().
+_ALGORITHM_FAMILY  = "xgboost_v1"
+_ALGORITHM_VERSION = "1"
+_LEAGUE_SCOPE       = "all"
+
+
+def _record_training_run(status: str, samples_used: int, walk_forward_metrics: dict,
+                          message: str) -> None:
+    """Înregistrează rularea în training_runs (local + Supabase best-effort)
+    și compară cu campionul activ, dacă există — pur informativ, loghează
+    rezultatul. Nu decide, nu promovează, nu întrerupe niciodată train():
+    orice eșec aici e prins și logat, fără să afecteze MLTrainingResult
+    returnat apelantului."""
+    try:
+        import uuid
+        from learning_core import champion_comparison, storage
+        from learning_core.model_registry import TrainingRunResult
+
+        run_id = str(uuid.uuid4())
+        storage.save_training_run(
+            TrainingRunResult(
+                training_run_id=run_id, status=status, samples_used=samples_used,
+                walk_forward_metrics=walk_forward_metrics, message=message,
+            ),
+            algorithm_name=_ALGORITHM_FAMILY,
+            algorithm_version=_ALGORITHM_VERSION,
+            league_scope=_LEAGUE_SCOPE,
+        )
+        if walk_forward_metrics:
+            comparison = champion_comparison.compare_to_champion(
+                algorithm_family=_ALGORITHM_FAMILY,
+                algorithm_version=_ALGORITHM_VERSION,
+                league_scope=_LEAGUE_SCOPE,
+                new_training_run_id=run_id,
+                new_metrics=walk_forward_metrics,
+            )
+            logger.info("[ML] training_run %s înregistrat. %s", run_id, comparison.message)
+        else:
+            logger.info("[ML] training_run %s înregistrat (status=%s, fără metrici de comparat).",
+                         run_id, status)
+    except Exception as exc:
+        logger.warning("[ML] Înregistrare training_run eșuată (nu afectează antrenarea): %s", exc)
+
 FEATURE_COLUMNS = [
     # [ELIMINAT — audit de feature importance, permutation importance
     # măsurată pe 53.409 meciuri reale: "home_xg_pred", "away_xg_pred",
@@ -212,6 +260,8 @@ class MLPredictorEngine:
     def train(self) -> MLTrainingResult:
         if not sb.is_available():
             self.last_train_status = "unavailable"
+            _record_training_run("unavailable", 0, {},
+                                  "Supabase indisponibil — verifică SUPABASE_URL / SUPABASE_SECRET_KEY în secrets.")
             return MLTrainingResult(
                 status="unavailable",
                 message="Supabase indisponibil — verifică SUPABASE_URL / SUPABASE_SECRET_KEY în secrets.",
@@ -221,10 +271,9 @@ class MLPredictorEngine:
         if df is None or len(df) < MIN_SAMPLES_TO_TRAIN:
             n = 0 if df is None else len(df)
             self.last_train_status = "insufficient_data"
-            return MLTrainingResult(
-                status="insufficient_data", samples_used=n,
-                message=f"Doar {n} meciuri cu rezultat cunoscut — minim {MIN_SAMPLES_TO_TRAIN} necesare pentru antrenare ML.",
-            )
+            msg = f"Doar {n} meciuri cu rezultat cunoscut — minim {MIN_SAMPLES_TO_TRAIN} necesare pentru antrenare ML."
+            _record_training_run("insufficient_data", n, {}, msg)
+            return MLTrainingResult(status="insufficient_data", samples_used=n, message=msg)
 
         try:
             from xgboost import XGBClassifier
@@ -296,16 +345,25 @@ class MLPredictorEngine:
                 self.model_version, self.samples_used, acc, ll, brier, len(wf["folds"]),
             )
 
+            train_message = (
+                f"Model antrenat pe {self.samples_used} meciuri. "
+                f"Validare walk-forward: {len(wf['folds'])} folds, Brier mediu={brier}."
+            )
+            _record_training_run(
+                "trained", self.samples_used,
+                {"accuracy": acc, "log_loss": ll, "brier_score": brier},
+                train_message,
+            )
             return MLTrainingResult(
                 status="trained", samples_used=self.samples_used,
                 accuracy=acc, log_loss=ll,
-                message=f"Model antrenat pe {self.samples_used} meciuri. "
-                        f"Validare walk-forward: {len(wf['folds'])} folds, Brier mediu={brier}.",
+                message=train_message,
             )
 
         except Exception as exc:
             logger.error("[ML] Training failed: %s", exc)
             self.last_train_status = "error"
+            _record_training_run("error", 0, {}, str(exc))
             return MLTrainingResult(status="error", message=str(exc))
 
     # ── Predicție ─────────────────────────────────────────────────────────
