@@ -10,7 +10,10 @@ Zero scriere (nu importă promotion_service/challenger_manager/
 model_artifact_storage — nimic care ar putea scrie). Zero artefact
 persistat. Fișier temporar — se șterge după rulare, împreună cu workflow-ul.
 """
+import pathlib
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 import numpy as np
 import pandas as pd
