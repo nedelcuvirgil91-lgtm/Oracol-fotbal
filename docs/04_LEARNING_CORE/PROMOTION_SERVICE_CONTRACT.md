@@ -32,6 +32,8 @@ def promote_challenger(
 
 Exact cele trei din `PROMOTION_CONTRACT.md`: Challenger `SUCCEEDED`, verdict `candidate_for_promotion` deja persistat imuabil, artefact re-validat prin încărcare reală. Fail-fast — la primul eșec, `PromotionResult(status="rejected", reason=...)`, zero apel RPC.
 
+**Promotion execută, nu decide** (invariant adăugat la aprobarea Pasului 4.5, `PROMOTION_CONTRACT.md`) — toate trei sunt verificări structurale (există/valid), niciodată recalcularea deciziei deja luate de Shadow Evaluation. Promotion Service nu importă `shadow_testing`, nu rulează teste statistice, nu recalculează `delta_brier`/`delta_logloss`/`delta_accuracy`.
+
 ## Cine îl apelează
 
 Exclusiv un declanșator manual, explicit — CLI sau acțiune UI viitoare (nescrisă încă), niciodată automat. Nu e wired în `sync/run_daily.py` — la fel ca `challenger_evaluation.py` (Pasul 4), rămâne izolat până la o decizie explicită separată de conectare (ex. „am nevoie să pot promova dintr-un Streamlit UI").

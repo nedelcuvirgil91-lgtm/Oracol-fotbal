@@ -27,13 +27,25 @@ Aceste două efecte nu sunt „responsabilități separate care se ating acciden
 
 Nicio altă tabelă/agregat nu e atins — `challenger_evaluations` (verdictul, deja imuabil, doar CITIT ca precondiție), `shadow_predictions`, artefactul din Storage (doar CITIT, pentru validare) rămân neschimbate.
 
+## Invariant — Promotion execută, nu decide
+
+Adăugat explicit la aprobarea Pasului 4.5 (Chief Architect), înainte de înghețarea completă.
+
+```
+Comparison → Shadow Evaluation → verdict candidate_for_promotion → Promotion Service
+```
+
+Lanțul de decizie (comparare metrici, semnificație statistică, praguri, eligibilitate) e complet ÎNCHEIAT înainte ca Promotion Service să fie invocat — verdictul `candidate_for_promotion` din `challenger_evaluations` (Pasul 4, imuabil) e rezultatul final al acelui lanț, nu o sugestie. **Promotion Service nu recalculează nimic din asta** — nu re-rulează teste statistice, nu re-evaluează praguri, nu re-decide dacă modelul e „suficient de bun". Cele trei precondiții de mai jos sunt verificări **structurale** (există / nu există, valid / invalid), niciodată o a doua opinie asupra calității modelului.
+
+Dacă Promotion Service ar începe vreodată să evalueze din nou eligibilitatea (nu doar s-o citească), logica de decizie ar deveni duplicată — cu risc real ca cele două căi de decizie (Shadow Evaluation vs. re-verificarea din Promotion) să diveargă în timp. Orice extindere viitoare a precondițiilor Promotion Service trebuie să rămână strict structurală (ex. „rândul există și are forma așteptată"), niciodată statistică/de prag.
+
 ## Precondiții (verificate ÎNAINTE de orice scriere — fail fast, zero scriere parțială)
 
-Promotion Service refuză să acționeze dacă **oricare** din următoarele e falsă:
+Promotion Service refuză să acționeze dacă **oricare** din următoarele e falsă. Toate trei sunt verificări STRUCTURALE, nu decizionale (vezi invariantul de mai sus):
 
-1. **Challenger există** pentru `training_run_id` dat, și `challengers.state == 'SUCCEEDED'`.
-2. **Verdict pozitiv, imuabil, deja înregistrat** — cel mai recent rând din `challenger_evaluations` pentru acest `training_run_id` are `verdict = 'candidate_for_promotion'`. Această verificare e independentă de (1) — nu se are încredere doar în `challengers.state` (apărare în adâncime, consistent cu „verificat, nu presupus"). Închide, totodată, legătura dintre Pasul 4 (verdict) și Pasul 5 (acțiune) — un verdict `candidate_for_promotion` calculat de Shadow Evaluation e literalmente precondiția obligatorie a promovării, nu doar informație pasivă.
-3. **Artefactul e re-validat la momentul promovării** — `model_artifact_storage.load_model_artifact(training_run_id)` reușește ȘI produce un obiect funcțional (`predict_proba` apelabil pe un rând de test), nu doar „fișierul există". Validarea se întâmplă **înainte** de orice scriere în bază de date (vezi `ATOMICITY_CONTRACT.md`).
+1. **Challenger există** pentru `training_run_id` dat, și `challengers.state == 'SUCCEEDED'` — o citire de stare, nu o re-evaluare a motivului pentru care e `SUCCEEDED`.
+2. **Verdict pozitiv, imuabil, deja înregistrat** — cel mai recent rând din `challenger_evaluations` pentru acest `training_run_id` are `verdict = 'candidate_for_promotion'`. Această verificare e independentă de (1) — nu se are încredere doar în `challengers.state` (apărare în adâncime, consistent cu „verificat, nu presupus"). Închide, totodată, legătura dintre Pasul 4 (verdict) și Pasul 5 (acțiune) — un verdict `candidate_for_promotion` calculat de Shadow Evaluation e literalmente precondiția obligatorie a promovării, nu doar informație pasivă. **Promotion Service citește acest câmp — nu recalculează `delta_brier`/`delta_logloss`/`delta_accuracy` sau semnificația lor statistică.**
+3. **Artefactul e re-validat la momentul promovării** — `model_artifact_storage.load_model_artifact(training_run_id)` reușește ȘI produce un obiect funcțional (`predict_proba` apelabil pe un rând de test), nu doar „fișierul există". Validarea se întâmplă **înainte** de orice scriere în bază de date (vezi `ATOMICITY_CONTRACT.md`). Aceasta e o verificare de integritate tehnică (bytes deserializabili), nu de calitate a modelului.
 
 Dacă oricare eșuează, Promotion Service întoarce un rezultat explicit de eșec, cu motivul — **zero scriere** are loc.
 
