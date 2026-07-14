@@ -279,15 +279,19 @@ def test_module_has_single_known_importer():
     Chief Architect Review, verificata separat in
     tests/test_challenger_shadow_logging.py). Pasul 4 (ADR-018) a adaugat
     learning_core/challenger_evaluation.py — DOAR citire
-    (get_active_challenger), niciodata scriere/tranzitie de stare.
-    Garda ramane utila sub o forma mai stricta: NIMENI altcineva nu are
-    voie sa importe modulul direct — un scriitor necontrolat, in afara
-    acestor doua module Learning Core cunoscute, ar reintroduce exact
-    problema de ownership dublu pe care ADR-016 o elimina."""
+    (get_active_challenger). Pasul 5 (ADR-019) a adaugat
+    learning_core/promotion_service.py — DOAR citire (get_challenger),
+    scrierea reala a tranzitiei PROMOTED se intampla in interiorul
+    functiei Postgres promote_challenger() (migration 005), nu prin
+    challenger_manager.transition() din Python. Garda ramane utila sub o
+    forma mai stricta: NIMENI altcineva nu are voie sa importe modulul
+    direct — un scriitor necontrolat, in afara acestor module Learning
+    Core cunoscute, ar reintroduce exact problema de ownership dublu pe
+    care ADR-016 o elimina."""
     import ast
     import pathlib
 
-    ALLOWED_IMPORTERS = {"challenger_shadow.py", "challenger_evaluation.py"}
+    ALLOWED_IMPORTERS = {"challenger_shadow.py", "challenger_evaluation.py", "promotion_service.py"}
 
     root = pathlib.Path(__file__).resolve().parent.parent
     offenders = []

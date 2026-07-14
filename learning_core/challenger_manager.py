@@ -20,6 +20,23 @@ garantat de producție), acest modul RIDICĂ excepție la orice eșec de creare
 sau tranziție. Corect, fiindcă bookkeeping-ul Challenger e sursa unică de
 adevăr a propriei stări — o tranziție care nu se poate confirma nu trebuie
 niciodată raportată drept succes tăcut (Regula #8 CLAUDE.md).
+
+── ATENȚIE — tranziția SUCCEEDED → PROMOTED (Pasul 5, ADR-019) ────────────
+`transition(training_run_id, "PROMOTED")` rămâne valid aici la nivel de FSM
+(ALLOWED_TRANSITIONS) și testat ca atare, dar NU e calea reală de promovare
+în producție. O promovare reală se întâmplă EXCLUSIV prin funcția Postgres
+`promote_challenger()` (database/migrations/005_promotion.sql), apelată din
+`learning_core/promotion_service.py` — acolo, tranziția `challengers.state
+= 'PROMOTED'` e scrisă direct în SQL, ATOMIC împreună cu inserarea rândului
+`model_champions` corespunzător, în aceeași tranzacție (vezi
+docs/04_LEARNING_CORE/ATOMICITY_CONTRACT.md — un `transition()` Python
+separat, urmat de o scriere separată în model_champions, NU ar fi atomic).
+
+Apelarea directă a `transition(tid, "PROMOTED")` din orice cod de producție
+ar marca un Challenger drept promovat FĂRĂ să creeze rândul `model_champions`
+corespunzător — o stare inconsistentă reală. Azi, zero cod de producție face
+asta (`promotion_service.py` folosește exclusiv RPC-ul) — funcția rămâne în
+ALLOWED_TRANSITIONS doar pentru completitudinea FSM-ului și pentru teste.
 ================================================================================
 """
 from __future__ import annotations

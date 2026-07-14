@@ -635,6 +635,55 @@ def record_challenger_evaluation(
         return False
 
 
+def get_latest_challenger_evaluation(training_run_id: str) -> dict | None:
+    """Cel mai recent verdict imuabil (ADR-018) pentru un training_run_id —
+    ordonat după `evaluated_at`. None dacă nu există niciunul încă (stare
+    legitimă, nu eroare — Regula #8)."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("challenger_evaluations")
+            .select("*")
+            .eq("training_run_id", training_run_id)
+            .order("evaluated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Supabase] get_latest_challenger_evaluation failed pentru %s: %s",
+                        training_run_id, exc)
+        return None
+
+
+def rpc_promote_challenger(training_run_id: str, promoted_by: str) -> str:
+    """Apelează funcția Postgres `promote_challenger` (migration 005) —
+    ADR-019/Contract de Atomicitate: o singură tranzacție, ambele efecte
+    (model_champions + challengers) aplicate atomic sau deloc. Întoarce
+    'promoted' | 'already_active'.
+
+    EXCEPȚIE deliberată de la convenția restului fișierului (return None/
+    False la eșec): aici excepția e lăsată să urce necontrolat — mesajul
+    exact al unui RAISE EXCEPTION server-side (precondiție structurală
+    nesatisfăcută, ex. „Challenger nu e SUCCEEDED") e informație pe care
+    apelantul (un om care declanșează o promovare manuală) trebuie s-o
+    vadă exact, nu doar „a eșuat". `learning_core/promotion_service.py`
+    prinde această excepție la propriul nivel și o mapează la
+    `PromotionResult(status="rejected", reason=str(exc))` — el rămâne
+    punctul unde nicio excepție nu mai scapă necontrolat mai departe."""
+    client = get_client()
+    if client is None:
+        raise RuntimeError("Supabase indisponibil — imposibil de apelat promote_challenger")
+    res = client.rpc("promote_challenger", {
+        "p_training_run_id": training_run_id,
+        "p_promoted_by": promoted_by,
+    }).execute()
+    return res.data
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # [ADAUGAT] CACHE PERSISTENT (Nivel 2) — vezi architecture/ADR-003-cache.md
 # ════════════════════════════════════════════════════════════════════════════
