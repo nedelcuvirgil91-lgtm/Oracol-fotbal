@@ -35,9 +35,10 @@ jobs:
 
           import supabase_client as sb
           from learning_core import challenger_manager, model_artifact_storage, promotion_service, champion_loader
-          from ml_predictor import _ALGORITHM_VERSION
+          from ml_predictor import _ALGORITHM_VERSION, FEATURE_COLUMNS
 
           FAM = 'gate_validation_test'
+          RUN_TAG = uuid.uuid4().hex[:8]  # sufix unic per dispatch -- elimina orice coliziune cu stare ramasa dintr-un run anterior
           RESULTS = []
 
           def check(name, cond, detail=''):
@@ -47,11 +48,13 @@ jobs:
               return cond
 
           def train_tiny_model():
-              rng_X = np.array([[i % 7, (i * 3) % 11, (i + 2) % 5, i % 4] for i in range(60)], dtype=float)
+              n_features = len(FEATURE_COLUMNS)
+              rng = np.random.RandomState(42)
+              X = rng.rand(60, n_features)
               y = np.array([i % 3 for i in range(60)])
               model = XGBClassifier(n_estimators=10, max_depth=2, random_state=42,
                                      objective='multi:softprob', num_class=3, eval_metric='mlogloss')
-              model.fit(rng_X, y)
+              model.fit(X, y)
               return model
 
           def make_promotable_challenger(scope, algorithm_version=_ALGORITHM_VERSION, samples_used=100):
@@ -97,7 +100,7 @@ jobs:
                   bucket.upload(path, corrupted_bytes, {'content-type': 'application/json'})
 
           # ── Scenariul 1: Promotion end-to-end ────────────────────────────
-          scope_a = 'happy_path'
+          scope_a = f'happy_path_{RUN_TAG}'
           run_a = make_promotable_challenger(scope_a)
           result_a = promotion_service.promote_challenger(run_a, FAM, scope_a, promoted_by='gate-validation-script')
           check('S1: prima promovare reuseste', result_a.status == 'promoted', str(result_a))
@@ -149,7 +152,7 @@ jobs:
           check('S5: repromovarea lui B (deja activ) e no-op', result_b_again.status == 'already_active', str(result_b_again))
 
           # ── Scenariul 6: algorithm_version incompatibil -> fallback ──────
-          scope_v = 'version_mismatch'
+          scope_v = f'version_mismatch_{RUN_TAG}'
           run_v = make_promotable_challenger(scope_v, algorithm_version='999-legacy-mismatch')
           result_v = promotion_service.promote_challenger(run_v, FAM, scope_v, promoted_by='gate-validation-script')
           check('S6: promovarea reuseste (RPC nu verifica algorithm_version)', result_v.status == 'promoted', str(result_v))
@@ -158,7 +161,7 @@ jobs:
           check('S6: champion_loader REFUZA campion cu algorithm_version incompatibil', loaded_v is None)
 
           # ── Scenariul 7: artefact corupt -> fallback determinist ─────────
-          scope_c = 'corrupted_artifact'
+          scope_c = f'corrupted_artifact_{RUN_TAG}'
           run_c = make_promotable_challenger(scope_c)
           result_c = promotion_service.promote_challenger(run_c, FAM, scope_c, promoted_by='gate-validation-script')
           check('S7: promovarea reuseste', result_c.status == 'promoted', str(result_c))
