@@ -592,6 +592,49 @@ def update_challenger_state(training_run_id: str, expected_current_state: str, n
         return False
 
 
+def record_challenger_evaluation(
+    training_run_id: str, algorithm_family: str, league_scope: str,
+    n_matches_evaluated: int, evaluation_window_start: str | None, evaluation_window_end: str | None,
+    verdict: str, statistical_method: str,
+    brier_baseline: float | None, brier_experiment: float | None,
+    delta_brier: float | None, brier_significant: bool | None,
+    logloss_baseline: float | None, logloss_experiment: float | None,
+    delta_logloss: float | None, logloss_significant: bool | None,
+    accuracy_baseline: float | None, accuracy_experiment: float | None,
+    delta_accuracy: float | None, accuracy_significant: bool | None,
+) -> bool:
+    """Persistă un verdict de Shadow Evaluation ca fapt istoric IMUABIL —
+    ADR-018. `INSERT ... ignore_duplicates=True` => ON CONFLICT DO NOTHING
+    la nivel Postgres, pe UNIQUE (training_run_id, n_matches_evaluated): o
+    rulare ulterioară cu ACEEAȘI fereastră de evaluare nu poate scrie un
+    rând nou și nu poate modifica rândul deja existent — niciodată UPDATE,
+    niciodată check-then-act. True dacă rândul a fost scris SAU exista deja
+    (ambele sunt „faptul e înregistrat", nu eșec)."""
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("challenger_evaluations").upsert({
+            "training_run_id": training_run_id,
+            "algorithm_family": algorithm_family, "league_scope": league_scope,
+            "n_matches_evaluated": n_matches_evaluated,
+            "evaluation_window_start": evaluation_window_start,
+            "evaluation_window_end": evaluation_window_end,
+            "verdict": verdict, "statistical_method": statistical_method,
+            "brier_baseline": brier_baseline, "brier_experiment": brier_experiment,
+            "delta_brier": delta_brier, "brier_significant": brier_significant,
+            "logloss_baseline": logloss_baseline, "logloss_experiment": logloss_experiment,
+            "delta_logloss": delta_logloss, "logloss_significant": logloss_significant,
+            "accuracy_baseline": accuracy_baseline, "accuracy_experiment": accuracy_experiment,
+            "delta_accuracy": delta_accuracy, "accuracy_significant": accuracy_significant,
+        }, on_conflict="training_run_id,n_matches_evaluated", ignore_duplicates=True).execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Supabase] record_challenger_evaluation failed pentru %s (n=%s): %s",
+                        training_run_id, n_matches_evaluated, exc)
+        return False
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # [ADAUGAT] CACHE PERSISTENT (Nivel 2) — vezi architecture/ADR-003-cache.md
 # ════════════════════════════════════════════════════════════════════════════
