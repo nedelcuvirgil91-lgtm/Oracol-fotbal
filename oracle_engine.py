@@ -354,45 +354,63 @@ class FootballOracleEngine:
         # servite continuă să vină exclusiv din antrenarea locală de mai sus.
         # `ml_source` reflectă ce servește EFECTIV azi (local/none — "champion"
         # nu apare aici încă, ca să nu sugereze fals că e folosit pentru
-        # servire). `champion_diagnostic` e o probă separată, izolată, a
-        # mecanismului care va deveni operațional abia la Pasul 7B.
+        # servire). `champion_diagnostic` e o probă separată, izolată — formă
+        # FIXĂ, strict informativă (status/reason/training_run_id/
+        # algorithm_version/validated_at), fără nicio decizie/fallback/retry/
+        # statistică — recomandare explicită Chief Architect, ca să nu devină
+        # un al doilea runtime.
         self.ml_source: str = "local" if (self.ml and self.ml.is_trained) else "none"
-        self.champion_diagnostic: dict = self._probe_champion() if self.use_supabase else {"available": False}
+        self.champion_diagnostic: dict = (
+            self._probe_champion() if self.use_supabase else self._champion_diagnostic_unavailable("no_supabase")
+        )
 
         logger.info(
-            "FootballOracleEngine v3.0 ready. Supabase=%s Injuries=%s Cache=%s KeyMgr=%s ML=%s ml_source=%s champion_available=%s",
+            "FootballOracleEngine v3.0 ready. Supabase=%s Injuries=%s Cache=%s KeyMgr=%s ML=%s ml_source=%s champion_status=%s",
             self.use_supabase, INJURY_MANAGER_AVAILABLE, CACHE_MANAGER_AVAILABLE,
             KEY_MANAGER_AVAILABLE, ML_MODULE_AVAILABLE, self.ml_source,
-            self.champion_diagnostic.get("available"),
+            self.champion_diagnostic.get("status"),
         )
+
+    @staticmethod
+    def _champion_diagnostic_unavailable(reason: str) -> dict:
+        return {
+            "status": "unavailable", "reason": reason,
+            "training_run_id": None, "algorithm_version": None,
+            "validated_at": datetime.now(timezone.utc).isoformat(),
+        }
 
     def _probe_champion(self) -> dict:
         """Încearcă să încarce și să valideze Champion-ul activ, STRICT pt
         diagnostic (Pasul 6) — nu afectează self.ml. Populează complet un
         MLPredictorEngine "candidat" (aceeași reprezentare internă ca un
         model antrenat local — vezi ml_predictor.seed_from_champion(),
-        "Golul A" din Architecture Gate 6), apoi îl aruncă, păstrând doar
-        informația de diagnostic. Niciodată nu ridică excepție."""
+        "Golul A" din Architecture Gate 6), pentru a dovedi mecanismul
+        capăt-la-capăt, apoi îl aruncă — întoarce EXCLUSIV forma fixă de
+        diagnostic (status/reason/training_run_id/algorithm_version/
+        validated_at), niciodată stare internă a candidatului (samples_used/
+        is_trained rămân interne, nu leacă în diagnostic). Niciodată nu
+        ridică excepție."""
         try:
             from ml_predictor import _ALGORITHM_FAMILY, _LEAGUE_SCOPE, MLPredictorEngine
             from learning_core.champion_loader import load_champion_or_none
 
             result = load_champion_or_none(_ALGORITHM_FAMILY, _LEAGUE_SCOPE)
             if result is None:
-                return {"available": False}
+                return self._champion_diagnostic_unavailable("no_valid_champion")
 
             candidate = MLPredictorEngine()
             candidate.seed_from_champion(result.model, samples_used=result.samples_used)
+            assert candidate.is_trained  # dovada ca seeding-ul chiar functioneaza, nu doar returnat
 
             return {
-                "available": True,
+                "status": "validated", "reason": None,
                 "training_run_id": result.training_run_id,
-                "samples_used": candidate.samples_used,
-                "is_trained": candidate.is_trained,
+                "algorithm_version": result.algorithm_version,
+                "validated_at": datetime.now(timezone.utc).isoformat(),
             }
         except Exception as exc:
             logger.warning("[Champion] Probă de diagnostic (Pasul 6) eșuată: %s", exc)
-            return {"available": False}
+            return self._champion_diagnostic_unavailable("probe_failed")
 
     def _persist_weights(self) -> None:
         if self.use_supabase:
