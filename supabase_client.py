@@ -499,6 +499,99 @@ def get_active_champion(algorithm_family: str, league_scope: str) -> dict | None
         return None
 
 
+def create_challenger(training_run_id: str, algorithm_family: str, league_scope: str) -> dict | None:
+    """Creează un Challenger nou, în starea CREATED. None la orice eșec —
+    fie Supabase indisponibil, fie constrângerea de invariant (cel mult un
+    Challenger activ per algorithm_family/league_scope, ADR-016) a respins
+    scrierea. Apelantul (learning_core.challenger_manager) e responsabil să
+    trateze None ca eșec explicit, nu ca succes tacit (Regula #8)."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = client.table("challengers").insert({
+            "training_run_id": training_run_id,
+            "algorithm_family": algorithm_family,
+            "league_scope": league_scope,
+            "state": "CREATED",
+        }).execute()
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Supabase] create_challenger failed pentru %s: %s", training_run_id, exc)
+        return None
+
+
+def get_challenger(training_run_id: str) -> dict | None:
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("challengers")
+            .select("*")
+            .eq("training_run_id", training_run_id)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Supabase] get_challenger failed pentru %s: %s", training_run_id, exc)
+        return None
+
+
+def get_active_challenger(algorithm_family: str, league_scope: str) -> dict | None:
+    """Challenger-ul activ curent (stare non-terminală) pentru
+    (algorithm_family, league_scope). None dacă nu există niciunul —
+    stare legitimă, nu eroare (Regula #8)."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("challengers")
+            .select("*")
+            .eq("algorithm_family", algorithm_family)
+            .eq("league_scope", league_scope)
+            .not_.in_("state", ["PROMOTED", "REJECTED"])
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Supabase] get_active_challenger failed pentru %s/%s: %s",
+                        algorithm_family, league_scope, exc)
+        return None
+
+
+def update_challenger_state(training_run_id: str, expected_current_state: str, new_state: str,
+                             rejection_reason: str | None, terminal: bool) -> bool:
+    """Tranziție atomică compare-and-swap: scrie DOAR dacă rândul e încă în
+    expected_current_state la momentul UPDATE-ului — niciodată check-then-act
+    (Regula bazelor de date). False dacă starea s-a schimbat concurent între
+    citire și scriere, sau la orice alt eșec."""
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        payload = {"state": new_state, "updated_at": now_iso, "rejection_reason": rejection_reason}
+        if terminal:
+            payload["terminal_at"] = now_iso
+        res = (
+            client.table("challengers")
+            .update(payload)
+            .eq("training_run_id", training_run_id)
+            .eq("state", expected_current_state)
+            .execute()
+        )
+        return bool(res.data)
+    except Exception as exc:
+        logger.warning("[Supabase] update_challenger_state failed pentru %s (%s -> %s): %s",
+                        training_run_id, expected_current_state, new_state, exc)
+        return False
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # [ADAUGAT] CACHE PERSISTENT (Nivel 2) — vezi architecture/ADR-003-cache.md
 # ════════════════════════════════════════════════════════════════════════════
