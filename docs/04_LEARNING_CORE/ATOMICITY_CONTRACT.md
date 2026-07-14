@@ -17,6 +17,16 @@ Toate scrierile Supabase folosite de Learning Core până acum, fără nicio exc
 
 Acesta nu e „infrastructură în plus" sau un tipar nou introdus de dragul lui — e mecanismul minim necesar pentru a respecta un invariant deja acceptat (Contract #5, stabilit înainte de Pasul 1). **Corecție de acuratețe** (verificat, nu presupus — o afirmație anterioară din acest document, „primul asemenea obiect din proiect", era greșită): RPC NU e un tipar nou pentru proiect — `upsert_odds_snapshot` (`database/migrations/001_odds_history.sql:96-128`, apelat din `services/odds_persistence_service.py:197` și `services/odds_backfill_service.py:211`) e deja o funcție Postgres, deja apelată prin `client.rpc(...)`, exact pentru același motiv (o scriere care trebuie să rămână atomică, cu clauze care nu pot fi exprimate sigur prin `.upsert()` simplu). E primul precedent REAL, nu un tipar inventat pentru Learning Core — Promotion Service urmează acest precedent deja testat în producție, nu introduce unul nou.
 
+## Ce e invariant aici, și ce e doar mecanism (adăugat la aprobarea Pasului 5)
+
+RPC-ul (`promote_challenger`, `database/migrations/005_promotion.sql`) e implementarea tranzacțională ALEASĂ pentru acest invariant — nu invariantul însuși. Distincția contează dacă vreodată infrastructura se schimbă (altă bază de date, alt client, o versiune viitoare de Supabase cu tranzacții multi-statement expuse direct clientului):
+
+> **Ce trebuie păstrat, necondiționat**: „Promote Challenger" e o singură unitate atomică — ambele efecte (`model_champions` + `challengers`) se aplică împreună, sau niciunul.
+>
+> **Ce NU trebuie păstrat, dacă infrastructura permite altceva mai simplu**: mecanismul concret (o funcție Postgres). Dacă un viitor client Supabase ar expune tranzacții multi-statement direct, sau dacă infrastructura de bază de date s-ar schimba complet, mecanismul se poate înlocui — atâta timp cât noua implementare satisface exact aceeași proprietate observabilă (secțiunea „Ce garantează acest mecanism" de mai jos), nu structura ei internă.
+
+Orice înlocuire viitoare a mecanismului rămâne, totuși, o schimbare de contract (modifică „cum se produce" un invariant deja înghețat) — trece printr-un ADR nou, per regula standard din `FROZEN_REGISTRY.md`, nu printr-o editare tăcută a acestui document.
+
 ## Diviziunea muncii: Python (Promotion Service) vs. RPC (Postgres)
 
 Nu tot ce ține de „Promote Challenger" intră în funcția Postgres — doar partea care CERE atomicitate transacțională. Restul (validarea artefactului, citirea verdictului imuabil) rămâne în Python, ÎNAINTE de a invoca RPC-ul — exact ordinea cerută de Contract #5 („validează artefactul ÎNAINTE de tranzacție"):

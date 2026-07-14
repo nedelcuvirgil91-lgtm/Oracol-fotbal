@@ -31,6 +31,14 @@ Chief Architect a acceptat ambele obiecții ca valide, a respins concluzia „NO
 
 6. **Promotion execută, nu decide** — adăugat de Chief Architect la aprobarea Pasului 4.5, ca ultimă condiție înainte de înghețarea completă. Lanțul de decizie (Comparison → Shadow Evaluation → verdict `candidate_for_promotion`) e complet încheiat înainte ca Promotion Service să fie invocat. Cele trei precondiții din `PROMOTION_CONTRACT.md` sunt verificări STRUCTURALE (există/valid), niciodată o a doua opinie statistică asupra calității modelului — Promotion Service nu importă `shadow_testing`, nu recalculează deltas/semnificație. Previne duplicarea logicii de decizie între Shadow Evaluation și Promotion, care ar putea diverge în timp. Vezi `PROMOTION_CONTRACT.md` și `PROMOTION_SERVICE_CONTRACT.md`, secțiunile actualizate.
 
+## Addendum — aprobarea Pasului 5 (implementare)
+
+După implementarea mecanică a contractelor de mai sus (migration 005, `learning_core/promotion_service.py`), Chief Architect a aprobat Pasul 5 și a consemnat două invarianți suplimentari, direct legați de ce s-a descoperit/clarificat în implementare:
+
+7. **Promotion Service e singura cale legitimă către starea `PROMOTED`** — ca răspuns direct la riscul semnalat în timpul implementării (`challenger_manager.transition(tid, "PROMOTED")` rămâne valid la nivel de FSM, dar nu e o cale de producție). FSM-ul descrie stările posibile; Promotion Service descrie singura cale legală prin care sistemul ajunge efectiv acolo. Vezi `PROMOTION_CONTRACT.md`, secțiunea nouă.
+
+8. **RPC-ul e mecanismul, nu invariantul** — atomicitatea „Promote Challenger" (ambele efecte împreună, sau niciunul) e proprietatea permanentă de păstrat; funcția Postgres `promote_challenger` e implementarea aleasă azi, înlocuibilă în viitor (printr-un ADR nou) dacă infrastructura permite altceva echivalent, fără ca invariantul însuși să se schimbe. Vezi `ATOMICITY_CONTRACT.md`, secțiunea nouă.
+
 ## Rationale
 
 Un gate arhitectural găsește o contradicție reală — răspunsul corect nu e nici „ignoră și continuă", nici „respinge tot conceptul", ci „rezolvă exact contradicția găsită, cu cea mai mică extensie de scop posibilă" (Promotion Service, nu Orchestrator; RPC justificat de un invariant concret, nu de o preferință de stil).

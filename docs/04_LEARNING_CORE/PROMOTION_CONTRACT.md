@@ -27,6 +27,16 @@ Aceste două efecte nu sunt „responsabilități separate care se ating acciden
 
 Nicio altă tabelă/agregat nu e atins — `challenger_evaluations` (verdictul, deja imuabil, doar CITIT ca precondiție), `shadow_predictions`, artefactul din Storage (doar CITIT, pentru validare) rămân neschimbate.
 
+## Invariant — Promotion Service e singura cale legitimă către PROMOTED
+
+Adăugat explicit la aprobarea Pasului 5 (Chief Architect), ca urmare directă a unui risc descoperit în timpul implementării (documentat la sursă în `learning_core/challenger_manager.py`).
+
+> **Nicio componentă din producție nu are voie să producă starea `PROMOTED` în afara Promotion Service.**
+
+FSM-ul (`challenger_manager.ALLOWED_TRANSITIONS`) descrie stările **posibile** — `SUCCEEDED → PROMOTED` rămâne o tranziție validă la nivel de model de stări, păstrată pentru completitudine și pentru teste directe ale FSM-ului. Dar Promotion Service descrie **singura cale legală** prin care sistemul ajunge efectiv în acea stare, în producție.
+
+Un apel de producție către `challenger_manager.transition(training_run_id, "PROMOTED")`, în afara fluxului `promotion_service.promote_challenger()` → `promote_challenger()` (RPC), ar produce un Challenger marcat `PROMOTED` **fără** rândul `model_champions` corespunzător — o stare inconsistentă reală, nu doar teoretică. Acest invariant nu e impus (încă) la nivel de bază de date — e o regulă de guvernanță, verificată prin disciplina „zero apelanți în afara `promotion_service.py`" (`tests/test_promotion_service.py`, `tests/test_challenger_manager.py::test_module_has_single_known_importer`). Dacă vreodată apare un al doilea apelant real al `challenger_manager.transition(..., "PROMOTED")`, gărzile AST existente îl detectează imediat.
+
 ## Invariant — Promotion execută, nu decide
 
 Adăugat explicit la aprobarea Pasului 4.5 (Chief Architect), înainte de înghețarea completă.
