@@ -36,3 +36,7 @@ Al doilea feature promovat la `FEATURE_COLUMNS` prin dovadă de ablație de la c
 - Orice re-antrenare a modelului de producție după acest ADR va folosi automat noul feature.
 - Rândurile de antrenare fără istoric real de faulturi primesc `NaN` pentru `foul_diff` — XGBoost gestionează nativ (missing-value split), nu se aproximează.
 - `ht_goal_diff` NU se implementează — rămâne respins per `HT_SCORE_ABLATION_2026-07-14.md`. Coloanele brute `home_ht_goals`/`away_ht_goals` (ADR-011) și `avg_ht_goals` (informativ, `TeamProfile`) rămân neschimbate, fără nicio coloană derivată nouă.
+
+## Addendum — aliniere implementare (audit data leakage, 2026-07-14)
+
+Identic cu addendumul din ADR-012: `ml_predictor.train()` impută încă `foul_diff` cu mediana globală, contrazicând decizia de mai sus. Corectată în același commit — imputarea eliminată complet pentru toate cele 13 coloane din `FEATURE_COLUMNS`, în `train()` și `predict()`. Vezi ADR-012, addendum, pentru detaliul complet al scurgerii găsite (mediana calculată pe tot setul deja sortat cronologic, "vedea" segmente viitoare la fold-urile timpurii de walk-forward validation).

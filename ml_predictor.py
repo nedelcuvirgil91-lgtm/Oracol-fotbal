@@ -319,7 +319,18 @@ class MLPredictorEngine:
                 logger.warning("[ML] kickoff_date absent din date — walk-forward validation "
                                 "degradează la ordinea brută din DB (posibil nesigur temporal).")
 
-            X = df[FEATURE_COLUMNS].astype(float).fillna(df[FEATURE_COLUMNS].astype(float).median())
+            # [ADAUGAT — fix leakage walk-forward] NU se impută cu mediana
+            # globală — acea mediană era calculată pe tot setul deja sortat
+            # cronologic, deci "vedea" segmente viitoare la imputarea
+            # fold-urilor timpurii (scurgere informațională în preprocesare,
+            # distinctă de scurgerea de etichete). XGBoost gestionează NaN
+            # nativ (missing-value split, `missing=np.nan` implicit) — exact
+            # designul deja documentat pentru corner_dominance/card_diff
+            # (ADR-012) și foul_diff (ADR-013), extins acum consecvent la
+            # toate cele 13 coloane. Verificat empiric (2026-07-14): cele 10
+            # coloane originale au 0 NULL din 53.409 rânduri — schimbarea e
+            # no-op pentru ele.
+            X = df[FEATURE_COLUMNS].astype(float)
             y = df["actual_result"].map(RESULT_TO_LABEL).astype(int)
 
             # Validare onestă, temporală (nu mai afectează modelul final)
@@ -406,9 +417,12 @@ class MLPredictorEngine:
         if not self.is_trained or self.model is None:
             return None
         try:
+            # NaN trece nativ către XGBoost, exact ca la antrenare (train())
+            # — nicio imputare separată aici, altfel modelul ar ruta prin
+            # split-uri diferite de missing-value la predicție față de
+            # antrenare (regim inconsistent, nu doar o valoare aproximată).
             row = pd.DataFrame([{c: features.get(c, np.nan) for c in self.feature_names}])
             row = row.astype(float)
-            row = row.fillna(row.median(numeric_only=True)).fillna(0.0)
             probs = self.model.predict_proba(row)[0]
             ph, pd_, pa = float(probs[0]), float(probs[1]), float(probs[2])
             confidence = float(max(ph, pd_, pa))

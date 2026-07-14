@@ -31,3 +31,7 @@ Primul feature promovat la `FEATURE_COLUMNS` prin dovadă de ablație de la ELO/
 - `FEATURE_COLUMNS` are acum 12 intrări (10 existente + 2 noi).
 - Orice re-antrenare a modelului de producție după acest ADR va folosi automat noile feature-uri.
 - Rândurile de antrenare fără istoric real de cornere/cartonașe primesc `NaN` pentru cele 2 coloane derivate — XGBoost gestionează nativ (missing-value split), nu se aproximează.
+
+## Addendum — aliniere implementare (audit data leakage, 2026-07-14)
+
+`ml_predictor.train()` conținea, până la această dată, o linie moștenită dinaintea acestui ADR (`fillna(df[FEATURE_COLUMNS].median())`) care contrazicea direct decizia de mai sus — impută inclusiv `corner_dominance`/`card_diff` cu mediana globală, în loc să le lase `NaN`. Găsită la un audit de data leakage (mediana era calculată pe tot setul deja sortat cronologic, deci "vedea" segmente viitoare la fold-urile timpurii ale walk-forward validation — o scurgere distinctă de cea de etichete). Corectată: imputarea a fost eliminată complet pentru toate cele 13 coloane din `FEATURE_COLUMNS` (nu doar cele 2 de aici), atât în `train()` cât și în `predict()` — implementarea e acum aliniată cu decizia originală a acestui ADR. Vezi și ADR-013, addendum identic.
