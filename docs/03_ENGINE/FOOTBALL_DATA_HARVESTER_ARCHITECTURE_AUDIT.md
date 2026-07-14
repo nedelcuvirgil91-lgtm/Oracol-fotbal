@@ -4,6 +4,10 @@
 
 **Scop**: un serviciu separat, cu un singur mandat — completează statistici de meci lipsă (shots, shots on target, posesie, xG unde există o sursă curată, big chances) în `match_history`, din surse externe, fără să atingă niciodată logica de predicție a Football Oracle.
 
+**Reframing (Chief Architect)**: nu doar un "scraper" — un **Data Acquisition Engine**, cu o interfață unică peste orice tip de sursă (API, CSV, Kaggle, scraping, import manual). Vezi §2.
+
+**Invariant central, repetat explicit pentru că e cel mai important din tot documentul**: *„dacă mâine ștergem Harvester, Football Oracle continuă să funcționeze."* Football Oracle nu trebuie să știe că Harvester există — nu doar la nivel de cod, ci la nivel de dependință. Nicio ramură `if harvester...` sau echivalent nu are voie să existe vreodată în codul Football Oracle. Vezi §11.
+
 ---
 
 ## 0. Premisă — de ce un serviciu separat, nu o extensie a `sync/`
@@ -18,33 +22,51 @@
 
 ## 1. Structura repo-ului
 
-Propunere: repo GitHub separat (`football-data-harvester`), NU un director în `Oracol-fotbal`. Motive:
+Propunere inițială: repo GitHub separat (`football-data-harvester`), NU un director în `Oracol-fotbal`. **Revizuit (Chief Architect) — trei componente, nu două**, ca niciunul din cele două servicii de business să nu depindă direct de celălalt:
 
-- Eliminabilitate totală literală — ștergerea unui repo nu poate atinge accidental fișiere din alt repo, spre deosebire de un director dintr-un monorepo (unde un `rm -rf` greșit sau un import relativ scăpat ar putea traversa granița).
-- Deploy/CI independent — Harvester poate rula pe alt orar, cu alte secrete, fără să partajeze `requirements.txt`/dependențe cu Football Oracle (risc redus de coliziune de versiuni, ex. o versiune de `pandas` care ar sparge `ml_predictor.py`).
-- Graniță de review clară — orice PR pe Harvester nu poate, prin construcție, atinge `oracle_engine.py`/`ml_predictor.py`.
+```
+football-common   (repo minimal, shared)
+  - mappings.py (echipe/ligi canonice, ADR-001)
+  - league ids / team ids / competition ids
+       ↑                              ↑
+       |                              |
+  Football Oracle              Football Data Harvester
+  (produsul, predicții)        (Data Acquisition Engine)
+```
 
-**Punct critic, nerezolvat încă**: Harvester TOT trebuie să scrie în `match_history` din Supabase-ul de producție al Football Oracle — deci partajează baza de date, chiar dacă nu partajează codul. Izolarea de cod nu e izolare de date. Acest lucru trebuie tratat explicit la §4 (nu poate corupe istoricul) — separarea de repo reduce riscul de cod, dar nu-l elimină la nivel de scriere în DB.
+Football Oracle și Harvester depind AMBELE de `football-common`, NICIODATĂ unul de celălalt — nici măcar pentru `mappings.py`. Asta rezolvă complet întrebarea deschisă inițială despre sincronizarea normalizării (vezi fostul §3, acum decis).
 
-## 2. Plugin architecture
+Motive pentru separarea în 3 componente, nu 2:
+
+- Eliminabilitate totală literală — ștergerea repo-ului Harvester nu poate atinge accidental fișiere din Football Oracle sau din `football-common`.
+- Deploy/CI independent — Harvester rulează pe alt orar, cu alte secrete, fără să partajeze `requirements.txt` cu Football Oracle.
+- Graniță de review clară — un PR pe Harvester nu poate, prin construcție, atinge `oracle_engine.py`/`ml_predictor.py`.
+- **`football-common` rămâne suficient de mic încât să nu devină el însuși un punct de cuplare ascunsă** — conține EXCLUSIV date de mapare/identitate (nume canonice, ID-uri), niciodată logică de business, niciodată cod de scriere/citire Supabase. Dacă `football-common` ar crește să conțină logică, ar reintroduce exact cuplarea pe care separarea o respinge.
+
+**Punct critic, rămâne valabil**: Harvester TOT trebuie să scrie în `match_history` din Supabase-ul de producție al Football Oracle — deci partajează baza de date, chiar dacă nu partajează codul (nici măcar prin `football-common`). Izolarea de cod nu e izolare de date. Tratat explicit la §4.
+
+## 2. Data Acquisition Engine — interfață unică peste orice tip de sursă
+
+**Extindere de scop (Chief Architect)**: nu un plugin architecture limitat la "surse web", ci un Data Acquisition Engine — aceeași interfață pentru API, CSV, Kaggle, scraping, import manual. Obiectiv explicit: o sursă nouă se adaugă în ~30 minute, indiferent de tipul ei de acces.
 
 Reutilizează conceptul din `sync/sources/` (fiecare provider = un modul cu interfață comună), dar NU codul — Harvester nu importă `sync/sources/*.py` din Football Oracle (ar reintroduce cuplarea pe care §0/§1 o resping).
 
-Interfață minimă propusă per plugin:
+Interfață minimă propusă, generică pe tipul de acces:
 ```
 class HarvesterSource(Protocol):
     name: str                     # identitate stabilă, ex. "football_data_co_uk"
+    kind: Literal["api", "csv", "kaggle", "scrape", "manual"]
     def fetch(self, fixture_ids: list[str]) -> list[HarvestedRow]: ...
 ```
-`HarvestedRow` = date brute + `source_name` + `fetched_at` (UTC) — niciodată scris direct în `match_history`, ci printr-un strat de normalizare/conflict-resolution (§4-5) înainte de orice scriere.
+`HarvestedRow` = date brute + `source_name` + `fetched_at` (UTC) — niciodată scris direct în `match_history`, ci printr-un strat de normalizare/conflict-resolution (§4-5) înainte de orice scriere. Diferența dintre `kind`-uri e izolată complet în implementarea `fetch()` a fiecărui plugin (un CSV local, un apel HTTP, un dataset Kaggle, o pagină scrapuită, un fișier introdus manual — toate produc identic `list[HarvestedRow]`, restul motorului nu știe și nu-i pasă de sursă).
 
-**Întrebare deschisă, nerezolvată**: câte surse independente pentru ACELAȘI tip de statistică sunt realist necesare la lansare? Dacă răspunsul e "una singură" (ex. doar football-data.co.uk pentru shots), atunci stratul de detectare a conflictelor (§5) e supra-inginerie pentru v1 — merită decis explicit înainte de design, nu presupus.
+**Întrebare deschisă, parțial redusă de reframing**: câte surse independente pentru ACELAȘI tip de statistică sunt realist necesare la lansare? Interfața generică de mai sus suportă ușor multi-sursă prin design, dar asta NU înseamnă că stratul de detectare a conflictelor (§5) trebuie construit din prima zi — la lansare, probabil o singură sursă activă per statistică (ex. football-data.co.uk pentru shots) e suficientă; conflict-resolution rămâne document, nu implementat, până apare o a doua sursă reală.
 
-## 3. Normalizare
+## 3. Normalizare — rezolvat prin `football-common`
 
-`mappings.py` (Football Oracle) e sursa canonică de nume echipe/ligi — ADR-001, deja Frozen. Harvester NU poate reimplementa propria normalizare independentă (ar produce exact disjuncția deja documentată în proiect între surse — vezi `DATA_PIPELINE_INVESTIGATION_2026-07-12.md`, unde o secvențiere greșită de doi scriitori a produs rânduri cu ELO și rating din surse diferite, niciodată reconciliate).
+`mappings.py` (echipe/ligi canonice, ADR-001, deja Frozen în Football Oracle) mută în `football-common` (§1). Harvester și Football Oracle consumă AMBELE aceeași sursă, fără ca vreunul să depindă de celălalt — elimină riscul deja materializat o dată în proiect (`DATA_PIPELINE_INVESTIGATION_2026-07-12.md`: o secvențiere greșită de doi scriitori a produs rânduri cu ELO și rating din surse diferite, niciodată reconciliate, din exact acest tip de normalizare dezincronizată).
 
-Propunere: Harvester consumă `mappings.py` ca dependință read-only (fie prin API expus de Football Oracle, fie printr-un pachet publicat separat cu maparea canonică — de decis, dar NU prin duplicare manuală, care ar dezincroniza cele două repo-uri în timp).
+**Notă de migrare, pentru Football Oracle**: mutarea `mappings.py` în `football-common` e o schimbare de contract (ADR-001 e deja Frozen) — necesită un ADR nou în Football Oracle dacă/când se decide implementarea efectivă. Acest document nu decide ADR-ul, doar arhitectura țintă.
 
 ## 4. Cum nu poate corupe istoricul — precedent obligatoriu
 
@@ -54,7 +76,12 @@ Acesta e cel mai important punct al documentului, pentru că proiectul are deja 
 
 **Al doilea nivel de protecție, obligatoriu**: scriere ATOMICĂ per coloană/rând (`INSERT ... ON CONFLICT DO UPDATE SET col = COALESCE(match_history.col, EXCLUDED.col)` — pattern SQL, nu doar disciplină Python) — chiar dacă Harvester ar avea un bug care trimite o valoare greșită pentru o coloană deja populată, baza de date însăși refuză suprascrierea, nu doar codul aplicației. Acesta e un nivel de apărare pe care fix-ul din 2026-07-13 NU l-a avut la momentul incidentului (garda era doar în Python, la stratul aplicație) — Harvester ar trebui să înceapă direct cu garda la nivel de bază de date, nu s-o adauge după un incident.
 
-**Întrebare deschisă**: cine deține scrierea efectivă în `match_history` — Harvester scrie direct (necesită credențiale `service_role` pe proiectul de producție al Football Oracle, risc de blast radius mare), sau Harvester produce un fișier/payload intermediar, iar Football Oracle importă printr-un proces separat, controlat, auditat? A doua variantă reduce suprafața de atac (Harvester nu are niciodată acces de scriere direct la producție), dar adaugă o etapă manuală/semi-automată. De decis explicit — nu implicit prin cea mai simplă implementare.
+**Decis (Chief Architect) — nu mai e întrebare deschisă**: **scriere directă**, nu payload intermediar, nu fișiere, nu import manual. Motivul explicit: „Vreau scriere directă. Dar: doar pe coloane permise; doar NULL → valoare; niciodată overwrite; cu COALESCE în SQL; cu verificări înainte de commit." Adică Harvester scrie direct în producție, dar arhitectura face **imposibil tehnic** să distrugă ceva — nu prin evitarea scrierii directe, ci prin garda la 3 niveluri, obligatorii TOATE simultan, nu alternative:
+1. **Whitelist de coloane** — Harvester are voie să scrie EXCLUSIV în coloanele explicit definite pentru el (shots, shots_on_target, possession, big_chance, etc.) — orice altă coloană, inclusiv orice coloană din `FEATURE_COLUMNS`, e respinsă la nivel de cod înainte de orice apel către Supabase.
+2. **NULL → valoare, niciodată overwrite** — payload conține doar chei pentru coloane curent NULL (§ regula obligatorie de mai sus), verificat mecanic printr-un test de gardă.
+3. **`COALESCE` în SQL** — a doua linie de apărare, la nivelul bazei de date, independentă de disciplina din Python (§ al doilea nivel de protecție de mai sus) — chiar dacă (1) și (2) ar eșua printr-un bug, baza de date refuză oricum suprascrierea.
+
+Credențialele folosite de Harvester pentru scriere directă rămân `service_role`, dar restricționate — fie prin RLS pe exact coloanele din whitelist (dacă Supabase permite RLS la nivel de coloană pentru `UPDATE`, de verificat la implementare), fie prin funcția RPC dedicată (`harvest_upsert_stats(...)`, pattern deja precedent în proiect — `promote_challenger`, `upsert_odds_snapshot`) care aplică toate cele 3 garanții server-side, nu doar client-side.
 
 ## 5. Proveniența fiecărei statistici + Quality Score
 
@@ -70,7 +97,7 @@ Propunere de schemă minimă per statistică scrisă:
 
 **Quality Score**: propus ca un scor per (sursă, tip de statistică), NU per rând individual — ex. „football-data.co.uk are completitudine 96,14% pe Bundesliga, 75,23% pe Ligue 1" (cifre deja măsurate, `DATASET_CAPABILITY_AUDIT_2026-07-13.md`). Actualizat periodic (nu la fiecare scriere), folosit pentru a decide ORDINEA de încercare a surselor la §2, nu pentru a filtra rânduri individuale (ar introduce complexitate fără beneficiu clar la o singură sursă per statistică, conform întrebării deschise de la §2).
 
-**Detectarea conflictelor între provideri**: relevantă DOAR dacă există ≥2 surse pentru aceeași statistică pe același meci (vezi întrebarea deschisă §2). Dacă da: regulă propusă — prima scriere câștigă (coloana devine non-NULL, gating-ul de la §4 blochează orice suprascriere ulterioară), nu o reconciliere activă. Simplu, dar înseamnă că ordinea de rulare a surselor contează — trebuie documentată explicit, nu implicită.
+**Detectarea conflictelor între provideri**: relevantă DOAR dacă/când apare o a doua sursă reală pentru aceeași statistică (vezi §2 — la lansare, o singură sursă activă per statistică e suficientă, conflict-resolution rămâne document, nu cod). Dacă/când apare: regulă propusă — prima scriere câștigă (coloana devine non-NULL, gating-ul de la §4 blochează orice suprascriere ulterioară), nu o reconciliere activă. Simplu, dar înseamnă că ordinea de rulare a surselor contează — trebuie documentată explicit, nu implicită.
 
 ## 6. Versionarea datelor
 
@@ -98,23 +125,29 @@ Deja acoperit mecanic la §4 — reutilizează identic pattern-ul `_missing_feat
 
 ## 11. Cum poate fi șters complet fără să afecteze Football Oracle
 
-Condiție de proiectare, nu doar de operare — trebuie verificabilă înainte de prima linie de cod:
+Condiție de proiectare, nu doar de operare — trebuie verificabilă înainte de prima linie de cod. **Invariant central (Chief Architect), repetat aici ca regulă hard, nu doar recomandare**: dacă mâine ștergem Harvester, Football Oracle continuă să funcționeze — fără dependințe ascunse, fără nicio ramură `if harvester...` (sau echivalent semantic) nicăieri în codul Football Oracle.
 
-1. **Football Oracle nu importă niciodată cod din Harvester** — garantat prin §1 (repo separat).
-2. **Coloanele pe care Harvester le scrie trebuie să fie deja tolerante la NULL în tot codul de producție azi** — verificabil: fiecare coloană țintă (shots, shots_on_target, possession, big_chance) e deja 0% populată în producție ȘI codul funcționează corect cu ele NULL (confirmat de auditul tehnic din 2026-07-14 — `home_offensive_rating`/etc. folosesc azi proxy-uri sintetice tocmai pentru că aceste coloane sunt goale). Deci oprirea Harvester-ului = revenire la starea actuală, nu o stare nouă, nedefinită.
-3. **Niciun cod de producție nu trebuie să presupună CĂ Harvester a rulat** — nicio ramură `if home_shots is not None` care ar deveni cale moartă dacă Harvester nu mai scrie niciodată nu trebuie să fie singura cale funcțională; fallback-ul sintetic actual trebuie să rămână calea implicită, nu una „temporară".
-4. **Ștergerea coloanelor scrise de Harvester** (dacă s-ar decide vreodată) trebuie să fie o migrare aditivă inversă simplă (`ALTER TABLE ... DROP COLUMN`), fără dependințe încrucișate — verificabil dacă schema respectă disciplina deja stabilită (`CREATE TABLE IF NOT EXISTS`, coloane aditive, niciodată o coloană obligatorie/`NOT NULL` nouă pe un tabel existent).
+1. **Football Oracle nu importă niciodată cod din Harvester** — garantat prin §1 (repo separat, trei componente).
+2. **Football Oracle nu depinde de Harvester nici măcar indirect, prin `football-common`** — dependința e `Oracle → football-common` și `Harvester → football-common`, niciodată `Oracle → Harvester`. Ștergerea Harvester-ului nu atinge `football-common`, deci nu atinge Football Oracle.
+3. **Coloanele pe care Harvester le scrie trebuie să fie deja tolerante la NULL în tot codul de producție azi** — verificabil: fiecare coloană țintă (shots, shots_on_target, possession, big_chance) e deja 0% populată în producție ȘI codul funcționează corect cu ele NULL (confirmat de auditul tehnic din 2026-07-14 — `home_offensive_rating`/etc. folosesc azi proxy-uri sintetice tocmai pentru că aceste coloane sunt goale). Deci oprirea Harvester-ului = revenire la starea actuală, nu o stare nouă, nedefinită.
+4. **Niciun cod de producție nu trebuie să presupună CĂ Harvester a rulat** — nicio ramură `if home_shots is not None` care ar deveni cale moartă dacă Harvester nu mai scrie niciodată nu trebuie să fie singura cale funcțională; fallback-ul sintetic actual trebuie să rămână calea implicită, nu una „temporară". Literal: niciun `if harvester_available` / `if home_shots is not None: ... else: raise` — doar fallback tăcut, mereu funcțional.
+5. **Ștergerea coloanelor scrise de Harvester** (dacă s-ar decide vreodată) trebuie să fie o migrare aditivă inversă simplă (`ALTER TABLE ... DROP COLUMN`), fără dependințe încrucișate — verificabil dacă schema respectă disciplina deja stabilită (`CREATE TABLE IF NOT EXISTS`, coloane aditive, niciodată o coloană obligatorie/`NOT NULL` nouă pe un tabel existent).
 
-**Verdict**: eliminabilitatea totală e realizabilă, DAR nu automat — cere disciplina explicită de la punctul 3 (nicio cale de cod care presupune Harvester ca sursă unică/obligatorie) menținută activ în `ml_predictor.py`/`feature_engine.py` pe toată durata cât Harvester există. Nu e o proprietate câștigată o singură dată la design, ci una de verificat la fiecare PR viitor care atinge aceste coloane.
+**Verdict**: eliminabilitatea totală e realizabilă, DAR nu automat — cere disciplina explicită de la punctul 4 (nicio cale de cod care presupune Harvester ca sursă unică/obligatorie) menținută activ în `ml_predictor.py`/`feature_engine.py` pe toată durata cât Harvester există. Nu e o proprietate câștigată o singură dată la design, ci una de verificat la fiecare PR viitor care atinge aceste coloane — candidat pentru un test de gardă dedicat (similar cu garda AST deja folosită în Learning Core pentru „zero importatori neașteptați").
 
 ---
 
-## Întrebări deschise, nerezolvate — de decis înainte de prima linie de cod
+## Decizii confirmate (Chief Architect) — nu mai sunt întrebări deschise
 
-1. Harvester scrie direct în producție (`service_role`, risc de blast radius) sau produce un payload intermediar importat controlat de Football Oracle? (§4)
-2. Există realist ≥2 surse independente pentru aceeași statistică la lansare, sau design-ul de conflict-resolution (§5) e supra-inginerie pentru v1? (§2)
-3. Cum se distribuie/sincronizează `mappings.py` între cele două repo-uri fără duplicare manuală care să dezincronizeze în timp? (§3)
-4. Frecvența reală de rulare — o dată, periodic, sau doar la cerere? (§7)
+1. **Scriere directă** în producție, nu payload intermediar, nu import manual — protejată prin whitelist de coloane + NULL-only + `COALESCE` SQL, toate 3 obligatorii simultan (§4).
+2. **`football-common`** — repo minimal separat pentru `mappings.py`/ID-uri canonice, consumat identic de Football Oracle și Harvester, niciun import încrucișat între cele două (§1, §3).
+3. **Data Acquisition Engine** — interfață unică peste API/CSV/Kaggle/scraping/manual, nu doar "surse web" (§2).
+
+## Întrebări deschise, rămase — de decis înainte de prima linie de cod
+
+1. Există realist ≥2 surse independente pentru aceeași statistică la lansare, sau conflict-resolution (§5) rămâne document neimplementat pentru v1? (§2)
+2. Frecvența reală de rulare — o dată, periodic, sau doar la cerere? (§7)
+3. RLS pe coloană vs. funcție RPC dedicată pentru aplicarea celor 3 garanții de scriere server-side (§4) — de decis la implementare, în funcție de ce permite Supabase.
 
 ## Ce NU tratează acest document
 

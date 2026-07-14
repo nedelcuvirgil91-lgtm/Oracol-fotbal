@@ -34,10 +34,10 @@ Orice modificare de `FEATURE_COLUMNS`, hiperparametri sau algoritm rămâne guve
 | P4 | ELO Trend | Direcția recentă a ELO conține informație suplimentară | Accuracy / Log Loss | Planned |
 | P5 | Schedule Strength | Nivelul adversarilor recenți conține informație suplimentară | Accuracy / Log Loss | Planned |
 | P6 | Home Advantage per ligă | Avantaj de teren calibrat &gt; constantă fixă globală | Accuracy | Planned |
-| P7 | Injuries ca feature ML | Accidentările curente conțin semnal neexploatat | Accuracy / Log Loss | Planned |
-| P8 | Shots on Target / Finishing / Defensive Efficiency | Calitatea atacului/apărării conține informație dincolo de goluri brute | Accuracy / Log Loss | Planned (condiționat de backfill) |
+| P7 | Backfill complet + Shots on Target / Finishing / Defensive Efficiency | Structura statistică (șuturi, eficiență) conține informație dincolo de goluri brute | Accuracy / Log Loss | Planned |
+| P8 | Injuries ca feature ML | Accidentările curente (informație contextuală) conțin semnal neexploatat | Accuracy / Log Loss | Planned |
 | P9 | Benchmark LightGBM/CatBoost | XGBoost rămâne optim la scara actuală | toate 3 | Planned, prioritate joasă |
-| — | Confidence Quality Index | Un meta-semnal de încredere e la fel de valoros ca probabilitatea, pentru Value Betting | N/A | Idea |
+| — | Confidence Quality Index | Scor general de încredere al modelului — nu doar pentru Value Betting | N/A | Idea |
 
 ---
 
@@ -110,7 +110,20 @@ Orice modificare de `FEATURE_COLUMNS`, hiperparametri sau algoritm rămâne guve
 
 ## Etapa 3 — Date noi
 
-### P7 — Injuries ca feature ML
+*Ordine deliberată: structura statistică (P7) înaintea contextului (P8) — accidentările sunt informație contextuală, șuturile/eficiența sunt informație structurală. Structura vine înaintea contextului: aș vrea baza statistică cât mai completă înainte să introducem accidentările în ML.*
+
+### P7 — Backfill complet + Shots on Target / Finishing Efficiency / Defensive Efficiency
+
+- **Motiv**: date parțial disponibile extern (75-100% acoperire pe 6/7 ligi mari, `DATASET_CAPABILITY_AUDIT_2026-07-13.md`), dar 0% populate în producție — gap de backfill demonstrat, nu problemă de disponibilitate.
+- **Ipoteză**: rata de conversie șut→gol (proxy ieftin pentru calitatea atacului, fără să aștepte xG extern) și echivalentul defensiv conțin informație pe care volumul brut de goluri istorice n-o capturează.
+- **Metrică urmărită**: Accuracy / Log Loss.
+- **Benchmark oficial**: idem.
+- **Criteriu de succes**: îmbunătățire simultană pe minim 2 din 3 metrici.
+- **Criteriu de abandon**: fără câștig măsurabil, sau backfill-ul nu poate fi completat la o acoperire suficientă pentru un test statistic relevant.
+- **Precondiție**: necesită completarea gap-ului de backfill shots/shots_on_target pentru ligile mari (infrastructură deja parțial existentă, `ShotsTracker`, `sync/backfill_features.py`) — de tratat ca pas separat, înainte de ablația propriu-zisă. Candidat direct pentru primul domeniu de aplicare al Football Data Harvester (vezi `FOOTBALL_DATA_HARVESTER_ARCHITECTURE_AUDIT.md`), odată ce acela e pregătit.
+- **Status**: Planned, condiționat de precondiția de mai sus.
+
+### P8 — Injuries ca feature ML
 
 - **Motiv**: singura sursă cu date REALE deja colectate integral (API-Football, `injury_manager.py`, `football_providers.ApiFootballProvider.get_injuries()`) — azi folosită doar ca shadow logging dezactivat (`shadow_mode_enabled=False`) și aplicată multiplicativ pe xG pre-blend, niciodată ca input direct XGBoost.
 - **Ipoteză**: informația de accidentări curente, aplicată STRICT point-in-time (cunoscută înainte de kickoff, nu retroactiv), conține semnal predictiv neexploatat azi de model.
@@ -119,17 +132,6 @@ Orice modificare de `FEATURE_COLUMNS`, hiperparametri sau algoritm rămâne guve
 - **Criteriu de succes**: îmbunătățire simultană pe minim 2 din 3 metrici, ȘI verificare explicită de zero leakage temporal (test dedicat, nu presupunere).
 - **Criteriu de abandon**: fără câștig măsurabil, SAU imposibilitatea de a garanta disciplina point-in-time la scară (date de accidentări istorice incomplete/nesigure temporal).
 - **Status**: Planned.
-
-### P8 — Shots on Target / Finishing Efficiency / Defensive Efficiency
-
-- **Motiv**: date parțial disponibile extern (75-100% acoperire pe 6/7 ligi mari, `DATASET_CAPABILITY_AUDIT_2026-07-13.md`), dar 0% populate în producție — gap de backfill demonstrat, nu problemă de disponibilitate.
-- **Ipoteză**: rata de conversie șut→gol (proxy ieftin pentru calitatea atacului, fără să aștepte xG extern) și echivalentul defensiv conțin informație pe care volumul brut de goluri istorice n-o capturează.
-- **Metrică urmărită**: Accuracy / Log Loss.
-- **Benchmark oficial**: idem.
-- **Criteriu de succes**: îmbunătățire simultană pe minim 2 din 3 metrici.
-- **Criteriu de abandon**: fără câștig măsurabil, sau backfill-ul nu poate fi completat la o acoperire suficientă pentru un test statistic relevant.
-- **Precondiție**: necesită completarea gap-ului de backfill shots/shots_on_target pentru ligile mari (infrastructură deja parțial existentă, `ShotsTracker`, `sync/backfill_features.py`) — de tratat ca pas separat, înainte de ablația propriu-zisă.
-- **Status**: Planned, condiționat de precondiția de mai sus.
 
 ## Prioritate joasă — după epuizarea Etapelor 1-3
 
@@ -150,9 +152,10 @@ Orice modificare de `FEATURE_COLUMNS`, hiperparametri sau algoritm rămâne guve
 ### Confidence Quality Index
 
 - **Motiv**: modelul produce o probabilitate, dar nu o estimare a cât de sigură e acea probabilitate. Situații ca echipă nou-promovată, antrenor nou, puține meciuri disponibile, multe valori lipsă — toate produc azi o probabilitate cu aceeași „greutate" aparentă ca una dintr-o situație bine cunoscută.
-- **Ipoteză**: neformulată încă — necesită proiectare separată (ce intră în index, cum se combină cu probabilitatea, cum consumă motorul de Value Betting acest semnal).
-- **Nu schimbă predicția** — e un meta-semnal pentru motorul de decizie, nu un input al modelului de clasificare.
-- **Status**: Idea — capturată explicit, nu Planned (nu are încă ipoteză testabilă/criterii de succes formulate).
+- **Viziune extinsă (Chief Architect)**: nu doar pentru Value Betting — un scor general de încredere al modelului, afișat alături de orice predicție. Două meciuri pot avea probabilități similare (ex. 61/23/16 vs. 42/31/27) dar încredere complet diferită — un scor separat (ex. „94/100" vs. „47/100") comunică asta explicit, unde probabilitatea singură nu poate.
+- **Ipoteză**: neformulată încă — necesită proiectare separată (ce intră în index, cum se combină cu probabilitatea, cum consumă motorul de Value Betting și UI-ul acest semnal).
+- **Nu schimbă predicția** — e un meta-semnal pentru motorul de decizie/UI, nu un input al modelului de clasificare.
+- **Status**: Idea — capturată explicit, nu Planned (nu are încă ipoteză testabilă/criterii de succes formulate). Orizont: peste câteva luni, nu în P1-P9.
 
 ---
 
