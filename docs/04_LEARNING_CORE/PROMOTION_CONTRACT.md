@@ -1,6 +1,6 @@
 # Promotion Contract — evenimentul de domeniu „Promote Challenger"
 
-**Status**: FROZEN (via ADR-019)
+**Status**: FROZEN (via ADR-019); Clarified by ADR-019 addendum (validare E2E, distincția secvențial/concurent)
 **Scope**: Contract normativ pentru Pasul 5 (Promotion), rezultat al Architecture Gate Review
 
 ---
@@ -61,7 +61,10 @@ Dacă oricare eșuează, Promotion Service întoarce un rezultat explicit de eș
 
 ## Idempotență
 
-Dacă `training_run_id` cerut e **deja** campionul activ pentru `(algorithm_family, league_scope)` (rulare dublă a aceleiași promovări), operația e un no-op: întoarce succes, fără o a doua scriere, fără al doilea rând `model_champions`, fără o a doua tranziție de stare (Challenger e deja `PROMOTED`, tranziția `PROMOTED → PROMOTED` nu există în `ALLOWED_TRANSITIONS` — detectată explicit ÎNAINTE de a încerca tranziția, nu lăsată să eșueze ca eroare).
+Idempotența are două niveluri distincte, verificate separat, la doi apelanți diferiți (confirmate prin validare end-to-end pe infrastructură reală, ADR-019, addendum):
+
+- **Apel secvențial** (cineva re-invocă promovarea pentru un `training_run_id` care e deja `PROMOTED`, după ce promovarea anterioară s-a încheiat complet): Promotion Service respinge la precondiția FSM — `PromotionResult(status="rejected", reason="Challenger nu este în starea SUCCEEDED...")`. Acesta e comportamentul corect: din perspectiva FSM-ului Challenger-ului, precondiția operației nu mai e îndeplinită — un apel secvențial ulterior nu (mai) reprezintă aceeași operație, ci una respinsă cu motiv explicit. Zero corupere de stare, zero a doua scriere.
+- **Apel concurent** (două promovări simultane pentru același `training_run_id`, ambele citind `state == 'SUCCEEDED'` înainte ca vreuna să comită): protecția are loc STRICT în RPC (`promote_challenger`, migration 005, lock `FOR UPDATE`) — al doilea apel, deblocat după commit-ul primului, vede `state = 'PROMOTED'` și întoarce `'already_active'` (succes, nu eroare, fără a doua scriere). Acesta e singurul caz real în care `PromotionResult(status="already_active")` e atins prin calea de producție.
 
 ## Cine invocă Promotion
 

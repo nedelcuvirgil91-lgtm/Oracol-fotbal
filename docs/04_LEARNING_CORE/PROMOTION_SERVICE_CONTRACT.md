@@ -1,6 +1,6 @@
 # Promotion Service Contract — componenta, nu Orchestrator-ul
 
-**Status**: FROZEN (via ADR-019)
+**Status**: FROZEN (via ADR-019); Clarified by ADR-019 addendum (validare E2E, distincția secvențial/concurent)
 **Scope**: Contract normativ pentru componenta Python a Pasului 5
 
 ---
@@ -44,4 +44,4 @@ Identic cu secțiunea „Ce NU face Promotion" din `PROMOTION_CONTRACT.md` — n
 
 ## Testabilitate (cerință de design, nu implementare încă)
 
-Ca toate componentele Learning Core anterioare (Pasul 1-4): teste fără rețea (RPC fabricat/mockuit), teste de gardă arhitecturală (AST — zero importatori neașteptați), test explicit de idempotență (a doua promovare a aceluiași `training_run_id` = no-op, nu eroare), test explicit al fiecărei precondiții eșuate (Challenger greșit, verdict greșit, artefact invalid) — fiecare trebuie să respingă, fără nicio scriere parțială.
+Ca toate componentele Learning Core anterioare (Pasul 1-4): teste fără rețea (RPC fabricat/mockuit), teste de gardă arhitecturală (AST — zero importatori neașteptați), test explicit că un răspuns RPC `'already_active'` (cazul de cursă concurentă — vezi `PROMOTION_CONTRACT.md`, secțiunea „Idempotență") e mapat la succes, nu la eroare, test explicit al fiecărei precondiții eșuate (Challenger greșit, verdict greșit, artefact invalid, sau Challenger deja `PROMOTED` — respins ca `rejected`, nu ca `already_active`) — fiecare trebuie să respingă, fără nicio scriere parțială.

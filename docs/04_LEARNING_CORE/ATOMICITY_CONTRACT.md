@@ -1,6 +1,6 @@
 # Atomicity Contract — Promotion ca o singură tranzacție
 
-**Status**: FROZEN (via ADR-019)
+**Status**: FROZEN (via ADR-019); Clarified by ADR-019 addendum (validare E2E, distincția secvențial/concurent)
 **Scope**: Contract normativ pentru mecanismul tehnic al Pasului 5 (Promotion)
 
 ---
@@ -46,8 +46,12 @@ Promotion Service (Python)
          ▼
        promote_challenger(...)  [funcție Postgres, o singură tranzacție]
          ├─ verifică din nou (server-side) că challenger e SUCCEEDED
-           — apărare împotriva unei curse între pasul 1 (Python) și apelul RPC
-         ├─ dacă training_run_id e deja campionul activ → no-op, succes (idempotență)
+           — apărare împotriva unei curse CONCURENTE între pasul 1 (Python)
+           al unui al doilea apel simultan și apelul RPC al primului
+         ├─ dacă state e deja PROMOTED și training_run_id e campionul activ
+           → 'already_active' (idempotență — vezi nota de mai jos: acest
+           caz e atins DOAR de o cursă concurentă, nu de un apel secvențial
+           ulterior, care e deja respins la pasul 1, în Python)
          ├─ UPDATE model_champions SET superseded_at=now(), superseded_by=...
            WHERE algorithm_family=... AND league_scope=... AND superseded_at IS NULL
          ├─ INSERT INTO model_champions (..., training_run_id, promoted_by, ...)
@@ -62,7 +66,7 @@ Validarea artefactului (pasul 3) rămâne în Python și NU intră în funcția 
 
 - **Atomicitate reală**: funcția rulează într-o singură tranzacție Postgres — fie toate cele trei scrieri (supersedare + insert + tranziție challenger) se aplică, fie niciuna.
 - **Crash safety, colaps la două cazuri**: „înainte de commit" (nimic schimbat — starea de dinaintea promovării, exact ca și cum apelul n-ar fi avut loc) sau „după commit" (ambele efecte vizibile simultan). Nu există o a treia stare intermediară observabilă de niciun cititor extern (inclusiv Runtime, atunci când va citi Champion).
-- **Idempotență**: verificată SERVER-SIDE, în aceeași tranzacție — nu doar în Python (unde o cursă între citire și apelul RPC ar putea produce un fals negativ).
+- **Idempotență la nivel de cursă concurentă**: verificată SERVER-SIDE, în aceeași tranzacție — nu în Python, unde o cursă între citire și apelul RPC ar putea produce un fals negativ. Această garanție e distinctă de respingerea unui apel SECVENȚIAL ulterior (după ce promovarea anterioară s-a încheiat) — aceea are loc mai devreme, la precondiția FSM din Promotion Service (Python), ca `rejected`, nu ca `already_active`. Confirmat prin validare end-to-end pe infrastructură reală (ADR-019, addendum) — vezi `PROMOTION_CONTRACT.md`, secțiunea „Idempotență", pentru distincția completă.
 
 ## Ce NU decide acest document
 

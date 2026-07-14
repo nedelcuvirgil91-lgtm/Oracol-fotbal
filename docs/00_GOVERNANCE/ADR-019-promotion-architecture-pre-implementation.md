@@ -39,6 +39,16 @@ După implementarea mecanică a contractelor de mai sus (migration 005, `learnin
 
 8. **RPC-ul e mecanismul, nu invariantul** — atomicitatea „Promote Challenger" (ambele efecte împreună, sau niciunul) e proprietatea permanentă de păstrat; funcția Postgres `promote_challenger` e implementarea aleasă azi, înlocuibilă în viitor (printr-un ADR nou) dacă infrastructura permite altceva echivalent, fără ca invariantul însuși să se schimbe. Vezi `ATOMICITY_CONTRACT.md`, secțiunea nouă.
 
+## Addendum — Validare E2E finală (identitate izolată de test, infrastructură reală)
+
+După implementarea Pasului 5-7B, un audit final end-to-end a rulat toate scenariile critice (promovare, superseding, imuabilitate, refuzul unui rollback nepermis, idempotență, incompatibilitate de `algorithm_version`, artefact corupt) contra infrastructurii reale (Supabase `Prediction`), sub o identitate de test complet izolată (`gate_validation_test`), fără să atingă identitatea reală de guvernanță (`xgboost_v1`/`all`). Toate scenariile au confirmat integritatea datelor și atomicitatea — singura observație a fost una de contract/documentație, nu de cod:
+
+9. **Idempotența „Promote Challenger" are două niveluri distincte, ambele corecte, care nu trebuie confundate**:
+   - **Apel secvențial** (re-promovare a unui `training_run_id` deja `PROMOTED`, după ce prima promovare s-a încheiat): Promotion Service (Python) respinge la precondiția FSM (`state != 'SUCCEEDED'`) — `PromotionResult(status="rejected", reason=...)`. Corect: din perspectiva FSM-ului Challenger-ului, precondiția operației nu mai e îndeplinită — nu (mai) e aceeași operație.
+   - **Apel concurent** (două promovări simultane pentru același `training_run_id`, ambele citind `state == 'SUCCEEDED'` înainte ca vreuna să comită): RPC-ul (`promote_challenger`, migration 005) rezolvă cursa prin `FOR UPDATE` — al doilea apel, deblocat după commit-ul primului, vede `state = 'PROMOTED'` și întoarce `'already_active'` (succes, nu eroare). Aici, la nivelul bazei de date, e locul corect pentru protecția anti-cursă.
+
+   **Decizie explicită**: codul rămâne neschimbat — cele două niveluri de responsabilitate (Promotion Service verifică precondiția de business; RPC-ul garantează integritatea tranzacțională/anti-cursă) sunt deja corect separate. Nu se introduce o excepție în `promotion_service.py` doar pentru a uniformiza mesajul de răspuns al unui apel secvențial cu cel al unui apel concurent — ar câștiga o etichetă identică, fără niciun câștig real de siguranță sau consistență. Se corectează exclusiv textul din `PROMOTION_CONTRACT.md` (secțiunea „Idempotență") și `ATOMICITY_CONTRACT.md`, care descriau anterior idempotența ca un singur caz nediferențiat.
+
 ## Rationale
 
 Un gate arhitectural găsește o contradicție reală — răspunsul corect nu e nici „ignoră și continuă", nici „respinge tot conceptul", ci „rezolvă exact contradicția găsită, cu cea mai mică extensie de scop posibilă" (Promotion Service, nu Orchestrator; RPC justificat de un invariant concret, nu de o preferință de stil).
