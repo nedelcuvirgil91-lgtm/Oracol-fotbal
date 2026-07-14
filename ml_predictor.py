@@ -56,6 +56,14 @@ FEATURE_COLUMNS = [
     # (home/away_corner_avg_recent, home/away_card_avg_recent) — nu
     # stocate redundant ca atare în match_history.
     "corner_dominance", "card_diff",
+    # [ADAUGAT — ADR-013] Promovat prin test de ablație walk-forward pe
+    # 5.253 meciuri reale (docs/03_ENGINE/FOULS_DOMINANCE_ABLATION_
+    # 2026-07-14.md): acuratețe/log-loss/Brier îmbunătățite simultan
+    # (magnitudine mică, raportată onest). Calculat din cele 2 coloane
+    # brute (home/away_foul_avg_recent) — nu stocat redundant. `ht_goal_
+    # diff` a fost testat separat și RESPINS (docs/03_ENGINE/HT_SCORE_
+    # ABLATION_2026-07-14.md) — accuracy câștigă, log-loss/Brier regresează.
+    "foul_diff",
 ]
 
 RESULT_TO_LABEL = {"H": 0, "D": 1, "A": 2}
@@ -110,6 +118,11 @@ class MLPredictorEngine:
             df["card_diff"] = df["away_card_avg_recent"] - df["home_card_avg_recent"]
         else:
             df["card_diff"] = np.nan
+        # [ADAUGAT — ADR-013] foul_diff, aceeași disciplină ca mai sus.
+        if "home_foul_avg_recent" in df.columns and "away_foul_avg_recent" in df.columns:
+            df["foul_diff"] = df["away_foul_avg_recent"] - df["home_foul_avg_recent"]
+        else:
+            df["foul_diff"] = np.nan
         missing = [c for c in FEATURE_COLUMNS if c not in df.columns]
         for c in missing:
             df[c] = np.nan

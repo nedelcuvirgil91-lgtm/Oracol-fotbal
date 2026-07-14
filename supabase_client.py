@@ -342,11 +342,11 @@ def get_team_recent_shots(team: str, league: str, last_n: int = 5) -> list[dict]
 def get_team_recent_match_events(team: str, league: str, last_n: int = 5) -> list[dict]:
     """
     Ultimele `last_n` meciuri TERMINATE ale echipei `team` în liga `league`,
-    cu cornere/faulturi/cartonașe reale populate (Task 2, ADR-011) — sursă
-    pentru statistici reale afișate în TeamProfile, fără a atinge formula
-    de rating (corners/fouls/cards nu sunt încă parametri ai
-    compute_team_offdef_rating — rămân informativ, până la o decizie
-    separată de ablație).
+    cu cornere/faulturi/cartonașe/gol la pauză reale populate (Task 2/3,
+    ADR-011) — sursă pentru statistici reale afișate în TeamProfile, fără
+    a atinge formula de rating (corners/fouls/cards/HT nu sunt încă
+    parametri ai compute_team_offdef_rating — rămân informativ, până la o
+    decizie separată de ablație pentru fiecare).
 
     Zero scurgere temporală: doar meciuri cu actual_result populat.
     """
@@ -358,7 +358,7 @@ def get_team_recent_match_events(team: str, league: str, last_n: int = 5) -> lis
             client.table("match_history")
             .select("home_team,away_team,home_fouls,away_fouls,"
                     "home_corners,away_corners,home_yellow_cards,away_yellow_cards,"
-                    "home_red_cards,away_red_cards,kickoff_date")
+                    "home_red_cards,away_red_cards,home_ht_goals,away_ht_goals,kickoff_date")
             .eq("league", league)
             .or_(f"home_team.eq.{team},away_team.eq.{team}")
             .not_.is_("actual_result", "null")

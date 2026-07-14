@@ -453,6 +453,8 @@ def _render_match_card(match: dict, engine) -> None:
                 <div class="dna-stat"><span class="dna-stat-k">Șuturi/meci</span><span class="dna-stat-v">{hp.avg_shots_ot:.1f}</span></div>
                 <div class="dna-stat"><span class="dna-stat-k">Cornere/meci</span><span class="dna-stat-v">{f"{hp.avg_corners:.1f}" if hp.avg_corners is not None else "—"}</span></div>
                 <div class="dna-stat"><span class="dna-stat-k">Cartonașe/meci</span><span class="dna-stat-v">{f"{hp.avg_yellow_cards:.1f}" if hp.avg_yellow_cards is not None else "—"}</span></div>
+                <div class="dna-stat"><span class="dna-stat-k">Faulturi/meci</span><span class="dna-stat-v">{f"{hp.avg_fouls:.1f}" if hp.avg_fouls is not None else "—"}</span></div>
+                <div class="dna-stat"><span class="dna-stat-k">Gol la pauză/meci</span><span class="dna-stat-v">{f"{hp.avg_ht_goals:.2f}" if hp.avg_ht_goals is not None else "—"}</span></div>
                 <div class="dna-stat"><span class="dna-stat-k">Sursă</span><span class="dna-stat-v" style="font-size:.6rem;">{hp.data_source}</span></div>
             </div>
             <div class="dna-box"><div class="dna-box-title">{away}</div>
@@ -464,6 +466,8 @@ def _render_match_card(match: dict, engine) -> None:
                 <div class="dna-stat"><span class="dna-stat-k">Șuturi/meci</span><span class="dna-stat-v">{ap.avg_shots_ot:.1f}</span></div>
                 <div class="dna-stat"><span class="dna-stat-k">Cornere/meci</span><span class="dna-stat-v">{f"{ap.avg_corners:.1f}" if ap.avg_corners is not None else "—"}</span></div>
                 <div class="dna-stat"><span class="dna-stat-k">Cartonașe/meci</span><span class="dna-stat-v">{f"{ap.avg_yellow_cards:.1f}" if ap.avg_yellow_cards is not None else "—"}</span></div>
+                <div class="dna-stat"><span class="dna-stat-k">Faulturi/meci</span><span class="dna-stat-v">{f"{ap.avg_fouls:.1f}" if ap.avg_fouls is not None else "—"}</span></div>
+                <div class="dna-stat"><span class="dna-stat-k">Gol la pauză/meci</span><span class="dna-stat-v">{f"{ap.avg_ht_goals:.2f}" if ap.avg_ht_goals is not None else "—"}</span></div>
                 <div class="dna-stat"><span class="dna-stat-k">Sursă</span><span class="dna-stat-v" style="font-size:.6rem;">{ap.data_source}</span></div>
             </div>
         </div>""", unsafe_allow_html=True)

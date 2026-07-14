@@ -202,6 +202,7 @@ class TeamProfile:
     avg_corners:       float | None = None
     avg_fouls:         float | None = None
     avg_yellow_cards:  float | None = None
+    avg_ht_goals:      float | None = None
 
 
 @dataclass
@@ -481,11 +482,12 @@ class FootballOracleEngine:
     @staticmethod
     def _real_match_events(canonical: str, league: str, last_n: int = 5) -> dict:
         """
-        Cornere/faulturi/cartonașe galbene REALE, medie pe ultimele `last_n`
-        meciuri terminate — pur informativ (Task 2, ADR-011), NU alimentează
-        formula de rating. Valorile lipsă rămân None — nu se aproximează.
+        Cornere/faulturi/cartonașe galbene/gol la pauză REALE, medie pe
+        ultimele `last_n` meciuri terminate — pur informativ (Task 2/3,
+        ADR-011), NU alimentează formula de rating. Valorile lipsă rămân
+        None — nu se aproximează.
         """
-        empty = {"avg_corners": None, "avg_fouls": None, "avg_yellow_cards": None}
+        empty = {"avg_corners": None, "avg_fouls": None, "avg_yellow_cards": None, "avg_ht_goals": None}
         if not SUPABASE_MODULE_AVAILABLE:
             return empty
         try:
@@ -494,22 +496,25 @@ class FootballOracleEngine:
             return empty
         if not rows:
             return empty
-        corners, fouls, yellows = [], [], []
+        corners, fouls, yellows, ht_goals = [], [], [], []
         for r in rows:
             is_home = r.get("home_team") == canonical
             is_away = r.get("away_team") == canonical
             if not (is_home or is_away):
                 continue
-            c = r.get("home_corners") if is_home else r.get("away_corners")
-            f = r.get("home_fouls") if is_home else r.get("away_fouls")
-            y = r.get("home_yellow_cards") if is_home else r.get("away_yellow_cards")
+            c  = r.get("home_corners") if is_home else r.get("away_corners")
+            f  = r.get("home_fouls") if is_home else r.get("away_fouls")
+            y  = r.get("home_yellow_cards") if is_home else r.get("away_yellow_cards")
+            ht = r.get("home_ht_goals") if is_home else r.get("away_ht_goals")
             if c is not None: corners.append(float(c))
             if f is not None: fouls.append(float(f))
             if y is not None: yellows.append(float(y))
+            if ht is not None: ht_goals.append(float(ht))
         return {
             "avg_corners": sum(corners) / len(corners) if corners else None,
             "avg_fouls": sum(fouls) / len(fouls) if fouls else None,
             "avg_yellow_cards": sum(yellows) / len(yellows) if yellows else None,
+            "avg_ht_goals": sum(ht_goals) / len(ht_goals) if ht_goals else None,
         }
 
     def _build_profile(self, team_id: str, team_name: str, league: str) -> TeamProfile:
@@ -721,6 +726,7 @@ class FootballOracleEngine:
             avg_corners=round(events["avg_corners"], 2) if events["avg_corners"] is not None else None,
             avg_fouls=round(events["avg_fouls"], 2) if events["avg_fouls"] is not None else None,
             avg_yellow_cards=round(events["avg_yellow_cards"], 2) if events["avg_yellow_cards"] is not None else None,
+            avg_ht_goals=round(events["avg_ht_goals"], 2) if events["avg_ht_goals"] is not None else None,
         )
 
     # ── League weights (cold-start blending) ──────────────────────────────
@@ -931,6 +937,10 @@ class FootballOracleEngine:
                                         else None,
             "card_diff":               (away_p.avg_yellow_cards - home_p.avg_yellow_cards)
                                         if home_p.avg_yellow_cards is not None and away_p.avg_yellow_cards is not None
+                                        else None,
+            # [ADAUGAT — ADR-013] Aceeași disciplină ca mai sus.
+            "foul_diff":               (away_p.avg_fouls - home_p.avg_fouls)
+                                        if home_p.avg_fouls is not None and away_p.avg_fouls is not None
                                         else None,
             "weather_penalty":         weather_penalty,
             "mc_prob_home":            mc["mc_prob_home"],

@@ -229,9 +229,20 @@ def explain_prediction(pred, weights: dict, config: dict) -> MatchExplanation | 
         )
         ml_weight = float(config.get("ml_blend_weight", 0.35))
         ph_final, _, _, _ = blend_predictions((ph_current, pd_current, pa_current), ml_pred, ml_weight)
-        _add("Model ML", ph_final, detail={
+        ml_detail = {
             "samples antrenare": str(pred.ml_samples_used),
             "încredere model":   f"{pred.ml_confidence*100:.0f}%",
-        })
+        }
+        # [ADAUGAT — ADR-013] Feature-urile derivate active în model (ADR-012:
+        # corner_dominance/card_diff; ADR-013: foul_diff) — aceleași formule
+        # ca oracle_engine._build_ml_features(). "necunoscut" dacă istoricul
+        # real lipsește pentru oricare echipă (Regula #8, nu se aproximează).
+        if home_p.avg_corners is not None and away_p.avg_corners is not None:
+            ml_detail["corner_dominance"] = f"{home_p.avg_corners - away_p.avg_corners:+.1f}"
+        if home_p.avg_yellow_cards is not None and away_p.avg_yellow_cards is not None:
+            ml_detail["card_diff"] = f"{away_p.avg_yellow_cards - home_p.avg_yellow_cards:+.1f}"
+        if home_p.avg_fouls is not None and away_p.avg_fouls is not None:
+            ml_detail["foul_diff"] = f"{away_p.avg_fouls - home_p.avg_fouls:+.1f}"
+        _add("Model ML", ph_final, detail=ml_detail)
 
     return MatchExplanation(stages=stages, final_prob_home=round(prev_ph, 4))

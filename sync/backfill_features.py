@@ -95,6 +95,10 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     # (docs/03_ENGINE/CORNER_CARD_DOMINANCE_ABLATION_2026-07-13.md).
     "home_corner_avg_recent", "away_corner_avg_recent",
     "home_card_avg_recent", "away_card_avg_recent",
+    # [ADAUGAT — ADR-013] Medie reală de faulturi, promovată la
+    # FEATURE_COLUMNS in ml_predictor.py dupa dovada de ablatie
+    # (docs/03_ENGINE/FOULS_DOMINANCE_ABLATION_2026-07-14.md).
+    "home_foul_avg_recent", "away_foul_avg_recent",
 )
 
 
@@ -128,6 +132,7 @@ def fetch_all_matches(league: str | None = None) -> list[dict]:
                     "actual_home_goals,actual_away_goals,actual_result,"
                     "backfill_done,home_shots_on_target,away_shots_on_target,"
                     "home_corners,away_corners,home_yellow_cards,away_yellow_cards,"
+                    "home_fouls,away_fouls,"
                     + ",".join(FEATURE_COLUMNS))
             .not_.is_("actual_result", "null")
             .order("kickoff_date", desc=False)
@@ -347,6 +352,34 @@ class ShotsTracker:
             self.history[home] = self.history[home][-20:]
         if away_sot is not None:
             self.history.setdefault(away, []).append(float(away_sot))
+            self.history[away] = self.history[away][-20:]
+
+
+class FoulsTracker:
+    """
+    Medie glisantă reală de faulturi per echipă — identică ca disciplină cu
+    ShotsTracker. Sursă pentru home_foul_avg_recent/away_foul_avg_recent
+    (ADR-013), promovată la ml_predictor.FEATURE_COLUMNS după ablație
+    (docs/03_ENGINE/FOULS_DOMINANCE_ABLATION_2026-07-14.md).
+    """
+
+    def __init__(self, window: int = FORM_WINDOW):
+        self.window = window
+        self.history: dict[str, list[float]] = {}
+
+    def get_avg_fouls(self, team: str) -> float | None:
+        values = self.history.get(team, [])[-self.window:]
+        if not values:
+            return None
+        return sum(values) / len(values)
+
+    def process_match(self, home: str, away: str,
+                       home_fouls: float | None, away_fouls: float | None) -> None:
+        if home_fouls is not None:
+            self.history.setdefault(home, []).append(float(home_fouls))
+            self.history[home] = self.history[home][-20:]
+        if away_fouls is not None:
+            self.history.setdefault(away, []).append(float(away_fouls))
             self.history[away] = self.history[away][-20:]
 
 
@@ -771,6 +804,7 @@ def run_backfill(
     h2h_tracker        = H2HTracker()
     shots_tracker      = ShotsTracker()
     corner_card_tracker = CornerCardTracker()
+    fouls_tracker       = FoulsTracker()
 
     # 3. Procesăm meciurile în ordine cronologică
     pending_updates: list[tuple[int, dict]] = []
@@ -802,6 +836,8 @@ def run_backfill(
         away_corner_avg = corner_card_tracker.get_avg_corners(away)
         home_card_avg   = corner_card_tracker.get_avg_cards(home)
         away_card_avg   = corner_card_tracker.get_avg_cards(away)
+        home_foul_avg   = fouls_tracker.get_avg_fouls(home)
+        away_foul_avg   = fouls_tracker.get_avg_fouls(away)
 
         # [FIX v4.1] Gating per-coloană: se scrie DOAR subsetul de coloane
         # ale căror valori curente sunt NULL — o coloană deja populată
@@ -826,6 +862,8 @@ def run_backfill(
                 "away_corner_avg_recent": away_corner_avg,
                 "home_card_avg_recent":   home_card_avg,
                 "away_card_avg_recent":   away_card_avg,
+                "home_foul_avg_recent":   home_foul_avg,
+                "away_foul_avg_recent":   away_foul_avg,
             }
             # [Regula #13] Nu scriem None peste None — dacă tracker-ul de
             # cornere/cartonașe nu are încă istoric real (ex. primul meci al
@@ -846,6 +884,7 @@ def run_backfill(
             match.get("home_corners"), match.get("away_corners"),
             match.get("home_yellow_cards"), match.get("away_yellow_cards"),
         )
+        fouls_tracker.process_match(home, away, match.get("home_fouls"), match.get("away_fouls"))
 
         # Scriem în batch
         if len(pending_updates) >= batch_size:

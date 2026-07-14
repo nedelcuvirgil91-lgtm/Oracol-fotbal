@@ -51,6 +51,7 @@ def _fresh_store():
             "h2h_modifier": 0.0, "h2h_meetings": 0,
             "home_corner_avg_recent": 5.5, "away_corner_avg_recent": 4.5,
             "home_card_avg_recent": 1.5, "away_card_avg_recent": 2.0,
+            "home_foul_avg_recent": 11.0, "away_foul_avg_recent": 10.0,
         },
     }
 
@@ -106,13 +107,15 @@ def test_writes_only_null_columns(monkeypatch):
     calls_by_id = {mid: feats for mid, feats in fake.update_calls}
 
     # id=1 era complet gol -> update-ul trebuie sa acopere toate coloanele
-    # calculabile. Exceptie: cornere/cartonase raman None (Regula #8 — nicio
-    # stare necunoscuta nu se aproximeaza) pentru ca e primul meci din
-    # dataset pentru ambele echipe, deci CornerCardTracker nu are niciun
-    # istoric antecedent; o valoare None nu se scrie niciodata peste NULL.
+    # calculabile. Exceptie: cornere/cartonase/faulturi raman None (Regula
+    # #8 — nicio stare necunoscuta nu se aproximeaza) pentru ca e primul
+    # meci din dataset pentru ambele echipe, deci CornerCardTracker/
+    # FoulsTracker nu au niciun istoric antecedent; o valoare None nu se
+    # scrie niciodata peste NULL.
     cold_start_cols = {
         "home_corner_avg_recent", "away_corner_avg_recent",
         "home_card_avg_recent", "away_card_avg_recent",
+        "home_foul_avg_recent", "away_foul_avg_recent",
     }
     assert set(calls_by_id[1].keys()) == set(bf.FEATURE_COLUMNS) - cold_start_cols
 
