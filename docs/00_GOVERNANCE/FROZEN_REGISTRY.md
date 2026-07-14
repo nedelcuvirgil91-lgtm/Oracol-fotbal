@@ -13,6 +13,10 @@ Acest document reprezintă registrul oficial al tuturor specificațiilor tehnice
 | ENGINE_SPEC.md | 1.0.0 | — | FROZEN | 2026-07-11 |
 | CONFIG_SPEC.md | 1.0.0 | — | FROZEN | 2026-07-11 |
 | ODDS_PERSISTENCE_DESIGN.md | 1.0.0 | Frozen via ADR-005; Clarified by ADR-006; Extended by ADR-010 (historical backfill + provenance) | FROZEN | 2026-07-11 |
+| docs/04_LEARNING_CORE/RUNTIME_CONTRACT.md | 1.0.0 | Frozen via ADR-019 | FROZEN | 2026-07-14 |
+| docs/04_LEARNING_CORE/PROMOTION_CONTRACT.md | 1.0.0 | Frozen via ADR-019 | FROZEN | 2026-07-14 |
+| docs/04_LEARNING_CORE/ATOMICITY_CONTRACT.md | 1.0.0 | Frozen via ADR-019 | FROZEN | 2026-07-14 |
+| docs/04_LEARNING_CORE/PROMOTION_SERVICE_CONTRACT.md | 1.0.0 | Frozen via ADR-019 | FROZEN | 2026-07-14 |
 
 ## Not Yet Frozen
 
