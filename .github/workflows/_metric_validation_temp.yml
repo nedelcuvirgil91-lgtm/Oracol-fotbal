@@ -1,0 +1,28 @@
+name: Learning Core — Leakage Fix Metric Comparison (TEMPORARY, read-only)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  metric-comparison:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compare walk-forward metrics — old (median imputation) vs new (native NaN), read-only
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python scripts/_compare_leakage_fix_metrics_temp.py
