@@ -1,0 +1,186 @@
+name: Learning Core — Gate Validation (TEMPORARY, isolated test identity)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  gate-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run end-to-end Learning Core validation (isolated test identity)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          python -c "
+          import sys, uuid
+          sys.path.insert(0, '.')
+
+          import numpy as np
+          from xgboost import XGBClassifier
+
+          import supabase_client as sb
+          from learning_core import challenger_manager, model_artifact_storage, promotion_service, champion_loader
+          from ml_predictor import _ALGORITHM_VERSION
+
+          FAM = 'gate_validation_test'
+          RESULTS = []
+
+          def check(name, cond, detail=''):
+              status = 'PASS' if cond else 'FAIL'
+              RESULTS.append((name, status, detail))
+              print(f'[{status}] {name} {detail}')
+              return cond
+
+          def train_tiny_model():
+              rng_X = np.array([[i % 7, (i * 3) % 11, (i + 2) % 5, i % 4] for i in range(60)], dtype=float)
+              y = np.array([i % 3 for i in range(60)])
+              model = XGBClassifier(n_estimators=10, max_depth=2, random_state=42,
+                                     objective='multi:softprob', num_class=3, eval_metric='mlogloss')
+              model.fit(rng_X, y)
+              return model
+
+          def make_promotable_challenger(scope, algorithm_version=_ALGORITHM_VERSION, samples_used=100):
+              run_id = str(uuid.uuid4())
+              ok = sb.save_training_run(
+                  training_run_id=run_id, algorithm_name=FAM, algorithm_version=algorithm_version,
+                  league_scope=scope, status='trained', samples_used=samples_used,
+                  walk_forward_metrics={'accuracy': 0.55, 'log_loss': 0.95, 'brier_score': 0.6},
+                  message='gate validation E2E',
+              )
+              assert ok, f'save_training_run failed for {run_id}'
+
+              model = train_tiny_model()
+              path = model_artifact_storage.save_model_artifact(model, training_run_id=run_id)
+              assert path is not None, f'save_model_artifact failed for {run_id}'
+
+              challenger_manager.create_challenger(run_id, FAM, scope)
+              challenger_manager.transition(run_id, 'WAITING')
+              challenger_manager.transition(run_id, 'EVALUATING')
+              challenger_manager.transition(run_id, 'SUCCEEDED')
+
+              sb.record_challenger_evaluation(
+                  training_run_id=run_id, algorithm_family=FAM, league_scope=scope,
+                  n_matches_evaluated=250, evaluation_window_start='2026-01-01', evaluation_window_end='2026-06-01',
+                  verdict='candidate_for_promotion', statistical_method='paired_bootstrap',
+                  brier_baseline=0.62, brier_experiment=0.55, delta_brier=-0.07, brier_significant=True,
+                  logloss_baseline=1.05, logloss_experiment=0.95, delta_logloss=-0.10, logloss_significant=True,
+                  accuracy_baseline=0.45, accuracy_experiment=0.55, delta_accuracy=0.10, accuracy_significant=True,
+              )
+              return run_id
+
+          def corrupt_artifact(training_run_id, corrupted_bytes):
+              client = sb.get_client()
+              bucket = client.storage.from_('model-artifacts')
+              path = f'{training_run_id}.json'
+              try:
+                  bucket.update(path, corrupted_bytes, {'content-type': 'application/json'})
+              except Exception:
+                  try:
+                      bucket.remove([path])
+                  except Exception:
+                      pass
+                  bucket.upload(path, corrupted_bytes, {'content-type': 'application/json'})
+
+          # ── Scenariul 1: Promotion end-to-end ────────────────────────────
+          scope_a = 'happy_path'
+          run_a = make_promotable_challenger(scope_a)
+          result_a = promotion_service.promote_challenger(run_a, FAM, scope_a, promoted_by='gate-validation-script')
+          check('S1: prima promovare reuseste', result_a.status == 'promoted', str(result_a))
+
+          loaded = champion_loader.load_champion_or_none(FAM, scope_a)
+          check('S1: champion_loader incarca campionul promovat', loaded is not None and loaded.training_run_id == run_a)
+
+          champ_row = sb.get_active_champion(FAM, scope_a)
+          check('S1: model_champions are randul activ corect', champ_row is not None and champ_row['training_run_id'] == run_a)
+
+          chal_a = challenger_manager.get_challenger(run_a)
+          check('S1: Challenger A e PROMOTED', chal_a['state'] == 'PROMOTED')
+
+          # ── Scenariul 2: a doua promovare (B supersedeaza A) ─────────────
+          run_b = make_promotable_challenger(scope_a)
+          result_b = promotion_service.promote_challenger(run_b, FAM, scope_a, promoted_by='gate-validation-script')
+          check('S2: a doua promovare reuseste', result_b.status == 'promoted', str(result_b))
+
+          champ_row_2 = sb.get_active_champion(FAM, scope_a)
+          check('S2: campionul activ e acum B', champ_row_2['training_run_id'] == run_b)
+
+          res = sb.get_client().table('model_champions').select('*').eq('training_run_id', run_a).execute()
+          row_a_after = res.data[0] if res.data else None
+          check('S2: A e superseded', row_a_after is not None and row_a_after['superseded_at'] is not None)
+          check('S2: A.superseded_by == B', row_a_after is not None and row_a_after['superseded_by'] == run_b)
+
+          # ── Scenariul 3: imuabilitate — UPDATE/DELETE pe randul istoric ──
+          try:
+              sb.get_client().table('model_champions').update({'promoted_by': 'hacked'}).eq('training_run_id', run_a).execute()
+              check('S3: UPDATE pe rand istoric respins', False, 'UPDATE-ul NU a ridicat exceptie')
+          except Exception as exc:
+              check('S3: UPDATE pe rand istoric respins', True, str(exc)[:200])
+
+          try:
+              sb.get_client().table('model_champions').delete().eq('training_run_id', run_a).execute()
+              check('S3: DELETE pe rand istoric respins', False, 'DELETE-ul NU a ridicat exceptie')
+          except Exception as exc:
+              check('S3: DELETE pe rand istoric respins', True, str(exc)[:200])
+
+          # ── Scenariul 4: rollback la A esueaza sigur (Rollback neimplementat, scop deja exclus) ──
+          result_rollback = promotion_service.promote_challenger(run_a, FAM, scope_a, promoted_by='gate-validation-script')
+          check('S4: incercarea de rollback la A e respinsa explicit', result_rollback.status == 'rejected', str(result_rollback))
+
+          champ_after_rollback = sb.get_active_champion(FAM, scope_a)
+          check('S4: campionul activ ramane B (nicio corupere de stare)', champ_after_rollback['training_run_id'] == run_b)
+
+          # ── Scenariul 5: idempotenta — repromovarea lui B ────────────────
+          result_b_again = promotion_service.promote_challenger(run_b, FAM, scope_a, promoted_by='gate-validation-script')
+          check('S5: repromovarea lui B (deja activ) e no-op', result_b_again.status == 'already_active', str(result_b_again))
+
+          # ── Scenariul 6: algorithm_version incompatibil -> fallback ──────
+          scope_v = 'version_mismatch'
+          run_v = make_promotable_challenger(scope_v, algorithm_version='999-legacy-mismatch')
+          result_v = promotion_service.promote_challenger(run_v, FAM, scope_v, promoted_by='gate-validation-script')
+          check('S6: promovarea reuseste (RPC nu verifica algorithm_version)', result_v.status == 'promoted', str(result_v))
+
+          loaded_v = champion_loader.load_champion_or_none(FAM, scope_v)
+          check('S6: champion_loader REFUZA campion cu algorithm_version incompatibil', loaded_v is None)
+
+          # ── Scenariul 7: artefact corupt -> fallback determinist ─────────
+          scope_c = 'corrupted_artifact'
+          run_c = make_promotable_challenger(scope_c)
+          result_c = promotion_service.promote_challenger(run_c, FAM, scope_c, promoted_by='gate-validation-script')
+          check('S7: promovarea reuseste', result_c.status == 'promoted', str(result_c))
+
+          corrupt_artifact(run_c, b'this is not a valid xgboost model file')
+
+          try:
+              loaded_c = champion_loader.load_champion_or_none(FAM, scope_c)
+              check('S7: champion_loader cade gratios pe artefact corupt (None, fara exceptie)', loaded_c is None)
+          except Exception as exc:
+              check('S7: champion_loader cade gratios pe artefact corupt (None, fara exceptie)', False, f'A RIDICAT exceptie: {exc}')
+
+          # ── Sumar ─────────────────────────────────────────────────────────
+          print()
+          print('=' * 70)
+          failed = [r for r in RESULTS if r[1] == 'FAIL']
+          for name, status, detail in RESULTS:
+              print(f'{status:5s} {name}')
+          print('=' * 70)
+          if failed:
+              print(f'{len(failed)} scenarii au esuat.')
+              sys.exit(1)
+          else:
+              print(f'Toate cele {len(RESULTS)} verificari au trecut.')
+          "
