@@ -148,6 +148,23 @@ class MLPredictorEngine:
         self.is_trained: bool = False
         self.last_train_status: str = "not_trained"
 
+    # [ADAUGAT — Pasul 6, Implementation Contract Learning Core] Populează
+    # starea internă dintr-un model deja antrenat, încărcat dintr-un
+    # Champion (learning_core.champion_loader) — fără să treacă prin
+    # train() local. Garantează aceeași reprezentare internă
+    # (is_trained/model_version/samples_used/feature_names) indiferent de
+    # proveniența modelului — nicio dublă reprezentare a aceluiași obiect
+    # (Chief Architect Review, Architecture Gate 6, "Golul A").
+    #
+    # Nu modifică NIMIC din train()/predict() — metodă complet aditivă.
+    def seed_from_champion(self, model, samples_used: int, model_version: int = 1) -> None:
+        self.model = model
+        self.model_version = model_version
+        self.samples_used = samples_used
+        self.feature_names = list(FEATURE_COLUMNS)
+        self.is_trained = True
+        self.last_train_status = "trained_from_champion"
+
     # ── Pregătire date ──────────────────────────────────────────────────
     def _fetch_training_dataframe(self) -> pd.DataFrame | None:
         rows = sb.get_training_data(only_with_results=True)

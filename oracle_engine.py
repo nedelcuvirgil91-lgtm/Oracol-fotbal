@@ -348,11 +348,51 @@ class FootballOracleEngine:
             train_result = self.ml.train()
             logger.info("[ML] Inițializare: %s — %s", train_result.status, train_result.message)
 
+        # [ADAUGAT — Pasul 6, Implementation Contract Learning Core] Probă
+        # de Champion, STRICT diagnostic — vezi RUNTIME_CONTRACT.md ("Pasul 6
+        # vs. Pasul 7B") și ADR-019. NU înlocuiește self.ml — predicțiile
+        # servite continuă să vină exclusiv din antrenarea locală de mai sus.
+        # `ml_source` reflectă ce servește EFECTIV azi (local/none — "champion"
+        # nu apare aici încă, ca să nu sugereze fals că e folosit pentru
+        # servire). `champion_diagnostic` e o probă separată, izolată, a
+        # mecanismului care va deveni operațional abia la Pasul 7B.
+        self.ml_source: str = "local" if (self.ml and self.ml.is_trained) else "none"
+        self.champion_diagnostic: dict = self._probe_champion() if self.use_supabase else {"available": False}
+
         logger.info(
-            "FootballOracleEngine v3.0 ready. Supabase=%s Injuries=%s Cache=%s KeyMgr=%s ML=%s",
+            "FootballOracleEngine v3.0 ready. Supabase=%s Injuries=%s Cache=%s KeyMgr=%s ML=%s ml_source=%s champion_available=%s",
             self.use_supabase, INJURY_MANAGER_AVAILABLE, CACHE_MANAGER_AVAILABLE,
-            KEY_MANAGER_AVAILABLE, ML_MODULE_AVAILABLE,
+            KEY_MANAGER_AVAILABLE, ML_MODULE_AVAILABLE, self.ml_source,
+            self.champion_diagnostic.get("available"),
         )
+
+    def _probe_champion(self) -> dict:
+        """Încearcă să încarce și să valideze Champion-ul activ, STRICT pt
+        diagnostic (Pasul 6) — nu afectează self.ml. Populează complet un
+        MLPredictorEngine "candidat" (aceeași reprezentare internă ca un
+        model antrenat local — vezi ml_predictor.seed_from_champion(),
+        "Golul A" din Architecture Gate 6), apoi îl aruncă, păstrând doar
+        informația de diagnostic. Niciodată nu ridică excepție."""
+        try:
+            from ml_predictor import _ALGORITHM_FAMILY, _LEAGUE_SCOPE, MLPredictorEngine
+            from learning_core.champion_loader import load_champion_or_none
+
+            result = load_champion_or_none(_ALGORITHM_FAMILY, _LEAGUE_SCOPE)
+            if result is None:
+                return {"available": False}
+
+            candidate = MLPredictorEngine()
+            candidate.seed_from_champion(result.model, samples_used=result.samples_used)
+
+            return {
+                "available": True,
+                "training_run_id": result.training_run_id,
+                "samples_used": candidate.samples_used,
+                "is_trained": candidate.is_trained,
+            }
+        except Exception as exc:
+            logger.warning("[Champion] Probă de diagnostic (Pasul 6) eșuată: %s", exc)
+            return {"available": False}
 
     def _persist_weights(self) -> None:
         if self.use_supabase:

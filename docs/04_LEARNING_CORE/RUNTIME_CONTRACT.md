@@ -2,7 +2,7 @@
 
 **Status**: FROZEN (via ADR-019)
 **Scope**: Contract normativ, nu ADR — descrie o regulă permanentă, nu o decizie punctuală
-**Precondiție pentru**: Pasul 6/7 (Runtime gains read capability) din Implementation Contract al Learning Core
+**Precondiție pentru**: Pasul 6 (Champion Loading — încărcare + validare, fără schimbarea sursei servite) și Pasul 7B (switch-ul real de servire) din Implementation Contract al Learning Core
 
 ---
 
@@ -10,34 +10,54 @@
 
 Până la Pasul 4.5, invariantul de mai jos a existat DOAR în istoricul conversației dintre Chief Architect și Claude — niciodată transcris. Asta a fost identificat ca o lipsă reală la Architecture Gate Review (înainte de Pasul 5): un contract despre care depinde corectitudinea Promotion nu era trasabil în repo (încalcă Regula #9 CLAUDE.md — „orice rezultat trasabil complet până la sursă"). Acest document închide acel gol.
 
-**Runtime, azi (după Pasul 1-4), NU citește `model_champions` în niciun fel** — verificat exhaustiv, zero hit-uri în `oracle_engine.py` pentru `model_champions`/`challenger_manager`/`champion_comparison`, dincolo de hook-ul de Shadow Logging deja auditat (ADR-017). `FootballOracleEngine.__init__()` apelează necondiționat `self.ml.train()` la fiecare pornire de proces — complet neconștient de conceptul de Champion.
+**Runtime, azi (după Pasul 1-5), NU citește `model_champions` în niciun fel** — verificat exhaustiv, zero hit-uri în `oracle_engine.py` pentru `model_champions`/`challenger_manager`/`champion_comparison`, dincolo de hook-ul de Shadow Logging deja auditat (ADR-017). `FootballOracleEngine.__init__()` apelează necondiționat `self.ml.train()` la fiecare pornire de proces — complet neconștient de conceptul de Champion.
 
-Acest document NU implementează schimbarea asta acum. Descrie contractul pe care Runtime trebuie să-l respecte **atunci când** o va face (Pasul 6/7) — scris acum, ca precondiție pentru Promotion (Pasul 5), fiindcă Promotion produce exact obiectul pe care acest contract îl guvernează.
+Pasul 6 (Architecture Gate 6) introduce citirea + validarea, dar **NU schimbă ce servește Runtime** — vezi secțiunea „Pasul 6 vs. Pasul 7B" de mai jos. Acest document descrie contractul complet, valabil pentru ambii pași.
 
-## Invariantul de utilizabilitate (5 condiții simultane)
+## Invariantul de utilizabilitate (6 condiții simultane)
 
-Runtime poate considera un Champion „utilizabil" (și-l poate încărca pentru servire) **doar dacă TOATE cele cinci condiții sunt adevărate simultan**:
+Runtime poate considera un Champion „utilizabil" **doar dacă TOATE cele șase condiții sunt adevărate simultan**:
 
 1. **Champion există** — există un rând în `model_champions` pentru `(algorithm_family, league_scope)`.
 2. **Champion e activ** — `superseded_at IS NULL` pe acel rând.
 3. **Artefactul există** — `model_artifact_storage.load_model_artifact(training_run_id)` găsește un obiect la calea așteptată în Storage.
 4. **Artefactul e valid** — bytes-ii nu sunt corupți (deserializarea XGBoost nu ridică excepție).
 5. **Deserializarea reușește** — modelul reconstruit e un `XGBClassifier` funcțional (`predict_proba` apelabil).
+6. **`algorithm_version` compatibil** — adăugat la Architecture Gate 6. `training_runs.algorithm_version` al Champion-ului trebuie să fie identic cu `ml_predictor._ALGORITHM_VERSION` din codul curent. Invariant arhitectural: **Runtime nu încarcă niciodată un Champion antrenat cu o versiune incompatibilă a algoritmului**. Dacă `FEATURE_COLUMNS` s-a schimbat între momentul antrenării Champion-ului și codul curent (ex. o viitoare ablație ca ADR-012/013), un Champion vechi ar putea produce predicții eronate sau ar putea eșua silențios la potrivirea formei — tratat identic cu un artefact invalid, fără excepție specială.
 
-Dacă **oricare singură** dintre cele cinci e falsă, Runtime tratează Champion-ul ca **indisponibil în întregime** — niciodată o folosire parțială/improvizată (ex. „folosesc structura dar nu greutățile", sau „folosesc campionul vechi presupus, fără verificare"). Asta e o aplicare directă a Regulii #8 CLAUDE.md: nicio stare necunoscută nu se aproximează.
+Dacă **oricare singură** dintre cele șase e falsă, Runtime tratează Champion-ul ca **indisponibil în întregime** — niciodată o folosire parțială/improvizată (ex. „folosesc structura dar nu greutățile", sau „folosesc campionul vechi presupus, fără verificare"). Asta e o aplicare directă a Regulii #8 CLAUDE.md: nicio stare necunoscută nu se aproximează.
 
 ## Fallback-ul (arhitectură permanentă, nu scaffolding temporar)
 
 ```
-Champion load → succes (toate 5 condiții) → servește din Champion
+Champion load → succes (toate 6 condiții) → servește din Champion   [din Pasul 7B]
              → eșec (oricare condiție falsă)  → antrenează local → servește din modelul local
 ```
 
 Acest fallback e o parte **permanentă** a arhitecturii — analog cascadei de fallback deja existente în `oracle_api.py` între provideri externi. Nu e un mecanism provizoriu de migrare, care dispare după ce Champion devine „stabil". Eliminarea lui ar necesita un ADR nou, dedicat, cu justificare explicită — niciodată o eliminare tăcută, silențioasă.
 
+## Runtime State Machine — trei stări terminale (Architecture Gate 6)
+
+Nu un state machine cu tranziții observabile în timpul rulării — încărcarea e exclusiv la construcția procesului (o singură dată, sincron, blocant), deci nu există nicio fereastră în care procesul servește cereri „în timp ce încarcă". Trei stări terminale, exclusive, decise o singură dată:
+
+```
+CHAMPION_ML   — Champion valid (toate 6 condiții), folosit pentru servire   [activ din Pasul 7B]
+LOCAL_ML      — Champion indisponibil/invalid, antrenare locală reușită     [comportamentul de azi]
+NO_ML         — ambele eșuate — Poisson/Monte Carlo pur                     [deja existent azi]
+```
+
+„BOOTSTRAP", „CHAMPION_LOADING" și „ERROR" nu sunt stări reale — primele două sunt pași tranzitorii, neobservabili, în interiorul constructorului; „ERROR" colapsează în `NO_ML`, deja gestionat grațios azi.
+
+## Pasul 6 vs. Pasul 7B — separare explicită de responsabilitate
+
+Decizie explicită Chief Architect: fiecare gate validează o singură schimbare de responsabilitate.
+
+- **Pasul 6** — „Poate Runtime încărca și valida un Champion, în siguranță?" Introduce `learning_core/champion_loader.py` (cele 6 condiții) și seeding-ul complet al unui `MLPredictorEngine` candidat, dar rezultatul e folosit STRICT ca diagnostic (`champion_diagnostic`, `ml_source`) — `self.ml`, ce servește efectiv predicțiile, rămâne populat exclusiv din antrenarea locală, exact ca azi. Zero risc asupra utilizatorului, prin construcție — mecanismul e exercitat real, împotriva datelor reale, fără nicio cale prin care rezultatul lui să ajungă la predicția servită.
+- **Pasul 7B** — „Poate Runtime începe efectiv să servească din Champion?" Singura schimbare: `self.ml` devine candidatul deja validat/seedat în Pasul 6, în loc de rezultatul `train()` local. Gate arhitectural separat, neautorizat încă.
+
 ## Ce NU descrie acest document
 
-Nu descrie CUM Runtime ajunge să citească `model_champions` (asta e implementarea Pasului 6/7, nescrisă încă). Nu descrie polling/refresh/cache invalidation — niciunul dintre acestea nu există și nu e cerut azi (YAGNI). Nu descrie promovare/rollback — acelea sunt „Promotion Contract" (document separat).
+Nu descrie polling/refresh/cache invalidation/reload manual — niciunul dintre acestea nu există și nu e cerut (YAGNI, respins explicit la Architecture Gate 6 — funcționare autonomă, fără intervenție umană necesară pentru corectitudine). Nu descrie promovare/rollback — acelea sunt „Promotion Contract" (document separat).
 
 ## Relația cu Promotion Contract
 
