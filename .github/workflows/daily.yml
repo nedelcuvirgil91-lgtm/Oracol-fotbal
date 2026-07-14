@@ -12,6 +12,11 @@ on:
         required: false
         default: "false"
         type: boolean
+      skip_features:
+        description: "Sări actualizarea feature-urilor derivate (formă, H2H, cornere, cartonașe, faulturi)"
+        required: false
+        default: "false"
+        type: boolean
       skip_ml:
         description: "Sări reantrenarea ML"
         required: false
@@ -48,6 +53,7 @@ jobs:
         run: |
           ARGS=""
           if [ "${{ github.event.inputs.skip_elo }}" = "true" ]; then ARGS="$ARGS --no-elo"; fi
+          if [ "${{ github.event.inputs.skip_features }}" = "true" ]; then ARGS="$ARGS --no-features"; fi
           if [ "${{ github.event.inputs.skip_ml }}" = "true" ]; then ARGS="$ARGS --no-ml"; fi
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
           python sync/run_daily.py $ARGS
