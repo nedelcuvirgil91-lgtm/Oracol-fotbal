@@ -196,6 +196,12 @@ class TeamProfile:
     data_source:       str
     data_quality:      str
     data_quality_note: str
+    # Statistici reale, informative (Task 2, ADR-011) — NU sunt încă
+    # parametri ai compute_team_offdef_rating(), doar afișate. None dacă
+    # nu există date reale (nu se aproximează).
+    avg_corners:       float | None = None
+    avg_fouls:         float | None = None
+    avg_yellow_cards:  float | None = None
 
 
 @dataclass
@@ -472,6 +478,40 @@ class FootballOracleEngine:
             return None
         return sum(values) / len(values)
 
+    @staticmethod
+    def _real_match_events(canonical: str, league: str, last_n: int = 5) -> dict:
+        """
+        Cornere/faulturi/cartonașe galbene REALE, medie pe ultimele `last_n`
+        meciuri terminate — pur informativ (Task 2, ADR-011), NU alimentează
+        formula de rating. Valorile lipsă rămân None — nu se aproximează.
+        """
+        empty = {"avg_corners": None, "avg_fouls": None, "avg_yellow_cards": None}
+        if not SUPABASE_MODULE_AVAILABLE:
+            return empty
+        try:
+            rows = sb.get_team_recent_match_events(canonical, league, last_n=last_n)
+        except Exception:
+            return empty
+        if not rows:
+            return empty
+        corners, fouls, yellows = [], [], []
+        for r in rows:
+            is_home = r.get("home_team") == canonical
+            is_away = r.get("away_team") == canonical
+            if not (is_home or is_away):
+                continue
+            c = r.get("home_corners") if is_home else r.get("away_corners")
+            f = r.get("home_fouls") if is_home else r.get("away_fouls")
+            y = r.get("home_yellow_cards") if is_home else r.get("away_yellow_cards")
+            if c is not None: corners.append(float(c))
+            if f is not None: fouls.append(float(f))
+            if y is not None: yellows.append(float(y))
+        return {
+            "avg_corners": sum(corners) / len(corners) if corners else None,
+            "avg_fouls": sum(fouls) / len(fouls) if fouls else None,
+            "avg_yellow_cards": sum(yellows) / len(yellows) if yellows else None,
+        }
+
     def _build_profile(self, team_id: str, team_name: str, league: str) -> TeamProfile:
         """
         Cascade:
@@ -664,6 +704,8 @@ class FootballOracleEngine:
         off_rating = min(off_rating, o_cap)
         def_rating = min(def_rating, d_cap)
 
+        events = self._real_match_events(canonical, league, last_n)
+
         return TeamProfile(
             team_id=team_id, team_name=canonical,
             matches_analysed=n if stats else 0,
@@ -676,6 +718,9 @@ class FootballOracleEngine:
             elo_rating=elo_raw, data_source=data_source,
             data_quality=data_quality,
             data_quality_note=DATA_QUALITY_NOTES[data_quality],
+            avg_corners=round(events["avg_corners"], 2) if events["avg_corners"] is not None else None,
+            avg_fouls=round(events["avg_fouls"], 2) if events["avg_fouls"] is not None else None,
+            avg_yellow_cards=round(events["avg_yellow_cards"], 2) if events["avg_yellow_cards"] is not None else None,
         )
 
     # ── League weights (cold-start blending) ──────────────────────────────
