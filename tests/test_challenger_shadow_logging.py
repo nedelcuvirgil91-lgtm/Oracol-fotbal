@@ -1,8 +1,13 @@
 """
 Teste pentru Pasul 3 (Implementation Contract Learning Core) — shadow
-logging pentru un Challenger activ, ADR-017. Fără rețea — toate
-dependențele (challenger_manager, learning_core.challenger_shadow,
-shadow_testing) sunt monkeypatch-uite.
+logging pentru un Challenger activ, ADR-017 (+ addendum Chief Architect
+Review: OracleEngine -> Shadow Adapter -> ChallengerManager). Fără rețea.
+
+Acest fișier testează exclusiv FRONTIERA oracle_engine.py <-> Shadow
+Adapter (learning_core.challenger_shadow) — comportamentul intern al
+adapterului (Challenger inexistent, artefact indisponibil, logare
+treatment/control) e testat separat, în
+tests/test_challenger_shadow_adapter.py.
 
 Cele DOUĂ condiții impuse explicit de Chief Architect, verificate direct:
   1. Predicția servită (`pred`) e neschimbată, indiferent dacă flag-ul e
@@ -11,9 +16,15 @@ Cele DOUĂ condiții impuse explicit de Chief Architect, verificate direct:
   2. Shadow e complet eliminabil printr-un singur flag — dezactivat
      (implicit), metoda face return imediat, ZERO import/apel suplimentar
      (verificat prin monkeypatch care ridică excepție dacă e atins).
+
+Plus regula arhitecturală adăugată la review: oracle_engine.py nu importă
+NICIODATĂ learning_core.challenger_manager direct — trece exclusiv prin
+learning_core.challenger_shadow (adapter).
 """
+import ast
 import copy
 import inspect
+import pathlib
 
 import pytest
 
@@ -89,9 +100,9 @@ def test_default_config_preserves_shadow_mode_key():
 
 def test_log_challenger_shadow_returns_false_when_disabled(monkeypatch):
     def _boom(*a, **kw):
-        raise AssertionError("challenger_manager.get_active_challenger NU trebuie atins cand flag-ul e oprit")
+        raise AssertionError("adapterul NU trebuie atins cand flag-ul e oprit")
 
-    monkeypatch.setattr("learning_core.challenger_manager.get_active_challenger", _boom)
+    monkeypatch.setattr("learning_core.challenger_shadow.log_shadow_for_active_challenger", _boom)
 
     engine = _FakeEngine(config={"challenger_shadow_logging_enabled": False})
     result = engine._log_challenger_shadow(**_call_args())
@@ -106,6 +117,32 @@ def test_log_challenger_shadow_called_exactly_once_in_evaluate_match():
     assert call_count == 1
 
 
+# ── Regulă arhitecturală: OracleEngine -> Shadow Adapter -> ChallengerManager
+
+def test_oracle_engine_never_imports_challenger_manager_directly():
+    """Chief Architect Review, post-Pasul 3: OracleEngine nu are voie sa
+    importe learning_core.challenger_manager direct — trebuie sa treaca
+    exclusiv prin learning_core.challenger_shadow (Shadow Adapter), singura
+    frontiera permisa."""
+    tree = ast.parse(
+        pathlib.Path(oracle_engine.__file__).read_text(encoding="utf-8"),
+        filename=oracle_engine.__file__,
+    )
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if module.split(".")[-1] == "challenger_manager" or any(
+                a.name == "challenger_manager" for a in node.names
+            ):
+                pytest.fail(
+                    "oracle_engine.py importă challenger_manager direct — "
+                    "trebuie să treacă prin learning_core.challenger_shadow (adapter)"
+                )
+        elif isinstance(node, ast.Import):
+            if any(alias.name.split(".")[-1] == "challenger_manager" for alias in node.names):
+                pytest.fail("oracle_engine.py importă challenger_manager direct")
+
+
 # ── Condiția 1: pred neschimbată, în orice scenariu ─────────────────────────
 
 def test_pred_unchanged_when_flag_disabled():
@@ -118,22 +155,13 @@ def test_pred_unchanged_when_flag_disabled():
     assert args["pred"] == pred_before
 
 
-def test_pred_unchanged_when_flag_enabled_and_challenger_active(monkeypatch):
+def test_pred_unchanged_when_flag_enabled_and_adapter_succeeds(monkeypatch):
     args = _call_args()
     pred_before = copy.deepcopy(args["pred"])
 
     monkeypatch.setattr(
-        "learning_core.challenger_manager.get_active_challenger",
-        lambda family, scope: {"training_run_id": "run-xyz"},
-    )
-    monkeypatch.setattr(
-        "learning_core.challenger_shadow.predict_with_challenger",
-        lambda features, run_id: (0.9, 0.05, 0.05),
-    )
-    logged_calls = []
-    monkeypatch.setattr(
-        "shadow_testing.log_shadow_prediction",
-        lambda **kw: logged_calls.append(kw) or True,
+        "learning_core.challenger_shadow.log_shadow_for_active_challenger",
+        lambda **kw: True,
     )
 
     engine = _FakeEngine(config={"challenger_shadow_logging_enabled": True})
@@ -141,17 +169,16 @@ def test_pred_unchanged_when_flag_enabled_and_challenger_active(monkeypatch):
 
     assert args["pred"] == pred_before, "pred nu trebuie modificat, indiferent de shadow logging"
     assert result is True
-    assert len(logged_calls) == 2
 
 
-def test_pred_unchanged_even_if_shadow_logging_raises(monkeypatch):
+def test_pred_unchanged_even_if_adapter_raises(monkeypatch):
     args = _call_args()
     pred_before = copy.deepcopy(args["pred"])
 
-    def _boom(*a, **kw):
-        raise RuntimeError("eroare simulata in shadow logging")
+    def _boom(**kw):
+        raise RuntimeError("eroare simulata in adapter")
 
-    monkeypatch.setattr("learning_core.challenger_manager.get_active_challenger", _boom)
+    monkeypatch.setattr("learning_core.challenger_shadow.log_shadow_for_active_challenger", _boom)
 
     engine = _FakeEngine(config={"challenger_shadow_logging_enabled": True})
     result = engine._log_challenger_shadow(**args)
@@ -160,76 +187,27 @@ def test_pred_unchanged_even_if_shadow_logging_raises(monkeypatch):
     assert result is False
 
 
-# ── Comportament când flag-ul e activ ───────────────────────────────────────
+def test_adapter_receives_correct_arguments(monkeypatch):
+    captured = {}
 
-def test_noop_when_no_active_challenger(monkeypatch):
-    monkeypatch.setattr(
-        "learning_core.challenger_manager.get_active_challenger",
-        lambda family, scope: None,
-    )
+    def _capture(**kw):
+        captured.update(kw)
+        return True
 
-    def _fail_if_called(**kw):
-        raise AssertionError("shadow_testing.log_shadow_prediction nu trebuie apelat fara Challenger activ")
-
-    monkeypatch.setattr("shadow_testing.log_shadow_prediction", _fail_if_called)
-
-    engine = _FakeEngine(config={"challenger_shadow_logging_enabled": True})
-    result = engine._log_challenger_shadow(**_call_args())
-    assert result is False
-
-
-def test_noop_when_artifact_unavailable(monkeypatch):
-    monkeypatch.setattr(
-        "learning_core.challenger_manager.get_active_challenger",
-        lambda family, scope: {"training_run_id": "run-xyz"},
-    )
-    monkeypatch.setattr(
-        "learning_core.challenger_shadow.predict_with_challenger",
-        lambda features, run_id: None,
-    )
-
-    def _fail_if_called(**kw):
-        raise AssertionError("shadow_testing.log_shadow_prediction nu trebuie apelat fara artefact valid")
-
-    monkeypatch.setattr("shadow_testing.log_shadow_prediction", _fail_if_called)
-
-    engine = _FakeEngine(config={"challenger_shadow_logging_enabled": True})
-    result = engine._log_challenger_shadow(**_call_args())
-    assert result is False
-
-
-def test_logs_treatment_and_control_with_correct_groups(monkeypatch):
-    monkeypatch.setattr(
-        "learning_core.challenger_manager.get_active_challenger",
-        lambda family, scope: {"training_run_id": "run-xyz"},
-    )
-    monkeypatch.setattr(
-        "learning_core.challenger_shadow.predict_with_challenger",
-        lambda features, run_id: (0.9, 0.05, 0.05),
-    )
-    logged_calls = []
-    monkeypatch.setattr(
-        "shadow_testing.log_shadow_prediction",
-        lambda **kw: logged_calls.append(kw) or True,
-    )
+    monkeypatch.setattr("learning_core.challenger_shadow.log_shadow_for_active_challenger", _capture)
 
     engine = _FakeEngine(config={"challenger_shadow_logging_enabled": True})
     args = _call_args()
-    result = engine._log_challenger_shadow(**args)
+    engine._log_challenger_shadow(**args)
 
-    assert result is True
-    assert len(logged_calls) == 2
-    groups = {c["experiment_group"] for c in logged_calls}
-    assert groups == {"treatment", "control"}
-
-    treatment = next(c for c in logged_calls if c["experiment_group"] == "treatment")
-    assert treatment["prob_home"] == 0.9
-    assert treatment["experiment_version"] == "run-xyz"
-
-    control = next(c for c in logged_calls if c["experiment_group"] == "control")
-    assert control["prob_home"] == args["pred"].prob_home_win
-    assert control["prob_draw"] == args["pred"].prob_draw
-    assert control["prob_away"] == args["pred"].prob_away_win
+    assert captured["algorithm_family"] == "xgboost_v1"
+    assert captured["league_scope"] == "all"
+    assert captured["fixture_id"] == args["pred"].fixture_id
+    assert captured["control_prob_home"] == args["pred"].prob_home_win
+    assert captured["control_prob_draw"] == args["pred"].prob_draw
+    assert captured["control_prob_away"] == args["pred"].prob_away_win
+    assert "home_offensive_rating" in captured["features"]
+    assert "home_elo" in captured["features"]
 
 
 # ── Condiția 2: complet eliminabil printr-un singur flag ────────────────────

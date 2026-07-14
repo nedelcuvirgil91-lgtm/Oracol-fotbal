@@ -274,15 +274,19 @@ def test_get_challenger_and_get_active_challenger(fake_client):
 def test_module_has_single_known_importer():
     """La inchiderea Pasului 2, acest modul avea ZERO importatori de
     productie — invariant valabil doar pana la Pasul 3 (ADR-017), care l-a
-    conectat, deliberat si gated printr-un flag dedicat, in
-    oracle_engine.py (_log_challenger_shadow). Garda ramane utila sub o
+    conectat, deliberat si gated printr-un flag dedicat. Dupa addendum-ul
+    Chief Architect Review (regula OracleEngine -> Shadow Adapter ->
+    ChallengerManager), singurul importator legitim e Shadow Adapter-ul
+    (learning_core/challenger_shadow.py) — NU oracle_engine.py direct, care
+    trece exclusiv prin adapter (verificat separat, in
+    tests/test_challenger_shadow_logging.py). Garda ramane utila sub o
     forma mai stricta: NIMENI altcineva nu are voie sa importe modulul
     direct — un al doilea scriitor necontrolat ar reintroduce exact
     problema de ownership dublu pe care ADR-016 o elimina."""
     import ast
     import pathlib
 
-    ALLOWED_IMPORTERS = {"oracle_engine.py"}
+    ALLOWED_IMPORTERS = {"challenger_shadow.py"}
 
     root = pathlib.Path(__file__).resolve().parent.parent
     offenders = []

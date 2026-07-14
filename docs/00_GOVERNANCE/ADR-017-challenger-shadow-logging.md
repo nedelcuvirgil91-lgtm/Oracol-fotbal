@@ -105,3 +105,64 @@ face comparația viitoare posibilă, fără s-o implementeze încă.
   explicită.
 - Prima activare reală a flag-ului rămâne o decizie separată, ulterioară,
   nu implicită.
+
+---
+
+## Addendum — Chief Architect Review (post-acceptare Pasul 3)
+
+Doi invarianți noi, ceruți explicit la review, consemnați aici ca parte a
+contractului — nu doar demonstrați ad-hoc, ci impuși structural în cod și
+verificați prin teste dedicate.
+
+### Invariant 1 — Shadow e un Side Effect, nu parte din Prediction Pipeline
+
+```
+Prediction Pipeline:   Input → Prediction → Return către utilizator
+Side Effect:                   Prediction → Shadow Logging   (nu invers)
+```
+
+Shadow Logging nu produce nimic consumat de Prediction Pipeline — nu
+întoarce o valoare folosită pentru a construi `pred`, nu poate readuce
+informație înapoi în fluxul de predicție. E strict observațională:
+citește `pred` deja finalizat, scrie în `shadow_predictions`, atât.
+Demonstrat, nu doar afirmat: `_log_challenger_shadow()` primește `pred`
+ca parametru read-only, apelul ei e ultima linie din `evaluate_match()`
+și rezultatul e ignorat de apelant — verificat prin comparație bit cu bit
+a `pred` înainte/după apel (`tests/test_challenger_shadow_logging.py`).
+
+### Invariant 2 — Frontieră unică: OracleEngine → Shadow Adapter → ChallengerManager
+
+```
+OracleEngine
+     │
+     ▼
+learning_core.challenger_shadow   (Shadow Adapter — singura frontieră)
+     │
+     ▼
+learning_core.challenger_manager
+```
+
+`oracle_engine.py` **nu importă niciodată** `learning_core.challenger_manager`
+direct — varianta implementată inițial în Pasul 3 (import direct din
+`_log_challenger_shadow()`) a fost refactorizată imediat după acest review.
+`learning_core/challenger_shadow.py` devine Shadow Adapter-ul: singurul
+modul care importă `challenger_manager` pentru acest scop, expune un
+singur punct de intrare public (`log_shadow_for_active_challenger()`),
+și e singura graniță prin care Oracle Engine poate ajunge, indirect, la
+Challenger.
+
+Rațiune (nu doar stil): astăzi `_log_challenger_shadow()` era singurul loc
+care avea nevoie de `challenger_manager` — o linie de cod ar fi părut
+identică cu sau fără adapter. Peste 6 luni, cu Shadow Evaluation (Pasul 4)
+și Promotion (viitor), mai multe componente vor avea nevoie de Challenger
+— fără o frontieră impusă explicit, fiecare ar fi importat
+`challenger_manager` direct, recreând exact anti-pattern-ul deja respins
+în această sesiune (surse multiple necontrolate de adevăr — ELO, writeri
+multipli pe `match_history`). Adapter-ul impune azi disciplina care ar
+deveni costisitoare de retro-instalat mai târziu.
+
+Verificat prin două gărzi simetrice, câte una de fiecare parte a
+frontierei: `tests/test_challenger_shadow_logging.py::test_oracle_engine_never_imports_challenger_manager_directly`
+(analiză AST pe `oracle_engine.py`) și
+`tests/test_challenger_manager.py::test_module_has_single_known_importer`
+(singurul importator permis al `challenger_manager` e `challenger_shadow.py`).

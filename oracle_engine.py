@@ -1289,10 +1289,17 @@ class FootballOracleEngine:
 
     # [ADAUGAT — Pasul 3, Implementation Contract Learning Core] Shadow
     # logging pt Challenger activ — vezi ADR-016 (Challenger FSM, Pasul 2) și
-    # docs/00_GOVERNANCE/ADR-017-challenger-shadow-logging.md. Flag DEDICAT
-    # (`challenger_shadow_logging_enabled`, implicit False) — NU reutilizează
-    # `shadow_mode_enabled`, care rămâne legat exclusiv de experimentul
-    # apifootball_injuries_coaches, fără nicio legătură cu Learning Core.
+    # docs/00_GOVERNANCE/ADR-017-challenger-shadow-logging.md (+ addendum
+    # Chief Architect Review: Shadow e un SIDE EFFECT, nu parte din
+    # Prediction Pipeline). Flag DEDICAT (`challenger_shadow_logging_enabled`,
+    # implicit False) — NU reutilizează `shadow_mode_enabled`, care rămâne
+    # legat exclusiv de experimentul apifootball_injuries_coaches.
+    #
+    # REGULĂ ARHITECTURALĂ: OracleEngine → Shadow Adapter → ChallengerManager.
+    # Această metodă NU importă niciodată learning_core.challenger_manager
+    # direct — trece exclusiv prin learning_core.challenger_shadow (adapter),
+    # singura frontieră permisă. Verificat prin gardă arhitecturală
+    # (tests/test_challenger_shadow_logging.py).
     def _log_challenger_shadow(
         self, pred: MatchPrediction, home_p: TeamProfile, away_p: TeamProfile,
         h2h: H2HRecord, home_xg: float, away_xg: float,
@@ -1303,51 +1310,26 @@ class FootballOracleEngine:
         cost. Nu modifică NICIODATĂ `pred` — parametrii sunt folosiți doar
         pentru a reconstrui feature-urile ML deja calculate mai sus
         (_build_ml_features e pură, fără efecte secundare), nu pentru a
-        recalcula predicția servită. Orice eșec (fără Challenger activ,
-        artefact lipsă, eroare de inferență, Supabase indisponibil) e prins
-        aici — niciodată propagat către evaluate_match()."""
+        recalcula predicția servită. Orice eșec e prins aici — niciodată
+        propagat către evaluate_match()."""
         if not self.config.get("challenger_shadow_logging_enabled", False):
             return False
         try:
             from ml_predictor import _ALGORITHM_FAMILY, _LEAGUE_SCOPE
-            from learning_core import challenger_manager
+            from learning_core.challenger_shadow import log_shadow_for_active_challenger
 
-            active = challenger_manager.get_active_challenger(_ALGORITHM_FAMILY, _LEAGUE_SCOPE)
-            if active is None:
-                return False
-
-            from learning_core.challenger_shadow import predict_with_challenger
             ml_features = self._build_ml_features(
                 home_p, away_p, h2h, home_xg, away_xg, ph, pd_, pa, mc, weather_penalty,
             )
-            challenger_probs = predict_with_challenger(ml_features, active["training_run_id"])
-            if challenger_probs is None:
-                return False
-            c_ph, c_pd, c_pa = challenger_probs
-
-            import shadow_testing
-            # treatment = predicția Challenger-ului (NU cea servită utilizatorului)
-            shadow_testing.log_shadow_prediction(
-                fixture_id=pred.fixture_id,
-                experiment_name=_ALGORITHM_FAMILY, experiment_version=active["training_run_id"],
-                home_xg=home_xg, away_xg=away_xg,
-                prob_home=c_ph, prob_draw=c_pd, prob_away=c_pa,
-                experiment_group="treatment", processing_stage="final",
+            return log_shadow_for_active_challenger(
+                algorithm_family=_ALGORITHM_FAMILY, league_scope=_LEAGUE_SCOPE,
+                features=ml_features,
+                fixture_id=pred.fixture_id, home_xg=home_xg, away_xg=away_xg,
+                control_prob_home=pred.prob_home_win, control_prob_draw=pred.prob_draw,
+                control_prob_away=pred.prob_away_win,
                 league=pred.league, home_team=pred.home_team, away_team=pred.away_team,
                 kickoff_date=pred.kickoff_date,
             )
-            # control = predicția reală de producție (pred), logată din nou
-            # doar pt comparația paired din shadow_testing.evaluate_experiment()
-            shadow_testing.log_shadow_prediction(
-                fixture_id=pred.fixture_id,
-                experiment_name=_ALGORITHM_FAMILY, experiment_version=active["training_run_id"],
-                home_xg=home_xg, away_xg=away_xg,
-                prob_home=pred.prob_home_win, prob_draw=pred.prob_draw, prob_away=pred.prob_away_win,
-                experiment_group="control", processing_stage="final",
-                league=pred.league, home_team=pred.home_team, away_team=pred.away_team,
-                kickoff_date=pred.kickoff_date,
-            )
-            return True
         except Exception as exc:
             logger.debug("[ChallengerShadow] _log_challenger_shadow failed: %s", exc)
             return False
