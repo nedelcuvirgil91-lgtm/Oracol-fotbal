@@ -360,7 +360,18 @@ Notă onestă: estimarea e extrapolată din log-uri reale, nu teoretică — dar
 
 ---
 
-## 4. Decizie deschisă, semnalată explicit — 2 excepții față de `mappings.normalize_team_name()`
+## 4. Decizie REZOLVATĂ — 2 excepții față de `mappings.normalize_team_name()`
+
+**Status: rezolvat.** Utilizatorul a ales varianta (a) din decizia de mai jos. `Colon Santa Fe` și `Fenerbahce` au fost adăugate în `mappings.TEAM_ALIASES` (`mappings.py`, secțiunea „Champions League / Europa League"), cu aliasurile `Colon Santa FE`/`FENERBAHCE`. Verificat direct:
+
+```
+normalize_team_name('Colon Santa FE') -> 'Colon Santa Fe'
+normalize_team_name('FENERBAHCE')     -> 'Fenerbahce'
+```
+
+`pytest tests/` — 387 teste, toate verzi după modificare (niciun test existent nu depindea de comportamentul vechi, neschimbat, al acestor 2 nume). Modificarea e pur aditivă în `TEAM_ALIASES` — nu atinge nicio altă intrare. Cu acest fix, Pasul A din §1 și `normalize_team_name()` sunt acum aliniate 100% pentru toate cele 176 de perechi — nu mai există risc de reintroducere a fragmentării pe aceste 2 nume la sincronizări viitoare.
+
+Argumentarea originală a deciziei (păstrată pentru trasabilitate):
 
 Verificare încrucișată a celor 176 perechi din Pasul A față de `mappings.normalize_team_name()` (sursa deja folosită de Faza 1 la scriere) a găsit **2 nepotriviri**:
 
@@ -394,8 +405,48 @@ La construirea acestui plan, o primă interogare de verificare (construită prin
 
 ---
 
-## 7. Ce NU decide acest document
+## 7. Impact Matrix — cele 18 coloane din `FEATURE_COLUMNS`
 
-- Decizia din §4 (completare `mappings.TEAM_ALIASES` pentru cele 2 excepții) — rămâne explicit a ta.
+Clarificarea cerută înainte de execuție. Fiecare rând e verificat direct pe codul din `sync/backfill_features.py` (nu pe presupunere) — citate exacte de linie. Concluzie generală, verificată prin grep încrucișat în `oracle_engine.py`: **niciuna din cele 18 coloane nu e citită de fluxul de servire live** (`_build_profile`/`_build_ml_features` din `oracle_engine.py` își calculează propriile ELO/formă/H2H/statistici din `oracle_api` live + stare internă proprie, independent de `match_history`). Cele 18 coloane sunt consumate EXCLUSIV de `ml_predictor._fetch_training_dataframe()` (antrenare) — deci fereastra de ~45-70 min în care aceste coloane sunt `NULL` în timpul re-backfill-ului **nu afectează predicțiile live în niciun fel** (Regula North Star #10 — servirea live nu depinde de infrastructura de învățare — confirmată intactă de acest audit, nu doar presupusă).
+
+### A. Obligatoriu reset — output direct al unui tracker cheiat pe string de echipă (12 coloane)
+
+Fiecare din aceste 12 coloane e citită dintr-un `dict[str, ...]` al cărui cheie e literal `match.get("home_team")`/`match.get("away_team")` (linia 858-859) — o singură echipă fragmentată în 2 string-uri produce 2 intrări separate în dict, cu istorie disjunctă.
+
+| Coloană | Tracker + linie | Justificare |
+|---|---|---|
+| `home_elo`, `away_elo` | `ELOTracker.ratings: dict[str, float]` (:225), `get_elo()` (:228-229) | Rating stocat direct pe string-ul echipei; `"Man Utd"` și `"Manchester United"` acumulează 2 istorii ELO complet separate. |
+| `home_form_score`, `away_form_score` | `FormTracker.history: dict[str, list]` (:277), `calculate_form_score()` (:282-292) | Fereastră glisantă de 10 meciuri, cheiată identic pe string brut. |
+| `home_corner_avg_recent`, `away_corner_avg_recent` | `CornerCardTracker.corners: dict[str, list]` (:438, :441-443) | Medie glisantă, cheiată pe echipă. |
+| `home_card_avg_recent`, `away_card_avg_recent` | `CornerCardTracker.cards: dict[str, list]` (:439, :445-447) | Idem, dict separat în aceeași clasă. |
+| `home_foul_avg_recent`, `away_foul_avg_recent` | `FoulsTracker.history: dict[str, list]` (:374, :376-380) | Medie glisantă, cheiată pe echipă. |
+| `home_shot_avg_recent`, `away_shot_avg_recent` | `ShotCountTracker.history: dict[str, list]` (:409, :411-415) | Cea mai recentă pereche (ADR-021, P7.1, aceeași zi) — dar mecanismul e identic: dict cheiat pe string brut. |
+
+**Verdict: toate 12 trebuie resetate. Fără excepție — nu există variantă în care un string fragmentat NU corupe cheia dict-ului.**
+
+### B. Derivate automat — compunere din starea categoriei A, fără tracker propriu (4 coloane)
+
+| Coloană | Mecanism | Justificare |
+|---|---|---|
+| `home_offensive_rating`, `home_defensive_rating`, `away_offensive_rating`, `away_defensive_rating` | `team_pre_match_rating()` (:695-762), apelată per meci (:870-875) | Nu au propriul dict persistent — se recalculează la fiecare apel din `elo_tracker.get_elo(team)` (:726), `form_tracker.get_form(team)` (:734) și `shots_tracker.get_avg_shots_on_target(team)` (:742) — toate 3 cheiate pe echipă (categoria A). Mecanismul de calcul „se auto-corectează" automat ODATĂ ce Pasul A rescrie numele — dar **valoarea deja STOCATĂ** în `match_history` a fost calculată în trecut cu ELO/formă/SOT fragmentate și rămâne stale. Writer Protection (Regula #13) tot o protejează de suprascriere dacă nu e explicit `NULL` — deci reset SQL obligatoriu, chiar dacă „vinovăția" e moștenită, nu primară. |
+
+**Verdict: toate 4 trebuie resetate — derivarea automată explică DE CE vor fi corecte după re-backfill, nu scutește de reset explicit.**
+
+### C. Verificare specială — structură diferită de cheie, risc suplimentar de verificat (2 coloane)
+
+| Coloană | Mecanism | Risc specific |
+|---|---|---|
+| `h2h_modifier`, `h2h_meetings` | `H2HTracker.history: dict[tuple, list]`, cheie **PERECHE** `(min(home,away), max(home,away))` (:480-482, :508) | Singura coloană cheiată pe 2 string-uri simultan, nu pe unul. Consecințe verificate în cod: (1) `get_h2h_before()` (:496-497) compară `h == home`/`h == away` cu numele CURENTE la apel, nu cu ordinea din cheie — orientarea (avantaj home/away) NU se corupe la un swap al ordinii alfabetice după canonicalizare, verificat direct în cod, nu presupus; (2) corectitudinea completă depinde STRICT ca Pasul A să se fi terminat 100% înainte de re-backfill — dacă o singură parte a unei perechi rămâne nerescrisă la momentul re-backfill-ului, cheia pereche nu găsește istoricul deja consolidat al celeilalte părți, iar cele 2 seturi de istoric rămân separate SILENȚIOS (fără eroare, fără log) — deci ordinea strictă A → reset → C nu e opțională aici, cum e (parțial) tolerantă la celelalte 16 coloane. |
+
+**Verdict: trebuie resetate, plus o verificare suplimentară post-execuție** — spot-check pe `h2h_meetings` pentru o pereche cunoscută cu istoric fragmentat (ex. un meci Porto vs. o echipă din lista de 176) pentru a confirma empiric, nu doar teoretic, că numărul de întâlniri crește după consolidare față de valoarea pre-Faza-3.
+
+### Concluzia Impact Matrix
+
+**Toate cele 18 coloane trebuie invalidate. Nu există nicio coloană din `FEATURE_COLUMNS` care poate fi exclusă din Pasul B fără a lăsa o stare stale, silențioasă, needetectabilă prin niciun mecanism existent (Writer Protection nu detectează valori „greșite dar nu NULL" — le protejează neschimbate).** Scope-ul de 313 nume / 19.797 rânduri din §2-3 rămâne corect și complet — confirmat, nu doar reafirmat.
+
+---
+
+## 8. Ce NU decide acest document
+
 - Execuția propriu-zisă — acest document arată SQL-ul exact, nu îl rulează.
 - Reevaluarea P3 (MOV) — condiționată de rezultatul Faza 3, pas separat, ulterior, cu metodologia deja stabilită.

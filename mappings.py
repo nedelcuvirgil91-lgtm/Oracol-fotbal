@@ -322,6 +322,12 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "Spartak Moscow": [],
     "Sheriff Tiraspol": [],
     "Midtjylland": ["FC MIDTJYLLAND"],
+    # [ADAUGAT — P3.5 Faza 3, docs/03_ENGINE/P3_5_FAZA3_MIGRATION_PLAN_2026-07-15.md §4]
+    # Singurele 2 din cele 176 de perechi raw->canonical (canonical_team_mapping.csv)
+    # care nu se potriveau deja cu normalize_team_name() inainte de acest fix —
+    # adaugate explicit ca sa nu se reintroduca fragmentarea dupa consolidarea Faza 3.
+    "Colon Santa Fe": ["Colon Santa FE"],
+    "Fenerbahce": ["FENERBAHCE"],
 }
 
 ALIAS_TO_CANONICAL: dict[str, str] = {}
