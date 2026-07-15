@@ -29,7 +29,7 @@ Orice modificare de `FEATURE_COLUMNS`, hiperparametri sau algoritm rămâne guve
 | Prioritate | Experiment | Ipoteză (scurt) | Metrică principală | Status |
 |---|---|---|---|---|
 | P1 | Hyperparameter Tuning (Optuna) | Reduce Log Loss fără schimbare de date/algoritm | Log Loss | Rejected |
-| P2 | Probability Calibration (Isotonic) | Reduce Log Loss/Brier, Accuracy neschimbată | Log Loss + Brier | Planned |
+| P2 | Probability Calibration (baseline vs Platt vs Isotonic) | Reduce Log Loss/Brier, Accuracy neschimbată | Log Loss + Brier | Running |
 | P3 | Goal Difference ELO (MOV) | Crește fidelitatea ELO → crește Accuracy | Accuracy | Planned |
 | P4 | ELO Trend | Direcția recentă a ELO conține informație suplimentară | Accuracy / Log Loss | Planned |
 | P5 | Schedule Strength | Nivelul adversarilor recenți conține informație suplimentară | Accuracy / Log Loss | Planned |
@@ -75,15 +75,18 @@ Cel mai bun candidat (`n_estimators=350, max_depth=3, learning_rate≈0,0296, su
 
 **Concluzie**: conform deciziei explicite a Chief Architect, Hyperparameter Tuning se închide definitiv. Configurația de producție (`n_estimators=150, max_depth=4, learning_rate=0.08, subsample=0.85, colsample_bytree=0.85`) rămâne neschimbată. Nu se reia investigația decât dacă se schimbă feature-urile, ELO-ul, sau datele de antrenare.
 
-### P2 — Probability Calibration (Isotonic)
+### P2 — Probability Calibration (baseline vs Platt vs Isotonic)
 
 - **Motiv**: dovadă empirică deja existentă de supraîncredere sistematică (`ELO_PERFORMANCE_EXPERIMENT_2026-07-13.md` — -4,6pp în bin-ul de încredere maximă pentru o variantă de model testată). Motorul de Value Betting depinde de acuratețea probabilității, nu doar de clasa prezisă.
-- **Ipoteză**: calibrare isotonic, fitată STRICT fold-local (aceeași disciplină deja aplicată la eliminarea leakage-ului de imputare — fit doar pe segmentul de train al fiecărui fold, aplicat pe segmentul de validare), reduce Log Loss/Brier fără să afecteze Accuracy.
-- **Metrică urmărită**: Log Loss + Brier (principal); Accuracy trebuie să rămână neschimbată (calibrarea nu schimbă clasa prezisă, doar probabilitatea atașată).
-- **Benchmark oficial**: idem.
-- **Criteriu de succes**: Log Loss și/sau Brier reduse cu ≥0,5% relativ, Accuracy neschimbată (±0,001).
+- **Ipoteză**: o calibrare (Platt/sigmoid sau Isotonic), fitată STRICT fold-local, reduce Log Loss/Brier fără să afecteze Accuracy. Nu se presupune din start că Isotonic câștigă — se compară explicit împotriva Platt Scaling ȘI împotriva unui baseline fără nicio calibrare, toate trei pe aceleași folduri, aceleași date.
+- **Metodologie fold-local (rafinată față de formularea inițială)**: segmentul de TRAIN al fiecărui fold walk-forward e împărțit mai departe, strict cronologic, în `clf-fit` (~85%, partea mai veche — antrenează XGBoost) și `calib` (~15%, partea mai recentă — antrenează calibratorul). VALIDATION rămâne complet neatinsă de orice antrenare. Motivul split-ului: Isotonic Regression, fitată direct pe predicțiile XGBoost pe propriile date de antrenare (in-sample), ar produce o calibrare artificial de optimistă — problemă documentată, motiv pentru care `sklearn.CalibratedClassifierCV` cere explicit un set de calibrare disjunct de antrenarea de bază. Split-ul rămâne 100% cronologic (zero leakage temporal, aceeași disciplină ca la eliminarea imputării).
+- **Metrică urmărită**: Log Loss + Brier (principal); Accuracy monitorizată, nu e obiectiv — nu trebuie să regreseze peste prag.
+- **Benchmark oficial**: idem, plus comparație internă baseline-din-experiment (control corect, izolează exact efectul calibrării, fără confuzie cu efectul reducerii volumului de date de antrenare al clasificatorului).
+- **Calibrare — diagnostic suplimentar**: Expected Calibration Error (ECE) + reliability diagram (10 bin-uri de încredere), calculate pe predicțiile concatenate din toate cele 5 folduri de validare, pentru fiecare din cele 3 variante — răspunde explicit la întrebarea „modelul e overconfident, underconfident, sau bine calibrat?", nu doar la cifrele agregate de Log Loss/Brier.
+- **Criteriu de succes**: Log Loss și/sau Brier reduse cu ≥0,5% relativ (față de baseline-ul din experiment), Accuracy neschimbată (±0,001).
 - **Criteriu de abandon**: nicio reducere măsurabilă de Log Loss/Brier, sau reducere însoțită de schimbare a Accuracy peste prag.
-- **Status**: Planned.
+- **Condiție de promovare (dacă Accepted)**: NU se promovează direct în producție. Se validează întâi impactul asupra motorului de Value Betting — o calibrare poate reduce Log Loss dar comprima probabilitățile suficient încât să scadă numărul de value bets identificate; acesta e un pas separat, ulterior, înainte de orice integrare în `ml_predictor.py`.
+- **Status**: Running.
 
 ## Etapa 2 — Îmbunătățim informația dominantă (ELO)
 
