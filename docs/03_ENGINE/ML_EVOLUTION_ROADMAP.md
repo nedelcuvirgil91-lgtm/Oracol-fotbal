@@ -21,7 +21,7 @@ Orice modificare de `FEATURE_COLUMNS`, hiperparametri sau algoritm rămâne guve
 - **Running** — experiment activ (workflow temporar rulat sau în curs).
 - **Accepted** — criteriul de succes îndeplinit, schimbarea a fost/urmează să fie integrată permanent.
 - **Rejected** — criteriul de abandon îndeplinit, motivul consemnat, nu se reîncearcă fără o schimbare reală de metodologie.
-- **Inconclusive / Needs refinement** — nici criteriul de succes, nici cel de abandon nu e clar îndeplinit (ex. toate metricile se mișcă în direcția bună, dar sub pragul de semnificație stabilit, sau semnale contradictorii între sub-metrici). Nu se declară nici Accepted, nici Rejected — se cere o rundă scurtă, explicit delimitată, de rafinare (nu o căutare nouă) înainte de verdict final; dacă nici runda de rafinare nu produce un câștig clar, se închide ca Rejected.
+- **Inconclusive / Needs refinement** — nici criteriul de succes, nici cel de abandon nu e clar îndeplinit (ex. toate metricile se mișcă în direcția bună, dar sub pragul de semnificație stabilit, sau semnale contradictorii între sub-metrici). Nu se declară nici Accepted, nici Rejected — se cere o rundă scurtă, explicit delimitată, de rafinare (nu o căutare nouă) înainte de verdict final. **Poate rămâne starea finală, permanentă** (nu se escaladează automat la Rejected) când dovada arată un efect real dar prea mic pentru costul schimbării — distincție explicită, importantă: „Rejected" înseamnă „ideea nu funcționează"; „Inconclusive, fără promovare" înseamnă „ideea funcționează, dar câștigul nu justifică schimbarea, azi". Un experiment închis astfel poate fi reluat, fără reinventarea metodologiei, dacă o precondiție semnalată explicit (ex. o problemă de calitate a datelor) se rezolvă separat.
 
 ---
 
@@ -32,9 +32,10 @@ Orice modificare de `FEATURE_COLUMNS`, hiperparametri sau algoritm rămâne guve
 | P1 | Hyperparameter Tuning (Optuna) | Reduce Log Loss fără schimbare de date/algoritm | Log Loss | Rejected |
 | P2 | Probability Calibration (baseline vs Platt vs Isotonic) | Reduce Log Loss/Brier, Accuracy neschimbată | Log Loss + Brier | Rejected |
 | P3.0 | Design Review — formula MOV ELO | Alegerea formulei greșit ar propaga eroarea în tot sistemul (ELO domină modelul) | N/A (document) | Accepted |
-| P3 | Goal Difference ELO (MOV) | Crește fidelitatea ELO → crește Accuracy | Accuracy + fidelitate ELO + Spearman | Inconclusive / Needs refinement |
-| P3.1 | Rafinare P3 — reproductibilitate + rundă scurtă în jurul V3 | Rezolvă discrepanța de reproductibilitate + testează dacă o corecție de surpriză mai puternică produce câștig clar | Accuracy + Log Loss + Brier + fidelitate | Running |
-| P4 | ELO Trend | Direcția recentă a ELO conține informație suplimentară | Accuracy / Log Loss | Planned |
+| P3 | Goal Difference ELO (MOV) | Crește fidelitatea ELO → crește Accuracy | Accuracy + fidelitate ELO + Spearman | **Inconclusive (fără promovare în producție)** |
+| P3.1 | Rafinare P3 — reproductibilitate + rundă scurtă în jurul V3 | Rezolvă discrepanța de reproductibilitate + testează dacă o corecție de surpriză mai puternică produce câștig clar | Accuracy + Log Loss + Brier + fidelitate | Done (a informat verdictul final P3) |
+| P3.5 | Team Identity Audit & Historical Normalization | Discrepanțele uriașe per-echipă găsite în P3.1 (unele echipe aproape identice cu referința, altele diferă cu 100-240 puncte) sunt semnătura unei probleme de normalizare a numelui de echipă, nu a formulei ELO | N/A (audit de date, nu experiment ML) | Planned — următoarea prioritate |
+| P4 | ELO Trend | Direcția recentă a ELO conține informație suplimentară | Accuracy / Log Loss | Planned (după P3.5) |
 | P5 | Schedule Strength | Nivelul adversarilor recenți conține informație suplimentară | Accuracy / Log Loss | Planned |
 | P6 | Home Advantage per ligă | Avantaj de teren calibrat &gt; constantă fixă globală | Accuracy | Planned |
 | P7 | Backfill complet + Shots on Target / Finishing / Defensive Efficiency | Structura statistică (șuturi, eficiență) conține informație dincolo de goluri brute | Accuracy / Log Loss | Planned |
@@ -129,7 +130,7 @@ Nicio variantă nu atinge pragul de 0,5% relativ (criteriul oficial) pe Log Loss
 - **Criteriu de abandon**: fidelitatea ELO scade ȘI câștigul de predictor e doar marginal (sub pragul de mai sus) — nu se promovează un ELO mai puțin fidel pentru un câștig mic.
 - **Formula aleasă**: FiveThirtyEight-style (§P3.0) — `ln(gd+1) × c/(d·elo_diff+c)` pentru rezultate decisive, multiplicator=1,0 la egal (caz special, gd=0 ar anula altfel actualizarea — descoperit la implementare, nu în document). 3 variante de constante testate la replay (V1 baseline 2,2/0,001, V2 damped 4,4/0,0005, V3 amplified 1,1/0,002) — verificare de direcție, nu căutare exhaustivă.
 - **Precondiție tehnică**: necesită recalculul complet al replay-ului istoric ELO (nu e o schimbare incrementală) — de rulat izolat, comparat cap-la-cap cu ELO-ul actual, nu de suprascris direct.
-- **Status**: **Inconclusive / Needs refinement**.
+- **Status**: **Inconclusive (fără promovare în producție)** — închis definitiv, două runde independente (5 variante de constante testate total), nu se reia decât dacă P3.5 rezolvă problema de normalizare a numelor de echipă semnalată mai jos.
 
 **Rezultate reale, runda 1 (2026-07-15, 53.409 meciuri, walk-forward, doar `home_elo`/`away_elo` înlocuite):**
 
@@ -145,15 +146,41 @@ Toate 3 variante îmbunătățesc simultan Accuracy/Log Loss/Brier față de Rep
 
 **Problemă de reproductibilitate semnalată, de rezolvat înaintea oricărei alte optimizări**: `mean_abs_pct_diff` pentru Replay A (control, neschimbat față de producție) a ieșit 11,23% în această rulare, față de 9,40% raportat cu 2 zile înainte în `ELO_FIDELITY_AUDIT_2026-07-13.md`, cu aceeași metodologie și același număr total de meciuri (53.409). Cauza nu e încă identificată.
 
-**Decizie Chief Architect**: nu se trece la P4. Se deschide **P3.1** — rundă scurtă de rafinare (nu o căutare nouă): (1) investighează discrepanța de reproductibilitate 9,40%/11,23%, (2) testează maximum câteva variante de constante în jurul lui V3 (cel mai interesant candidat — cel mai bun Log Loss/Brier, cel mai bun Spearman, argumentul fiind că rangul e mai puțin corupt de bias-ul de cold-start deja documentat decât eroarea medie absolută). Dacă nici P3.1 nu produce un câștig clar, P3 se închide ca Rejected.
+**Decizie Chief Architect (runda 1)**: nu se trece la P4. Se deschide **P3.1** — rundă scurtă de rafinare (nu o căutare nouă): (1) investighează discrepanța de reproductibilitate 9,40%/11,23%, (2) testează maximum câteva variante de constante în jurul lui V3 (cel mai interesant candidat — cel mai bun Log Loss/Brier, cel mai bun Spearman, argumentul fiind că rangul e mai puțin corupt de bias-ul de cold-start deja documentat decât eroarea medie absolută).
+
+**Rezultate P3.1 (2026-07-15, aceleași 53.409 meciuri):**
+
+*Diagnostic reproductibilitate* — Replay A a dat exact 11,23% și în această rulare (identic cu runda 1, deci 100% reproductibil intern). Comparat rând-cu-rând cu tabelul publicat în `ELO_FIDELITY_AUDIT_2026-07-13.md`: unele echipe aproape identice (Atletico Madrid 1530,7 vs 1531; Manchester City 1776,6 vs 1782; Real Madrid 1791,0 vs 1781), altele diferă cu sute de puncte (Manchester United 1549,6 vs 1742, diferență ~192; Inter Milan 1550,1 vs 1791, ~241; Bayern Munich 1781,5 vs 1909, ~127; Tottenham 1494,3 vs 1575, ~81). Tipar neregulat, nu un offset uniform — semnătura unei probleme de **normalizare a numelui de echipă** în `match_history` (istoric fragmentat sub variante de nume diferite), nu a formulei MOV sau a codului de replay. Precedent direct: `ELO_FIDELITY_AUDIT` semnalase deja exact acest mecanism pentru Atletico Madrid („doar 10 meciuri în tot replay-ul"). Cauza rădăcină NU e rezolvată aici — vezi P3.5.
+
+*Rundă de rafinare (V3 repetat + V4 mai amplificat + V5 mai puțin amplificat)*:
+
+```
+                Accuracy vs A    Log Loss vs A    Brier vs A    Fidelitate (eroare/Spearman)    yoy_std sezon
+V3 (repetat)    +0,20pp          mai bun          mai bun       13,13% / 0,782 (identic rundei 1) 61,65
+V4 mai amplif.  -0,10pp (regres) mai slab         mai slab      14,0% / 0,737 (ambele mai slabe)   105,87 (dublu)
+V5 mai puțin    +0,29pp          mai bun          mai bun       11,9% / 0,752 (practic identic)    63,39 (practic identic)
+```
+
+V4 arată clar limita superioară — regresie pe toate metricile plus instabilitate sezon-cu-sezon dublă (corecție de surpriză prea agresivă). **V5 e cel mai bun rezultat din tot P3**: Accuracy +0,29pp, la 0,01pp sub pragul strict de 0,3pp — cel mai aproape de prag din toate cele 5 variante testate (2 runde) — cu fidelitate practic neschimbată față de Replay A.
+
+**Verdict final (Chief Architect)**: nu se mai face o rundă P3.2. Motivul nu e diferența de 0,01pp — e că tiparul e deja convergent și coerent pe două runde independente (V1→V5, aceeași zonă de câștig mic dar real), consistent cu concluziile P1 (plafon atins după 2 runde Optuna) și P2 (model deja bine calibrat): informația marginală dintr-o căutare suplimentară ar fi foarte mică. **P3 se închide ca Inconclusive, NU Rejected** — distincție deliberată: efectul predictiv e real (toate cele 5 variante mișcă Accuracy/Log Loss/Brier consistent în direcția bună, fără nicio regresie la V1/V2/V3/V5), dar insuficient pentru costul unui replay complet al întregii istorii ELO, azi. Cea mai valoroasă descoperire a acestei investigații nu e formula MOV — e problema de normalizare a numelor de echipă, care probabil produce mai mult zgomot în comparațiile de fidelitate decât orice alegere de formulă. **Nu se reoptimizează MOV** — următoarea prioritate e calitatea datelor (P3.5). Dacă acel audit repară fragmentarea istoricului, V5 (sau formula A în general) poate fi re-testată peste luni, fără reinventarea metodologiei.
 
 ### P3.1 — Rafinare P3 (reproductibilitate + rundă scurtă în jurul V3)
 
 - **Motiv**: P3 marcat Inconclusive — semnal real (toate metricile de predictor se mișcă în direcția bună, fără nicio regresie), dar sub pragul de succes stabilit, plus o discrepanță de reproductibilitate nerezolvată pe fidelitate.
 - **Pasul 1**: diagnostic direct — tabel complet per-echipă (Replay A vs. referință) printat explicit, comparabil rând-cu-rând cu tabelul deja publicat în `ELO_FIDELITY_AUDIT_2026-07-13.md`, pentru a localiza sursa discrepanței 9,40%/11,23%.
 - **Pasul 2**: 3 variante noi de constante, bracketând V3 (V3 repetat ca ancoră/verificare de reproductibilitate + V4 mai amplificat + V5 mai puțin amplificat) — nu o căutare exhaustivă.
-- **Criteriu**: identic cu P3 (§ de mai sus) — dacă nici această rundă nu produce un câștig clar (Accuracy ≥+0,3pp SAU fidelitate clar mai bună pe ambele axe), P3 se închide definitiv ca Rejected.
-- **Status**: Running.
+- **Criteriu**: identic cu P3 (§ de mai sus).
+- **Rezultat**: vezi rezultatele complete în secțiunea P3 de mai sus. Cel mai bun candidat (V5) a ajuns la 0,01pp sub prag — aproape, dar nu clar. Chief Architect a decis să nu mai continue cu o rundă suplimentară (convergență deja demonstrată pe 2 runde/5 variante), și a închis P3 ca Inconclusive, nu Rejected.
+- **Status**: **Done** — a informat verdictul final al P3, nu se mai reia separat.
+
+### P3.5 — Team Identity Audit & Historical Normalization
+
+- **Motiv**: descoperire directă din P3.1 — comparând ratingul final `ELOTracker` (replay complet peste `match_history`) cu referința externă pentru aceleași 16 echipe, unele echipe se potrivesc aproape perfect (Atletico Madrid, Manchester City, Real Madrid — diferențe sub 10 puncte), altele diferă cu 80-240 de puncte (Manchester United, Inter Milan, Bayern Munich, Tottenham). Tiparul neregulat (nu un offset sistematic) e incompatibil cu o eroare de formulă sau un bias uniform de cold-start — e semnătura clasică a unui istoric de echipă fragmentat sub mai multe variante de nume, fiecare pornind propriul rating de la zero. Precedent deja documentat pentru Atletico Madrid în `ELO_FIDELITY_AUDIT_2026-07-13.md` (doar 10 meciuri în tot replay-ul, semnalat atunci ca „indiciu de problemă de acoperire/normalizare specifică acestui nume", nerezolvat).
+- **Ipoteză**: `match_history` conține variante de nume neconsolidate pentru un subset de echipe (alias-uri, redenumiri istorice, promovări/retrogradări între ligi cu nume ușor diferite, posibile duplicate) — consolidarea lor ar produce un `ELOTracker` semnificativ mai fidel, fără nicio schimbare de formulă.
+- **Scop**: audit sistematic — alias-uri de echipe, redenumiri, promovări/retrogradări, echipe duplicate, istorii fragmentate. Nu e un experiment ML (fără criteriu Accuracy/Log Loss/Brier propriu) — e un audit de calitate a datelor, cu livrabil probabil un raport + o listă de consolidări propuse (aplicate ulterior, separat, cu disciplina obișnuită de scriere pe producție — confirmare explicită, niciodată check-then-act).
+- **Legătură cu P3**: dacă acest audit reduce semnificativ discrepanțele neregulate găsite în P3.1, formula MOV (în special V5) devine candidat pentru re-testare — fără reinventarea metodologiei, doar peste date mai curate.
+- **Status**: Planned — următoarea prioritate, înaintea reluării Etapei 2 (P4/P5/P6).
 
 ### P4 — ELO Trend
 
