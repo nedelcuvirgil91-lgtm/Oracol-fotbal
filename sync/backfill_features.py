@@ -99,6 +99,11 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     # FEATURE_COLUMNS in ml_predictor.py dupa dovada de ablatie
     # (docs/03_ENGINE/FOULS_DOMINANCE_ABLATION_2026-07-14.md).
     "home_foul_avg_recent", "away_foul_avg_recent",
+    # [ADAUGAT — P7.1, docs/03_ENGINE/P7_1_IMPLEMENTATION_PLAN.md] Medie
+    # reală de șuturi TOTALE. Candidat la ml_predictor.FEATURE_COLUMNS
+    # DOAR dacă ablația (SHOT_DOMINANCE_ABLATION_2026-07-15.md) e Accepted
+    # — până atunci, coloane pur informative, fără niciun consumator ML.
+    "home_shot_avg_recent", "away_shot_avg_recent",
 )
 
 
@@ -131,6 +136,7 @@ def fetch_all_matches(league: str | None = None) -> list[dict]:
             .select("id,fixture_id,home_team,away_team,league,kickoff_date,"
                     "actual_home_goals,actual_away_goals,actual_result,"
                     "backfill_done,home_shots_on_target,away_shots_on_target,"
+                    "home_shots,away_shots,"
                     "home_corners,away_corners,home_yellow_cards,away_yellow_cards,"
                     "home_fouls,away_fouls,"
                     + ",".join(FEATURE_COLUMNS))
@@ -380,6 +386,41 @@ class FoulsTracker:
             self.history[home] = self.history[home][-20:]
         if away_fouls is not None:
             self.history.setdefault(away, []).append(float(away_fouls))
+            self.history[away] = self.history[away][-20:]
+
+
+class ShotCountTracker:
+    """
+    Medie glisantă reală de șuturi TOTALE (nu pe poartă — vezi ShotsTracker,
+    care rămâne neatins, calculează shots_on_target) per echipă — identică
+    ca disciplină cu FoulsTracker. Sursă pentru home_shot_avg_recent/
+    away_shot_avg_recent (P7.1, docs/03_ENGINE/P7_1_DESIGN_SHOT_DOMINANCE_
+    2026-07-15.md), candidat la ml_predictor.FEATURE_COLUMNS doar dacă
+    ablația (docs/03_ENGINE/SHOT_DOMINANCE_ABLATION_2026-07-15.md) e Accepted.
+
+    Comportament pe istoric incomplet intenționat identic cu FoulsTracker/
+    CornerCardTracker: media se calculează pe toate valorile disponibile
+    (1..window), fără a impune minimum `window` meciuri — `None` doar când
+    istoricul e complet gol (Regula #8, nicio stare necunoscută aproximată).
+    """
+
+    def __init__(self, window: int = FORM_WINDOW):
+        self.window = window
+        self.history: dict[str, list[float]] = {}
+
+    def get_avg_shots(self, team: str) -> float | None:
+        values = self.history.get(team, [])[-self.window:]
+        if not values:
+            return None
+        return sum(values) / len(values)
+
+    def process_match(self, home: str, away: str,
+                       home_shots: float | None, away_shots: float | None) -> None:
+        if home_shots is not None:
+            self.history.setdefault(home, []).append(float(home_shots))
+            self.history[home] = self.history[home][-20:]
+        if away_shots is not None:
+            self.history.setdefault(away, []).append(float(away_shots))
             self.history[away] = self.history[away][-20:]
 
 
@@ -805,6 +846,7 @@ def run_backfill(
     shots_tracker      = ShotsTracker()
     corner_card_tracker = CornerCardTracker()
     fouls_tracker       = FoulsTracker()
+    shot_count_tracker   = ShotCountTracker()
 
     # 3. Procesăm meciurile în ordine cronologică
     pending_updates: list[tuple[int, dict]] = []
@@ -838,6 +880,8 @@ def run_backfill(
         away_card_avg   = corner_card_tracker.get_avg_cards(away)
         home_foul_avg   = fouls_tracker.get_avg_fouls(home)
         away_foul_avg   = fouls_tracker.get_avg_fouls(away)
+        home_shot_avg   = shot_count_tracker.get_avg_shots(home)
+        away_shot_avg   = shot_count_tracker.get_avg_shots(away)
 
         # [FIX v4.1] Gating per-coloană: se scrie DOAR subsetul de coloane
         # ale căror valori curente sunt NULL — o coloană deja populată
@@ -864,6 +908,8 @@ def run_backfill(
                 "away_card_avg_recent":   away_card_avg,
                 "home_foul_avg_recent":   home_foul_avg,
                 "away_foul_avg_recent":   away_foul_avg,
+                "home_shot_avg_recent":   home_shot_avg,
+                "away_shot_avg_recent":   away_shot_avg,
             }
             # [Regula #13] Nu scriem None peste None — dacă tracker-ul de
             # cornere/cartonașe nu are încă istoric real (ex. primul meci al
@@ -885,6 +931,7 @@ def run_backfill(
             match.get("home_yellow_cards"), match.get("away_yellow_cards"),
         )
         fouls_tracker.process_match(home, away, match.get("home_fouls"), match.get("away_fouls"))
+        shot_count_tracker.process_match(home, away, match.get("home_shots"), match.get("away_shots"))
 
         # Scriem în batch
         if len(pending_updates) >= batch_size:

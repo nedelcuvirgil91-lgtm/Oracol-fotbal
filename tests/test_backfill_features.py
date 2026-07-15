@@ -52,6 +52,7 @@ def _fresh_store():
             "home_corner_avg_recent": 5.5, "away_corner_avg_recent": 4.5,
             "home_card_avg_recent": 1.5, "away_card_avg_recent": 2.0,
             "home_foul_avg_recent": 11.0, "away_foul_avg_recent": 10.0,
+            "home_shot_avg_recent": 12.0, "away_shot_avg_recent": 9.5,
         },
     }
 
@@ -107,15 +108,16 @@ def test_writes_only_null_columns(monkeypatch):
     calls_by_id = {mid: feats for mid, feats in fake.update_calls}
 
     # id=1 era complet gol -> update-ul trebuie sa acopere toate coloanele
-    # calculabile. Exceptie: cornere/cartonase/faulturi raman None (Regula
-    # #8 — nicio stare necunoscuta nu se aproximeaza) pentru ca e primul
-    # meci din dataset pentru ambele echipe, deci CornerCardTracker/
-    # FoulsTracker nu au niciun istoric antecedent; o valoare None nu se
-    # scrie niciodata peste NULL.
+    # calculabile. Exceptie: cornere/cartonase/faulturi/suturi raman None
+    # (Regula #8 — nicio stare necunoscuta nu se aproximeaza) pentru ca e
+    # primul meci din dataset pentru ambele echipe, deci CornerCardTracker/
+    # FoulsTracker/ShotCountTracker nu au niciun istoric antecedent; o
+    # valoare None nu se scrie niciodata peste NULL.
     cold_start_cols = {
         "home_corner_avg_recent", "away_corner_avg_recent",
         "home_card_avg_recent", "away_card_avg_recent",
         "home_foul_avg_recent", "away_foul_avg_recent",
+        "home_shot_avg_recent", "away_shot_avg_recent",
     }
     assert set(calls_by_id[1].keys()) == set(bf.FEATURE_COLUMNS) - cold_start_cols
 
@@ -123,10 +125,11 @@ def test_writes_only_null_columns(monkeypatch):
     assert "home_elo" not in calls_by_id[2], (
         "home_elo era deja populat (valoare reala) si NU trebuia inclus in UPDATE"
     )
-    # Fixture-ul nu include deloc coloane brute de cornere/cartonase
-    # (home_corners/away_corners/etc.) pe niciun rand -> CornerCardTracker
-    # nu acumuleaza niciodata istoric real, deci cold_start_cols raman None
-    # si pentru id=2 (Regula #8, nu se scrie None peste NULL).
+    # Fixture-ul nu include deloc coloane brute de cornere/cartonase/suturi
+    # (home_corners/away_corners/home_shots/etc.) pe niciun rand ->
+    # CornerCardTracker/FoulsTracker/ShotCountTracker nu acumuleaza
+    # niciodata istoric real, deci cold_start_cols raman None si pentru
+    # id=2 (Regula #8, nu se scrie None peste NULL).
     assert set(calls_by_id[2].keys()) == set(bf.FEATURE_COLUMNS) - {"home_elo"} - cold_start_cols
 
     # id=3 era deja complet -> nu trebuie sa aiba niciun apel de update
