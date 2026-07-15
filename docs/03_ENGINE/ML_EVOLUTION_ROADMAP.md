@@ -38,7 +38,8 @@ Orice modificare de `FEATURE_COLUMNS`, hiperparametri sau algoritm rămâne guve
 | P4 | ELO Trend | Direcția recentă a ELO conține informație suplimentară | Accuracy / Log Loss | Planned (după P3.5) |
 | P5 | Schedule Strength | Nivelul adversarilor recenți conține informație suplimentară | Accuracy / Log Loss | Planned |
 | P6 | Home Advantage per ligă | Avantaj de teren calibrat &gt; constantă fixă globală | Accuracy | Planned |
-| P7 | Backfill complet + Shots on Target / Finishing / Defensive Efficiency | Structura statistică (șuturi, eficiență) conține informație dincolo de goluri brute | Accuracy / Log Loss | Planned |
+| P7.1 | `shot_dominance` (Structural Match Statistics, rundă 1) | Diferența de șuturi totale recente conține informație de formă imediată, complementară ELO-ului (rating pe termen lung) | Accuracy / Log Loss / Brier | Planned |
+| P7.2 | `sot_dominance` (Structural Match Statistics, rundă 2) | Idem, pe șuturi pe poartă — condiționat explicit de verdictul P7.1 | Accuracy / Log Loss / Brier | Planned, condiționat de verdictul P7.1 (nu începe în paralel) |
 | P8 | Injuries ca feature ML | Accidentările curente (informație contextuală) conțin semnal neexploatat | Accuracy / Log Loss | Planned |
 | P9 | Benchmark LightGBM/CatBoost | XGBoost rămâne optim la scara actuală | toate 3 | Planned, prioritate joasă |
 | P10 | Pi Rating Evaluation | Sistem de rating alternativ (Constantinou & Fenton 2013) — nu o variantă MOV, un sistem diferit, scos explicit din P3 | Accuracy / Log Loss / Brier | Idea |
@@ -235,16 +236,18 @@ Descoperire centrală: `TEAM_ALIASES`/`normalize_team_name()` (`mappings.py`, 27
 
 *Ordine deliberată: structura statistică (P7) înaintea contextului (P8) — accidentările sunt informație contextuală, șuturile/eficiența sunt informație structurală. Structura vine înaintea contextului: aș vrea baza statistică cât mai completă înainte să introducem accidentările în ML.*
 
-### P7 — Backfill complet + Shots on Target / Finishing Efficiency / Defensive Efficiency
+### P7 — Structural Match Statistics (familie de experimente, disciplină un-singur-feature-per-rundă)
 
-- **Motiv**: date parțial disponibile extern (75-100% acoperire pe 6/7 ligi mari, `DATASET_CAPABILITY_AUDIT_2026-07-13.md`), dar 0% populate în producție — gap de backfill demonstrat, nu problemă de disponibilitate.
-- **Ipoteză**: rata de conversie șut→gol (proxy ieftin pentru calitatea atacului, fără să aștepte xG extern) și echivalentul defensiv conțin informație pe care volumul brut de goluri istorice n-o capturează.
-- **Metrică urmărită**: Accuracy / Log Loss.
-- **Benchmark oficial**: idem.
-- **Criteriu de succes**: îmbunătățire simultană pe minim 2 din 3 metrici.
-- **Criteriu de abandon**: fără câștig măsurabil, sau backfill-ul nu poate fi completat la o acoperire suficientă pentru un test statistic relevant.
-- **Precondiție**: necesită completarea gap-ului de backfill shots/shots_on_target pentru ligile mari (infrastructură deja parțial existentă, `ShotsTracker`, `sync/backfill_features.py`) — de tratat ca pas separat, înainte de ablația propriu-zisă. Candidat direct pentru primul domeniu de aplicare al Football Data Harvester (vezi `FOOTBALL_DATA_HARVESTER_ARCHITECTURE_AUDIT.md`), odată ce acela e pregătit.
-- **Status**: Planned, condiționat de precondiția de mai sus.
+**Document umbrelă**: `STRUCTURAL_MATCH_STATISTICS_ROADMAP.md` (2026-07-15) — audit + design review complet: stare reală DB (backfill ADR-011 deja rulat, 66,7% populat pe cele 5 ligi mari pentru `shots`/`shots_on_target`/`fouls`/`corners`/`cards`/HT; `possession`/`xg_actual` 0% peste tot), infrastructură reutilizabilă identificată (`STAT_GROUPS`, `MatchStatsBackfillService`, `ShotsTracker`), 17 feature-uri derivate propuse, matrice prioritate/impact/complexitate.
+
+**Decizie Chief Architect (2026-07-15)**: nu se implementează simultan întreaga familie de feature-uri bazate pe șuturi propusă în documentul umbrelă. Se respectă disciplina deja stabilită la P1-P3: **un singur feature nou pe rundă, ablație completă walk-forward, decizie Accepted/Rejected/Inconclusive explicită înainte de a continua la următorul.** P7 devine, la rândul lui, o secvență de sub-experimente numerotate (P7.1, P7.2, ...), nu un singur experiment cu mai multe feature-uri bundle-uite.
+
+- **P7.1 — `shot_dominance`** (singurul feature implementat în această rundă) — design complet: `P7_1_DESIGN_SHOT_DOMINANCE_2026-07-15.md`. Status: **Planned**, design închis, implementare neîncepută.
+- **P7.2 — `sot_dominance`** — pornește DOAR dacă P7.1 e Accepted. Reutilizează `ShotsTracker` (deja calculează media glisantă de șuturi pe poartă, azi consumată doar de `compute_team_offdef_rating`, niciodată expusă ca feature XGBoost separat) — cost de implementare mic dacă se ajunge acolo, dar design-ul propriu-zis (leakage, prag de succes) se scrie abia după verdictul P7.1, nu în avans. Status: Planned, condiționat.
+- **Backlog, neprogramat explicit** (nu respins, doar în afara scopului rundei curente): `shot_accuracy`, `finishing_efficiency`, `defensive_efficiency`, `opponent_shot_pressure`, restul celor 17 feature-uri din documentul umbrelă — reevaluate individual, câte unul, doar după ce P7.1/P7.2 se închid.
+- **Possession**: rămâne blocat — nicio sursă gratuită conformă ToS nu acoperă backfill istoric (confirmat în documentul umbrelă, §3), doar API-Football live/incremental, cu lună(i) de acumulare înainte de a avea istoric suficient pentru un test walk-forward relevant. Nu se deschide niciun P7.x pentru posesie până nu există fie o sursă, fie suficient istoric acumulat.
+- **Big Chances**: rămâne explicit în afara scopului — nicio coloană în schemă, nicio sursă conformă ToS pentru niciuna din cele 11 competiții urmărite (confirmat, `KNOWLEDGE_ENGINE_SOURCES_AUDIT_2026-07-13.md`).
+- **League Identity (duplicare `E0` vs. `Premier League`)**: risc identificat separat în documentul umbrelă (§8.2), analog structural cu Team Identity Audit (P3.5) dar distinct de el — rămâne backlog separat, tratat ca un eventual P3.5-bis viitor. **Nu blochează P7.1** — `shot_dominance` se calculează per echipă din istoricul ei cronologic, indiferent sub ce nume de ligă apare rândul; fragmentarea de ligă ar afecta agregări pe ligă (ex. calibrare per ligă), nu media glisantă per echipă folosită aici.
 
 ### P8 — Injuries ca feature ML
 
