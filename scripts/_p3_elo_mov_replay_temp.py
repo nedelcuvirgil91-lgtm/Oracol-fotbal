@@ -1,7 +1,18 @@
 """
-TEMPORAR -- P3 din ML_EVOLUTION_ROADMAP.md: Goal Difference ELO (MOV),
-executat conform P3_0_DESIGN_REVIEW_ELO_MOV_2026-07-15.md (aprobat de
-Chief Architect, formula A aleasa).
+TEMPORAR -- P3.1 din ML_EVOLUTION_ROADMAP.md: rafinare Goal Difference
+ELO (MOV), urmare a rundei 1 (P3), marcata explicit "Inconclusive / Needs
+refinement" de Chief Architect -- toate cele 3 variante testate imbunatateau
+Accuracy/Log Loss/Brier simultan, dar sub pragul strict de +0.3pp Accuracy;
+fidelitatea arata un trade-off real intre eroarea medie vs. referinta si
+Spearman rank correlation (V3_amplified castiga pe rang + Log Loss/Brier,
+pierde pe eroare medie). Decizie explicita: nu se trece la P4 fara (1) o
+investigatie a discrepantei de reproductibilitate (11.23% aici vs. 9.40%
+in ELO_FIDELITY_AUDIT_2026-07-13.md, aceeasi metodologie, acelasi numar de
+meciuri) si (2) o singura runda de rafinare in jurul lui V3, maximum
+cateva variante -- NU o cautare noua.
+
+Executat conform P3_0_DESIGN_REVIEW_ELO_MOV_2026-07-15.md (formula A
+aleasa, aprobata de Chief Architect).
 
 Replay A = ELOTracker exact ca in productie (sync/backfill_features.py,
 IMPORTAT direct, nu reimplementat -- garanteaza identitate bit-cu-bit cu
@@ -92,9 +103,15 @@ OFFICIAL_BENCHMARK = {"accuracy": 0.4868, "log_loss": 1.0253, "brier_score": 0.6
 ACCURACY_SUCCESS_DELTA = 0.003   # >=+0.3pp
 
 MOV_VARIANTS = {
-    "V1_baseline":  (2.2, 0.001),
-    "V2_damped":    (4.4, 0.0005),
-    "V3_amplified": (1.1, 0.002),
+    # P3.1 -- runda de rafinare (cerinta explicita: "maximum cateva variante
+    # bine alese, nu o cautare masiva"). V3 REPETAT ca ancora/verificare de
+    # reproductibilitate (ruleaza din nou identic, pe acelasi cod, aceeasi
+    # sursa de date -- verificam daca numerele raman stabile intre cele doua
+    # rulari). V4/V5 bracheteaza V3: mai multa, respectiv mai putina
+    # corectie de surpriza fata de V3, nu o cautare exhaustiva.
+    "V3_amplified":      (1.1, 0.002),
+    "V4_more_amplified": (0.8, 0.0025),
+    "V5_mild_amplified": (1.5, 0.0015),
 }
 
 
@@ -328,6 +345,18 @@ def main() -> int:
     print(f"  stabilitate sezon-cu-sezon: {stab_a['n_year_pairs']} perechi de ani, "
           f"yoy_std={stab_a['yoy_std']}, yoy_mean_abs={stab_a['yoy_mean_abs']}, "
           f"Spearman mediu intre ani consecutivi={stab_a['mean_spearman_consecutive_years']}")
+
+    # [ADAUGAT -- P3.1] Diagnostic de reproductibilitate: rularea anterioara
+    # (2026-07-15, prima runda P3) a raportat mean_abs_pct_diff=11.23% pentru
+    # Replay A, fata de 9.40% raportat cu 2 zile inainte in
+    # ELO_FIDELITY_AUDIT_2026-07-13.md, cu aceeasi metodologie si acelasi
+    # numar total de meciuri (53.409). Tabelul complet per-echipa de mai jos
+    # permite comparatia directa, rand cu rand, cu tabelul deja publicat acolo.
+    print(f"\n  Tabel complet per-echipa (Replay A, pentru diagnostic reproductibilitate vs. "
+          f"ELO_FIDELITY_AUDIT_2026-07-13.md):")
+    print(f"  {'echipa':<22}{'replay':>10}{'referinta':>12}{'diff':>10}{'abs_pct_diff':>15}")
+    for row in sorted(ref_a["rows"], key=lambda r: -r["abs_pct_diff"]):
+        print(f"  {row['team']:<22}{row['replay']:>10}{row['reference']:>12}{row['diff']:>10}{row['abs_pct_diff']:>14}%")
 
     fidelity_results = {}
     for name, data in replay_b.items():

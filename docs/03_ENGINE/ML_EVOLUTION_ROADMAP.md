@@ -21,6 +21,7 @@ Orice modificare de `FEATURE_COLUMNS`, hiperparametri sau algoritm rămâne guve
 - **Running** — experiment activ (workflow temporar rulat sau în curs).
 - **Accepted** — criteriul de succes îndeplinit, schimbarea a fost/urmează să fie integrată permanent.
 - **Rejected** — criteriul de abandon îndeplinit, motivul consemnat, nu se reîncearcă fără o schimbare reală de metodologie.
+- **Inconclusive / Needs refinement** — nici criteriul de succes, nici cel de abandon nu e clar îndeplinit (ex. toate metricile se mișcă în direcția bună, dar sub pragul de semnificație stabilit, sau semnale contradictorii între sub-metrici). Nu se declară nici Accepted, nici Rejected — se cere o rundă scurtă, explicit delimitată, de rafinare (nu o căutare nouă) înainte de verdict final; dacă nici runda de rafinare nu produce un câștig clar, se închide ca Rejected.
 
 ---
 
@@ -31,7 +32,8 @@ Orice modificare de `FEATURE_COLUMNS`, hiperparametri sau algoritm rămâne guve
 | P1 | Hyperparameter Tuning (Optuna) | Reduce Log Loss fără schimbare de date/algoritm | Log Loss | Rejected |
 | P2 | Probability Calibration (baseline vs Platt vs Isotonic) | Reduce Log Loss/Brier, Accuracy neschimbată | Log Loss + Brier | Rejected |
 | P3.0 | Design Review — formula MOV ELO | Alegerea formulei greșit ar propaga eroarea în tot sistemul (ELO domină modelul) | N/A (document) | Accepted |
-| P3 | Goal Difference ELO (MOV) | Crește fidelitatea ELO → crește Accuracy | Accuracy + fidelitate ELO + Spearman | Running |
+| P3 | Goal Difference ELO (MOV) | Crește fidelitatea ELO → crește Accuracy | Accuracy + fidelitate ELO + Spearman | Inconclusive / Needs refinement |
+| P3.1 | Rafinare P3 — reproductibilitate + rundă scurtă în jurul V3 | Rezolvă discrepanța de reproductibilitate + testează dacă o corecție de surpriză mai puternică produce câștig clar | Accuracy + Log Loss + Brier + fidelitate | Running |
 | P4 | ELO Trend | Direcția recentă a ELO conține informație suplimentară | Accuracy / Log Loss | Planned |
 | P5 | Schedule Strength | Nivelul adversarilor recenți conține informație suplimentară | Accuracy / Log Loss | Planned |
 | P6 | Home Advantage per ligă | Avantaj de teren calibrat &gt; constantă fixă globală | Accuracy | Planned |
@@ -127,7 +129,31 @@ Nicio variantă nu atinge pragul de 0,5% relativ (criteriul oficial) pe Log Loss
 - **Criteriu de abandon**: fidelitatea ELO scade ȘI câștigul de predictor e doar marginal (sub pragul de mai sus) — nu se promovează un ELO mai puțin fidel pentru un câștig mic.
 - **Formula aleasă**: FiveThirtyEight-style (§P3.0) — `ln(gd+1) × c/(d·elo_diff+c)` pentru rezultate decisive, multiplicator=1,0 la egal (caz special, gd=0 ar anula altfel actualizarea — descoperit la implementare, nu în document). 3 variante de constante testate la replay (V1 baseline 2,2/0,001, V2 damped 4,4/0,0005, V3 amplified 1,1/0,002) — verificare de direcție, nu căutare exhaustivă.
 - **Precondiție tehnică**: necesită recalculul complet al replay-ului istoric ELO (nu e o schimbare incrementală) — de rulat izolat, comparat cap-la-cap cu ELO-ul actual, nu de suprascris direct.
-- **Status**: **Running**.
+- **Status**: **Inconclusive / Needs refinement**.
+
+**Rezultate reale, runda 1 (2026-07-15, 53.409 meciuri, walk-forward, doar `home_elo`/`away_elo` înlocuite):**
+
+```
+                Accuracy    Log Loss    Brier      vs. referință (16 echipe)      Spearman
+Replay A (control)  0,4842   1,0304     0,6175     mean_abs_pct_diff=11,23%       0,755
+V1 baseline          +0,22pp  mai bun   mai bun     10,99% (mai bun)               0,737 (mai slab)
+V2 damped            +0,10pp  mai bun   mai bun     10,35% (cel mai bun)           0,723 (cel mai slab)
+V3 amplified         +0,20pp  cel mai bun brier/LL  13,13% (mai slab)              0,782 (cel mai bun)
+```
+
+Toate 3 variante îmbunătățesc simultan Accuracy/Log Loss/Brier față de Replay A, fără nicio regresie — semnal real, nu zgomot. Dar cea mai bună Accuracy (V1, +0,22pp) rămâne sub pragul de succes (+0,3pp) stabilit înainte de rezultat — conform disciplinei „nu schimbăm regulile după rezultate", nu se declară Accepted. Fidelitatea arată un trade-off real: V1/V2 reduc eroarea medie vs. referință dar înrăutățesc Spearman; V3 face invers (eroare medie mai mare, dar cel mai bun rang ȘI cel mai bun Log Loss/Brier) — niciun candidat nu câștigă clar pe ambele axe de fidelitate simultan, deci nu se declară nici Rejected (metricile de predictor nu regresează nicăieri).
+
+**Problemă de reproductibilitate semnalată, de rezolvat înaintea oricărei alte optimizări**: `mean_abs_pct_diff` pentru Replay A (control, neschimbat față de producție) a ieșit 11,23% în această rulare, față de 9,40% raportat cu 2 zile înainte în `ELO_FIDELITY_AUDIT_2026-07-13.md`, cu aceeași metodologie și același număr total de meciuri (53.409). Cauza nu e încă identificată.
+
+**Decizie Chief Architect**: nu se trece la P4. Se deschide **P3.1** — rundă scurtă de rafinare (nu o căutare nouă): (1) investighează discrepanța de reproductibilitate 9,40%/11,23%, (2) testează maximum câteva variante de constante în jurul lui V3 (cel mai interesant candidat — cel mai bun Log Loss/Brier, cel mai bun Spearman, argumentul fiind că rangul e mai puțin corupt de bias-ul de cold-start deja documentat decât eroarea medie absolută). Dacă nici P3.1 nu produce un câștig clar, P3 se închide ca Rejected.
+
+### P3.1 — Rafinare P3 (reproductibilitate + rundă scurtă în jurul V3)
+
+- **Motiv**: P3 marcat Inconclusive — semnal real (toate metricile de predictor se mișcă în direcția bună, fără nicio regresie), dar sub pragul de succes stabilit, plus o discrepanță de reproductibilitate nerezolvată pe fidelitate.
+- **Pasul 1**: diagnostic direct — tabel complet per-echipă (Replay A vs. referință) printat explicit, comparabil rând-cu-rând cu tabelul deja publicat în `ELO_FIDELITY_AUDIT_2026-07-13.md`, pentru a localiza sursa discrepanței 9,40%/11,23%.
+- **Pasul 2**: 3 variante noi de constante, bracketând V3 (V3 repetat ca ancoră/verificare de reproductibilitate + V4 mai amplificat + V5 mai puțin amplificat) — nu o căutare exhaustivă.
+- **Criteriu**: identic cu P3 (§ de mai sus) — dacă nici această rundă nu produce un câștig clar (Accuracy ≥+0,3pp SAU fidelitate clar mai bună pe ambele axe), P3 se închide definitiv ca Rejected.
+- **Status**: Running.
 
 ### P4 — ELO Trend
 
