@@ -56,6 +56,8 @@ class ShotCountTracker:
 
 Plasare: imediat după `FoulsTracker` (lângă `ShotsTracker`/`CornerCardTracker`), cod identic structural cu `FoulsTracker`, doar redenumit.
 
+**Comportamentul pentru istoricul incomplet este intenționat identic cu `CornerCardTracker` și `FoulsTracker`: media se calculează pe toate valorile disponibile (1...`FORM_WINDOW`), fără a impune minimum 10 meciuri.** Un istoric de 3 meciuri produce o medie pe 3, nu `None` și nu o valoare aproximată — `None` apare STRICT când istoricul e gol (0 meciuri cunoscute). Fereastra „completă" (10/10) nu e o precondiție de calcul, doar o cifră raportată separat în P7.1A (§1) ca informație suplimentară despre stabilitatea mediei.
+
 Modificări în funcțiile existente (nu clase noi):
 - `FEATURE_COLUMNS` (linia 87): +`"home_shot_avg_recent", "away_shot_avg_recent"`.
 - `fetch_all_matches()` (linia ~133): SELECT +`"home_shots,away_shots"` (azi lipsesc — doar `home_shots_on_target`/`away_shots_on_target` sunt citite).
@@ -135,6 +137,7 @@ Niciun pas din acest plan nu poate întrerupe predicțiile live existente — to
 - [ ] Teste unitare noi verzi (`test_shot_count_tracker.py`, extensia `test_backfill_features.py`).
 - [ ] `pytest tests/ -q` 100% verde (fără regresii).
 - [ ] Backfill rulat pe producție (`--dry-run` întâi, apoi real) — coverage confirmat ≥90% (consistent cu P7.1A, 92,7% așteptat).
+- [ ] **Verificare de consistență post-backfill** (sanity check, SQL read-only): niciun rând cu `home_shot_avg_recent`/`away_shot_avg_recent` populat nu are valoare negativă, `NaN` sau infinită (`WHERE home_shot_avg_recent < 0 OR home_shot_avg_recent = 'NaN' ...`); numărul de rânduri populate e în linie cu auditul P7.1A (~92,7%, ±o marjă mică justificată de eventuale meciuri noi intrate în `match_history` între audit și backfill). Orice abatere semnificativă de la 92,7% sau orice valoare negativă/NaN/infinită oprește fluxul înainte de pasul de ablație — semn de bug în `ShotCountTracker`, nu de acceptat tacit.
 - [ ] Workflow temporar de ablație rulat, rezultat documentat onest în `SHOT_DOMINANCE_ABLATION_2026-07-15.md` (metrici exacte, nu rotunjite optimist).
 - [ ] Workflow + script temporar șterse (ambele branch-uri, dacă rulat și pe `main`).
 - [ ] ADR-021 scris — **Accepted** (cu implementarea din §1/§3 marcată „DOAR dacă Accepted" aplicată complet + testele de integrare adăugate) SAU **Rejected** (motiv consemnat, coloane brute păstrate, nicio schimbare la `FEATURE_COLUMNS`).
