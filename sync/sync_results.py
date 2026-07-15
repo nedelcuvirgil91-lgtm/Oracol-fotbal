@@ -33,6 +33,7 @@ if str(root) not in sys.path:
 import requests
 
 from key_manager import get_key_manager
+from mappings import normalize_team_name
 
 logger = logging.getLogger("FootballOracle.Sync.Results")
 
@@ -234,8 +235,15 @@ def fetch_yesterday_results(target_date: str | None = None, days_back: int = 7) 
             if not league:
                 continue
 
-            home_team  = (match.get("homeTeam") or {}).get("name", "")
-            away_team  = (match.get("awayTeam") or {}).get("name", "")
+            # [ADAUGAT — P3.5 Team Identity Audit, fix de wiring] Normalizare
+            # obligatorie aici, nu doar la scriere (database/queries.py) —
+            # update_results_in_supabase() cauta randul existent dupa
+            # home_team+away_team+kickoff_date; daca randul a fost scris deja
+            # canonic (fix-ul de mai sus) dar cautarea foloseste numele brut
+            # din acest API, potrivirea ar esua silentios. Aceeasi sursa
+            # (football-data.org), aceeasi conventie de nume brute.
+            home_team  = normalize_team_name((match.get("homeTeam") or {}).get("name", ""))
+            away_team  = normalize_team_name((match.get("awayTeam") or {}).get("name", ""))
             score      = match.get("score", {})
             ft         = score.get("fullTime", {})
             home_goals = ft.get("home")

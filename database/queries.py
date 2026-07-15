@@ -13,6 +13,8 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
+from mappings import normalize_team_name
+
 logger = logging.getLogger("FootballOracle.Queries")
 
 
@@ -36,6 +38,28 @@ def get_client():
 # MATCH HISTORY
 # ════════════════════════════════════════════════════════════════════════════
 
+def _normalize_team_fields(row: dict) -> dict:
+    """
+    [ADAUGAT — P3.5 Team Identity Audit, fix de wiring] Punct unic de
+    normalizare a home_team/away_team, aplicat la FIECARE scriere in
+    match_history, indiferent de sursa. `normalize_team_name()`
+    (mappings.py) exista de mult si e deja aplicata de sync/import_
+    historical.py, dar niciun writer al sincronizarii zilnice (sync/
+    sources/football_data.py, openfootball.py) nu o apela — cauza
+    radacina demonstrata in TEAM_IDENTITY_AUDIT.md (137 echipe
+    fragmentate, 10,1% din match_history). Aplicata aici, la cele doua
+    functii de upsert (nu in fiecare sursa individual), ca nicio sursa
+    viitoare sa nu poata reintroduce defectul — acelasi principiu ca
+    _strip_none_values() de mai jos (Protectia Writer-ilor, 2026-07-13).
+    """
+    out = dict(row)
+    if out.get("home_team"):
+        out["home_team"] = normalize_team_name(out["home_team"])
+    if out.get("away_team"):
+        out["away_team"] = normalize_team_name(out["away_team"])
+    return out
+
+
 def upsert_match(row: dict) -> bool:
     """
     Inserează sau actualizează un meci în match_history.
@@ -46,7 +70,7 @@ def upsert_match(row: dict) -> bool:
         return False
     try:
         client.table("match_history").upsert(
-            row, on_conflict="fixture_id"
+            _normalize_team_fields(row), on_conflict="fixture_id"
         ).execute()
         return True
     except Exception as exc:
@@ -85,7 +109,7 @@ def upsert_matches_bulk(rows: list[dict]) -> tuple[int, int]:
     # randuri). Payload-ul ramane mic (zeci de KB), sub limitele PostgREST.
     batch_size = 250
     for i in range(0, len(rows), batch_size):
-        batch = [_strip_none_values(r) for r in rows[i:i + batch_size]]
+        batch = [_strip_none_values(_normalize_team_fields(r)) for r in rows[i:i + batch_size]]
         try:
             client.table("match_history").upsert(
                 batch, on_conflict="fixture_id"

@@ -192,7 +192,14 @@ Descoperire centrală: `TEAM_ALIASES`/`normalize_team_name()` (`mappings.py`, 27
 
 **Cele 4 echipe cu discrepanțele cele mai mari din P3.1** (Manchester United, Inter Milan, Bayern Munich, Tottenham) apar toate în lista confirmată, cu exact același mecanism.
 
-**Nicio scriere efectuată** — nici în `match_history`, nici în `TEAM_ALIASES`, nici în cod de producție. Fix-ul de wiring (adăugarea apelului `normalize_team_name()` în writer-ii sincronizării zilnice) e identificat precis dar **neaplicat** — decizie separată, explicită, de luat de Chief Architect. La fel, consolidarea rândurilor deja scrise brut în `match_history` ar fi o scriere pe producție — necesită protocolul obișnuit (SQL exact arătat, confirmare explicită), neinițiat aici.
+**Nicio scriere efectuată în timpul auditului** — nici în `match_history`, nici în `TEAM_ALIASES`, nici în cod de producție.
+
+**Fix de wiring aplicat separat, imediat după (2026-07-15), aprobat explicit de Chief Architect — Faza 1 din planul în 3 faze (Fix preventiv → Observație → Consolidare istoric):**
+- `database/queries._normalize_team_fields()` (funcție nouă) aplicată în `upsert_match()` și `upsert_matches_bulk()` — funnel-ul folosit de `sync/sync_matches.py` (football-data.org, openfootball), același principiu ca „Protecția Writer-ilor" (2026-07-13): garda la punctul unic de trecere, nu în fiecare sursă individual.
+- `supabase_client.upsert_match_history()` — al doilea funnel (folosit de `oracle_engine.py`, introducere manuală de rezultat din UI) — normalizare identică.
+- `sync/sync_results.py` (`fetch_yesterday_results()`) — normalizare la EXTRAGERE, nu doar la scriere: căutarea rândului existent (`home_team`+`away_team`+`kickoff_date`) ar fi eșuat silențios contra rândurilor deja scrise canonic de primele două funnel-uri, altfel.
+- **10 teste noi** (`tests/test_team_normalization_writers.py`) — demonstrează că toate cele 3 puncte de intrare produc același nume canonic pentru aceeași echipă (`test_all_writers_agree_on_the_same_canonical_name`), inclusiv regresie directă pe cazul Atletico Madrid din audit. 380/380 teste verzi (370 + 10 noi).
+- **Nicio consolidare a `match_history` existent** — doar rândurile scrise de acum înainte sunt normalizate. Faza 2 (observație, câteva zile) și Faza 3 (plan de migrare dry-run + raport înainte/după, execuție separată) rămân neînceput, condiționate explicit de confirmarea că Faza 1 funcționează corect în producție.
 
 ### P4 — ELO Trend
 

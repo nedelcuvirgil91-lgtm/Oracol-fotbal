@@ -21,6 +21,8 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 
+from mappings import normalize_team_name
+
 logger = logging.getLogger("FootballOracle.Supabase")
 
 _client = None
@@ -260,7 +262,17 @@ def upsert_match_history(row: dict) -> bool:
     if client is None:
         return False
     try:
-        client.table("match_history").upsert(row, on_conflict="fixture_id").execute()
+        # [ADAUGAT — P3.5 Team Identity Audit, fix de wiring] Al doilea
+        # funnel de scriere in match_history (celalalt e database/queries.py,
+        # folosit de sync/) — aceeasi normalizare aplicata aici, la punctul
+        # de scriere, nu la fiecare apelant (oracle_engine.py, introducere
+        # manuala de rezultat din UI). Vezi TEAM_IDENTITY_AUDIT.md.
+        payload = dict(row)
+        if payload.get("home_team"):
+            payload["home_team"] = normalize_team_name(payload["home_team"])
+        if payload.get("away_team"):
+            payload["away_team"] = normalize_team_name(payload["away_team"])
+        client.table("match_history").upsert(payload, on_conflict="fixture_id").execute()
         return True
     except Exception as exc:
         logger.error("[Supabase] upsert_match_history failed: %s", exc)
