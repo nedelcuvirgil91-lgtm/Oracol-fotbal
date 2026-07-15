@@ -28,7 +28,7 @@ Orice modificare de `FEATURE_COLUMNS`, hiperparametri sau algoritm rămâne guve
 
 | Prioritate | Experiment | Ipoteză (scurt) | Metrică principală | Status |
 |---|---|---|---|---|
-| P1 | Hyperparameter Tuning (Optuna) | Reduce Log Loss fără schimbare de date/algoritm | Log Loss | Planned |
+| P1 | Hyperparameter Tuning (Optuna) | Reduce Log Loss fără schimbare de date/algoritm | Log Loss | Rejected |
 | P2 | Probability Calibration (Isotonic) | Reduce Log Loss/Brier, Accuracy neschimbată | Log Loss + Brier | Planned |
 | P3 | Goal Difference ELO (MOV) | Crește fidelitatea ELO → crește Accuracy | Accuracy | Planned |
 | P4 | ELO Trend | Direcția recentă a ELO conține informație suplimentară | Accuracy / Log Loss | Planned |
@@ -51,7 +51,29 @@ Orice modificare de `FEATURE_COLUMNS`, hiperparametri sau algoritm rămâne guve
 - **Benchmark oficial**: Accuracy 0.4868 / Log Loss 1.0253 / Brier 0.6145.
 - **Criteriu de succes**: Log Loss redus cu ≥0,5% relativ (≤1,0202), fără degradare &gt;0,001 pe Accuracy sau Brier, pe aceleași 5 folduri walk-forward.
 - **Criteriu de abandon**: nicio combinație testată nu reduce Log Loss cu ≥0,3% relativ, sau reducerea vine cu degradare peste prag pe Accuracy/Brier.
-- **Status**: Planned.
+- **Status**: **Rejected** (închis definitiv, două runde executate, ambele contra infrastructurii reale, walk-forward, 53.409 meciuri).
+
+**Rezultate reale:**
+
+*Runda 1 (2026-07-14/15) — 120 trial-uri, spațiu de căutare larg (9 hiperparametri, `TPESampler(seed=42)`), obiectiv = `avg_log_loss`.*
+
+```
+Log Loss : 1.0253 -> ~1.0206  (-0,46% relativ, cel mai bun candidat)
+```
+Cel mai bun candidat din runda 1 a redus Log Loss, dar sub pragul oficial de 0,5% relativ (0,46% < 0,50%). Deviația standard între folduri a candidatului câștigător (0,0055) a depășit chiar îmbunătățirea absolută (0,0047), iar acesta pierdea pe unul din cele 5 folduri — nuanță semnalată explicit la raportare, nu doar eticheta automată „OK" a scriptului. Verdict: **REJECTED** conform criteriului oficial de succes (nu a fost atins pragul de abandon de -0,3%, dar nici pragul de succes de -0,5%). Convergență netâmplătoare observată totuși: majoritatea trial-urilor de top se grupau strâns în jurul `max_depth=2-3`, `learning_rate≈0,03-0,04`, `n_estimators≈300-400`, regularizare pozitivă puternică (`reg_lambda`/`gamma` mari) — un semnal clar, nu zgomot, motiv pentru care s-a decis o rundă focalizată (P1.1) în loc de închidere imediată.
+
+*Runda 2 — P1.1 (2026-07-15) — 400 trial-uri, spațiu de căutare restrâns la zona de convergență a rundei 1, `MedianPruner` (early stopping, 227/400 complete, 173 întrerupte), obiectiv de căutare = `avg_log_loss + 0,3×std_log_loss` (accent pe stabilitate), clasament final tot după `avg_log_loss` pur, pentru comparabilitate directă cu benchmark-ul și runda 1.*
+
+```
+Log Loss : 1.0253 -> 1.0203  (-0,0050, -0,4877% relativ)
+Accuracy : 0.4868 -> 0.4891  (+0,0023)
+Brier    : 0.6145 -> 0.6115  (-0,0030)
+Folduri individuale care bat benchmark-ul: 4/5 (foldul 1 rămâne singurul punct slab: 1,0261 > 1,0253)
+```
+
+Cel mai bun candidat (`n_estimators=350, max_depth=3, learning_rate≈0,0296, subsample≈0,624, colsample_bytree≈0,775, min_child_weight=7, reg_alpha≈0,001, reg_lambda≈3,36, gamma≈2,80`) ratează pragul oficial de 0,5% relativ cu **0,0123 puncte procentuale** — la limită, dar sub prag. Accuracy și Brier s-au îmbunătățit fără nicio degradare, însă checkul suplimentar de stabilitate (câștig pe toate cele 5 folduri) nu trece. Convergența identică pe două runde independente (120 și 400 trial-uri, spații de căutare diferite) confirmă un optim local real, nu artefact statistic — dar pragul de succes a fost stabilit înainte de rezultat și nu se schimbă retroactiv.
+
+**Concluzie**: conform deciziei explicite a Chief Architect, Hyperparameter Tuning se închide definitiv. Configurația de producție (`n_estimators=150, max_depth=4, learning_rate=0.08, subsample=0.85, colsample_bytree=0.85`) rămâne neschimbată. Nu se reia investigația decât dacă se schimbă feature-urile, ELO-ul, sau datele de antrenare.
 
 ### P2 — Probability Calibration (Isotonic)
 
