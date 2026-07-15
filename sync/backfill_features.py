@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
 import sys
 import time
 from datetime import date, datetime, timezone
@@ -212,6 +213,28 @@ def _k_factor(matches_played: int) -> float:
     return K_FACTOR_NEW if matches_played < 10 else K_FACTOR_BASE
 
 
+# [ADAUGAT — ADR-022, P3 Accepted] Multiplicator Margin of Victory (MOV),
+# formula FiveThirtyEight-style (P3_0_DESIGN_REVIEW_ELO_MOV_2026-07-15.md),
+# constante V2_damped — alese pe baza P3_REVALIDATION_POST_P3_5_2026-07-15.md
+# (singura variantă, alături de V1, care îmbunătățește simultan ambele axe
+# de fidelitate ELO — eroare absolută ȘI Spearman rank correlation — față
+# de referință; cea mai bună dintre toate 5 variante testate pe ambele axe).
+MOV_C = 4.4
+MOV_D = 0.0005
+
+
+def _mov_multiplier(goal_diff: int, elo_diff_signed: float) -> float:
+    """La egal (goal_diff=0), multiplicator neutru 1.0 — "marja de victorie"
+    nu are sens pentru un rezultat fără victorie (ln(1)=0 ar anula complet
+    actualizarea, caz special descoperit la implementarea originală P3,
+    nu în document). `elo_diff_signed` = rating câștigător − rating învins,
+    folosind ratingurile pre-meci (home advantage inclus) — o surpriză
+    (câștigătorul avea rating mai mic) amplifică multiplicatorul."""
+    if goal_diff <= 0:
+        return 1.0
+    return math.log(goal_diff + 1) * (MOV_C / (MOV_D * elo_diff_signed + MOV_C))
+
+
 class ELOTracker:
     """
     Urmărește ratingurile ELO pentru toate echipele în timp real,
@@ -235,8 +258,14 @@ class ELOTracker:
         """Returnează ELO-urile ÎNAINTE de a procesa meciul."""
         return round(self.get_elo(home)), round(self.get_elo(away))
 
-    def process_match(self, home: str, away: str, result: str) -> None:
-        """Actualizează ELO după un meci. Apelat DUPĂ ce am salvat ELO-ul pre-meci."""
+    def process_match(self, home: str, away: str, home_goals: int, away_goals: int, result: str) -> None:
+        """Actualizează ELO după un meci. Apelat DUPĂ ce am salvat ELO-ul pre-meci.
+
+        [SCHIMBAT — ADR-022] `home_goals`/`away_goals` obligatorii — folosite
+        pentru multiplicatorul MOV (§ADR-022). Semnătura veche (doar
+        `result`) nu mai există; ambii apelanți (run_backfill(),
+        sync/bootstrap_league_learning.py) transmit golurile, deja
+        disponibile la punctul de apel."""
         r_home = self.get_elo(home) + HOME_ADVANTAGE
         r_away = self.get_elo(away)
 
@@ -245,16 +274,22 @@ class ELOTracker:
 
         if result == "H":
             score_home, score_away = 1.0, 0.0
+            elo_diff = r_home - r_away
         elif result == "A":
             score_home, score_away = 0.0, 1.0
+            elo_diff = r_away - r_home
         else:
             score_home, score_away = 0.5, 0.5
+            elo_diff = 0.0
+
+        goal_diff = abs(int(home_goals) - int(away_goals))
+        multiplier = _mov_multiplier(goal_diff, elo_diff)
 
         k_home = _k_factor(self.get_count(home))
         k_away = _k_factor(self.get_count(away))
 
-        self.ratings[home] = self.get_elo(home) + k_home * (score_home - exp_home)
-        self.ratings[away] = self.get_elo(away) + k_away * (score_away - exp_away)
+        self.ratings[home] = self.get_elo(home) + k_home * multiplier * (score_home - exp_home)
+        self.ratings[away] = self.get_elo(away) + k_away * multiplier * (score_away - exp_away)
         self.match_counts[home] = self.get_count(home) + 1
         self.match_counts[away] = self.get_count(away) + 1
 
@@ -921,7 +956,7 @@ def run_backfill(
                 pending_updates.append((match["id"], features))
 
         # Actualizăm starea tracker-elor (indiferent dacă meciul era deja procesat)
-        elo_tracker.process_match(home, away, result)
+        elo_tracker.process_match(home, away, hg, ag, result)
         form_tracker.process_match(home, away, hg, ag, result)
         h2h_tracker.process_match(home, away, result, hg, ag)
         shots_tracker.process_match(home, away, match.get("home_shots_on_target"), match.get("away_shots_on_target"))
