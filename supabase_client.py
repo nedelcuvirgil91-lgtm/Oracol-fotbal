@@ -354,11 +354,19 @@ def get_team_recent_shots(team: str, league: str, last_n: int = 5) -> list[dict]
 def get_team_recent_match_events(team: str, league: str, last_n: int = 5) -> list[dict]:
     """
     Ultimele `last_n` meciuri TERMINATE ale echipei `team` în liga `league`,
-    cu cornere/faulturi/cartonașe/gol la pauză reale populate (Task 2/3,
-    ADR-011) — sursă pentru statistici reale afișate în TeamProfile, fără
-    a atinge formula de rating (corners/fouls/cards/HT nu sunt încă
-    parametri ai compute_team_offdef_rating — rămân informativ, până la o
-    decizie separată de ablație pentru fiecare).
+    cu cornere/faulturi/cartonașe/gol la pauză/șuturi totale reale populate
+    (Task 2/3 ADR-011, șuturi totale ADR-021/P7.1) — sursă pentru statistici
+    reale afișate în TeamProfile, fără a atinge formula de rating
+    (corners/fouls/cards/HT nu sunt încă parametri ai
+    compute_team_offdef_rating — rămân informativ). `home_shots`/`away_shots`
+    alimentează `shot_dominance` (FEATURE_COLUMNS, promovat prin ablație —
+    docs/03_ENGINE/SHOT_DOMINANCE_ABLATION_2026-07-15.md).
+
+    Notă cunoscută: filtrul de rând rămâne `home_corners IS NOT NULL`
+    (neschimbat, ca să nu se atingă comportamentul deja validat prin
+    ablație al corner_dominance/foul_diff) — deci `avg_shots` se calculează
+    doar din rândurile care AU și cornere populate, nu din toate rândurile
+    cu șuturi reale. Cuplaj pre-existent, nu unul introdus de P7.1.
 
     Zero scurgere temporală: doar meciuri cu actual_result populat.
     """
@@ -370,7 +378,8 @@ def get_team_recent_match_events(team: str, league: str, last_n: int = 5) -> lis
             client.table("match_history")
             .select("home_team,away_team,home_fouls,away_fouls,"
                     "home_corners,away_corners,home_yellow_cards,away_yellow_cards,"
-                    "home_red_cards,away_red_cards,home_ht_goals,away_ht_goals,kickoff_date")
+                    "home_red_cards,away_red_cards,home_ht_goals,away_ht_goals,"
+                    "home_shots,away_shots,kickoff_date")
             .eq("league", league)
             .or_(f"home_team.eq.{team},away_team.eq.{team}")
             .not_.is_("actual_result", "null")

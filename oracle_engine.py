@@ -208,6 +208,11 @@ class TeamProfile:
     avg_fouls:         float | None = None
     avg_yellow_cards:  float | None = None
     avg_ht_goals:      float | None = None
+    # [ADAUGAT — ADR-021/P7.1] Șuturi TOTALE reale (nu pe poartă — vezi
+    # avg_shots_ot mai sus, deja existent). Sursă pentru shot_dominance
+    # (FEATURE_COLUMNS), promovat prin ablație — vezi
+    # docs/03_ENGINE/SHOT_DOMINANCE_ABLATION_2026-07-15.md.
+    avg_shots:         float | None = None
 
 
 @dataclass
@@ -567,12 +572,13 @@ class FootballOracleEngine:
     @staticmethod
     def _real_match_events(canonical: str, league: str, last_n: int = 5) -> dict:
         """
-        Cornere/faulturi/cartonașe galbene/gol la pauză REALE, medie pe
-        ultimele `last_n` meciuri terminate — pur informativ (Task 2/3,
-        ADR-011), NU alimentează formula de rating. Valorile lipsă rămân
-        None — nu se aproximează.
+        Cornere/faulturi/cartonașe galbene/gol la pauză/șuturi totale REALE,
+        medie pe ultimele `last_n` meciuri terminate — pur informativ
+        (Task 2/3 ADR-011, șuturi ADR-021/P7.1), NU alimentează formula de
+        rating. Valorile lipsă rămân None — nu se aproximează.
         """
-        empty = {"avg_corners": None, "avg_fouls": None, "avg_yellow_cards": None, "avg_ht_goals": None}
+        empty = {"avg_corners": None, "avg_fouls": None, "avg_yellow_cards": None,
+                  "avg_ht_goals": None, "avg_shots": None}
         if not SUPABASE_MODULE_AVAILABLE:
             return empty
         try:
@@ -581,7 +587,7 @@ class FootballOracleEngine:
             return empty
         if not rows:
             return empty
-        corners, fouls, yellows, ht_goals = [], [], [], []
+        corners, fouls, yellows, ht_goals, shots = [], [], [], [], []
         for r in rows:
             is_home = r.get("home_team") == canonical
             is_away = r.get("away_team") == canonical
@@ -591,11 +597,14 @@ class FootballOracleEngine:
             f  = r.get("home_fouls") if is_home else r.get("away_fouls")
             y  = r.get("home_yellow_cards") if is_home else r.get("away_yellow_cards")
             ht = r.get("home_ht_goals") if is_home else r.get("away_ht_goals")
+            s  = r.get("home_shots") if is_home else r.get("away_shots")
             if c is not None: corners.append(float(c))
             if f is not None: fouls.append(float(f))
             if y is not None: yellows.append(float(y))
             if ht is not None: ht_goals.append(float(ht))
+            if s is not None: shots.append(float(s))
         return {
+            "avg_shots": sum(shots) / len(shots) if shots else None,
             "avg_corners": sum(corners) / len(corners) if corners else None,
             "avg_fouls": sum(fouls) / len(fouls) if fouls else None,
             "avg_yellow_cards": sum(yellows) / len(yellows) if yellows else None,
@@ -812,6 +821,7 @@ class FootballOracleEngine:
             avg_fouls=round(events["avg_fouls"], 2) if events["avg_fouls"] is not None else None,
             avg_yellow_cards=round(events["avg_yellow_cards"], 2) if events["avg_yellow_cards"] is not None else None,
             avg_ht_goals=round(events["avg_ht_goals"], 2) if events["avg_ht_goals"] is not None else None,
+            avg_shots=round(events["avg_shots"], 2) if events["avg_shots"] is not None else None,
         )
 
     # ── League weights (cold-start blending) ──────────────────────────────
@@ -1026,6 +1036,11 @@ class FootballOracleEngine:
             # [ADAUGAT — ADR-013] Aceeași disciplină ca mai sus.
             "foul_diff":               (away_p.avg_fouls - home_p.avg_fouls)
                                         if home_p.avg_fouls is not None and away_p.avg_fouls is not None
+                                        else None,
+            # [ADAUGAT — ADR-021/P7.1] Aceeași disciplină, promovat prin
+            # ablație (docs/03_ENGINE/SHOT_DOMINANCE_ABLATION_2026-07-15.md).
+            "shot_dominance":          (home_p.avg_shots - away_p.avg_shots)
+                                        if home_p.avg_shots is not None and away_p.avg_shots is not None
                                         else None,
             "weather_penalty":         weather_penalty,
             "mc_prob_home":            mc["mc_prob_home"],

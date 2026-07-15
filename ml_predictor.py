@@ -112,6 +112,12 @@ FEATURE_COLUMNS = [
     # diff` a fost testat separat și RESPINS (docs/03_ENGINE/HT_SCORE_
     # ABLATION_2026-07-14.md) — accuracy câștigă, log-loss/Brier regresează.
     "foul_diff",
+    # [ADAUGAT — ADR-021, P7.1] Promovat prin test de ablație walk-forward
+    # pe 5.253 meciuri reale (docs/03_ENGINE/SHOT_DOMINANCE_ABLATION_
+    # 2026-07-15.md): acuratețe/log-loss/Brier îmbunătățite simultan
+    # (Δacc +0,0046, Δlog-loss -0,0062, Δbrier -0,0047). Calculat din cele
+    # 2 coloane brute (home/away_shot_avg_recent) — nu stocat redundant.
+    "shot_dominance",
 ]
 
 RESULT_TO_LABEL = {"H": 0, "D": 1, "A": 2}
@@ -202,6 +208,11 @@ class MLPredictorEngine:
             df["foul_diff"] = df["away_foul_avg_recent"] - df["home_foul_avg_recent"]
         else:
             df["foul_diff"] = np.nan
+        # [ADAUGAT — ADR-021, P7.1] shot_dominance, aceeași disciplină.
+        if "home_shot_avg_recent" in df.columns and "away_shot_avg_recent" in df.columns:
+            df["shot_dominance"] = df["home_shot_avg_recent"] - df["away_shot_avg_recent"]
+        else:
+            df["shot_dominance"] = np.nan
         missing = [c for c in FEATURE_COLUMNS if c not in df.columns]
         for c in missing:
             df[c] = np.nan

@@ -82,9 +82,9 @@ def engine_with_recording_xgb(monkeypatch):
 
 
 def _rows_with_missing_corner_card_foul(n: int = 40) -> list[dict]:
-    """corner/card/foul brute LIPSESC (ca în producție azi, ~90% din rânduri)
-    — trebuie să ajungă NaN în corner_dominance/card_diff/foul_diff, nu
-    aproximate."""
+    """corner/card/foul/shot brute LIPSESC (ca în producție azi, ~90% din
+    rânduri) — trebuie să ajungă NaN în corner_dominance/card_diff/
+    foul_diff/shot_dominance, nu aproximate."""
     rows = []
     for i in range(n):
         row = dict(FEATURE_ROW_TEMPLATE)
@@ -98,7 +98,7 @@ def _rows_with_missing_corner_card_foul(n: int = 40) -> list[dict]:
 
 
 def _rows_fully_populated(n: int = 40) -> list[dict]:
-    """Toate cele 13 coloane complete, fără niciun NULL."""
+    """Toate cele 14 coloane complete, fără niciun NULL."""
     rows = []
     for i in range(n):
         row = dict(FEATURE_ROW_TEMPLATE)
@@ -110,6 +110,8 @@ def _rows_fully_populated(n: int = 40) -> list[dict]:
         row["away_card_avg_recent"] = 2.0
         row["home_foul_avg_recent"] = 11.0
         row["away_foul_avg_recent"] = 10.0
+        row["home_shot_avg_recent"] = 12.0
+        row["away_shot_avg_recent"] = 9.5
         row["actual_result"] = RESULTS_CYCLE[i % 3]
         row["kickoff_date"] = f"2026-01-{(i % 28) + 1:02d}"
         rows.append(row)
@@ -133,7 +135,7 @@ def test_missing_corner_card_foul_reach_xgboost_as_nan_not_imputed(engine_with_r
     production_model = _RecordingXGBClassifier.instances[-1]
     X_fit = production_model.X_fit
 
-    for col in ("corner_dominance", "card_diff", "foul_diff"):
+    for col in ("corner_dominance", "card_diff", "foul_diff", "shot_dominance"):
         assert X_fit[col].isna().all(), (
             f"{col} trebuie să rămână NaN (nativ XGBoost), nu aproximat cu mediana"
         )
@@ -151,7 +153,7 @@ def test_no_nan_is_silently_replaced_anywhere_in_pipeline(engine_with_recording_
     expected_nan_columns = {
         c for c in FEATURE_COLUMNS
         if c not in raw_df.columns or raw_df[c].isna().any()
-        or c in ("corner_dominance", "card_diff", "foul_diff")
+        or c in ("corner_dominance", "card_diff", "foul_diff", "shot_dominance")
     }
 
     production_model = _RecordingXGBClassifier.instances[-1]
@@ -174,6 +176,7 @@ def test_fully_populated_dataset_input_matrix_matches_raw_values_exactly(engine_
     df["corner_dominance"] = df["home_corner_avg_recent"] - df["away_corner_avg_recent"]
     df["card_diff"] = df["away_card_avg_recent"] - df["home_card_avg_recent"]
     df["foul_diff"] = df["away_foul_avg_recent"] - df["home_foul_avg_recent"]
+    df["shot_dominance"] = df["home_shot_avg_recent"] - df["away_shot_avg_recent"]
     df = df.sort_values("kickoff_date", kind="stable").reset_index(drop=True)
     expected = df[FEATURE_COLUMNS].astype(float)
 
@@ -196,14 +199,14 @@ def test_predict_passes_nan_natively_not_zero_or_median():
     # simulăm exact ce trimite oracle_engine când corner/card/foul lipsesc:
     # cheile absente din dict -> predict() le mapează la np.nan (features.get(c, np.nan))
     features = {c: 1.0 for c in FEATURE_COLUMNS}
-    for missing_col in ("corner_dominance", "card_diff", "foul_diff"):
+    for missing_col in ("corner_dominance", "card_diff", "foul_diff", "shot_dominance"):
         features.pop(missing_col, None)
 
     pred = engine.predict(features)
     assert pred is not None
 
     row_sent = engine.model.X_predict_calls[0]
-    for missing_col in ("corner_dominance", "card_diff", "foul_diff"):
+    for missing_col in ("corner_dominance", "card_diff", "foul_diff", "shot_dominance"):
         value = row_sent.iloc[0][missing_col]
         assert math.isnan(value), (
             f"{missing_col} trebuie trimis ca NaN la predict_proba(), nu 0.0/mediană"

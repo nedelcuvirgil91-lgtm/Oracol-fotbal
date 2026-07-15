@@ -243,6 +243,9 @@ def explain_prediction(pred, weights: dict, config: dict) -> MatchExplanation | 
             ml_detail["card_diff"] = f"{away_p.avg_yellow_cards - home_p.avg_yellow_cards:+.1f}"
         if home_p.avg_fouls is not None and away_p.avg_fouls is not None:
             ml_detail["foul_diff"] = f"{away_p.avg_fouls - home_p.avg_fouls:+.1f}"
+        # [ADAUGAT — ADR-021, P7.1] shot_dominance, aceeași disciplină.
+        if home_p.avg_shots is not None and away_p.avg_shots is not None:
+            ml_detail["shot_dominance"] = f"{home_p.avg_shots - away_p.avg_shots:+.1f}"
         _add("Model ML", ph_final, detail=ml_detail)
 
     return MatchExplanation(stages=stages, final_prob_home=round(prev_ph, 4))
