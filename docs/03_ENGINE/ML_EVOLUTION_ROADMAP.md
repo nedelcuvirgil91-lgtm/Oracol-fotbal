@@ -29,7 +29,7 @@ Orice modificare de `FEATURE_COLUMNS`, hiperparametri sau algoritm rămâne guve
 | Prioritate | Experiment | Ipoteză (scurt) | Metrică principală | Status |
 |---|---|---|---|---|
 | P1 | Hyperparameter Tuning (Optuna) | Reduce Log Loss fără schimbare de date/algoritm | Log Loss | Rejected |
-| P2 | Probability Calibration (baseline vs Platt vs Isotonic) | Reduce Log Loss/Brier, Accuracy neschimbată | Log Loss + Brier | Running |
+| P2 | Probability Calibration (baseline vs Platt vs Isotonic) | Reduce Log Loss/Brier, Accuracy neschimbată | Log Loss + Brier | Rejected |
 | P3 | Goal Difference ELO (MOV) | Crește fidelitatea ELO → crește Accuracy | Accuracy | Planned |
 | P4 | ELO Trend | Direcția recentă a ELO conține informație suplimentară | Accuracy / Log Loss | Planned |
 | P5 | Schedule Strength | Nivelul adversarilor recenți conține informație suplimentară | Accuracy / Log Loss | Planned |
@@ -86,7 +86,22 @@ Cel mai bun candidat (`n_estimators=350, max_depth=3, learning_rate≈0,0296, su
 - **Criteriu de succes**: Log Loss și/sau Brier reduse cu ≥0,5% relativ (față de baseline-ul din experiment), Accuracy neschimbată (±0,001).
 - **Criteriu de abandon**: nicio reducere măsurabilă de Log Loss/Brier, sau reducere însoțită de schimbare a Accuracy peste prag.
 - **Condiție de promovare (dacă Accepted)**: NU se promovează direct în producție. Se validează întâi impactul asupra motorului de Value Betting — o calibrare poate reduce Log Loss dar comprima probabilitățile suficient încât să scadă numărul de value bets identificate; acesta e un pas separat, ulterior, înainte de orice integrare în `ml_predictor.py`.
-- **Status**: Running.
+- **Status**: **Rejected** (rulat integral pe date reale, 53.409 meciuri, 5 folduri walk-forward, split clf/calib 85/15 cronologic în fiecare fold).
+
+**Rezultate reale (2026-07-15):**
+
+```
+                Log Loss    Brier    Accuracy    ECE (pe 44.508 predicții din validare, pooled)
+baseline        1.0277      0.6159   0.4842      0.0161
+Platt           1.0254      0.6149   0.4867      0.0092   (-0,22% Log Loss, -0,16% Brier)
+Isotonic        1.0631      0.6158   0.4865      0.0074   (+3,44% Log Loss -- MAI RĂU, -0,02% Brier)
+```
+
+Nicio variantă nu atinge pragul de 0,5% relativ (criteriul oficial) pe Log Loss sau Brier. Accuracy nu s-a degradat la nicio variantă (ambele au crescut ușor, sub pragul de semnificație urmărit). Verdict: **REJECTED**.
+
+**Observație notabilă** (exact tipul de nuanță pe care cerința de Reliability Diagram + ECE a fost menită să o scoată la iveală, nu doar cifrele agregate): Isotonic îmbunătățește vizibil calibrarea propriu-zisă (ECE 0,0074 față de 0,0161 la baseline, reliability diagram cu mai multe bin-uri „calibrat" și mai puține „overconfident") — dar înrăutățește Log Loss cu 3,44% relativ, opus intuiției. Cauza: Isotonic Regression e o funcție treaptă (nu netedă); pe seturi de calibrare relativ mici per fold (1.336-6.677 meciuri), poate produce probabilități extreme (apropiate de 0/1) în bin-uri sparse din cozile distribuției — o singură predicție greșită acolo e penalizată sever de Log Loss (logaritmul unei probabilități aproape de 0). Platt Scaling (sigmoid, doar 2 parametri per clasă, funcție netedă) e mult mai robust pe seturi de calibrare de această dimensiune — de aceea câștigă marginal pe toate 3 metricile, dar insuficient pentru pragul de 0,5%.
+
+**Concluzie**: modelul de producție e deja rezonabil de bine calibrat nativ (baseline ECE=0,0161, discrepanțe mici, majoritatea bin-urilor „calibrat"), motiv plauzibil pentru care nicio recalibrare nu produce un câștig suficient de mare. Nu se promovează nicio variantă în producție. Nu se declanșează pasul de validare Value Betting (condiționat explicit de Accepted). P2 se închide — nu se reia decât dacă apare o schimbare reală (feature-uri noi, volum de date mult mai mare, sau dovadă nouă de supraîncredere sistematică).
 
 ## Etapa 2 — Îmbunătățim informația dominantă (ELO)
 
