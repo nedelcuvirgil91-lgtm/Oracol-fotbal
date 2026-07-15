@@ -1,0 +1,289 @@
+raw_name,canonical_name,match_count,category,in_team_aliases_py,is_dominant_variant,team_total_matches,team_impact_matches
+Ath Madrid,Atletico Madrid,153,alias,yes,yes,313,160
+Club Atlético de Madrid,Atletico Madrid,150,alias,yes,no,313,160
+Atletico Madrid,Atletico Madrid,10,alias,yes,no,313,160
+Inter,Inter Milan,152,alias,yes,yes,307,155
+FC Internazionale Milano,Inter Milan,147,alias,yes,no,307,155
+Inter Milan,Inter Milan,8,alias,yes,no,307,155
+Real Madrid,Real Madrid,165,alias,yes,yes,320,155
+Real Madrid CF,Real Madrid,155,alias,yes,no,320,155
+Arsenal,Arsenal,156,alias,yes,yes,309,153
+Arsenal FC,Arsenal,153,alias,yes,no,309,153
+Paris Saint-Germain,Paris Saint-Germain,158,alias,yes,yes,306,148
+Paris Saint-Germain FC,Paris Saint-Germain,148,alias,yes,no,306,148
+Manchester City,Manchester City,168,alias,yes,yes,312,144
+Manchester City FC,Manchester City,144,alias,yes,no,312,144
+Bayern Munich,Bayern Munich,149,alias,yes,yes,291,142
+FC Bayern München,Bayern Munich,142,alias,yes,no,291,142
+Atalanta,Atalanta,164,alias,yes,yes,300,136
+Atalanta BC,Atalanta,136,alias,yes,no,300,136
+Liverpool,Liverpool,169,alias,yes,yes,305,136
+Liverpool FC,Liverpool,136,alias,yes,no,305,136
+Juventus,Juventus,160,alias,yes,yes,294,134
+Juventus FC,Juventus,134,alias,yes,no,294,134
+Newcastle United,Newcastle United,156,alias,yes,yes,288,132
+Newcastle United FC,Newcastle United,132,alias,yes,no,288,132
+Napoli,Napoli,160,alias,yes,yes,290,130
+SSC Napoli,Napoli,130,alias,yes,no,290,130
+Sociedad,Real Sociedad,152,alias,yes,yes,282,130
+Real Sociedad de Fútbol,Real Sociedad,122,alias,yes,no,282,130
+Real Sociedad,Real Sociedad,8,alias,yes,no,282,130
+Aston Villa,Aston Villa,155,alias,yes,yes,281,126
+Aston Villa FC,Aston Villa,126,alias,yes,no,281,126
+Bayer Leverkusen,Bayer Leverkusen,147,alias,yes,yes,271,124
+Bayer 04 Leverkusen,Bayer Leverkusen,124,alias,yes,no,271,124
+Chelsea,Chelsea,166,alias,yes,yes,290,124
+Chelsea FC,Chelsea,124,alias,yes,no,290,124
+Tottenham Hotspur,Tottenham Hotspur,156,alias,yes,yes,280,124
+Tottenham Hotspur FC,Tottenham Hotspur,124,alias,yes,no,280,124
+Ein Frankfurt,Eintracht Frankfurt,139,alias,yes,yes,262,123
+Eintracht Frankfurt,Eintracht Frankfurt,123,alias,yes,no,262,123
+Ath Bilbao,Athletic Club,152,alias,yes,yes,274,122
+Athletic Club,Athletic Club,122,alias,yes,no,274,122
+Bologna,Bologna,152,alias,yes,yes,274,122
+Bologna FC 1909,Bologna,122,alias,yes,no,274,122
+Girona,Girona FC,156,alias,yes,yes,278,122
+Girona FC,Girona FC,122,alias,yes,no,278,122
+Lazio,Lazio,160,alias,yes,yes,282,122
+SS Lazio,Lazio,122,alias,yes,no,282,122
+Monaco,Monaco,158,alias,yes,yes,280,122
+AS Monaco FC,Monaco,122,alias,yes,no,280,122
+Villarreal,Villarreal,164,alias,yes,yes,286,122
+Villarreal CF,Villarreal,122,alias,yes,no,286,122
+MGladbach,Borussia Monchengladbach,120,alias,yes,yes,241,121
+Borussia Mönchengladbach,Borussia Monchengladbach,102,alias,yes,no,241,121
+M'gladbach,Borussia Monchengladbach,19,alias,yes,no,241,121
+Manchester United,Manchester United,164,alias,yes,yes,284,120
+Manchester United FC,Manchester United,120,alias,yes,no,284,120
+Sevilla,Sevilla,163,alias,yes,yes,283,120
+Sevilla FC,Sevilla,120,alias,yes,no,283,120
+Bournemouth,AFC Bournemouth,164,alias,yes,yes,278,114
+AFC Bournemouth,AFC Bournemouth,114,alias,yes,no,278,114
+Betis,Betis,163,alias,yes,yes,277,114
+Real Betis Balompié,Betis,114,alias,yes,no,277,114
+Brentford,Brentford,157,alias,yes,yes,271,114
+Brentford FC,Brentford,114,alias,yes,no,271,114
+Brighton,Brighton,152,alias,yes,yes,266,114
+Brighton & Hove Albion FC,Brighton,114,alias,yes,no,266,114
+Osasuna,CA Osasuna,152,alias,yes,yes,266,114
+CA Osasuna,CA Osasuna,114,alias,yes,no,266,114
+Cagliari,Cagliari,153,alias,yes,yes,267,114
+Cagliari Calcio,Cagliari,114,alias,yes,no,267,114
+Celta,Celta Vigo,152,alias,yes,yes,266,114
+RC Celta de Vigo,Celta Vigo,114,alias,yes,no,266,114
+Crystal Palace,Crystal Palace,157,alias,yes,yes,271,114
+Crystal Palace FC,Crystal Palace,114,alias,yes,no,271,114
+Alaves,Deportivo Alaves,156,alias,yes,yes,270,114
+Deportivo Alavés,Deportivo Alaves,114,alias,yes,no,270,114
+Everton,Everton,156,alias,yes,yes,270,114
+Everton FC,Everton,114,alias,yes,no,270,114
+Fiorentina,Fiorentina,152,alias,yes,yes,266,114
+ACF Fiorentina,Fiorentina,114,alias,yes,no,266,114
+Fulham,Fulham,164,alias,yes,yes,278,114
+Fulham FC,Fulham,114,alias,yes,no,278,114
+Genoa,Genoa,153,alias,yes,yes,267,114
+Genoa CFC,Genoa,114,alias,yes,no,267,114
+Getafe,Getafe CF,153,alias,yes,yes,267,114
+Getafe CF,Getafe CF,114,alias,yes,no,267,114
+Verona,Hellas Verona,152,alias,yes,yes,266,114
+Hellas Verona FC,Hellas Verona,114,alias,yes,no,266,114
+Lecce,Lecce,152,alias,yes,yes,266,114
+US Lecce,Lecce,114,alias,yes,no,266,114
+Nottingham Forest,Nottingham Forest,164,alias,yes,yes,278,114
+Nottingham Forest FC,Nottingham Forest,114,alias,yes,no,278,114
+Mallorca,RCD Mallorca,152,alias,yes,yes,266,114
+RCD Mallorca,RCD Mallorca,114,alias,yes,no,266,114
+Vallecano,Rayo Vallecano,152,alias,yes,yes,266,114
+Rayo Vallecano de Madrid,Rayo Vallecano,114,alias,yes,no,266,114
+Torino,Torino,153,alias,yes,yes,267,114
+Torino FC,Torino,114,alias,yes,no,267,114
+Udinese,Udinese,152,alias,yes,yes,266,114
+Udinese Calcio,Udinese,114,alias,yes,no,266,114
+Valencia,Valencia,152,alias,yes,yes,266,114
+Valencia CF,Valencia,114,alias,yes,no,266,114
+West Ham United,West Ham United,168,alias,yes,yes,282,114
+West Ham United FC,West Ham United,114,alias,yes,no,282,114
+Wolverhampton Wanderers,Wolverhampton Wanderers,157,alias,yes,yes,271,114
+Wolverhampton Wanderers FC,Wolverhampton Wanderers,114,alias,yes,no,271,114
+Lille,Lille,159,alias,yes,yes,271,112
+Lille OSC,Lille,112,alias,yes,no,271,112
+Brest,Stade Brestois,144,alias,yes,yes,256,112
+Stade Brestois 29,Stade Brestois,112,alias,yes,no,256,112
+Marseille,Marseille,156,alias,yes,yes,266,110
+Olympique de Marseille,Marseille,110,alias,yes,no,266,110
+Stuttgart,VfB Stuttgart,139,alias,yes,yes,249,110
+VfB Stuttgart,VfB Stuttgart,110,alias,yes,no,249,110
+Lens,Lens,151,alias,yes,yes,259,108
+Racing Club de Lens,Lens,108,alias,yes,no,259,108
+Union Berlin,Union Berlin,136,alias,yes,yes,243,107
+1. FC Union Berlin,Union Berlin,107,alias,yes,no,243,107
+Heidenheim,1. FC Heidenheim,136,alias,yes,yes,238,102
+1. FC Heidenheim 1846,1. FC Heidenheim,102,alias,yes,no,238,102
+Augsburg,FC Augsburg,136,alias,yes,yes,238,102
+FC Augsburg,FC Augsburg,102,alias,yes,no,238,102
+Freiburg,Freiburg,139,alias,yes,yes,241,102
+SC Freiburg,Freiburg,102,alias,yes,no,241,102
+Hoffenheim,Hoffenheim,136,alias,yes,yes,238,102
+TSG 1899 Hoffenheim,Hoffenheim,102,alias,yes,no,238,102
+Le Havre,Le Havre AC,153,alias,yes,yes,255,102
+Le Havre AC,Le Havre AC,102,alias,yes,no,255,102
+Lyon,Lyon,161,alias,yes,yes,263,102
+Olympique Lyonnais,Lyon,102,alias,yes,no,263,102
+Mainz,Mainz 05,140,alias,yes,yes,242,102
+1. FSV Mainz 05,Mainz 05,102,alias,yes,no,242,102
+Nice,Nice,153,alias,yes,yes,255,102
+OGC Nice,Nice,102,alias,yes,no,255,102
+Strasbourg,RC Strasbourg,151,alias,yes,yes,253,102
+RC Strasbourg Alsace,RC Strasbourg,102,alias,yes,no,253,102
+Rennes,Rennes,150,alias,yes,yes,252,102
+Stade Rennais FC 1901,Rennes,102,alias,yes,no,252,102
+Werder Bremen,SV Werder Bremen,139,alias,yes,yes,241,102
+SV Werder Bremen,SV Werder Bremen,102,alias,yes,no,241,102
+Wolfsburg,Wolfsburg,145,alias,yes,yes,247,102
+VfL Wolfsburg,Wolfsburg,102,alias,yes,no,247,102
+Nantes,FC Nantes,151,alias,yes,yes,252,101
+FC Nantes,FC Nantes,101,alias,yes,no,252,101
+Toulouse,Toulouse FC,150,alias,yes,yes,251,101
+Toulouse FC,Toulouse FC,101,alias,yes,no,251,101
+Burnley,Burnley,172,alias,yes,yes,248,76
+Burnley FC,Burnley,76,alias,yes,no,248,76
+Como,Como,152,alias,yes,yes,228,76
+Como 1907,Como,76,alias,yes,no,228,76
+Empoli,Empoli,153,alias,yes,yes,229,76
+Empoli FC,Empoli,76,alias,yes,no,229,76
+Espanol,Espanyol,156,alias,yes,yes,232,76
+RCD Espanyol de Barcelona,Espanyol,76,alias,yes,no,232,76
+Monza,Monza,153,alias,yes,yes,229,76
+AC Monza,Monza,76,alias,yes,no,229,76
+Parma,Parma,152,alias,yes,yes,228,76
+Parma Calcio 1913,Parma,76,alias,yes,no,228,76
+Sassuolo,Sassuolo,152,alias,yes,yes,228,76
+US Sassuolo Calcio,Sassuolo,76,alias,yes,no,228,76
+Las Palmas,UD Las Palmas,160,alias,yes,yes,236,76
+UD Las Palmas,UD Las Palmas,76,alias,yes,no,236,76
+FC Koln,1. FC Koln,139,alias,yes,yes,207,68
+1. FC Köln,1. FC Koln,68,alias,yes,no,207,68
+Auxerre,AJ Auxerre,155,alias,yes,yes,223,68
+AJ Auxerre,AJ Auxerre,68,alias,yes,no,223,68
+Angers,Angers SCO,157,alias,yes,yes,225,68
+Angers SCO,Angers SCO,68,alias,yes,no,225,68
+Lorient,FC Lorient,152,alias,yes,yes,220,68
+FC Lorient,FC Lorient,68,alias,yes,no,220,68
+Metz,FC Metz,151,alias,yes,yes,219,68
+FC Metz,FC Metz,68,alias,yes,no,219,68
+St Pauli,FC St. Pauli,139,alias,yes,yes,207,68
+FC St. Pauli 1910,FC St. Pauli,68,alias,yes,no,207,68
+Reims,Stade de Reims,144,alias,yes,yes,212,68
+Stade de Reims,Stade de Reims,68,alias,yes,no,212,68
+Montpellier,Montpellier HSC,153,alias,yes,yes,220,67
+Montpellier HSC,Montpellier HSC,67,alias,yes,no,220,67
+Bochum,VfL Bochum,139,alias,yes,yes,206,67
+VfL Bochum 1848,VfL Bochum,67,alias,yes,no,206,67
+Leicester,Leicester City,164,alias,yes,yes,208,44
+Leicester City FC,Leicester City,38,alias,yes,no,208,44
+Leicester City,Leicester City,6,alias,yes,no,208,44
+Colon Santa Fe,Colon Santa Fe,66,alias,no_add_to_team_aliases,yes,106,40
+Colon Santa FE,Colon Santa Fe,40,alias,no_add_to_team_aliases,no,106,40
+Benfica,Benfica,139,alias,yes,yes,177,38
+Sport Lisboa e Benfica,Benfica,28,alias,yes,no,177,38
+BENFICA,Benfica,10,alias,no_add_to_team_aliases,no,177,38
+Leganes,CD Leganes,165,alias,yes,yes,203,38
+CD Leganés,CD Leganes,38,alias,yes,no,203,38
+Cadiz,Cadiz CF,156,alias,yes,yes,194,38
+Cádiz CF,Cadiz CF,38,alias,yes,no,194,38
+Cremonese,Cremonese,152,alias,yes,yes,190,38
+US Cremonese,Cremonese,38,alias,yes,no,190,38
+Elche,Elche CF,161,alias,yes,yes,199,38
+Elche CF,Elche CF,38,alias,yes,no,199,38
+Frosinone,Frosinone,152,alias,yes,yes,190,38
+Frosinone Calcio,Frosinone,38,alias,yes,no,190,38
+Granada,Granada CF,160,alias,yes,yes,198,38
+Granada CF,Granada CF,38,alias,yes,no,198,38
+Ipswich,Ipswich Town,180,alias,yes,yes,218,38
+Ipswich Town FC,Ipswich Town,38,alias,yes,no,218,38
+Leeds,Leeds United,171,alias,yes,yes,209,38
+Leeds United FC,Leeds United,38,alias,yes,no,209,38
+Levante,Levante UD,165,alias,yes,yes,203,38
+Levante UD,Levante UD,38,alias,yes,no,203,38
+Luton,Luton Town,181,alias,yes,yes,219,38
+Luton Town FC,Luton Town,38,alias,yes,no,219,38
+Oviedo,Real Oviedo,168,alias,yes,yes,206,38
+Real Oviedo,Real Oviedo,38,alias,yes,no,206,38
+Valladolid,Real Valladolid,160,alias,yes,yes,198,38
+Real Valladolid CF,Real Valladolid,38,alias,yes,no,198,38
+Salernitana,Salernitana,153,alias,yes,yes,191,38
+US Salernitana 1919,Salernitana,38,alias,yes,no,191,38
+Sheffield United,Sheffield United,180,alias,yes,yes,218,38
+Sheffield United FC,Sheffield United,38,alias,yes,no,218,38
+Southampton,Southampton,164,alias,yes,yes,202,38
+Southampton FC,Southampton,38,alias,yes,no,202,38
+Sunderland,Sunderland,188,alias,yes,yes,226,38
+Sunderland AFC,Sunderland,38,alias,yes,no,226,38
+Almeria,UD Almeria,160,alias,yes,yes,198,38
+UD Almería,UD Almeria,38,alias,yes,no,198,38
+Venezia,Venezia,153,alias,yes,yes,191,38
+Venezia FC,Venezia,38,alias,yes,no,191,38
+Clermont,Clermont Foot,144,alias,yes,yes,178,34
+Clermont Foot 63,Clermont Foot,34,alias,yes,no,178,34
+Hamburg,Hamburger SV,139,alias,yes,yes,173,34
+Hamburger SV,Hamburger SV,34,alias,yes,no,173,34
+Darmstadt,SV Darmstadt 98,136,alias,yes,yes,170,34
+SV Darmstadt 98,SV Darmstadt 98,34,alias,yes,no,170,34
+St Etienne,AS Saint-Etienne,155,alias,yes,yes,188,33
+AS Saint-Étienne,AS Saint-Etienne,33,alias,yes,no,188,33
+Club Brugge,Club Brugge,152,alias,yes,yes,180,28
+Club Brugge KV,Club Brugge,22,alias,yes,no,180,28
+CLUB BRUGGE,Club Brugge,6,alias,no_add_to_team_aliases,no,180,28
+Galatasaray,Galatasaray,149,alias,yes,yes,175,26
+Galatasaray SK,Galatasaray,18,alias,yes,no,175,26
+GALATASARAY,Galatasaray,8,alias,no_add_to_team_aliases,no,175,26
+Celtic,Celtic,148,alias,yes,yes,170,22
+Celtic FC,Celtic,16,alias,yes,no,170,22
+CELTIC,Celtic,6,alias,no_add_to_team_aliases,no,170,22
+Young Boys,Young Boys,120,alias,yes,yes,140,20
+BSC Young Boys,Young Boys,14,alias,yes,no,140,20
+BSC YOUNG BOYS,Young Boys,6,alias,no_add_to_team_aliases,no,140,20
+Feyenoord,Feyenoord,139,alias,yes,yes,157,18
+Feyenoord Rotterdam,Feyenoord,18,alias,yes,no,157,18
+Olympiakos,Olympiacos,57,alias,yes,yes,75,18
+PAE Olympiakos SFP,Olympiacos,10,alias,yes,no,75,18
+OLYMPIACOS PIRAEUS,Olympiacos,8,alias,yes,no,75,18
+Porto,Porto,139,alias,yes,yes,157,18
+FC PORTO,Porto,10,alias,no_add_to_team_aliases,no,157,18
+FC Porto,Porto,8,alias,yes,no,157,18
+FC Copenhagen,FC Copenhagen,110,alias,yes,yes,126,16
+FC København,FC Copenhagen,16,alias,yes,no,126,16
+Rangers,Rangers,148,alias,yes,yes,163,15
+RANGERS,Rangers,15,alias,no_add_to_team_aliases,no,163,15
+Sturm Graz,Sturm Graz,105,alias,yes,yes,119,14
+SK Sturm Graz,Sturm Graz,8,alias,yes,no,119,14
+STURM GRAZ,Sturm Graz,6,alias,no_add_to_team_aliases,no,119,14
+Bodo/Glimt,Bodo/Glimt,101,alias,yes,yes,113,12
+FK Bodø/Glimt,Bodo/Glimt,12,alias,yes,no,113,12
+Antwerp,Royal Antwerp,153,alias,no_add_to_team_aliases,yes,165,12
+Royal Antwerp FC,Royal Antwerp,6,alias,yes,no,165,12
+ANTWERP,Royal Antwerp,6,alias,yes,no,165,12
+Ajax,Ajax,148,alias,yes,yes,156,8
+AFC Ajax,Ajax,8,alias,yes,no,156,8
+Besiktas,Besiktas,149,alias,yes,yes,155,6
+BESIKTAS,Besiktas,6,alias,no_add_to_team_aliases,no,155,6
+SC BRAGA,Braga,12,alias,yes,yes,18,6
+Sporting Clube de Braga,Braga,6,alias,yes,no,18,6
+Brondby,Brondby,109,alias,yes,yes,115,6
+BRONDBY,Brondby,6,alias,no_add_to_team_aliases,no,115,6
+Fenerbahce,Fenerbahce,148,alias,no_add_to_team_aliases,yes,154,6
+FENERBAHCE,Fenerbahce,6,alias,no_add_to_team_aliases,no,154,6
+Genk,Genk,154,alias,yes,yes,160,6
+GENK,Genk,6,alias,no_add_to_team_aliases,no,160,6
+Lokomotiv Moscow,Lokomotiv Moscow,101,alias,yes,yes,107,6
+LOKOMOTIV MOSCOW,Lokomotiv Moscow,6,alias,no_add_to_team_aliases,no,107,6
+Malmo FF,Malmo FF,106,alias,yes,yes,112,6
+MALMO FF,Malmo FF,6,alias,no_add_to_team_aliases,no,112,6
+Midtjylland,Midtjylland,110,alias,yes,yes,116,6
+FC MIDTJYLLAND,Midtjylland,6,alias,yes,no,116,6
+Spartak Moscow,Spartak Moscow,102,alias,yes,yes,108,6
+SPARTAK MOSCOW,Spartak Moscow,6,alias,no_add_to_team_aliases,no,108,6
+AFC Wimbledon,AFC Wimbledon,184,alias,yes,yes,188,4
+Wimbledon,AFC Wimbledon,4,alias,yes,no,188,4
+Univ. Craiova,Universitatea Craiova,252,alias,yes,yes,253,1
+Universitatea Craiova,Universitatea Craiova,1,alias,yes,no,253,1

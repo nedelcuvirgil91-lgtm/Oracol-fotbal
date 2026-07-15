@@ -34,7 +34,7 @@ Orice modificare de `FEATURE_COLUMNS`, hiperparametri sau algoritm rămâne guve
 | P3.0 | Design Review — formula MOV ELO | Alegerea formulei greșit ar propaga eroarea în tot sistemul (ELO domină modelul) | N/A (document) | Accepted |
 | P3 | Goal Difference ELO (MOV) | Crește fidelitatea ELO → crește Accuracy | Accuracy + fidelitate ELO + Spearman | **Inconclusive (fără promovare în producție)** |
 | P3.1 | Rafinare P3 — reproductibilitate + rundă scurtă în jurul V3 | Rezolvă discrepanța de reproductibilitate + testează dacă o corecție de surpriză mai puternică produce câștig clar | Accuracy + Log Loss + Brier + fidelitate | Done (a informat verdictul final P3) |
-| P3.5 | Team Identity Audit & Historical Normalization | Discrepanțele uriașe per-echipă găsite în P3.1 (unele echipe aproape identice cu referința, altele diferă cu 100-240 puncte) sunt semnătura unei probleme de normalizare a numelui de echipă, nu a formulei ELO | N/A (audit de date, nu experiment ML) | Planned — următoarea prioritate |
+| P3.5 | Team Identity Audit & Historical Normalization | Discrepanțele uriașe per-echipă găsite în P3.1 (unele echipe aproape identice cu referința, altele diferă cu 100-240 puncte) sunt semnătura unei probleme de normalizare a numelui de echipă, nu a formulei ELO | N/A (audit de date, nu experiment ML) | **Done** — 137 echipe, 10,1% din match_history afectat, cauza rădăcină identificată |
 | P4 | ELO Trend | Direcția recentă a ELO conține informație suplimentară | Accuracy / Log Loss | Planned (după P3.5) |
 | P5 | Schedule Strength | Nivelul adversarilor recenți conține informație suplimentară | Accuracy / Log Loss | Planned |
 | P6 | Home Advantage per ligă | Avantaj de teren calibrat &gt; constantă fixă globală | Accuracy | Planned |
@@ -180,7 +180,19 @@ V4 arată clar limita superioară — regresie pe toate metricile plus instabili
 - **Ipoteză**: `match_history` conține variante de nume neconsolidate pentru un subset de echipe (alias-uri, redenumiri istorice, promovări/retrogradări între ligi cu nume ușor diferite, posibile duplicate) — consolidarea lor ar produce un `ELOTracker` semnificativ mai fidel, fără nicio schimbare de formulă.
 - **Scop**: audit sistematic — alias-uri de echipe, redenumiri, promovări/retrogradări, echipe duplicate, istorii fragmentate. Nu e un experiment ML (fără criteriu Accuracy/Log Loss/Brier propriu) — e un audit de calitate a datelor, cu livrabil probabil un raport + o listă de consolidări propuse (aplicate ulterior, separat, cu disciplina obișnuită de scriere pe producție — confirmare explicită, niciodată check-then-act).
 - **Legătură cu P3**: dacă acest audit reduce semnificativ discrepanțele neregulate găsite în P3.1, formula MOV (în special V5) devine candidat pentru re-testare — fără reinventarea metodologiei, doar peste date mai curate.
-- **Status**: Planned — următoarea prioritate, înaintea reluării Etapei 2 (P4/P5/P6).
+- **Status**: **Done**.
+
+**Rezultate reale (2026-07-15)**: `docs/03_ENGINE/TEAM_IDENTITY_AUDIT.md` + `docs/03_ENGINE/canonical_team_mapping.csv`.
+
+Descoperire centrală: `TEAM_ALIASES`/`normalize_team_name()` (`mappings.py`, 272 intrări) **există deja** și acoperă majoritatea covârșitoare a cazurilor — problema nu e lipsa unei surse de adevăr, e o **gaură de wiring**: `sync/import_historical.py` (import istoric bulk) apelează `normalize_team_name()` la fiecare rând; niciunul din writer-ii sincronizării zilnice (`sync/sources/football_data.py`, `football_data_co_uk.py`, `kaggle.py`, `openfootball.py`, `sync/sync_results.py`) nu o apelează — scriu numele echipelor brut, direct din payload-ul API.
+
+**137 echipe canonice afectate, 146 cazuri confirmate** (129 deja acoperite de `TEAM_ALIASES` dar neaplicate + 17 noi, negăsite până acum — tipar ALL-CAPS dintr-un al treilea provider de date de cupe europene). **10.835 apariții de meci „rătăcite" (10,1% din tot volumul `match_history`, 106.860 apariții).** Verificare exhaustivă: cele 729 de nume rămase, rulate prin `normalize_team_name()` pentru clustering automat — zero clustere noi găsite, deci acoperire completă a tot ce e detectabil mecanic.
+
+**Descoperire importantă, contrazice ipoteza inițială**: distribuția impactului NU e concentrată — top 20 cazuri acoperă doar 25,1% din impact, top 30 doar 36,1% (nu „primele 20 rezolvă 95%"). Aproape toate echipele mari afectate (Atletico Madrid, Real Madrid, Inter Milan, Arsenal, PSG, Manchester City, Bayern Munich...) au impact similar (120-160 meciuri fiecare) — problema e lată, nu ascuțită.
+
+**Cele 4 echipe cu discrepanțele cele mai mari din P3.1** (Manchester United, Inter Milan, Bayern Munich, Tottenham) apar toate în lista confirmată, cu exact același mecanism.
+
+**Nicio scriere efectuată** — nici în `match_history`, nici în `TEAM_ALIASES`, nici în cod de producție. Fix-ul de wiring (adăugarea apelului `normalize_team_name()` în writer-ii sincronizării zilnice) e identificat precis dar **neaplicat** — decizie separată, explicită, de luat de Chief Architect. La fel, consolidarea rândurilor deja scrise brut în `match_history` ar fi o scriere pe producție — necesită protocolul obișnuit (SQL exact arătat, confirmare explicită), neinițiat aici.
 
 ### P4 — ELO Trend
 
