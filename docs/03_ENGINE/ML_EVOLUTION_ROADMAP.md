@@ -30,7 +30,8 @@ Orice modificare de `FEATURE_COLUMNS`, hiperparametri sau algoritm rămâne guve
 |---|---|---|---|---|
 | P1 | Hyperparameter Tuning (Optuna) | Reduce Log Loss fără schimbare de date/algoritm | Log Loss | Rejected |
 | P2 | Probability Calibration (baseline vs Platt vs Isotonic) | Reduce Log Loss/Brier, Accuracy neschimbată | Log Loss + Brier | Rejected |
-| P3 | Goal Difference ELO (MOV) | Crește fidelitatea ELO → crește Accuracy | Accuracy | Planned |
+| P3.0 | Design Review — formula MOV ELO | Alegerea formulei greșit ar propaga eroarea în tot sistemul (ELO domină modelul) | N/A (document) | Awaiting decision |
+| P3 | Goal Difference ELO (MOV) | Crește fidelitatea ELO → crește Accuracy | Accuracy + fidelitate ELO | Blocked (așteaptă P3.0) |
 | P4 | ELO Trend | Direcția recentă a ELO conține informație suplimentară | Accuracy / Log Loss | Planned |
 | P5 | Schedule Strength | Nivelul adversarilor recenți conține informație suplimentară | Accuracy / Log Loss | Planned |
 | P6 | Home Advantage per ligă | Avantaj de teren calibrat &gt; constantă fixă globală | Accuracy | Planned |
@@ -107,16 +108,22 @@ Nicio variantă nu atinge pragul de 0,5% relativ (criteriul oficial) pe Log Loss
 
 *Context: ELO produce ~15-20× mai mult semnal (permutation importance) decât orice alt feature — orice investiție în calitatea lui are efect de levier asupra întregului model.*
 
+### P3.0 — Design Review: formula MOV ELO (precondiție obligatorie pentru P3)
+
+- **Motiv**: P3 nu e o optimizare peste o informație fixată (ca P1/P2) — schimbă informația însăși pe care modelul o învață. ELO domină importanța feature-urilor de 15-20× (`PREDICTOR_ROADMAP_V4.md`) — o formulă greșit aleasă se propagă în predictor, Learning Core, viitorul Confidence Engine, Value Betting. Decizie explicită a Chief Architect: nu se implementează P3 fără un document de proiectare aprobat în prealabil.
+- **Document**: `docs/03_ENGINE/P3_0_DESIGN_REVIEW_ELO_MOV_2026-07-15.md` — compară 3 formule candidate (FiveThirtyEight-style logaritmică, ClubElo/eloratings.net-style treaptă, Pi Ratings), recomandă varianta FiveThirtyEight-style (logaritmică + corecție de surpriză pe elo_diff, constante supuse validării empirice) și recomandă scoaterea Pi Ratings din scopul P3 (sistem de rating diferit, nu o extensie a Elo). Propune metodologie de fidelitate în 3 straturi (comparație relativă vs. `ELO_RATINGS_FALLBACK`, stabilitate sezon-cu-sezon — 100% internă, distribuția diferențelor), cu avertisment explicit: nu există date reale ClubElo (clubelo.com) în proiect — singura referință externă e `ELO_RATINGS_FALLBACK` (stil eloratings.net, deja auditat în `ELO_FIDELITY_AUDIT_2026-07-13.md`, cu eroare sistematică de cold-start de 9,4% independentă de formula MOV). Propune design Replay A/B (independent, zero scriere, zero atingere producție) și un criteriu de succes compus (fidelitate ELO SAU predictor clar mai bun, nu doar unul singur marginal).
+- **Status**: **Awaiting decision** — document livrat, așteaptă alegerea formulei (A/B) și confirmarea metodologiei de la Chief Architect înainte ca P3 să poată începe.
+
 ### P3 — Goal Difference ELO (MOV — Margin of Victory)
 
 - **Motiv**: `ELOTracker` (`sync/backfill_features.py`) folosește azi exclusiv rezultatul categorial (H/D/A) la actualizarea ratingului — un 5-0 și un 1-0 produc identică actualizare. Standard în implementările Elo moderne (FiveThirtyEight, ClubElo).
 - **Ipoteză**: un multiplicator de diferență de goluri produce un ELO mai fidel, care îmbunătățește la rândul lui predicțiile modelului.
-- **Metrică urmărită**: Accuracy (principal — precedent direct în `ELO_PERFORMANCE_EXPERIMENT_2026-07-13.md`, unde variante ELO diferite au mutat Accuracy cu +4,3pp); Log Loss/Brier raportate, regula de simultaneitate (CLAUDE.md) se aplică.
+- **Metrică urmărită**: Accuracy (principal — precedent direct în `ELO_PERFORMANCE_EXPERIMENT_2026-07-13.md`, unde variante ELO diferite au mutat Accuracy cu +4,3pp); Log Loss/Brier raportate, regula de simultaneitate (CLAUDE.md) se aplică; fidelitatea ELO (§3, P3.0) raportată și ea, nu doar predictorul.
 - **Benchmark oficial**: idem.
-- **Criteriu de succes**: Accuracy crescută cu ≥0,3pp, fără regres simultan pe Log Loss ȘI Brier.
-- **Criteriu de abandon**: nicio îmbunătățire simultană pe minim 2 din 3 metrici, sau regres pe oricare dintre ele.
+- **Criteriu de succes**: (fidelitatea ELO crește LA §3 din P3.0) SAU (Accuracy crescută cu ≥0,3pp, fără regres simultan pe Log Loss ȘI Brier) — criteriu compus, formalizat în P3.0 §6, nu doar predictorul izolat.
+- **Criteriu de abandon**: fidelitatea ELO scade ȘI câștigul de predictor e doar marginal (sub pragul de mai sus) — nu se promovează un ELO mai puțin fidel pentru un câștig mic.
 - **Precondiție tehnică**: necesită recalculul complet al replay-ului istoric ELO (nu e o schimbare incrementală) — de rulat izolat, comparat cap-la-cap cu ELO-ul actual, nu de suprascris direct.
-- **Status**: Planned.
+- **Status**: **Blocked** — așteaptă finalizarea P3.0 (alegerea formulei).
 
 ### P4 — ELO Trend
 
