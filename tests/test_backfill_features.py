@@ -53,6 +53,7 @@ def _fresh_store():
             "home_card_avg_recent": 1.5, "away_card_avg_recent": 2.0,
             "home_foul_avg_recent": 11.0, "away_foul_avg_recent": 10.0,
             "home_shot_avg_recent": 12.0, "away_shot_avg_recent": 9.5,
+            "home_elo_after": 1495, "away_elo_after": 1505,
         },
     }
 

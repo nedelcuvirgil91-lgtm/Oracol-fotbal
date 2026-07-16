@@ -105,6 +105,12 @@ FEATURE_COLUMNS: tuple[str, ...] = (
     # DOAR dacă ablația (SHOT_DOMINANCE_ABLATION_2026-07-15.md) e Accepted
     # — până atunci, coloane pur informative, fără niciun consumator ML.
     "home_shot_avg_recent", "away_shot_avg_recent",
+    # [ADAUGAT — ADR-023, docs/00_GOVERNANCE/ADR-023-canonical-live-elo-source.md]
+    # Canonical Live ELO Snapshot — ratingul ELO al fiecărei echipe IMEDIAT
+    # DUPĂ meci (spre deosebire de home_elo/away_elo, care rămân pre-meci,
+    # neschimbate, sursă exclusivă de antrenare ML). Consumator: servirea
+    # live (Phase 4-6), NU ml_predictor.FEATURE_COLUMNS — nu se adaugă acolo.
+    "home_elo_after", "away_elo_after",
 )
 
 
@@ -925,6 +931,29 @@ def run_backfill(
         # 10 coloane deja populate) primesc missing == [] și sunt sărite
         # complet, fără niciun apel de UPDATE.
         missing = _missing_feature_columns(match)
+
+        # Actualizăm starea tracker-elor (indiferent dacă meciul era deja procesat)
+        elo_tracker.process_match(home, away, hg, ag, result)
+        form_tracker.process_match(home, away, hg, ag, result)
+        h2h_tracker.process_match(home, away, result, hg, ag)
+        shots_tracker.process_match(home, away, match.get("home_shots_on_target"), match.get("away_shots_on_target"))
+        corner_card_tracker.process_match(
+            home, away,
+            match.get("home_corners"), match.get("away_corners"),
+            match.get("home_yellow_cards"), match.get("away_yellow_cards"),
+        )
+        fouls_tracker.process_match(home, away, match.get("home_fouls"), match.get("away_fouls"))
+        shot_count_tracker.process_match(home, away, match.get("home_shots"), match.get("away_shots"))
+
+        # [ADR-023] home_elo_after/away_elo_after — ratingul ELO imediat DUPĂ
+        # acest meci (Canonical Live ELO Snapshot). Citite DUPĂ
+        # elo_tracker.process_match() de mai sus, spre deosebire de
+        # home_elo/away_elo (pre-meci, citite înainte de bucla de update-uri
+        # a tracker-elor) — singurele 2 coloane din FEATURE_COLUMNS care
+        # reflectă starea de după meci, nu de dinainte.
+        home_elo_after = round(elo_tracker.get_elo(home))
+        away_elo_after = round(elo_tracker.get_elo(away))
+
         if missing:
             computed = {
                 "home_elo":               home_elo,
@@ -945,6 +974,8 @@ def run_backfill(
                 "away_foul_avg_recent":   away_foul_avg,
                 "home_shot_avg_recent":   home_shot_avg,
                 "away_shot_avg_recent":   away_shot_avg,
+                "home_elo_after":         home_elo_after,
+                "away_elo_after":         away_elo_after,
             }
             # [Regula #13] Nu scriem None peste None — dacă tracker-ul de
             # cornere/cartonașe nu are încă istoric real (ex. primul meci al
@@ -954,19 +985,6 @@ def run_backfill(
             features = {col: computed[col] for col in missing if computed[col] is not None}
             if features:
                 pending_updates.append((match["id"], features))
-
-        # Actualizăm starea tracker-elor (indiferent dacă meciul era deja procesat)
-        elo_tracker.process_match(home, away, hg, ag, result)
-        form_tracker.process_match(home, away, hg, ag, result)
-        h2h_tracker.process_match(home, away, result, hg, ag)
-        shots_tracker.process_match(home, away, match.get("home_shots_on_target"), match.get("away_shots_on_target"))
-        corner_card_tracker.process_match(
-            home, away,
-            match.get("home_corners"), match.get("away_corners"),
-            match.get("home_yellow_cards"), match.get("away_yellow_cards"),
-        )
-        fouls_tracker.process_match(home, away, match.get("home_fouls"), match.get("away_fouls"))
-        shot_count_tracker.process_match(home, away, match.get("home_shots"), match.get("away_shots"))
 
         # Scriem în batch
         if len(pending_updates) >= batch_size:
