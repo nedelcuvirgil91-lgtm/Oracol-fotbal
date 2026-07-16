@@ -2,7 +2,7 @@
 
 ## Status
 
-**Propus** — 2026-07-16. Documentează contractul de identitate și problema demonstrată;
+**Accepted** — 2026-07-16. Documentează contractul de identitate și problema demonstrată;
 **nu alege și nu autorizează** o soluție tehnică de remediere. Alegerea soluției și
 autorizarea implementării rămân o decizie ulterioară, separată, a Owner-ului
 („Architecture Review" după acest ADR).
