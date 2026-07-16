@@ -67,6 +67,8 @@ Guvernanța (ADR-uri, documente Frozen, promovare manuală) e tratată ca avanta
 | `app.py` | UI Streamlit — predicții, config, League Learning, diagnostics. | `oracle_engine.py`, `supabase_client.py` | Utilizator final |
 | `config.json` / `weights.json` | Configurare globală + ponderi per ligă, aditiv, compatibilitate păstrată. | (fișier local / `model_config` Supabase) | `oracle_engine.py`, `recalibration.py` |
 
+**Notă de tranziție (ADR-023, aprobat, în implementare pe faze)**: `oracle_engine.py` va înceta să depindă de `oracle_api.py` pentru ELO — sursa devine `match_history.home_elo_after`/`away_elo_after` (Canonical Live ELO Snapshot), citită prin `database/queries.py`. Până la finalizarea Phase 6 (Oracle Switch) a Execution Plan-ului, dependența din tabelul de mai sus rămâne exactă, neschimbată.
+
 ## Disciplina ADR
 
 - Orice schimbare de model de date/contract/responsabilitate de componentă = ADR nou, numerotat secvențial, format `Status/Context/Decizie/Consecințe` (vezi `architecture/ADR-001…004`, `docs/00_GOVERNANCE/ADR-005…006`).
