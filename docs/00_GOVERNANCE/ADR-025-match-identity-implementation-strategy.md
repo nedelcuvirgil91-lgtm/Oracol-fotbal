@@ -2,13 +2,11 @@
 
 ## Status
 
-**Propus / Changes Requested** — 2026-07-16. Revizie aplicată conform observațiilor
-Owner-ului (separarea contract/mecanism/plan operațional, extragerea Source Trust
-Policy, adăugarea Rollback Strategy și Canonical Row Definition, eliminarea unei
-reguli de implementare fixate prematur în ADR). Răspunde exclusiv la întrebarea: *cum
-implementăm contractul formal stabilit de ADR-024, fără a compromite datele istorice
-și fără a introduce regresii?* Nu execută nimic — necesită aprobare explicită înainte
-de orice scriere pe producție.
+**Approved / Architecture Frozen** — 2026-07-16. Răspunde exclusiv la întrebarea:
+*cum implementăm contractul formal stabilit de ADR-024, fără a compromite datele
+istorice și fără a introduce regresii?* Nu execută nimic — implementarea urmează
+prin documente separate de Implementation Design (ID-025-01…N), fără a redeschide
+acest ADR decât la o încălcare demonstrabilă a unei decizii de aici.
 
 ## Context
 
