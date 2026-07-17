@@ -60,13 +60,24 @@ def test_romania_and_mls_correctly_marked_unsupported_by_football_data():
 
 def test_romania_superliga_api_football_confirmed_not_guessed():
     """league_id=283 verificat live prin /leagues?country=Romania (workflow_dispatch,
-    run 29615697599, 2026-07-17) - nu presupus. supported=True (nu "necunoscut"),
-    fiindca dovada live (league_id + coverage_fixtures.events=True) e confirmata,
-    nu doar o presupunere de structura."""
+    run 29615697599, 2026-07-17) - nu presupus. provider_ids ramane setat (cheie
+    valida, league_id corect) chiar daca planul Free blocheaza sezonul curent -
+    vezi test_romania_superliga_api_football_plan_restricted."""
     definition = LEAGUE_PROVIDERS["Romania SuperLiga"]
     assert definition.provider_ids["api_football"] == 283
-    assert definition.supported["api_football"] is True
     assert API_FOOTBALL_LEAGUE_IDS["Romania SuperLiga"] == 283
+
+
+def test_romania_superliga_api_football_plan_restricted():
+    """supported="plan_restricted" - NU True, NU "necunoscut". Confirmat live
+    (nu presupus): /fixtures?league=283&season=2026 -> HTTP 200,
+    errors={"plan": "Free plans do not have access to this season, try from
+    2022 to 2024."} (run 29616468120). next=/date=/live= nu ocolesc
+    restrictia (run 29616932623, vezi comentariul din mappings.py)."""
+    definition = LEAGUE_PROVIDERS["Romania SuperLiga"]
+    assert definition.supported["api_football"] == "plan_restricted"
+    assert definition.supported["api_football"] is not True
+    assert definition.supported["api_football"] != "necunoscut"
 
 
 def test_api_football_league_ids_generic_not_romania_only():

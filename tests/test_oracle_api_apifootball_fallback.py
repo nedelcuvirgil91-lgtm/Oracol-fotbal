@@ -80,3 +80,22 @@ def test_api_football_fallback_skipped_when_league_already_has_matches(monkeypat
 
     assert calls == []
     assert any(m["source"] == "espn" for m in matches)
+
+
+def test_real_fetch_api_football_zero_http_calls_for_plan_restricted_league():
+    """Integrare reala (nu stub) a _fetch_matches_api_football -> ApiFootballProvider
+    -> _covered(): pentru Romania SuperLiga (supported="plan_restricted"), 0
+    cereri HTTP - gate-ul de coverage opreste inainte de orice request.
+    Confirma "0 cereri irosite" prin cod, nu doar prin comentariu."""
+    import key_manager
+    from football_providers import ApiFootballProvider
+
+    api = _api_no_network()
+    api._api_football = ApiFootballProvider(key_manager=key_manager.get_key_manager())
+    http_calls = []
+    api._api_football._get = lambda *a, **kw: http_calls.append(a) or {"response": []}
+
+    result = api._fetch_matches_api_football("Romania SuperLiga", "2026-07-17", "2026-07-24")
+
+    assert result == []
+    assert http_calls == []

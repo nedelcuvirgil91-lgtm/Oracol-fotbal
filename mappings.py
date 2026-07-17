@@ -424,11 +424,41 @@ LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
     ),
     "Romania SuperLiga": LeagueDefinition(
         name="Romania SuperLiga",
-        # api_football=283 ("Liga I") - VERIFICAT LIVE 2026-07-17 prin
-        # /leagues?country=Romania (workflow_dispatch, run 29615697599, nu
-        # presupus): sezon curent 2026 (2026-07-18 -> 2027-03-13),
-        # coverage_fixtures.events=True. "SuperLiga" e brandingul de
-        # sponsorizare al aceleiasi competitii, nu o liga separata in date.
+        # api_football=283 ("Liga I") - league_id VERIFICAT LIVE 2026-07-17
+        # prin /leagues?country=Romania (workflow_dispatch, run 29615697599,
+        # nu presupus). "SuperLiga" e brandingul de sponsorizare al aceleiasi
+        # competitii, nu o liga separata in date.
+        #
+        # supported["api_football"]="plan_restricted" — NU True, NU
+        # "necunoscut". Providerul e configurat corect (cheie valida,
+        # league_id corect) DAR planul Free API-Football blocheaza explicit
+        # accesul la sezonul curent pe /fixtures. Verificat live, 4 apeluri
+        # reale (nu presupus):
+        #   GET /fixtures?league=283&season=2026&from=2026-07-17&to=2026-07-24
+        #     -> HTTP 200, errors={"plan": "Free plans do not have access to
+        #        this season, try from 2022 to 2024."}, response=[]
+        #        (run 29616468120, payload brut confirmat in api_cache/Supabase)
+        #   GET /fixtures?league=283&next=5
+        #     -> HTTP 200, errors={"plan": "Free plans do not have access to
+        #        the Next parameter."} (run 29616932623)
+        #   GET /fixtures?league=283&date=2026-07-18 (fara season)
+        #     -> HTTP 200, errors={"season": "The Season field is required."}
+        #        - season ramane obligatoriu, nu ocoleste restrictia (run 29616932623)
+        #   GET /fixtures?live=all
+        #     -> functioneaza (8 meciuri live, alte ligi), dar acopera DOAR
+        #        meciuri in desfasurare, inutilizabil pentru programul de
+        #        meciuri viitoare (run 29616932623)
+        # Niciun parametru documentat oficial nu ocoleste restrictia de sezon
+        # pe planul Free. Confirmat si extern: documentatia oficiala
+        # (api-football.com/pricing: "Free plans are limited in terms of
+        # available seasons") si un caz independent (World Cup 2026, blog
+        # Zenn.dev, 2026-06-08) raporteaza EXACT acelasi mesaj de eroare,
+        # rezolvat de acel autor doar prin upgrade la plan platit.
+        #
+        # _covered() (football_providers.py) trateaza "plan_restricted" la
+        # fel ca False - blocheaza apelul, 0 cereri irosite. Daca planul se
+        # schimba (upgrade), un singur rand aici (True) reactiveaza fallback-ul
+        # complet, fara nicio alta modificare de cod.
         provider_ids={"football_data": None, "espn": "rou.1", "tsdb": "4652",
                        "odds": "soccer_romania_1_liga", "freelf": None, "api_football": 283},
         supported={
@@ -437,7 +467,7 @@ LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
                                       # Romania nu e printre ele
             "espn": True, "tsdb": True, "odds": True,
             "freelf": "necunoscut",
-            "api_football": True,  # CONFIRMAT live (league_id + coverage_fixtures.events=True) - nu "necunoscut"
+            "api_football": "plan_restricted",
         },
     ),
     "World Cup 2026": LeagueDefinition(

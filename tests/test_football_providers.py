@@ -82,11 +82,24 @@ def test_coverage_allows_unknown_provider_state():
     assert p._covered("World Cup 2026", "api_football") is True
 
 
-def test_coverage_allows_confirmed_romania_superliga():
-    """Romania SuperLiga nu mai e "necunoscut" - confirmata live (league_id=283,
-    coverage_fixtures.events=True, /leagues?country=Romania, 2026-07-17)."""
+def test_coverage_blocks_plan_restricted_romania_superliga():
+    """Romania SuperLiga: league_id=283 confirmat live, dar planul Free
+    blocheaza sezonul curent pe /fixtures (verificat live, run 29616468120/
+    29616932623) - supported="plan_restricted" trebuie tratat ca False,
+    NU ca "necunoscut" (nu e o stare nedeterminata, e confirmata)."""
     p = _provider()
-    assert p._covered("Romania SuperLiga", "api_football") is True
+    assert p._covered("Romania SuperLiga", "api_football") is False
+
+
+def test_get_fixtures_makes_zero_http_calls_when_plan_restricted():
+    """0 cereri irosite: get_fixtures() nu trebuie sa apeleze _get() deloc
+    pentru Romania SuperLiga - gate-ul de coverage opreste inainte de HTTP."""
+    p = _provider()
+    calls = []
+    p._get = lambda *a, **kw: calls.append(a) or {"response": []}
+    result = p.get_fixtures("Romania SuperLiga", 283, "2026-07-17", "2026-07-24", season=2026)
+    assert result == []
+    assert calls == []
 
 
 def test_normalize_coach_confirmed_structure():
@@ -148,6 +161,9 @@ def test_normalize_injury_defensive_on_wrong_shape():
 
 
 def test_get_fixtures_sends_league_season_range_params():
+    """World Cup 2026 ("necunoscut", nu "plan_restricted") - folosita aici
+    doar ca liga acoperita, ca sa testam parametrii trimisi, nu semantica
+    reala a competitiei."""
     p = _provider()
     captured_params = {}
     def spy_get(path, params, category, cache_key):
@@ -155,8 +171,8 @@ def test_get_fixtures_sends_league_season_range_params():
         assert category == "matches"
         return {"response": []}
     p._get = spy_get
-    p.get_fixtures("Romania SuperLiga", 283, "2026-07-18", "2026-07-25", season=2026)
-    assert captured_params == {"league": 283, "season": 2026, "from": "2026-07-18", "to": "2026-07-25"}
+    p.get_fixtures("World Cup 2026", 1, "2026-07-18", "2026-07-25", season=2026)
+    assert captured_params == {"league": 1, "season": 2026, "from": "2026-07-18", "to": "2026-07-25"}
 
 
 def test_get_fixtures_blocked_for_unsupported_league():

@@ -144,7 +144,13 @@ class ApiFootballProvider(FootballDataProvider):
             return False
         # False explicit -> nu incercam. True sau "necunoscut" -> incercam
         # (necunoscut nu blocheaza, doar nu era inca confirmat la audit).
-        return league_def.supported.get(category) is not False
+        # "plan_restricted" -> nu incercam: provider/cheie/ID confirmate
+        # corecte, dar planul curent (Free) blocheaza explicit accesul la
+        # sezonul curent - confirmat live, nu presupus (vezi comentariul
+        # din mappings.py, Romania SuperLiga). Tratat la fel ca False, ca
+        # sa nu iroseasca cereri pe un apel garantat sa esueze.
+        state = league_def.supported.get(category)
+        return state is not False and state != "plan_restricted"
 
     def _get(self, path: str, params: dict, cache_category: str, cache_key: str) -> dict | None:
         # 1. health check
