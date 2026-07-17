@@ -77,7 +77,7 @@ PROVIDERS: dict[str, dict] = {
         # provider, deja gestionate gratios in cod (validat live pe FreeLF).
         # Nu construiesc un tracker zilnic separat - exact "fara sistem
         # complex", cum ai cerut.
-        "keys": [{"key": "ae5e565b8f3f4178967ec45e7ffdabcd", "limit": 3000, "label": "ApiFootball-Key1"}],
+        "keys": [{"key": "8efa575e4bd1b5831b3d4d2b3c56d6a1", "limit": 3000, "label": "ApiFootball-Key1"}],
     },
 }
 
