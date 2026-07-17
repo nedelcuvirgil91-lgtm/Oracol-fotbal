@@ -12,6 +12,9 @@ de lucru pe acest fișier (conținut primit prin dictare/reconstrucție) a fost
 abandonată integral ca proces greșit; acest draft pornește de la zero,
 folosind exclusiv contractele deja înghețate ale ADR-026/028/030/031
 (reconstruite pe disc) și codul real al proiectului ca sursă de adevăr.
+**Data redactării**: 2026-07-17. Spre deosebire de ADR-026/028/030/031, nu
+există încă nicio implementare în `main` — acest fișier e contractul
+normativ care urmează să fie implementat, nu unul retroactiv.
 
 ---
 

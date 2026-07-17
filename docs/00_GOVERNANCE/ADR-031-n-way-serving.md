@@ -4,10 +4,25 @@
 Oracle vNext: ADR-026 (Frozen) → ADR-028 (Frozen) → ADR-030 (Frozen) →
 ADR-031 (Frozen) → ADR-033.
 
+**Implementat**: PR #6, merge-uit în `main`. Acest fișier reprezintă
+contractul normativ corespunzător implementării deja existente în `main`
+— nu o propunere, un document retroactiv al deciziei deja aplicate.
+
 **Reconstrucție**: Document nescris pe disc în timp real — Frozen exclusiv
 în istoricul conversației, reconstruit aici din conținutul furnizat explicit
 de proprietarul produsului, fără completare sau presupunere de conținut
-lipsă. Implementat (PR #6, merge-uit în `main`).
+lipsă. **Data reconstrucției**: 2026-07-17.
+
+## Dependencies
+
+Niciuna către ADR-026/028/030 (independent de ele — nu depinde de
+Continuous Learning sau de Model Registry pentru a expune ieșirile brute,
+doar de motoarele deja existente în `oracle_engine.py`). Verificat direct
+în cod: `build_raw_predictions()` nu importă nimic din `learning_core/`.
+
+**Dependenți din drumul critic**: ADR-033 declară explicit ADR-031 ca
+precondiție tehnică obligatorie (are nevoie de `raw_predictions` expuse
+pentru a le putea eșantiona).
 
 ---
 

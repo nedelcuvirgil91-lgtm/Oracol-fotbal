@@ -4,10 +4,28 @@
 execuție Football Oracle vNext: ADR-026 (Frozen) → ADR-028 (Frozen) →
 ADR-030 → ADR-031 → ADR-033.
 
+**Implementat**: PR #7, merge-uit în `main`. Acest fișier reprezintă
+contractul normativ corespunzător implementării deja existente în `main`
+— nu o propunere, un document retroactiv al deciziei deja aplicate.
+
 **Reconstrucție**: Document nescris pe disc în timp real — Frozen exclusiv
 în istoricul conversației, reconstruit aici din conținutul furnizat explicit
 de proprietarul produsului, fără completare sau presupunere de conținut
-lipsă. Implementat (PR #7, merge-uit în `main`).
+lipsă. **Data reconstrucției**: 2026-07-17.
+
+## Dependencies
+
+ADR-026 (frozen) — contractul `automation_runs`/tiering, reutilizat pentru
+`league_weights_adaptive` ca orice alt algoritm din Registry. Model
+Registry / `LearningAlgorithm` (ADR-015…019, pre-existent, neatins) —
+`league_weights_adaptive` intră prin acest contract, neschimbat.
+`recalibration.py`/`sync/bootstrap_league_learning.py` (pre-existent,
+reutilizat, nemodificat în logica lui internă).
+
+**Dependenți din drumul critic**: ADR-030 (continuous_learning.py tratează
+`league_weights_adaptive` generic, cu excludere explicită din Challenger
+Framework via `participates_in_challenger_framework=False` — fix aplicat în
+ADR-030 ca urmare directă a acestui ADR).
 
 ---
 

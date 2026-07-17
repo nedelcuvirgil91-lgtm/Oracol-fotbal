@@ -1,15 +1,32 @@
 # ADR-030 — Continuous Learning ca Funcție Decuplată
 
-**Status**: Decis. Al treilea ADR din seria de execuție Football Oracle vNext,
-succesor direct al ADR-026 și ADR-028 (ambele frozen). Drum critic: ADR-026
-(Frozen) → ADR-028 (Frozen) → ADR-030 → ADR-031 → ADR-033.
+**Status**: FROZEN. Al treilea ADR din drumul critic de execuție Football
+Oracle vNext, succesor direct al ADR-026 și ADR-028 (ambele frozen). Drum
+critic: ADR-026 (Frozen) → ADR-028 (Frozen) → **ADR-030 (Frozen)** →
+ADR-031 (Frozen) → ADR-033 (Frozen).
+
+**Implementat**: PR #5, merge-uit în `main`, inactiv implicit prin
+`learning_core_enabled=False`; activat controlat în producție ulterior
+(SQL exact confirmat), verificat end-to-end (`automation_runs` T2 real,
+antrenare `production_champion` declanșată corect, `xgboost_v1` sărit
+corect sub prag, `league_weights_adaptive` exclus corect din Challenger
+Framework, zero efecte secundare pe `challengers`/`decision_feed`). Acest
+fișier reprezintă contractul normativ corespunzător implementării deja
+existente în `main` — nu o propunere, un document retroactiv al deciziei
+deja aplicate.
 
 **Reconstrucție**: Document nescris pe disc în timp real — Frozen exclusiv în
 istoricul conversației, reconstruit aici din conținutul furnizat explicit de
 proprietarul produsului, fără completare sau presupunere de conținut lipsă.
-Implementat (PR #5, merge-uit în `main`, inactiv implicit prin
-`learning_core_enabled=False`; activat controlat în producție ulterior,
-verificat end-to-end).
+**Data reconstrucției**: 2026-07-17.
+
+**Notă de trasabilitate**: fragmentul „ADR Final" furnizat de proprietarul
+produsului se încheia cu „pregătit pentru Etapa 4/4 (Freeze)", fără ca
+textul propriu-zis al Freeze Declaration să fi fost retrimis (spre
+deosebire de ADR-028/031, unde fragmentul de Freeze a fost furnizat
+explicit). Freeze Declaration de mai jos e construită acum, nu recuperată
+verbatim — formalizează o decizie deja aplicată integral în cod și
+producție, fără nicio schimbare de conținut arhitectural față de ADR Final.
 
 ---
 
@@ -184,4 +201,34 @@ Assessment §6 · ADR-030 Planning Draft · ADR-030 Clarification Pass.
 
 ---
 
-**ADR-030 Final e pregătit pentru Etapa 4/4 (Freeze).**
+## Freeze Declaration (Etapa 4/4 — construită acum, vezi notă de trasabilitate din header)
+
+**ADR-030 — FROZEN.**
+
+Status actualizat: Decis → Frozen. Tratat de acum ca contract normativ, nu
+document de lucru — nicio modificare arhitecturală ulterioară decât
+printr-un ADR nou, dedicat, per aceeași regulă aplicată ADR-026/028.
+
+### Ce rămâne blocat, permanent, prin acest freeze:
+
+- Funcția de Continuous Learning rămâne decuplată de `sync/run_daily.py` —
+  nu devine niciodată un pas al lui.
+- Generic peste tot Model Registry-ul — niciun if/elif pe nume de algoritm
+  în bucla de orchestrare (confirmat în cod, `run_cycle()`).
+- Garda de consistență („cel mult un Challenger activ") rămâne obligatorie,
+  independentă de `get_active_challenger()` — o anomalie oprește procesarea,
+  nu alege arbitrar.
+- `learning_core_enabled` păstrează sensul redefinit prin acest ADR — nu
+  cel vechi, din `LEARNING_CORE_ARCHITECTURE.md`.
+- Fereastra pre-ADR-034 rămâne explicit auditabilă
+  (`correction_method="none — pre-ADR-034"`), nu ascunsă.
+
+### Drumul critic, poziție confirmată:
+
+`ADR-026 (Frozen) → ADR-028 (Frozen) → ADR-030 (Frozen) → ADR-031 → ADR-033`
+
+### Următorul pas
+
+La momentul acestui Freeze (reconstrucție), ADR-031 și ADR-033 erau deja
+decise separat — vezi fișierele lor proprii pentru continuarea drumului
+critic.

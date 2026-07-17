@@ -1,12 +1,33 @@
 # ADR-026 — Substrat de guvernanță pentru automatizare (automation_runs + decision_feed)
 
-**Status**: Implementat (PR #4, merge-uit în `main`)
-**Reconstrucție**: Acest document nu a fost niciodată scris pe disc în timp real —
-a fost declarat Frozen exclusiv în istoricul conversației. Descoperit ca gol
-sistemic (`docs/00_GOVERNANCE/` nu conține niciun fișier `ADR-026`...`ADR-033`,
-deși seria a fost tratată ca Frozen) în etapa de pregătire a ADR-033. Se
-reconstruiește aici, secțiune cu secțiune, exact cum a fost furnizat de
+**Status**: FROZEN. Primul ADR din drumul critic de execuție Football
+Oracle vNext: **ADR-026 (Frozen)** → ADR-028 (Frozen) → ADR-030 (Frozen) →
+ADR-031 (Frozen) → ADR-033 (Frozen).
+
+**Implementat**: PR #4, merge-uit în `main`. Acest fișier reprezintă
+contractul normativ corespunzător implementării deja existente în `main`
+— nu o propunere, un document retroactiv al deciziei deja aplicate.
+
+**Reconstrucție**: Document nescris pe disc în timp real — declarat Frozen
+exclusiv în istoricul conversației. Descoperit ca gol sistemic
+(`docs/00_GOVERNANCE/` nu conținea niciun fișier `ADR-026`...`ADR-033`,
+deși seria a fost tratată ca Frozen) în etapa de pregătire a ADR-033.
+Reconstruit secțiune cu secțiune, exact cum a fost furnizat de
 proprietarul produsului — nu se completează sau presupune conținut lipsă.
+**Data reconstrucției**: 2026-07-17.
+
+## Dependencies
+
+Niciuna în cadrul drumului critic vNext — ADR-026 e fundația (primul).
+Presupune infrastructura Learning Core pre-existentă (ADR-015…019) și
+tiparele de stare deja folosite în proiect (ex. `sync_status`), reutilizate
+ca precedent pentru `automation_runs`/`decision_feed` (detaliu menționat în
+istoricul de proiect, nu confirmat verbatim în acest fragment reconstruit).
+
+**Dependenți din drumul critic** (verificat prin referințe încrucișate în
+celelalte documente reconstruite): ADR-028, ADR-030 și ADR-033 declară
+explicit ADR-026 ca dependință (contractul `automation_runs` + tiering
+T1/T2/T3a/T3b).
 
 ---
 
