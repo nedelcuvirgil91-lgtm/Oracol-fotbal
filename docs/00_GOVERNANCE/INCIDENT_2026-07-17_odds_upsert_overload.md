@@ -1,10 +1,13 @@
 # INCIDENT 2026-07-17 — `upsert_odds_snapshot` function overload (PGRST203)
 
-**Status**: Documentat. **Producție NEMODIFICATĂ** — soluția necesită autorizare
-explicită (mandat: documentezi → cauză → soluție → nu modifici producția fără
-autorizare).
-**Severitate**: Medie — capturarea cotelor (odds_history) e nefuncțională; fără
-corupție de date; **independent de ADR-025**.
+**Status**: **CLOSED** (2026-07-17). Migration 010 aplicată pe producție,
+validată prin `workflow_dispatch` real (`daily.yml`, run `29571163637`):
+26 verificate / **19 scrise / 0 erori** (înainte: 0 scrise / 19 erori).
+Vezi `docs/00_GOVERNANCE/INCIDENT_2026-07-17_CLOSURE_REPORT.md` pentru raportul
+complet de închidere.
+**Severitate**: Medie — capturarea cotelor (odds_history) a fost nefuncțională
+între 2026-07-13 și 2026-07-17; fără corupție de date; **independent de
+ADR-025**.
 
 ## Fapte
 
@@ -76,7 +79,9 @@ Propunere: îl tratez ca element propriu în auditul de branch-uri / Release Roa
 (TASK 2/3), cu verdict și plan de integrare, **după** închiderea ADR-025 și cu
 autorizarea ta pentru orice scriere pe producție.
 
-## Nemodificat
+## Rezoluție (2026-07-17, post-autorizare)
 
-Nicio funcție, nicio schemă, niciun rând de producție nu a fost atins de acest
-raport. Doar documentare.
+Varianta A aplicată: `database/migrations/010_odds_snapshot_overload_consolidation.sql`
+(DROP funcția 6-arg + CREATE OR REPLACE funcția 11-arg canonică, corp identic
+cu cel deja live). Detalii complete de validare, audit schema vs. repo și
+verdict: `docs/00_GOVERNANCE/INCIDENT_2026-07-17_CLOSURE_REPORT.md`.
