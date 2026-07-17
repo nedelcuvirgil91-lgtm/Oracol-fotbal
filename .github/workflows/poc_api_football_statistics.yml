@@ -26,6 +26,11 @@ on:
         required: false
         default: ""
         type: string
+      season_restriction_league_id:
+        description: "OPȚIONAL — dacă completat, testează next=/date=/live= pentru acest league_id (ocolesc restricția de sezon?)"
+        required: false
+        default: ""
+        type: string
 
 jobs:
   probe:
@@ -58,8 +63,13 @@ jobs:
         run: |
           python sync/poc_api_football_fixtures_check.py --league "${{ github.event.inputs.verify_fixtures_league }}"
 
+      - name: Run season restriction check (next=/date=/live=)
+        if: github.event.inputs.season_restriction_league_id != ''
+        run: |
+          python sync/poc_api_football_season_restriction_check.py --league-id "${{ github.event.inputs.season_restriction_league_id }}"
+
       - name: Run API-Football statistics probe (discovery, nu integrare)
-        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == ''
+        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == ''
         env:
           # Necesar pentru ca cache-ul (team_id/fixture_id/verdict 403-404)
           # să supraviețuiască între rulări separate ale acestui workflow —
