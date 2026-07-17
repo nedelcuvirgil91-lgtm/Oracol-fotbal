@@ -90,25 +90,36 @@ _RECAL_CONFIG_DEFAULTS = {
     "recalibration_learning_rate": 0.05,
     "recalibration_max_delta":     0.15,
     "recency_half_life_days":      365,
-    # [ADAUGAT] Inchide golul din ADR-004: flag-ul era promis, niciodata
-    # implementat — recalibrarea rula necondiționat, la fiecare rezultat.
-    # Implicit True INTENȚIONAT (excepție de la regula generală "flag nou =
-    # implicit False") — motivul: acesta nu e un comportament NOU care se
-    # activează, e un comportament deja activ, dintotdeauna, în producție;
-    # implicit False ar fi oprit tăcut recalibrarea la acest commit, exact
-    # schimbarea de comportament implicit pe care nu trebuie s-o facem aici.
-    # Dezactivarea rămâne posibilă oricând, explicit, din model_config.
-    "auto_recalibration_enabled":  True,
+    # [ADR-028] Implicit False — vezi CLAUDE.md, North Star #3 ("niciun flag
+    # nou nu pornește implicit activ"). Până la acest commit, defaultul era
+    # True (excepție justificată la momentul ADR-004, ca să nu schimbe tăcut
+    # comportamentul deja activ în producție). ADR-028 mută sursa canonică de
+    # învățare a league_weights în Model Registry (algoritmul
+    # league_weights_adaptive, learning_core/algorithms/league_weights_adaptive.py,
+    # antrenabil manual/prin Continuous Learning) — calea legacy de mai jos
+    # rămâne funcțională (nu se șterge), dar devine opt-in explicit, nu
+    # comportament implicit de producție.
+    "auto_recalibration_enabled":  False,
 }
 
 
 def _recalibrate_for_result(match_row: dict, r: dict) -> None:
     """
-    [ADAUGAT v1.1] Recalibreaza automat league_weights pentru meciul
-    tocmai completat cu rezultatul real — fara nicio interventie manuala,
-    fara Portfolio. Foloseste EXACT aceeasi functie pura (recalibrate_weights,
-    din recalibration.py) ca fluxul live din oracle_engine.py — o singura
-    sursa de adevar pentru algoritmul de invatare.
+    [ADAUGAT v1.1] [DEMOTAT — ADR-028] Cale LEGACY, opt-in (implicit
+    dezactivată — vezi _RECAL_CONFIG_DEFAULTS). Rămâne exclusiv pentru
+    recalibrare ONLINE, per-meci, în fluxul zilnic de producție — NU e
+    antrenare Learning Core și nu scrie în training_runs. Sursa canonică de
+    antrenare/traseabilitate pentru acest algoritm e acum
+    learning_core.algorithms.league_weights_adaptive.LeagueWeightsAdaptiveAlgorithm
+    (Model Registry), care reutilizează exact aceeași funcție pură
+    (recalibrate_weights) printr-un replay cronologic offline
+    (sync/bootstrap_league_learning.py), fără să scrie în model_weights.
+
+    Recalibreaza automat league_weights pentru meciul tocmai completat cu
+    rezultatul real — fara nicio interventie manuala, fara Portfolio.
+    Foloseste EXACT aceeasi functie pura (recalibrate_weights, din
+    recalibration.py) ca fluxul live din oracle_engine.py — o singura sursa
+    de adevar pentru algoritmul de invatare.
 
     match_row: randul din match_history gasit de update_results_in_supabase()
                (contine home_xg_pred / away_xg_pred — predictia salvata la
@@ -137,10 +148,9 @@ def _recalibrate_for_result(match_row: dict, r: dict) -> None:
 
         cfg = load_config(_RECAL_CONFIG_DEFAULTS)
 
-        # [ADAUGAT] ADR-004 — recalibrarea automată respectă acum flag-ul
-        # promis. Implicit True (vezi nota de la _RECAL_CONFIG_DEFAULTS) —
-        # comportamentul de producție NU se schimbă prin acest commit.
-        if not cfg.get("auto_recalibration_enabled", True):
+        # [ADR-028] Implicit False — vezi nota de la _RECAL_CONFIG_DEFAULTS.
+        # Activare explicită, opt-in, din model_config.
+        if not cfg.get("auto_recalibration_enabled", False):
             logger.info(
                 "[SyncResults] auto_recalibration_enabled=False — recalibrare sărită pentru %s vs %s.",
                 r.get("home_team"), r.get("away_team"),
