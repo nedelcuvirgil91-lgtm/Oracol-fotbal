@@ -1,10 +1,10 @@
 # ADR-033 — Consensus Layer Validation Protocol
 
-**Status**: ADR Final redactat (Etapa 3/4 din 4 — Planning Draft ✅ →
-Clarification Pass ✅ → ADR Final ✅ → Freeze). Ultimul pas al drumului
-critic de execuție Football Oracle vNext: ADR-026 (Frozen) → ADR-028
-(Frozen) → ADR-030 (Frozen) → ADR-031 (Frozen) → **ADR-033 (în așteptarea
-Freeze)**.
+**Status**: FROZEN (Etapa 4/4 din 4 — Planning Draft ✅ → Clarification Pass
+✅ → ADR Final ✅ → Freeze ✅). Ultimul pas al drumului critic de execuție
+Football Oracle vNext: ADR-026 (Frozen) → ADR-028 (Frozen) → ADR-030
+(Frozen) → ADR-031 (Frozen) → **ADR-033 (Frozen)** — drumul critic complet
+înghețat, 5/5.
 
 **Autor**: Claude, redactat ca lucrare proprie la cererea explicită a
 proprietarului produsului — nu reconstrucție, nu dictare. Etapa anterioară
@@ -340,6 +340,16 @@ evaluare periodică T1, infrastructură proprie, independentă de Shadow
 Testing), corelată cu Brier/Log-loss/Accuracy, sub disciplină de
 pre-înregistrare, cu prag fix de eșantion, producând un verdict.
 
+> **Regulă normativă centrală**: Rezultatele generate de ADR-033 (metrici,
+> verdicte, propuneri T3a) nu pot modifica Prediction Pipeline, Consensus
+> Engine (dacă și când va exista) sau politica de serving fără un ADR
+> ulterior aprobat. Verdictul studiului produce exclusiv evidență — chiar
+> un verdict `surface-worthy`, aprobat prin T3a, autorizează doar o
+> propunere de schimbare, nu execută el însuși schimbarea. Nicio linie de
+> cod scrisă sub acest ADR nu are voie să atingă `oracle_engine.py` dincolo
+> de adapterul de capturare (§1) — orice extensie a comportamentului de
+> serving e, prin definiție, un ADR nou, nu o implementare a acestuia.
+
 ## Scope
 
 *(neschimbat față de Planning Draft, cu corecția din Clarification Pass:
@@ -493,6 +503,48 @@ ADR-026 (frozen) · ADR-031 (frozen) · ADR-018 (precedent de imutabilitate)
 
 ---
 
-**ADR-033 Final pregătit pentru Etapa 4/4 (Freeze) — ultimul pas al
-drumului critic. Blocking: 0. Major: 0. Minor: 3 (Open Questions, niciuna
-blocantă). Aștept confirmarea ta explicită pentru Freeze.**
+## Freeze Declaration (Etapa 4/4)
+
+**ADR-033 — FROZEN.**
+
+Status actualizat: Decis → Frozen. Tratat de acum ca contract normativ, nu
+document de lucru — nicio modificare arhitecturală ulterioară decât printr-un
+ADR nou, dedicat, per aceeași regulă aplicată ADR-026/028/030/031.
+
+Adăugare finală, la cererea explicită a proprietarului produsului: regula
+normativă centrală din §Decision (interdicția de a modifica Prediction
+Pipeline/Consensus Engine/politica de serving fără un ADR ulterior aprobat)
+— singurul amendament dintre aprobarea ADR Final și Freeze.
+
+### Ce rămâne blocat, permanent, prin acest freeze:
+
+- Tiparul în două faze (capture la serving-time, adapter propriu → evaluare
+  T1 periodică, infrastructură proprie) e mecanismul unic acceptat de
+  eșantionare — nu se reutilizează Shadow Testing, nu se inventează un al
+  treilea tipar.
+- Pragul de 200 de observații, fix, neconfigurabil.
+- O singură metrică primară, pre-înregistrată, fixă per studiu — niciodată
+  retroactivă.
+- Imutabilitatea `UNIQUE (fixture_id)` / `UNIQUE (metric_name,
+  n_samples_evaluated)` — structurală, nu convenție.
+- Regula normativă centrală: niciun verdict, oricât de pozitiv, nu execută
+  singur o schimbare de serving — doar autorizează o propunere T3a.
+- Activarea rămâne independentă de `learning_core_enabled`.
+
+### Drumul critic — COMPLET:
+
+`ADR-026 (Frozen) → ADR-028 (Frozen) → ADR-030 (Frozen) → ADR-031 (Frozen)
+→ ADR-033 (Frozen)`
+
+Cinci din cinci componente ale drumului critic al seriei Football Oracle
+vNext sunt acum înghețate ca documente. Următorul pas, per disciplina
+aplicată la fiecare ADR anterior, e implementarea separată — cod, migrare
+(dacă necesară), teste, PR, review, merge — NU parte din acest document.
+
+### Următorul pas
+
+Aștept confirmarea ta explicită pentru a începe implementarea ADR-033,
+urmând exact aceeași secvență folosită la ADR-026/028/030/031:
+reconnaissance → plan + identificare dependențe ascunse → implementare
+reutilizând infrastructura existentă → teste exhaustive → PR → verificare
+→ merge (doar după aprobare explicită).
