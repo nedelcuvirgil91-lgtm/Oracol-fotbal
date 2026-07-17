@@ -1,6 +1,7 @@
 from mappings import (
     LEAGUE_PROVIDERS, FD_COMPETITIONS, ESPN_LEAGUE_SLUGS, TSDB_LEAGUE_IDS,
     ODDS_SPORT_KEYS, FREE_LF_LEAGUE_IDS, SPORT_KEY_TO_LEAGUE,
+    API_FOOTBALL_LEAGUE_IDS,
     verify_league_coverage, normalize_league_name, normalize_team_name,
     LEAGUE_BASELINES, ELO_RATINGS_FALLBACK,
 )
@@ -40,6 +41,9 @@ def test_derived_dicts_match_league_providers():
         freelf = definition.provider_ids.get("freelf")
         if freelf is not None:
             assert FREE_LF_LEAGUE_IDS.get(league) == freelf
+        api_football = definition.provider_ids.get("api_football")
+        if api_football is not None:
+            assert API_FOOTBALL_LEAGUE_IDS.get(league) == api_football
 
 
 def test_europa_league_and_world_cup_in_fd_competitions():
@@ -52,6 +56,25 @@ def test_europa_league_and_world_cup_in_fd_competitions():
 def test_romania_and_mls_correctly_marked_unsupported_by_football_data():
     assert LEAGUE_PROVIDERS["Romania SuperLiga"].supported["football_data"] is False
     assert LEAGUE_PROVIDERS["MLS"].supported["football_data"] is False
+
+
+def test_romania_superliga_api_football_confirmed_not_guessed():
+    """league_id=283 verificat live prin /leagues?country=Romania (workflow_dispatch,
+    run 29615697599, 2026-07-17) - nu presupus. supported=True (nu "necunoscut"),
+    fiindca dovada live (league_id + coverage_fixtures.events=True) e confirmata,
+    nu doar o presupunere de structura."""
+    definition = LEAGUE_PROVIDERS["Romania SuperLiga"]
+    assert definition.provider_ids["api_football"] == 283
+    assert definition.supported["api_football"] is True
+    assert API_FOOTBALL_LEAGUE_IDS["Romania SuperLiga"] == 283
+
+
+def test_api_football_league_ids_generic_not_romania_only():
+    """Mecanismul e generic - orice liga cu provider_ids["api_football"] setat
+    apare aici, nu doar Romania SuperLiga (previne regresie catre cod hardcodat)."""
+    for league, definition in LEAGUE_PROVIDERS.items():
+        if definition.provider_ids.get("api_football") is not None:
+            assert league in API_FOOTBALL_LEAGUE_IDS
 
 
 def test_verify_league_coverage_no_errors_on_bootstrap_leagues():

@@ -424,14 +424,20 @@ LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
     ),
     "Romania SuperLiga": LeagueDefinition(
         name="Romania SuperLiga",
+        # api_football=283 ("Liga I") - VERIFICAT LIVE 2026-07-17 prin
+        # /leagues?country=Romania (workflow_dispatch, run 29615697599, nu
+        # presupus): sezon curent 2026 (2026-07-18 -> 2027-03-13),
+        # coverage_fixtures.events=True. "SuperLiga" e brandingul de
+        # sponsorizare al aceleiasi competitii, nu o liga separata in date.
         provider_ids={"football_data": None, "espn": "rou.1", "tsdb": "4652",
-                       "odds": "soccer_romania_1_liga", "freelf": None, "api_football": None},
+                       "odds": "soccer_romania_1_liga", "freelf": None, "api_football": 283},
         supported={
             "football_data": False,  # CONFIRMAT: planul gratuit football-data.org
                                       # acopera exact 12 competitii publicate oficial,
                                       # Romania nu e printre ele
             "espn": True, "tsdb": True, "odds": True,
-            "freelf": "necunoscut", "api_football": "necunoscut",
+            "freelf": "necunoscut",
+            "api_football": True,  # CONFIRMAT live (league_id + coverage_fixtures.events=True) - nu "necunoscut"
         },
     ),
     "World Cup 2026": LeagueDefinition(
@@ -488,6 +494,15 @@ ESPN_LEAGUE_SLUGS: dict[str, str] = {
 TSDB_LEAGUE_IDS: dict[str, str] = {
     lg: d.provider_ids["tsdb"] for lg, d in LEAGUE_PROVIDERS.items()
     if d.provider_ids.get("tsdb") is not None
+}
+
+# Ligile pentru care API-Football poate fi folosit ca fallback — generat
+# direct din LEAGUE_PROVIDERS, la fel ca dictionarele de mai sus. O liga
+# noua devine eligibila DOAR prin completarea provider_ids["api_football"]
+# aici, fara nicio modificare in oracle_api.py/football_providers.py.
+API_FOOTBALL_LEAGUE_IDS: dict[str, int] = {
+    lg: d.provider_ids["api_football"] for lg, d in LEAGUE_PROVIDERS.items()
+    if d.provider_ids.get("api_football") is not None
 }
 
 
