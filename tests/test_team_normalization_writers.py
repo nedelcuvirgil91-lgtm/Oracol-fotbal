@@ -34,24 +34,37 @@ from mappings import normalize_team_name
 # Helper de test — capteaza payload-ul trimis la Supabase, fara retea
 # ════════════════════════════════════════════════════════════════════════
 
-class _CapturingTable:
-    def __init__(self, sink):
+class _CapturingRpc:
+    """[MIGRAT — ID-025-03] Writer-ii ruteaza acum prin RPC-ul canonic
+    (`upsert_match_canonical` / `upsert_matches_canonical`), nu prin `.upsert()`
+    direct pe fixture_id. Fake-ul capteaza apelul RPC + payload-ul si intoarce
+    un rezultat plauzibil (insert)."""
+
+    def __init__(self, fn, params, sink):
+        self.fn = fn
+        self.params = params
         self.sink = sink
 
-    def upsert(self, batch, on_conflict=None):
-        self.sink.append((batch, on_conflict))
-        return self
-
     def execute(self):
-        return None
+        self.sink.append((self.fn, self.params))
+
+        class Res:
+            pass
+        r = Res()
+        if self.fn == "upsert_matches_canonical":
+            n = len(self.params["p_payloads"])
+            r.data = {"inserted": n, "updated": 0, "hard_conflict": 0}
+        else:
+            r.data = {"action": "insert", "id": 1}
+        return r
 
 
 class _CapturingClient:
     def __init__(self):
-        self.upserts = []
+        self.rpcs = []
 
-    def table(self, name):
-        return _CapturingTable(self.upserts)
+    def rpc(self, fn, params):
+        return _CapturingRpc(fn, params, self.rpcs)
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -91,11 +104,13 @@ def test_upsert_match_normalizes_before_upsert(monkeypatch):
 
     ok = q.upsert_match({
         "fixture_id": "fd_1", "home_team": "Man Utd", "away_team": "FC Internazionale Milano",
-        "actual_result": "H",
+        "kickoff_date": "2025-01-01", "actual_result": "H",
     })
 
     assert ok is True
-    sent, _ = client.upserts[0]
+    fn, params = client.rpcs[0]
+    assert fn == "upsert_match_canonical"
+    sent = params["p_payload"]
     assert sent["home_team"] == "Manchester United"
     assert sent["away_team"] == "Inter Milan"
 
@@ -111,7 +126,9 @@ def test_bulk_upsert_normalizes_every_row(monkeypatch):
     ok, errors = q.upsert_matches_bulk(rows)
 
     assert (ok, errors) == (2, 0)
-    sent_batch, _ = client.upserts[0]
+    fn, params = client.rpcs[0]
+    assert fn == "upsert_matches_canonical"
+    sent_batch = params["p_payloads"]
     assert sent_batch[0]["home_team"] == "Manchester United"
     assert sent_batch[0]["away_team"] == "Atletico Madrid"
     assert sent_batch[1]["home_team"] == "Atletico Madrid"
@@ -133,10 +150,13 @@ def test_upsert_match_history_normalizes_before_upsert(monkeypatch):
 
     ok = sb.upsert_match_history({
         "fixture_id": "fd_2", "home_team": "Bayern", "away_team": "FC Bayern München",
+        "kickoff_date": "2025-01-01",
     })
 
     assert ok is True
-    sent, _ = client.upserts[0]
+    fn, params = client.rpcs[0]
+    assert fn == "upsert_match_canonical"
+    sent = params["p_payload"]
     assert sent["home_team"] == "Bayern Munich"
     assert sent["away_team"] == "Bayern Munich", (
         "aceeasi echipa, doua variante brute diferite -- trebuie sa convearga "
@@ -144,14 +164,23 @@ def test_upsert_match_history_normalizes_before_upsert(monkeypatch):
     )
 
 
-def test_upsert_match_history_leaves_missing_team_fields_alone(monkeypatch):
-    """Al doilea apel din oracle_engine.py trimite doar rezultatul (fara
-    home_team/away_team) -- nu trebuie sa pice."""
+def test_upsert_match_history_strips_none_before_rpc(monkeypatch):
+    """[MIGRAT — ID-025-03] Writer Protection la nivel Python: o cheie None nu
+    ajunge in payload-ul RPC (ar fi oricum inofensiva, fiindca RPC-ul face
+    COALESCE(existing, NULL)=existing, dar o eliminam la sursa pentru claritate
+    si payload minim)."""
     client = _CapturingClient()
     monkeypatch.setattr(sb, "get_client", lambda: client)
 
-    ok = sb.upsert_match_history({"fixture_id": "fd_3", "actual_home_goals": 2})
+    ok = sb.upsert_match_history({
+        "fixture_id": "fd_3", "home_team": "X", "away_team": "Y",
+        "kickoff_date": "2025-01-01", "actual_home_goals": 2, "home_elo": None,
+    })
     assert ok is True
+    _, params = client.rpcs[0]
+    sent = params["p_payload"]
+    assert "home_elo" not in sent
+    assert sent["actual_home_goals"] == 2
 
 
 # ════════════════════════════════════════════════════════════════════════

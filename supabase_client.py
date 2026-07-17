@@ -257,23 +257,38 @@ def append_recalibration_log_batch(rows: list[dict]) -> tuple[int, int]:
 # ════════════════════════════════════════════════════════════════════════════
 
 def upsert_match_history(row: dict) -> bool:
-    """Inserează sau actualizează un meci în dataset-ul de antrenare ML."""
+    """Inserează sau actualizează un meci în dataset-ul de antrenare ML.
+
+    [MIGRAT — ID-025-03 Writer Migration] Al doilea funnel de scriere in
+    match_history (celalalt e database/queries.py, folosit de sync/). Ruteaza
+    prin RPC-ul canonic (`upsert_match_canonical`): lookup pe cheia naturala
+    normalizata + decizie UPDATE/INSERT sub pg_advisory_xact_lock, in loc de
+    upsert direct pe fixture_id. Un meci deja existent devine UPDATE
+    non-destructiv pe randul canonic — zero duplicate noi (mecanismul D, ADR-025).
+    Normalizarea home/away se face aici, in Python (nu in SQL), inainte de apel
+    (P3.5 Team Identity Audit + ID-025-03). Apelantii (oracle_engine.py) trebuie
+    sa furnizeze cheia naturala completa (home_team/away_team/kickoff_date).
+    """
     client = get_client()
     if client is None:
         return False
     try:
-        # [ADAUGAT — P3.5 Team Identity Audit, fix de wiring] Al doilea
-        # funnel de scriere in match_history (celalalt e database/queries.py,
-        # folosit de sync/) — aceeasi normalizare aplicata aici, la punctul
-        # de scriere, nu la fiecare apelant (oracle_engine.py, introducere
-        # manuala de rezultat din UI). Vezi TEAM_IDENTITY_AUDIT.md.
         payload = dict(row)
         if payload.get("home_team"):
             payload["home_team"] = normalize_team_name(payload["home_team"])
         if payload.get("away_team"):
             payload["away_team"] = normalize_team_name(payload["away_team"])
-        client.table("match_history").upsert(payload, on_conflict="fixture_id").execute()
-        return True
+        payload = {k: v for k, v in payload.items() if v is not None}
+        res = client.rpc("upsert_match_canonical", {"p_payload": payload}).execute()
+        data = getattr(res, "data", None) or {}
+        action = data.get("action") if isinstance(data, dict) else None
+        if action == "hard_conflict":
+            logger.warning(
+                "[Supabase] upsert_match_history HARD CONFLICT (nescris): %s vs %s @ %s",
+                payload.get("home_team"), payload.get("away_team"), payload.get("kickoff_date"),
+            )
+            return False
+        return action in ("insert", "update")
     except Exception as exc:
         logger.error("[Supabase] upsert_match_history failed: %s", exc)
         return False

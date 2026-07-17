@@ -1472,6 +1472,9 @@ class FootballOracleEngine:
                 "home_team":         cache.get("home_team", ""),
                 "away_team":         cache.get("away_team", ""),
                 "league":            cache.get("league", "default"),
+                # [ID-025-03] Cheia naturala completa — RPC-ul canonic cauta
+                # randul dupa (home, away, kickoff_date), nu dupa fixture_id.
+                "kickoff_date":      cache.get("kickoff_date", ""),
                 "actual_home_goals": actual_home_goals,
                 "actual_away_goals": actual_away_goals,
                 "actual_result":     actual_result,
