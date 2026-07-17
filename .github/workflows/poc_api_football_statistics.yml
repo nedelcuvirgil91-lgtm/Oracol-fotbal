@@ -16,6 +16,11 @@ on:
           - "Ligue 1"
           - "Romania SuperLiga"
           - "MLS"
+      lookup_country:
+        description: "OPȚIONAL — dacă completat, rulează DOAR sondajul /leagues pentru această țară (căutare league_id real), sare peste proba de statistici de mai sus"
+        required: false
+        default: ""
+        type: string
 
 jobs:
   probe:
@@ -35,7 +40,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Run API-Football /leagues lookup (discovery, league_id real)
+        if: github.event.inputs.lookup_country != ''
+        run: |
+          python sync/poc_api_football_league_lookup.py --country "${{ github.event.inputs.lookup_country }}"
+
       - name: Run API-Football statistics probe (discovery, nu integrare)
+        if: github.event.inputs.lookup_country == ''
         env:
           # Necesar pentru ca cache-ul (team_id/fixture_id/verdict 403-404)
           # să supraviețuiască între rulări separate ale acestui workflow —
