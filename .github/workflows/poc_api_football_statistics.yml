@@ -21,6 +21,11 @@ on:
         required: false
         default: ""
         type: string
+      verify_fixtures_league:
+        description: "OPȚIONAL — dacă completat, rulează DOAR verificarea end-to-end a fallback-ului de fixtures (get_matches_for_week) pentru această ligă"
+        required: false
+        default: ""
+        type: string
 
 jobs:
   probe:
@@ -45,8 +50,16 @@ jobs:
         run: |
           python sync/poc_api_football_league_lookup.py --country "${{ github.event.inputs.lookup_country }}"
 
+      - name: Run end-to-end fixtures fallback check (get_matches_for_week)
+        if: github.event.inputs.verify_fixtures_league != ''
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          python sync/poc_api_football_fixtures_check.py --league "${{ github.event.inputs.verify_fixtures_league }}"
+
       - name: Run API-Football statistics probe (discovery, nu integrare)
-        if: github.event.inputs.lookup_country == ''
+        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == ''
         env:
           # Necesar pentru ca cache-ul (team_id/fixture_id/verdict 403-404)
           # să supraviețuiască între rulări separate ale acestui workflow —
