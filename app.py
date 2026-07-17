@@ -277,7 +277,7 @@ def _render_match_card(match: dict, engine) -> None:
     </div>""", unsafe_allow_html=True)
 
     # ── Probabilități ─────────────────────────────────────────────────────
-    st.markdown('<span class="sub-label">Probabilități</span>', unsafe_allow_html=True)
+    st.markdown('<span class="sub-label">Probabilități (compus)</span>', unsafe_allow_html=True)
     st.markdown(
         '<div style="padding:0 1.5rem;">'
         + _prob_bar(f"🏠 {home[:14]}", pred.prob_home_win, "#4a9eff")
@@ -285,6 +285,25 @@ def _render_match_card(match: dict, engine) -> None:
         + _prob_bar(f"✈️ {away[:14]}", pred.prob_away_win, "#ff3d57")
         + "</div>", unsafe_allow_html=True
     )
+
+    # [ADAUGAT — ADR-031] N-way Serving: ieșirile brute, separate, per motor
+    # — aditiv, view-ul compus de mai sus rămâne implicit, neschimbat.
+    # Nu interpretează acordul/dezacordul dintre motoare (asta rămâne
+    # exclusiv ADR-033) — doar le afișează, etichetat, ordine deterministă.
+    raw_preds = getattr(pred, "raw_predictions", None)
+    if raw_preds:
+        with st.expander(f"⚙️ Ieșiri brute per motor ({len(raw_preds)})"):
+            _FAMILY_LABEL = {"rule_based": "🧮 Rule-based (Oracle Protocol)", "ml": "🤖 ML"}
+            for engine_pred in raw_preds:
+                label = _FAMILY_LABEL.get(engine_pred["family"], engine_pred["family"])
+                st.caption(f"{label} · {engine_pred['engine']} v{engine_pred['version']}")
+                st.markdown(
+                    '<div style="padding:0 1rem 0.6rem 1rem;">'
+                    + _prob_bar("Acasă", engine_pred["prob_home"], "#4a9eff")
+                    + _prob_bar("Egal",  engine_pred["prob_draw"], "#ffb300")
+                    + _prob_bar("Oaspeți", engine_pred["prob_away"], "#ff3d57")
+                    + "</div>", unsafe_allow_html=True,
+                )
 
     # ── Explainability ─────────────────────────────────────────────────────
     # [ADAUGAT] De ce arată predicția așa — cascadă de ablație reală (nu
