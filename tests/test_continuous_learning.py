@@ -106,6 +106,56 @@ class _CallRecorder:
         return self.approved_for_target.get(target_key, [])
 
 
+class _FakeMatchResult:
+    def __init__(self, data):
+        self.data = data
+
+
+class _FakeMatchQuery:
+    """Simulează .table('match_history').select().not_.is_().eq().gt().execute()
+    — suficient pentru _count_finished_matches(), nu chain-ul complet Supabase."""
+
+    def __init__(self, rows):
+        self._rows = list(rows)
+        self.applied_eq: list[tuple] = []
+        self.applied_gt: list[tuple] = []
+
+    def select(self, *a, **kw):
+        return self
+
+    @property
+    def not_(self):
+        return self
+
+    def is_(self, *a, **kw):
+        return self
+
+    def eq(self, col, val):
+        self.applied_eq.append((col, val))
+        self._rows = [r for r in self._rows if r.get(col) == val]
+        return self
+
+    def gt(self, col, val):
+        self.applied_gt.append((col, val))
+        self._rows = [r for r in self._rows if r.get(col, "") > val]
+        return self
+
+    def execute(self):
+        return _FakeMatchResult(list(self._rows))
+
+
+class _FakeMatchClient:
+    def __init__(self, rows):
+        self._rows = rows
+        self.last_query: _FakeMatchQuery | None = None
+
+    def table(self, name):
+        assert name == "match_history"
+        q = _FakeMatchQuery(self._rows)
+        self.last_query = q
+        return q
+
+
 @pytest.fixture()
 def recorder(monkeypatch):
     rec = _CallRecorder()
@@ -137,6 +187,89 @@ def test_guard_blocks_on_unknown_count(recorder, fake_algorithm, monkeypatch):
     monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: -1)
     result = cl.run_cycle()
     assert result["guard_failures"] == 1
+
+
+def test_count_finished_matches_all_scope_ignores_league_filter(monkeypatch):
+    """[Fix pre-activare learning_core_enabled] league='all' e sentinel
+    ('nescopat pe o singura liga' - valoarea league_scope reala a tuturor
+    algoritmilor de azi), nu o valoare din coloana match_history.league.
+    Fara acest fix, .eq('league', 'all') nu s-ar potrivi niciodata cu vreun
+    rand real, iar Faza B n-ar porni NICIODATA o antrenare automata."""
+    rows = [
+        {"id": 1, "league": "Premier League", "created_at": "2026-01-01"},
+        {"id": 2, "league": "La Liga", "created_at": "2026-01-02"},
+        {"id": 3, "league": "Serie A", "created_at": "2026-01-03"},
+    ]
+    fake_client = _FakeMatchClient(rows)
+    monkeypatch.setattr(cl, "get_client", lambda: fake_client)
+
+    result = cl._count_finished_matches("all", since=None)
+
+    assert result == 3
+    assert fake_client.last_query.applied_eq == [], \
+        "league='all' nu trebuie sa aplice niciun filtru .eq('league', ...)"
+
+
+def test_count_finished_matches_all_scope_respects_since(monkeypatch):
+    """Ramura 'all' respecta aceeasi semantica temporala ca ramura pe liga -
+    filtrul since ramane aplicat, doar filtrul de liga e omis."""
+    rows = [
+        {"id": 1, "league": "Premier League", "created_at": "2026-01-01"},
+        {"id": 2, "league": "La Liga", "created_at": "2026-06-01"},
+    ]
+    fake_client = _FakeMatchClient(rows)
+    monkeypatch.setattr(cl, "get_client", lambda: fake_client)
+
+    result_no_since = cl._count_finished_matches("all", since=None)
+    assert result_no_since == 2
+
+    result_with_since = cl._count_finished_matches("all", since="2026-03-01")
+    assert result_with_since == 1
+    assert fake_client.last_query.applied_gt == [("created_at", "2026-03-01")]
+
+
+def test_count_finished_matches_specific_league_unchanged(monkeypatch):
+    """Comportament existent, neschimbat - o liga reala tot filtreaza pe
+    .eq('league', ...), exact ca inainte de fix."""
+    rows = [
+        {"id": 1, "league": "Premier League", "created_at": "2026-01-01"},
+        {"id": 2, "league": "La Liga", "created_at": "2026-01-02"},
+    ]
+    fake_client = _FakeMatchClient(rows)
+    monkeypatch.setattr(cl, "get_client", lambda: fake_client)
+
+    result = cl._count_finished_matches("Premier League", since=None)
+
+    assert result == 1
+    assert fake_client.last_query.applied_eq == [("league", "Premier League")]
+
+
+def test_phase_b_end_to_end_with_all_scope_and_real_match_counting(recorder, monkeypatch):
+    """Test de integrare: cu _count_finished_matches() REAL (nemonkeypatch-uit,
+    spre deosebire de restul testelor din acest fisier), un algoritm cu
+    league_scope='all' si suficiente meciuri reale trebuie sa ajunga efectiv
+    la run_training() -> create_challenger(). Inainte de fix, acest test ar
+    fi esuat (0 meciuri numarate mereu pentru 'all')."""
+    algo = _FakeAlgorithm(name="algo_all_scope", league_scope="all")
+    model_registry.register(algo)
+
+    rows = [{"id": i, "league": "Premier League", "created_at": "2026-01-01"} for i in range(50)]
+    fake_client = _FakeMatchClient(rows)
+    monkeypatch.setattr(cl, "get_client", lambda: fake_client)
+
+    monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
+    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+
+    created = {}
+    monkeypatch.setattr(cl.challenger_manager, "create_challenger",
+                         lambda tid, family, league: created.setdefault("id", tid) or {"training_run_id": tid})
+    monkeypatch.setattr(cl.challenger_manager, "transition",
+                         lambda tid, to_state, rejection_reason=None: None)
+
+    result = cl.run_cycle()
+
+    assert result["trained"] == 1
+    assert created["id"] == "tr_fake_1"
 
 
 def test_phase_b_skips_training_below_threshold(recorder, fake_algorithm, monkeypatch):
