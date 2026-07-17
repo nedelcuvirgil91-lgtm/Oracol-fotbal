@@ -316,6 +316,39 @@ class MatchPrediction:
     fair_home_pct:            float = 0.0
     fair_draw_pct:            float = 0.0
     fair_away_pct:            float = 0.0
+    # ── N-way Serving (ADR-031) ────────────────────────────────────────────
+    # Aditiv, byte-for-byte compatibil cu tot ce e mai sus — prob_home_win/
+    # prob_draw/prob_away_win (compus, existent) rămân neschimbate. Listă,
+    # nu câmpuri fixe — N-way-ready fără hardcodare la exact 2 motoare.
+    # Ordine deterministă: sortată (familie, nume), niciodată ordine de
+    # calcul/iterare internă. Fiecare view compus e derivat PUR din aceste
+    # ieșiri brute (blend_predictions() neschimbat) — nu execută niciun
+    # motor suplimentar.
+    raw_predictions:          list  = field(default_factory=list)
+
+
+def build_raw_predictions(
+    rb_prob_home: float, rb_prob_draw: float, rb_prob_away: float,
+    ml_active: bool, ml_prob_home: float, ml_prob_draw: float, ml_prob_away: float,
+) -> list[dict]:
+    """[ADR-031] Construiește lista N-way de ieșiri brute, separate, pentru
+    Serving Contract — funcție pură (fără efecte laterale, fără atingerea
+    niciunui motor), separată explicit de evaluate_match() pentru
+    testabilitate directă. Ordine deterministă: sortată (familie, nume),
+    niciodată ordinea de calcul internă."""
+    predictions = [{
+        "engine": "oracle_protocol", "family": "rule_based", "version": "1",
+        "prob_home": round(rb_prob_home, 4), "prob_draw": round(rb_prob_draw, 4),
+        "prob_away": round(rb_prob_away, 4),
+    }]
+    if ml_active:
+        predictions.append({
+            "engine": "xgboost_v1", "family": "ml", "version": "1",
+            "prob_home": round(ml_prob_home, 4), "prob_draw": round(ml_prob_draw, 4),
+            "prob_away": round(ml_prob_away, 4),
+        })
+    predictions.sort(key=lambda e: (e["family"], e["engine"]))
+    return predictions
 
 
 class FootballOracleEngine:
@@ -1138,6 +1171,12 @@ class FootballOracleEngine:
                 logger.warning("[ApiFootball] Colectare eșuată pentru %s vs %s: %s", home_name, away_name, exc)
 
         ph, pd, pa, top_scores = self._poisson_model(home_xg, away_xg)
+        # [ADAUGAT — ADR-031] Instantaneu al ieșirii brute a motorului
+        # rule-based (Poisson + Monte Carlo + ELO, deja blendat intern la
+        # acest punct), ÎNAINTE de eventualul blend cu ML de mai jos —
+        # blend_predictions() rescrie ph/pd/pa in-place, deci fără acest
+        # instantaneu ieșirea "brută" a motorului A ar fi pierdută.
+        rb_ph, rb_pd, rb_pa = ph, pd, pa
 
         # ── Monte Carlo ───────────────────────────────────────────────────
         n_sim         = int(self.config.get("monte_carlo_simulations", 10000))
@@ -1209,6 +1248,11 @@ class FootballOracleEngine:
             if odds > 1.0:
                 kelly[sel] = self._kelly(prob, odds)
 
+        # [ADAUGAT — ADR-031] N-way Serving Policy — vezi build_raw_predictions().
+        raw_predictions = build_raw_predictions(
+            rb_ph, rb_pd, rb_pa, ml_active, ml_prob_home, ml_prob_draw, ml_prob_away,
+        )
+
         pred = MatchPrediction(
             fixture_id=str(fid), home_team=home_name, away_team=away_name, league=league,
             kickoff_utc=match.get("kickoff_utc", ""), kickoff_date=match.get("kickoff_date", ""),
@@ -1251,6 +1295,7 @@ class FootballOracleEngine:
             ml_prob_home=ml_prob_home, ml_prob_draw=ml_prob_draw, ml_prob_away=ml_prob_away,
             ml_confidence=ml_confidence, ml_blend_label=ml_blend_label,
             ml_samples_used=ml_samples_used,
+            raw_predictions=raw_predictions,
         )
         self._cache_prediction(pred, home_p, away_p, h2h, w_pen, mc)
 
