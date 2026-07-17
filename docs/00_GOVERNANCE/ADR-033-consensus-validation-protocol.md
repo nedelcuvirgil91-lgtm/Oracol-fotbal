@@ -1,9 +1,9 @@
 # ADR-033 — Consensus Layer Validation Protocol
 
-**Status**: Planning Draft (Etapa 1/4 — Planning Draft → Clarification Pass
-→ ADR Final → Freeze). Ultimul pas al drumului critic de execuție Football
-Oracle vNext: ADR-026 (Frozen) → ADR-028 (Frozen) → ADR-030 (Frozen) →
-ADR-031 (Frozen) → **ADR-033 (în lucru)**.
+**Status**: Clarification Pass închis (Etapa 2/4 din 4 — Planning Draft ✅ →
+Clarification Pass ✅ → ADR Final → Freeze). Ultimul pas al drumului critic
+de execuție Football Oracle vNext: ADR-026 (Frozen) → ADR-028 (Frozen) →
+ADR-030 (Frozen) → ADR-031 (Frozen) → **ADR-033 (în lucru)**.
 
 **Autor**: Claude, redactat ca lucrare proprie la cererea explicită a
 proprietarului produsului — nu reconstrucție, nu dictare. Etapa anterioară
@@ -203,5 +203,106 @@ Zero observații Blocking sau Major.
 
 ---
 
-**Planning Draft pregătit pentru Etapa 2/4 (Clarification Pass). Aștept
-aprobarea ta explicită.**
+## Clarification Pass (Etapa 2/4)
+
+Rezolvare explicită a celor trei puncte Minor + verificarea suplimentară de
+imutabilitate, per aprobarea condiționată primită.
+
+### Minor #1 — Fereastra de observare, formalizată
+
+Nu „după suficiente date" (vag) — trei momente distincte, explicite:
+
+1. **Capturarea începe imediat după activare** a adapterului propriu ADR-033
+   (flag aditiv, implicit `False`, per North Star #3 — simetric cu
+   `learning_core_enabled`). Din acel moment, fiecare predicție live produce
+   o încercare de capturare, indiferent de mărimea eșantionului acumulat.
+2. **Evaluarea periodică (Faza 2, T1) poate rula oricând**, independent de
+   câte perechi există deja — rularea în sine nu are prag; e sigură de
+   rerulat oricând (idempotentă, ca orice proces T1 din ADR-026).
+3. **Verdictul propriu-zis (`surface-worthy`/`respins`) e permis DOAR după
+   atingerea pragului minim de eșantion** (§Minor #2). Sub prag, procesul T1
+   se completează normal, dar produce status `insufficient_data` — nu un
+   verdict, nu o eroare, nu un `skipped`. Precedent direct, reutilizat exact:
+   `shadow_testing.evaluate_experiment()` produce deja exact acest status
+   pentru cazul „date insuficiente" (confirmat în cod,
+   `challenger_evaluation.py`) — ADR-033 adoptă aceeași formă, nu inventează
+   una nouă.
+
+**Corecție de precizie față de Planning Draft**: „Verdict binar" (§Validation
+Protocol Contract) devine, corect: verdictul final rămâne binar
+(`surface-worthy`/`respins`), dar starea INTERMEDIARĂ `insufficient_data` nu
+e un al treilea verdict — e absența oricărui verdict, exact ca la Shadow
+Evaluation.
+
+### Minor #2 — Pragul minim de eșantion, decis
+
+Prag numeric fix, nu parametru configurabil — motivul: verdictul trebuie să
+fie reproductibil, nu dependent de o valoare schimbată din `model_config`
+între două rulări ale aceluiași studiu (ar contrazice imutabilitatea §4/
+Minor suplimentar de mai jos — un prag variabil ar face „eșantion suficient"
+o proprietate mutabilă a sistemului, nu a datelor).
+
+Valoare: **200**, identică cu `MIN_MATCHES_FOR_EVALUATION` din
+`continuous_learning.py`/`challenger_evaluation.evaluate_active_challenger()`
+— nu un import/reutilizare a acelei constante (domenii conceptual diferite:
+evaluare Challenger vs. validare Consensus — cuplarea ar încălca Separation
+of Concerns), ci o constantă proprie ADR-033
+(`MIN_SAMPLES_FOR_CONSENSUS_VALIDATION = 200`), cu aceeași valoare,
+justificată explicit prin același precedent statistic deja acceptat în
+proiect (prag minim pentru teste pereche de tip bootstrap, deja validat
+empiric la Shadow Evaluation). Nu se inventează un număr nou fără
+precedent.
+
+### Minor #3 — Historical/Confidence Comparison, limitată explicit
+
+De acord cu observația inițială, formalizată acum ca regulă, nu doar
+notă: dependință circulară reală — „istoricul de consens" pe care l-ar
+compara această metrică nu poate exista înainte ca adapterul de capturare
+ADR-033 însuși să fi rulat o vreme. Consecință:
+
+- **Exclusă din setul de metrici candidate al primului studiu** — nu doar
+  „exploratorie", ci absentă din §Validation Protocol Contract până când
+  există un eșantion propriu ADR-033 suficient de mare cât să servească
+  drept „istoric" pentru ea însăși (prag separat, viitor, nedefinit aici —
+  nu se inventează acum o valoare pentru o metrică ce nu participă încă).
+- Dacă/când devine eligibilă, rămâne permanent exploratorie — nu poate
+  deveni niciodată metrică primară pre-înregistrată (regulă structurală, nu
+  doar recomandare), fiindcă orice comparație „istorică" a unei metrici
+  calculate din propriile date anterioare ale sistemului poartă risc de
+  circularitate pe care disciplina de pre-înregistrare (§Validation
+  Protocol Contract) există s-o prevină.
+
+Set de metrici candidate al primului studiu, corectat: Agreement Score,
+Divergence Score, Prediction Distance — trei, nu patru. Historical/Confidence
+Comparison rămâne un Non-Goal explicit al ADR-033 în forma lui inițială.
+
+### Verificare suplimentară — Imutabilitatea eșantioanelor, explicitată
+
+Deja specificată prin analogie (`challenger_evaluations`, ADR-018) în
+Planning Draft — formalizată acum ca mecanism exact, nu doar precedent
+citat:
+
+- **Faza 1 (capture)**: `UNIQUE (fixture_id)` pe tabela proprie de
+  eșantionare — o pereche capturată pentru un fixture nu poate fi
+  suprascrisă de o a doua încercare de capturare pentru același fixture
+  (structural imposibil, nu doar convenție de cod — trigger/constraint
+  Postgres, simetric cu `odds_history_immutability_guard`/
+  `model_champions_guard`).
+- **Faza 2 (evaluare/verdict)**: `UNIQUE (metric_name, n_samples_evaluated)`
+  pe tabela de verdicte — identic ca formă cu `UNIQUE (training_run_id,
+  n_matches_evaluated)` din `challenger_evaluations`. O rerulare a
+  studiului cu ACEEAȘI fereastră (același `n_samples_evaluated`) nu poate
+  schimba un verdict deja scris — `INSERT ... ON CONFLICT DO NOTHING`,
+  aceeași tehnică deja verificată prin test
+  (`test_immutability_second_write_with_same_window_is_a_noop`).
+- Fiecare pereche capturată e evaluată împotriva rezultatului final al
+  meciului o singură dată, în cadrul studiului care o consumă — un studiu
+  nou (fereastră mai mare) produce un verdict NOU, distinct, niciodată o
+  corecție a celui vechi (regulă deja stabilită în Planning Draft,
+  neschimbată).
+
+---
+
+**Clarification Pass închide toate cele trei puncte Minor + verificarea de
+imutabilitate. Zero puncte Blocking sau Major rămase. Pregătit pentru Etapa
+3/4 (ADR Final). Aștept aprobarea ta explicită.**
