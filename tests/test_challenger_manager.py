@@ -283,15 +283,20 @@ def test_module_has_single_known_importer():
     learning_core/promotion_service.py — DOAR citire (get_challenger),
     scrierea reala a tranzitiei PROMOTED se intampla in interiorul
     functiei Postgres promote_challenger() (migration 005), nu prin
-    challenger_manager.transition() din Python. Garda ramane utila sub o
-    forma mai stricta: NIMENI altcineva nu are voie sa importe modulul
-    direct — un scriitor necontrolat, in afara acestor module Learning
-    Core cunoscute, ar reintroduce exact problema de ownership dublu pe
-    care ADR-016 o elimina."""
+    challenger_manager.transition() din Python. ADR-030 (Continuous
+    Learning) adauga learning_core/continuous_learning.py — orchestratorul
+    decuplat care apeleaza create_challenger()/transition() la momentul
+    corect (prag de volum atins, verdict de evaluare disponibil), exact
+    rolul anticipat. Garda ramane utila sub o forma mai stricta: NIMENI
+    altcineva nu are voie sa importe modulul direct — un scriitor
+    necontrolat, in afara acestor module Learning Core cunoscute, ar
+    reintroduce exact problema de ownership dublu pe care ADR-016 o
+    elimina."""
     import ast
     import pathlib
 
-    ALLOWED_IMPORTERS = {"challenger_shadow.py", "challenger_evaluation.py", "promotion_service.py"}
+    ALLOWED_IMPORTERS = {"challenger_shadow.py", "challenger_evaluation.py", "promotion_service.py",
+                         "continuous_learning.py"}  # ADR-030 — orchestratorul decuplat
 
     root = pathlib.Path(__file__).resolve().parent.parent
     offenders = []

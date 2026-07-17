@@ -510,6 +510,33 @@ def get_training_run(training_run_id: str) -> dict | None:
         return None
 
 
+def get_latest_training_run(algorithm_name: str, league_scope: str) -> dict | None:
+    """[ADR-030] Cea mai recentă rulare de antrenare persistată în Supabase
+    pentru (algorithm_name, league_scope) — sursa durabilă, cross-run, spre
+    deosebire de learning_core.storage.list_training_runs() (local, per
+    runner, nu supraviețuiește între rulările efemere GitHub Actions).
+    None dacă nu s-a antrenat niciodată — stare legitimă, nu eroare."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("training_runs")
+            .select("*")
+            .eq("algorithm_name", algorithm_name)
+            .eq("league_scope", league_scope)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Supabase] get_latest_training_run failed pentru %s/%s: %s",
+                        algorithm_name, league_scope, exc)
+        return None
+
+
 def get_active_champion(algorithm_family: str, league_scope: str) -> dict | None:
     """Campionul activ curent pentru (algorithm_family, league_scope) —
     rândul cu superseded_at IS NULL, per invariantul din migrare (cel mult
@@ -598,6 +625,33 @@ def get_active_challenger(algorithm_family: str, league_scope: str) -> dict | No
         logger.warning("[Supabase] get_active_challenger failed pentru %s/%s: %s",
                         algorithm_family, league_scope, exc)
         return None
+
+
+def count_active_challengers(algorithm_family: str, league_scope: str) -> int:
+    """[ADR-030] Numără independent Challengerii activi (stare non-terminală)
+    pentru (algorithm_family, league_scope) — NU reutilizează
+    get_active_challenger() (care ia tăcut rows[0] dacă ar exista mai
+    multe). Gardă de siguranță: ADR-030 trebuie să detecteze explicit orice
+    încălcare a invariantului "cel mult un Challenger activ" (index unic
+    parțial idx_challengers_active_unique) — intervenție manuală, migrare
+    defectă, bug anterior — nu s-o ascundă alegând orbește primul rând."""
+    client = get_client()
+    if client is None:
+        return -1  # necunoscut != zero — apelantul nu trebuie sa presupuna "sigur"
+    try:
+        res = (
+            client.table("challengers")
+            .select("training_run_id")
+            .eq("algorithm_family", algorithm_family)
+            .eq("league_scope", league_scope)
+            .not_.in_("state", ["PROMOTED", "REJECTED"])
+            .execute()
+        )
+        return len(res.data or [])
+    except Exception as exc:
+        logger.warning("[Supabase] count_active_challengers failed pentru %s/%s: %s",
+                        algorithm_family, league_scope, exc)
+        return -1
 
 
 def update_challenger_state(training_run_id: str, expected_current_state: str, new_state: str,
