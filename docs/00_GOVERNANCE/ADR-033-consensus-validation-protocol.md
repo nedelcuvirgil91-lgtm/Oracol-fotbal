@@ -1,9 +1,10 @@
 # ADR-033 — Consensus Layer Validation Protocol
 
-**Status**: Clarification Pass închis (Etapa 2/4 din 4 — Planning Draft ✅ →
-Clarification Pass ✅ → ADR Final → Freeze). Ultimul pas al drumului critic
-de execuție Football Oracle vNext: ADR-026 (Frozen) → ADR-028 (Frozen) →
-ADR-030 (Frozen) → ADR-031 (Frozen) → **ADR-033 (în lucru)**.
+**Status**: ADR Final redactat (Etapa 3/4 din 4 — Planning Draft ✅ →
+Clarification Pass ✅ → ADR Final ✅ → Freeze). Ultimul pas al drumului
+critic de execuție Football Oracle vNext: ADR-026 (Frozen) → ADR-028
+(Frozen) → ADR-030 (Frozen) → ADR-031 (Frozen) → **ADR-033 (în așteptarea
+Freeze)**.
 
 **Autor**: Claude, redactat ca lucrare proprie la cererea explicită a
 proprietarului produsului — nu reconstrucție, nu dictare. Etapa anterioară
@@ -304,5 +305,194 @@ citat:
 ---
 
 **Clarification Pass închide toate cele trei puncte Minor + verificarea de
-imutabilitate. Zero puncte Blocking sau Major rămase. Pregătit pentru Etapa
-3/4 (ADR Final). Aștept aprobarea ta explicită.**
+imutabilitate. Zero puncte Blocking sau Major rămase.**
+
+---
+
+# ADR-033 — ADR Final (Etapa 3/4, sinteză completă)
+
+Sintetizează Planning Draft + Clarification Pass, plus cinci contracte
+explicite cerute suplimentar înainte de Freeze (niciunul nu contrazice ce
+era deja decis — toate erau implicite; devin acum explicite, verificabile
+la implementare).
+
+## Status
+
+Decis. Al cincilea și ultimul ADR de pe drumul critic al seriei Football
+Oracle vNext, succesor direct al ADR-026, ADR-028, ADR-030, ADR-031 (toate
+frozen). Drum critic: `ADR-026 (Frozen) → ADR-028 (Frozen) → ADR-030
+(Frozen) → ADR-031 (Frozen) → ADR-033`.
+
+## Context
+
+*(neschimbat față de Planning Draft — vezi §Context mai sus)*
+
+## Problem Statement
+
+*(neschimbat față de Planning Draft — vezi §Problem Statement mai sus)*
+
+## Decision
+
+ADR-033 nu construiește Consensus Layer. Definește protocolul prin care
+Consensus Layer își câștigă, sau nu, dreptul de a exista — eșantionare
+prospectivă în două faze (capture la serving-time, prin adapter propriu →
+evaluare periodică T1, infrastructură proprie, independentă de Shadow
+Testing), corelată cu Brier/Log-loss/Accuracy, sub disciplină de
+pre-înregistrare, cu prag fix de eșantion, producând un verdict.
+
+## Scope
+
+*(neschimbat față de Planning Draft, cu corecția din Clarification Pass:
+setul de metrici candidate al primului studiu are trei elemente — Agreement
+Score, Divergence Score, Prediction Distance — nu patru)*
+
+## Cele cinci contracte explicite (cerute înainte de Freeze)
+
+### 1. Capturarea e strict observațională
+
+- Adapterul nu modifică Prediction Pipeline — confirmat, neschimbat față de
+  Clarification Pass.
+- Nu influențează scorurile, selecția modelului, sau (viitorul) Consensus —
+  extins explicit: chiar dacă un studiu viitor produce verdict
+  `surface-worthy` și o propunere T3a e aprobată, capturarea în sine tot nu
+  devine parte din calea de decizie — rămâne strict input pentru studiul
+  T1, niciodată o cale de retroacțiune asupra predicției curente.
+- **Fail-open, explicit**: dacă adapterul de capturare nu poate persista
+  perechea (Supabase indisponibil, eroare de rețea, orice altă cauză),
+  predicția servită utilizatorului continuă normal, neafectată — identic
+  cu Regula #8 (degradare grațioasă) deja aplicată la
+  `challenger_shadow.log_shadow_for_active_challenger()`: orice excepție e
+  prinsă la adapter, niciodată propagată către Oracle Engine. O captură
+  ratată înseamnă un eșantion mai mic, niciodată o predicție întreruptă.
+
+### 2. Activarea e separată de Learning Core
+
+- Flag dedicat, propriu ADR-033 (ex. `consensus_capture_enabled`), implicit
+  `False` — per North Star #3, simetric ca formă cu `learning_core_enabled`,
+  dar NU același flag și NU citit din același loc conceptual.
+- **Independent explicit de `learning_core_enabled`** (ADR-030): cele două
+  controlează sisteme diferite (Continuous Learning vs. Consensus
+  Validation) — activarea unuia nu implică sau necesită activarea
+  celuilalt. Un operator poate rula Continuous Learning fără capturare de
+  Consensus, sau invers.
+- Poate fi pornit/oprit oricând, fără nicio interacțiune cu serving-ul —
+  oprirea flag-ului oprește doar Faza 1 (capturarea); Faza 2 (evaluarea T1)
+  poate rula în continuare pe eșantionul deja acumulat, sau poate fi și ea
+  oprită separat, fără să afecteze predicțiile live.
+
+### 3. Protocolul statistic e imuabil
+
+- Prag fix: **200** observații (§Minor #2, Clarification Pass) — nu
+  configurabil.
+- O singură metrică primară, pre-înregistrată înainte de rularea studiului.
+- **Explicit, nou**: metricile exploratorii NU pot deveni primare
+  retroactiv, pentru un studiu deja rulat sau în curs — metrica primară a
+  unui studiu se fixează la declararea/pornirea acelui studiu (parte din
+  identitatea lui, la fel ca `training_run_id` pentru o antrenare) și
+  rămâne fixă indiferent de rezultate. Un studiu NOU, cu o altă metrică
+  primară declarată explicit dinainte, e o rulare T1 separată, cu propriul
+  eșantion — nu o reinterpretare a datelor unui studiu vechi. Previne
+  exact p-hacking-ul pe care disciplina de pre-înregistrare există s-o
+  prevină.
+
+### 4. Imutabilitatea datelor
+
+- Captura pentru un `fixture_id` nu poate fi rescrisă —
+  `UNIQUE (fixture_id)`, structural, la nivel de bază de date.
+- Verdictele publicate nu pot fi modificate — `UNIQUE (metric_name,
+  n_samples_evaluated)`, identic ca formă cu `challenger_evaluations`
+  (ADR-018). O nouă evaluare (fereastră mai mare sau metrică nouă) produce
+  un verdict NOU, niciodată o suprascriere a celui vechi.
+
+### 5. Separarea responsabilităților
+
+| Fază | Responsabilitate exclusivă |
+|---|---|
+| Capturare (Faza 1) | Doar persistă perechea `(fixture_id, raw_predictions, timestamp, engine versions)` — nu calculează nimic, nu interpretează |
+| Evaluare T1 (Faza 2) | Doar calculează metricile + corelația cu rezultatul real — nu decide surfacing, nu scrie verdictul ca decizie finală |
+| Verdict | Doar publică rezultatul studiului (`surface-worthy`/`respins`/`insufficient_data`) — nu declanșează automat nimic dincolo de propunerea T3a (dacă pozitiv) |
+| UI (viitor, în afara scope-ului ADR-033) | Dacă și când o propunere T3a e aprobată, UI-ul afișează — nu interpretează, nu recalculează, nu modifică date. Constrângere explicită pentru orice implementare viitoare, nu doar pentru ADR-033 însuși |
+
+Niciun strat nu are voie să facă mai mult decât rândul lui din acest tabel —
+regulă structurală, nu doar recomandare de stil.
+
+## Validation Protocol Contract
+
+*(consolidat din Planning Draft + Clarification Pass — vezi secțiunile de
+mai sus pentru justificare; aici doar forma finală)*
+
+- Metrici candidate (primul studiu): Agreement Score, Divergence Score,
+  Prediction Distance. Historical/Confidence Comparison exclusă (Minor #3).
+- O singură metrică primară, pre-înregistrată, fixă per studiu (§3 de mai
+  sus).
+- Prag fix: 200 (`MIN_SAMPLES_FOR_CONSENSUS_VALIDATION`, constantă proprie).
+- Metrică de adevăr: exclusiv Brier/Log-loss/Accuracy.
+- Stări posibile: `insufficient_data` (sub prag) → `surface-worthy` sau
+  `respins` (peste prag) — nu binar strict, dar verdictul propriu-zis
+  rămâne binar (§Minor #1).
+- Imutabilitate: §4 de mai sus.
+- Reluare: verdict „respins" ≠ interdicție definitivă — studiu nou, T1 nou.
+
+## Ownership
+
+*(neschimbat față de Planning Draft — vezi tabelul de mai sus)*
+
+## Integrare cu ADR-026
+
+*(neschimbat față de Planning Draft — T1 pentru studiu, T3a doar dacă
+verdict pozitiv, niciun state machine nou)*
+
+## Non-Goals
+
+Nu construiește Consensus Layer în UI · nu decide singur surfacing-ul · nu
+inventează metrici de acuratețe noi · nu modifică ADR-031, Model Registry
+sau Promotion Service · nu împrumută sau extinde mecanismul ADR-034 · nu
+reutilizează infrastructura Shadow Testing · nu influențează, sub nicio
+formă, predicțiile, ponderile, modelele sau serving-ul · nu include
+Historical/Confidence Comparison în primul studiu · nu permite unei metrici
+exploratorii să devină primară retroactiv · nu leagă activarea de
+`learning_core_enabled`.
+
+## Dependencies
+
+ADR-031 (frozen) — ieșiri brute, comparabile, expuse. `match_history`
+(canonic) — sursa rezultatelor reale. Metricile deja standardizate
+(Brier/Log-loss/Accuracy, `shadow_testing.py`). Precedentul de imutabilitate
+(`challenger_evaluations`, ADR-018) — reutilizat ca formă de gardă, nu ca
+tabelă/infrastructură.
+
+## Consequences
+
+- Odată înghețat, acest ADR închide întregul drum critic al seriei vNext
+  (ADR-026→028→030→031→033).
+- Consensus Layer fie graduează (T3a aprobat), fie rămâne o respingere
+  documentată — ambele rezultate închid riscul semnalat în Independent
+  Assessment §5.
+- Stabilește un tipar repetabil (capture la serving → evaluare periodică,
+  infrastructură proprie per validare, activare independentă) pentru orice
+  semnal speculativ viitor de produs.
+- Un nou punct de atingere aditivă a căii de serving (adapterul de
+  capturare) — al doilea, după ADR-031, minim ca amploare.
+
+## References
+
+Vision & Target Architecture · Independent Architecture Assessment §5 ·
+ADR-026 (frozen) · ADR-031 (frozen) · ADR-018 (precedent de imutabilitate)
+· ADR-033 Planning Draft · ADR-033 Clarification Pass.
+
+## Open Questions
+
+1. TTL propriu pentru eventuala decizie T3a — nedeclarat, per precedent
+   ADR-026/030 (detaliu de implementare, nu blochează Freeze).
+2. Pragul de eșantion propriu necesar pentru ca Historical/Confidence
+   Comparison să devină eligibilă ca metrică exploratorie într-un studiu
+   viitor — nedefinit, intenționat (nu se inventează acum o valoare pentru
+   o metrică ce nu participă la primul studiu).
+3. Cele două întrebări moștenite de la ADR-026 (fallback TTL generic;
+   definiția „aprobator") rămân deschise, neatinse de acest ADR.
+
+---
+
+**ADR-033 Final pregătit pentru Etapa 4/4 (Freeze) — ultimul pas al
+drumului critic. Blocking: 0. Major: 0. Minor: 3 (Open Questions, niciuna
+blocantă). Aștept confirmarea ta explicită pentru Freeze.**
