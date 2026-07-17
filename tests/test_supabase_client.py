@@ -71,3 +71,43 @@ def test_get_training_data_stops_at_partial_last_page():
 
 def test_get_training_data_graceful_without_supabase():
     assert sb.get_training_data() == []
+
+
+class _FakeSelectAllQuery:
+    """Simulează .table().select("*").execute() — fără filtre, pentru
+    get_provider_metrics()."""
+    def __init__(self, rows):
+        self._rows = rows
+
+    def select(self, *a, **kw): return self
+
+    def execute(self): return _FakeResult(self._rows)
+
+
+class _FakeClientSelectAll:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def table(self, name):
+        return _FakeSelectAllQuery(self._rows)
+
+
+def test_get_provider_metrics_returns_rows():
+    """[Diagnostics Dashboard] provider_metrics era scris (record_provider_call)
+    dar niciodată citit — confirmă că citirea aduce exact rândurile din tabelă."""
+    fake_rows = [
+        {"provider": "football_data", "endpoint": "/matches", "calls": 10,
+         "errors": 1, "consecutive_failures": 0, "avg_latency_ms": 120.5,
+         "last_success": "2026-07-12T10:00:00Z", "last_failure": None},
+    ]
+    original_get_client = sb.get_client
+    sb.get_client = lambda: _FakeClientSelectAll(fake_rows)
+    try:
+        result = sb.get_provider_metrics()
+        assert result == fake_rows
+    finally:
+        sb.get_client = original_get_client
+
+
+def test_get_provider_metrics_graceful_without_supabase():
+    assert sb.get_provider_metrics() == []

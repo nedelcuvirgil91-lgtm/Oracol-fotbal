@@ -70,24 +70,33 @@ def test_openfootball_payload_has_no_elo_keys():
 #      reaparea printr-o sursa viitoare care emite None
 # ════════════════════════════════════════════════════════════════════════
 
-class _CapturingTable:
-    def __init__(self, sink):
+class _CapturingRpc:
+    """[MIGRAT — ID-025-03] Writer-ii ruteaza prin RPC-ul canonic, nu prin
+    `.upsert()` direct pe fixture_id. Garda de eliminare a cheilor None se
+    aplica identic, inainte de apelul RPC."""
+
+    def __init__(self, fn, params, sink):
+        self.fn = fn
+        self.params = params
         self.sink = sink
 
-    def upsert(self, batch, on_conflict=None):
-        self.sink.append((batch, on_conflict))
-        return self
-
     def execute(self):
-        return None
+        self.sink.append((self.fn, self.params))
+
+        class Res:
+            pass
+        r = Res()
+        n = len(self.params.get("p_payloads", [])) if self.fn == "upsert_matches_canonical" else 1
+        r.data = {"inserted": n, "updated": 0, "hard_conflict": 0}
+        return r
 
 
 class _CapturingClient:
     def __init__(self):
-        self.upserts = []
+        self.rpcs = []
 
-    def table(self, name):
-        return _CapturingTable(self.upserts)
+    def rpc(self, fn, params):
+        return _CapturingRpc(fn, params, self.rpcs)
 
 
 def test_bulk_upsert_strips_none_keys(monkeypatch):
@@ -96,21 +105,21 @@ def test_bulk_upsert_strips_none_keys(monkeypatch):
 
     rows = [{
         "fixture_id": "fd_x", "home_team": "A", "away_team": "B",
-        "actual_result": "H",
+        "kickoff_date": "2025-01-01", "actual_result": "H",
         "home_elo": None, "away_elo": None,      # sursa ostila/veche
         "home_xg_pred": None,
     }]
     ok, errors = q.upsert_matches_bulk(rows)
 
     assert (ok, errors) == (1, 0)
-    sent_batch, on_conflict = client.upserts[0]
-    sent = sent_batch[0]
-    assert on_conflict == "fixture_id"
+    fn, params = client.rpcs[0]
+    assert fn == "upsert_matches_canonical"
+    sent = params["p_payloads"][0]
     assert "home_elo" not in sent and "away_elo" not in sent
     assert "home_xg_pred" not in sent
     assert all(v is not None for v in sent.values()), (
         "nicio cheie cu valoare None nu are voie sa ajunga in payload-ul "
-        "de upsert — ar rescrie cu NULL o valoare existenta"
+        "RPC — ar rescrie cu NULL o valoare existenta"
     )
     # Valorile reale trec neatinse
     assert sent["fixture_id"] == "fd_x" and sent["actual_result"] == "H"

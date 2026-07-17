@@ -33,6 +33,7 @@ if str(root) not in sys.path:
 import requests
 
 from key_manager import get_key_manager
+from mappings import normalize_team_name
 
 logger = logging.getLogger("FootballOracle.Sync.Results")
 
@@ -89,6 +90,15 @@ _RECAL_CONFIG_DEFAULTS = {
     "recalibration_learning_rate": 0.05,
     "recalibration_max_delta":     0.15,
     "recency_half_life_days":      365,
+    # [ADAUGAT] Inchide golul din ADR-004: flag-ul era promis, niciodata
+    # implementat — recalibrarea rula necondiționat, la fiecare rezultat.
+    # Implicit True INTENȚIONAT (excepție de la regula generală "flag nou =
+    # implicit False") — motivul: acesta nu e un comportament NOU care se
+    # activează, e un comportament deja activ, dintotdeauna, în producție;
+    # implicit False ar fi oprit tăcut recalibrarea la acest commit, exact
+    # schimbarea de comportament implicit pe care nu trebuie s-o facem aici.
+    # Dezactivarea rămâne posibilă oricând, explicit, din model_config.
+    "auto_recalibration_enabled":  True,
 }
 
 
@@ -126,6 +136,17 @@ def _recalibrate_for_result(match_row: dict, r: dict) -> None:
         from recalibration import recalibrate_weights, compute_recency_weight
 
         cfg = load_config(_RECAL_CONFIG_DEFAULTS)
+
+        # [ADAUGAT] ADR-004 — recalibrarea automată respectă acum flag-ul
+        # promis. Implicit True (vezi nota de la _RECAL_CONFIG_DEFAULTS) —
+        # comportamentul de producție NU se schimbă prin acest commit.
+        if not cfg.get("auto_recalibration_enabled", True):
+            logger.info(
+                "[SyncResults] auto_recalibration_enabled=False — recalibrare sărită pentru %s vs %s.",
+                r.get("home_team"), r.get("away_team"),
+            )
+            return
+
         lr        = float(cfg.get("recalibration_learning_rate", 0.05))
         max_d     = float(cfg.get("recalibration_max_delta",     0.15))
         half_life = float(cfg.get("recency_half_life_days",      365))
@@ -214,8 +235,15 @@ def fetch_yesterday_results(target_date: str | None = None, days_back: int = 7) 
             if not league:
                 continue
 
-            home_team  = (match.get("homeTeam") or {}).get("name", "")
-            away_team  = (match.get("awayTeam") or {}).get("name", "")
+            # [ADAUGAT — P3.5 Team Identity Audit, fix de wiring] Normalizare
+            # obligatorie aici, nu doar la scriere (database/queries.py) —
+            # update_results_in_supabase() cauta randul existent dupa
+            # home_team+away_team+kickoff_date; daca randul a fost scris deja
+            # canonic (fix-ul de mai sus) dar cautarea foloseste numele brut
+            # din acest API, potrivirea ar esua silentios. Aceeasi sursa
+            # (football-data.org), aceeasi conventie de nume brute.
+            home_team  = normalize_team_name((match.get("homeTeam") or {}).get("name", ""))
+            away_team  = normalize_team_name((match.get("awayTeam") or {}).get("name", ""))
             score      = match.get("score", {})
             ft         = score.get("fullTime", {})
             home_goals = ft.get("home")

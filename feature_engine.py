@@ -14,6 +14,12 @@ Ce NU conține acest modul (intenționat):
     sync/backfill_features.py), fiindcă motorul live obține ELO-ul deja
     calculat de la un API extern (get_elo_rating). Sunt două responsabilități
     diferite, nu aceeași matematică — nu se unifică aici.
+    [NOTĂ — ADR-023, 2026-07-16] Această separare e programată să se
+    schimbe: motorul live va citi ELO din match_history.home_elo_after/
+    away_elo_after (Canonical Live ELO Snapshot), nu de la API extern —
+    vezi docs/00_GOVERNANCE/ADR-023-canonical-live-elo-source.md. Până la
+    finalizarea Phase 6 (Oracle Switch) a Execution Plan-ului asociat,
+    comportamentul descris mai sus rămâne exact, neschimbat.
   - Formula de calcul a offensive_rating/defensive_rating din backfill
     (FormTracker.calculate_ratings), care în prezent NU include blend-ul ELO
     folosit de motorul live. Aceasta este o divergență de MODEL cunoscută și

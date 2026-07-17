@@ -9,7 +9,12 @@ Rulat de GitHub Actions la 03:00 UTC în fiecare zi.
 
 Flux de execuție:
   1. Sincronizează meciuri noi (football-data.org + openfootball)
-  2. Calculează ELO intern din rezultatele noi
+  2. Actualizează feature-urile derivate (formă, H2H, cornere, cartonașe,
+     faulturi) pentru meciurile noi — sync.backfill_features.run_backfill(),
+     non-destructiv, gating per-coloană (Regula #13). Vezi ADR-014. ELO-ul
+     e recalculat aici (ELOTracker, MOV V2_damped — ADR-022), nu mai printr-un
+     pas separat — vezi ARCHITECTURE_AUDIT_2026-07-15.md pt eliminarea
+     implementării ELO necanonice (sync/calculate_elo.py).
   3. Evaluează experimentele shadow active (shadow_testing.py — vezi
      architecture/ADR-004-continuous-learning.md pt ordinea completă)
   4. Persistă cote de piață (odds_history) — vezi
@@ -18,10 +23,10 @@ Flux de execuție:
   6. Afișează raport de sincronizare
 
 Folosire:
-  python sync/run_daily.py              # rulare completă
-  python sync/run_daily.py --no-elo     # fără recalculare ELO
-  python sync/run_daily.py --no-ml      # fără reantrenare ML
-  python sync/run_daily.py --dry-run    # simulare fără scriere în Supabase
+  python sync/run_daily.py                # rulare completă
+  python sync/run_daily.py --no-features  # fără actualizare feature-uri derivate
+  python sync/run_daily.py --no-ml        # fără reantrenare ML
+  python sync/run_daily.py --dry-run      # simulare fără scriere în Supabase
 ================================================================================
 """
 from __future__ import annotations
@@ -88,12 +93,6 @@ def _print_sync_report(reports: list) -> None:
     print(f"  Competiții      : {len(all_leagues)}")
 
 
-def _print_elo_report(teams_updated: int, duration: float) -> None:
-    print("\n📊  ELO RATINGS")
-    _print_separator()
-    print(f"  ✅ {teams_updated} echipe actualizate  ({duration}s)")
-
-
 def _print_ml_report(status: dict) -> None:
     print("\n🤖  ML MODEL")
     _print_separator()
@@ -111,10 +110,24 @@ def _print_ml_report(status: dict) -> None:
         print(f"  ⚠️  {status.get('message', 'Status necunoscut')}")
 
 
+def _print_features_report(result: dict) -> None:
+    print("\n🧩  FEATURE UPDATE")
+    _print_separator()
+    status = result.get("status")
+    if status == "done":
+        print(f"  ✅ {result.get('processed', 0)} meciuri actualizate "
+              f"({result.get('already_done', 0)} deja complete, "
+              f"{result.get('errors', 0)} erori)")
+    elif status == "skipped":
+        print(f"  ℹ️  {result.get('message', 'Sărit')}")
+    else:
+        print(f"  ⚠️  {result.get('message', 'Status necunoscut')}")
+
+
 def run(
-    skip_elo: bool = False,
-    skip_ml:  bool = False,
-    dry_run:  bool = False,
+    skip_features: bool = False,
+    skip_ml:       bool = False,
+    dry_run:       bool = False,
 ) -> None:
     start_total = time.time()
     _print_header()
@@ -123,7 +136,7 @@ def run(
         print("  ⚠️  DRY RUN — nicio scriere în Supabase\n")
 
     # ── Pasul 0: Rezultate de ieri ────────────────────────────────────────
-    print("▶  Pasul 0/5 — Rezultate meciuri de ieri...")
+    print("▶  Pasul 0/6 — Rezultate meciuri de ieri...")
 
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
@@ -141,7 +154,7 @@ def run(
             print(f"  ⚠️  Eroare la sync rezultate: {exc}")
 
     # ── Pasul 1: Sincronizare meciuri ─────────────────────────────────────
-    print("▶  Pasul 1/5 — Sincronizare meciuri istorice...")
+    print("▶  Pasul 1/6 — Sincronizare meciuri istorice...")
 
     if not dry_run:
         from sync.sync_matches import sync_all
@@ -163,35 +176,37 @@ def run(
 
     _print_sync_report(sync_reports)
 
-    # ── Pasul 2: Recalculare ELO ──────────────────────────────────────────
-    print("\n▶  Pasul 2/5 — Recalculare ELO...")
+    # ── Pasul 3: Actualizare feature-uri derivate ──────────────────────────
+    # [ADAUGAT — ADR-014] Completează implementarea ADR-004 ("Toate
+    # feature-urile — ELO, formă, standings — se recalculează incremental
+    # după fiecare actualizare de rezultate"): înainte, acest pas rula doar
+    # manual (workflow_dispatch pe backfill.yml). run_backfill() e deja
+    # non-destructiv (gating per-coloană, Regula #13) și idempotent — sigur
+    # de rulat zilnic pe tot dataset-ul, cost marginal pentru rândurile deja
+    # complete.
+    print("\n▶  Pasul 3/6 — Actualizare feature-uri derivate (formă, H2H, cornere, cartonașe, faulturi)...")
 
-    if skip_elo:
-        print("  ℹ️  ELO sărit (--no-elo)")
-        elo_teams   = 0
-        elo_duration = 0.0
+    if skip_features:
+        print("  ℹ️  Sărit (--no-features)")
+        features_result = {"status": "skipped", "message": "--no-features flag"}
     elif dry_run:
-        elo_teams    = 0
-        elo_duration = 0.0
-        print("  ℹ️  ELO sărit (dry run)")
+        print("  ℹ️  Sărit (dry run)")
+        features_result = {"status": "skipped", "message": "dry run"}
     else:
         try:
-            elo_start = time.time()
-            from sync.calculate_elo import recalculate_all_elo
-            elo_teams = recalculate_all_elo()
-            elo_duration = round(time.time() - elo_start, 1)
+            from sync.backfill_features import run_backfill
+            features_result = run_backfill(dry_run=False)
         except Exception as exc:
-            logger.error("[DailySync] ELO recalculation failed: %s", exc)
-            elo_teams    = 0
-            elo_duration = 0.0
+            logger.error("[DailySync] run_backfill failed: %s", exc)
+            features_result = {"status": "error", "message": str(exc)}
 
-    _print_elo_report(elo_teams, elo_duration)
+    _print_features_report(features_result)
 
-    # ── Pasul 3: Evaluare experimente shadow ──────────────────────────────
+    # ── Pasul 4: Evaluare experimente shadow ──────────────────────────────
     # [ADAUGAT] Vezi architecture/ADR-004-continuous-learning.md — ordinea
     # corectă e ELO/formă/standings -> shadow evaluation -> ML retraining,
     # NU recalibrare automată per-meci (deja discutat, dezactivat separat).
-    print("\n▶  Pasul 3/5 — Evaluare experimente shadow...")
+    print("\n▶  Pasul 4/6 — Evaluare experimente shadow...")
 
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
@@ -228,10 +243,10 @@ def run(
             except Exception:
                 pass
 
-    # ── Pasul 4: Persistare cote de piață (odds_history) ──────────────────
+    # ── Pasul 5: Persistare cote de piață (odds_history) ──────────────────
     # [ADAUGAT] Conform docs/03_ENGINE/ODDS_PERSISTENCE_DESIGN.md (Frozen,
     # ADR-005, ADR-006). Domain service independent - vezi services/.
-    print("\n▶  Pasul 4/5 — Persistare cote de piață (odds_history)...")
+    print("\n▶  Pasul 5/6 — Persistare cote de piață (odds_history)...")
 
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
@@ -272,8 +287,8 @@ def run(
             except Exception:
                 pass
 
-    # ── Pasul 5: ML retraining ────────────────────────────────────────────
-    print("\n▶  Pasul 5/5 — Verificare / reantrenare ML...")
+    # ── Pasul 6: ML retraining ────────────────────────────────────────────
+    print("\n▶  Pasul 6/6 — Verificare / reantrenare ML...")
 
     if skip_ml:
         ml_status = {"status": "skipped", "message": "--no-ml flag"}
@@ -323,8 +338,8 @@ def main() -> None:
         description="Football Oracle — Daily Sync"
     )
     parser.add_argument(
-        "--no-elo", action="store_true",
-        help="Sări recalcularea ELO"
+        "--no-features", action="store_true",
+        help="Sări actualizarea feature-urilor derivate (formă, H2H, cornere, cartonașe, faulturi)"
     )
     parser.add_argument(
         "--no-ml", action="store_true",
@@ -337,9 +352,9 @@ def main() -> None:
     args = parser.parse_args()
 
     run(
-        skip_elo = args.no_elo,
-        skip_ml  = args.no_ml,
-        dry_run  = args.dry_run,
+        skip_features = args.no_features,
+        skip_ml       = args.no_ml,
+        dry_run       = args.dry_run,
     )
 
 

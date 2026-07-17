@@ -21,6 +21,8 @@ import logging
 import os
 from datetime import datetime, timedelta, timezone
 
+from mappings import normalize_team_name
+
 logger = logging.getLogger("FootballOracle.Supabase")
 
 _client = None
@@ -255,13 +257,38 @@ def append_recalibration_log_batch(rows: list[dict]) -> tuple[int, int]:
 # ════════════════════════════════════════════════════════════════════════════
 
 def upsert_match_history(row: dict) -> bool:
-    """Inserează sau actualizează un meci în dataset-ul de antrenare ML."""
+    """Inserează sau actualizează un meci în dataset-ul de antrenare ML.
+
+    [MIGRAT — ID-025-03 Writer Migration] Al doilea funnel de scriere in
+    match_history (celalalt e database/queries.py, folosit de sync/). Ruteaza
+    prin RPC-ul canonic (`upsert_match_canonical`): lookup pe cheia naturala
+    normalizata + decizie UPDATE/INSERT sub pg_advisory_xact_lock, in loc de
+    upsert direct pe fixture_id. Un meci deja existent devine UPDATE
+    non-destructiv pe randul canonic — zero duplicate noi (mecanismul D, ADR-025).
+    Normalizarea home/away se face aici, in Python (nu in SQL), inainte de apel
+    (P3.5 Team Identity Audit + ID-025-03). Apelantii (oracle_engine.py) trebuie
+    sa furnizeze cheia naturala completa (home_team/away_team/kickoff_date).
+    """
     client = get_client()
     if client is None:
         return False
     try:
-        client.table("match_history").upsert(row, on_conflict="fixture_id").execute()
-        return True
+        payload = dict(row)
+        if payload.get("home_team"):
+            payload["home_team"] = normalize_team_name(payload["home_team"])
+        if payload.get("away_team"):
+            payload["away_team"] = normalize_team_name(payload["away_team"])
+        payload = {k: v for k, v in payload.items() if v is not None}
+        res = client.rpc("upsert_match_canonical", {"p_payload": payload}).execute()
+        data = getattr(res, "data", None) or {}
+        action = data.get("action") if isinstance(data, dict) else None
+        if action == "hard_conflict":
+            logger.warning(
+                "[Supabase] upsert_match_history HARD CONFLICT (nescris): %s vs %s @ %s",
+                payload.get("home_team"), payload.get("away_team"), payload.get("kickoff_date"),
+            )
+            return False
+        return action in ("insert", "update")
     except Exception as exc:
         logger.error("[Supabase] upsert_match_history failed: %s", exc)
         return False
@@ -303,6 +330,83 @@ def get_training_data(only_with_results: bool = True) -> list[dict]:
     except Exception as exc:
         logger.error("[Supabase] get_training_data failed (după %d rânduri): %s", len(all_rows), exc)
         return all_rows
+
+
+def get_team_recent_shots(team: str, league: str, last_n: int = 5) -> list[dict]:
+    """
+    Ultimele `last_n` meciuri TERMINATE ale echipei `team` în liga `league`,
+    cu date reale de șuturi (home_shots/away_shots/*_on_target populate) —
+    sursă pentru avg_shots_ot real în TeamProfile (oracle_engine._build_profile),
+    înlocuind proxy-ul sintetic (avg_gf*0.45) cu date reale, unde există.
+
+    Zero scurgere temporală: doar meciuri cu actual_result populat (deci deja
+    terminate) — pentru un meci viitor de prezis, toate rândurile întoarse
+    sunt garantat din trecut. O echipă fără istoric relevant primește listă
+    goală — apelantul păstrează fallback-ul existent, nu se aproximează aici.
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("match_history")
+            .select("home_team,away_team,home_shots,away_shots,"
+                    "home_shots_on_target,away_shots_on_target,kickoff_date")
+            .eq("league", league)
+            .or_(f"home_team.eq.{team},away_team.eq.{team}")
+            .not_.is_("actual_result", "null")
+            .not_.is_("home_shots", "null")
+            .order("kickoff_date", desc=True)
+            .limit(last_n)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Supabase] get_team_recent_shots failed pentru %s/%s: %s", team, league, exc)
+        return []
+
+
+def get_team_recent_match_events(team: str, league: str, last_n: int = 5) -> list[dict]:
+    """
+    Ultimele `last_n` meciuri TERMINATE ale echipei `team` în liga `league`,
+    cu cornere/faulturi/cartonașe/gol la pauză/șuturi totale reale populate
+    (Task 2/3 ADR-011, șuturi totale ADR-021/P7.1) — sursă pentru statistici
+    reale afișate în TeamProfile, fără a atinge formula de rating
+    (corners/fouls/cards/HT nu sunt încă parametri ai
+    compute_team_offdef_rating — rămân informativ). `home_shots`/`away_shots`
+    alimentează `shot_dominance` (FEATURE_COLUMNS, promovat prin ablație —
+    docs/03_ENGINE/SHOT_DOMINANCE_ABLATION_2026-07-15.md).
+
+    Notă cunoscută: filtrul de rând rămâne `home_corners IS NOT NULL`
+    (neschimbat, ca să nu se atingă comportamentul deja validat prin
+    ablație al corner_dominance/foul_diff) — deci `avg_shots` se calculează
+    doar din rândurile care AU și cornere populate, nu din toate rândurile
+    cu șuturi reale. Cuplaj pre-existent, nu unul introdus de P7.1.
+
+    Zero scurgere temporală: doar meciuri cu actual_result populat.
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("match_history")
+            .select("home_team,away_team,home_fouls,away_fouls,"
+                    "home_corners,away_corners,home_yellow_cards,away_yellow_cards,"
+                    "home_red_cards,away_red_cards,home_ht_goals,away_ht_goals,"
+                    "home_shots,away_shots,kickoff_date")
+            .eq("league", league)
+            .or_(f"home_team.eq.{team},away_team.eq.{team}")
+            .not_.is_("actual_result", "null")
+            .not_.is_("home_corners", "null")
+            .order("kickoff_date", desc=True)
+            .limit(last_n)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Supabase] get_team_recent_match_events failed pentru %s/%s: %s", team, league, exc)
+        return []
 
 
 def count_training_samples() -> int:
@@ -355,6 +459,265 @@ def save_ml_status(trained_at: str, samples_used: int, accuracy: float | None,
     except Exception as exc:
         logger.error("[Supabase] save_ml_status failed: %s", exc)
         return False
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# LEARNING CORE — training_runs / model_champions (ADR-015)
+# ════════════════════════════════════════════════════════════════════════════
+# Istoric append-only de rulări de antrenare + pointer de campion activ per
+# (algorithm_family, league_scope). Nu suprascrie niciodată un rând existent
+# (spre deosebire de ml_model_status, care rămâne "status curent" pentru
+# afișare live — neschimbat, consumatorii lui existenți nu sunt atinși).
+
+def save_training_run(training_run_id: str, algorithm_name: str, algorithm_version: str,
+                       league_scope: str, status: str, samples_used: int,
+                       walk_forward_metrics: dict, message: str = "") -> bool:
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("training_runs").insert({
+            "training_run_id": training_run_id,
+            "algorithm_name": algorithm_name,
+            "algorithm_version": algorithm_version,
+            "league_scope": league_scope,
+            "status": status,
+            "samples_used": samples_used,
+            "walk_forward_metrics": walk_forward_metrics,
+            "message": message,
+        }).execute()
+        return True
+    except Exception as exc:
+        logger.error("[Supabase] save_training_run failed: %s", exc)
+        return False
+
+
+def get_training_run(training_run_id: str) -> dict | None:
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("training_runs")
+            .select("*")
+            .eq("training_run_id", training_run_id)
+            .single()
+            .execute()
+        )
+        return res.data or None
+    except Exception as exc:
+        logger.warning("[Supabase] get_training_run failed pentru %s: %s", training_run_id, exc)
+        return None
+
+
+def get_active_champion(algorithm_family: str, league_scope: str) -> dict | None:
+    """Campionul activ curent pentru (algorithm_family, league_scope) —
+    rândul cu superseded_at IS NULL, per invariantul din migrare (cel mult
+    unul). None dacă nu există niciun campion promovat încă — stare
+    legitimă, nu eroare (Regula #8, nu se aproximează)."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("model_champions")
+            .select("*")
+            .eq("algorithm_family", algorithm_family)
+            .eq("league_scope", league_scope)
+            .is_("superseded_at", "null")
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Supabase] get_active_champion failed pentru %s/%s: %s",
+                        algorithm_family, league_scope, exc)
+        return None
+
+
+def create_challenger(training_run_id: str, algorithm_family: str, league_scope: str) -> dict | None:
+    """Creează un Challenger nou, în starea CREATED. None la orice eșec —
+    fie Supabase indisponibil, fie constrângerea de invariant (cel mult un
+    Challenger activ per algorithm_family/league_scope, ADR-016) a respins
+    scrierea. Apelantul (learning_core.challenger_manager) e responsabil să
+    trateze None ca eșec explicit, nu ca succes tacit (Regula #8)."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = client.table("challengers").insert({
+            "training_run_id": training_run_id,
+            "algorithm_family": algorithm_family,
+            "league_scope": league_scope,
+            "state": "CREATED",
+        }).execute()
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Supabase] create_challenger failed pentru %s: %s", training_run_id, exc)
+        return None
+
+
+def get_challenger(training_run_id: str) -> dict | None:
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("challengers")
+            .select("*")
+            .eq("training_run_id", training_run_id)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Supabase] get_challenger failed pentru %s: %s", training_run_id, exc)
+        return None
+
+
+def get_active_challenger(algorithm_family: str, league_scope: str) -> dict | None:
+    """Challenger-ul activ curent (stare non-terminală) pentru
+    (algorithm_family, league_scope). None dacă nu există niciunul —
+    stare legitimă, nu eroare (Regula #8)."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("challengers")
+            .select("*")
+            .eq("algorithm_family", algorithm_family)
+            .eq("league_scope", league_scope)
+            .not_.in_("state", ["PROMOTED", "REJECTED"])
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Supabase] get_active_challenger failed pentru %s/%s: %s",
+                        algorithm_family, league_scope, exc)
+        return None
+
+
+def update_challenger_state(training_run_id: str, expected_current_state: str, new_state: str,
+                             rejection_reason: str | None, terminal: bool) -> bool:
+    """Tranziție atomică compare-and-swap: scrie DOAR dacă rândul e încă în
+    expected_current_state la momentul UPDATE-ului — niciodată check-then-act
+    (Regula bazelor de date). False dacă starea s-a schimbat concurent între
+    citire și scriere, sau la orice alt eșec."""
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        payload = {"state": new_state, "updated_at": now_iso, "rejection_reason": rejection_reason}
+        if terminal:
+            payload["terminal_at"] = now_iso
+        res = (
+            client.table("challengers")
+            .update(payload)
+            .eq("training_run_id", training_run_id)
+            .eq("state", expected_current_state)
+            .execute()
+        )
+        return bool(res.data)
+    except Exception as exc:
+        logger.warning("[Supabase] update_challenger_state failed pentru %s (%s -> %s): %s",
+                        training_run_id, expected_current_state, new_state, exc)
+        return False
+
+
+def record_challenger_evaluation(
+    training_run_id: str, algorithm_family: str, league_scope: str,
+    n_matches_evaluated: int, evaluation_window_start: str | None, evaluation_window_end: str | None,
+    verdict: str, statistical_method: str,
+    brier_baseline: float | None, brier_experiment: float | None,
+    delta_brier: float | None, brier_significant: bool | None,
+    logloss_baseline: float | None, logloss_experiment: float | None,
+    delta_logloss: float | None, logloss_significant: bool | None,
+    accuracy_baseline: float | None, accuracy_experiment: float | None,
+    delta_accuracy: float | None, accuracy_significant: bool | None,
+) -> bool:
+    """Persistă un verdict de Shadow Evaluation ca fapt istoric IMUABIL —
+    ADR-018. `INSERT ... ignore_duplicates=True` => ON CONFLICT DO NOTHING
+    la nivel Postgres, pe UNIQUE (training_run_id, n_matches_evaluated): o
+    rulare ulterioară cu ACEEAȘI fereastră de evaluare nu poate scrie un
+    rând nou și nu poate modifica rândul deja existent — niciodată UPDATE,
+    niciodată check-then-act. True dacă rândul a fost scris SAU exista deja
+    (ambele sunt „faptul e înregistrat", nu eșec)."""
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("challenger_evaluations").upsert({
+            "training_run_id": training_run_id,
+            "algorithm_family": algorithm_family, "league_scope": league_scope,
+            "n_matches_evaluated": n_matches_evaluated,
+            "evaluation_window_start": evaluation_window_start,
+            "evaluation_window_end": evaluation_window_end,
+            "verdict": verdict, "statistical_method": statistical_method,
+            "brier_baseline": brier_baseline, "brier_experiment": brier_experiment,
+            "delta_brier": delta_brier, "brier_significant": brier_significant,
+            "logloss_baseline": logloss_baseline, "logloss_experiment": logloss_experiment,
+            "delta_logloss": delta_logloss, "logloss_significant": logloss_significant,
+            "accuracy_baseline": accuracy_baseline, "accuracy_experiment": accuracy_experiment,
+            "delta_accuracy": delta_accuracy, "accuracy_significant": accuracy_significant,
+        }, on_conflict="training_run_id,n_matches_evaluated", ignore_duplicates=True).execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Supabase] record_challenger_evaluation failed pentru %s (n=%s): %s",
+                        training_run_id, n_matches_evaluated, exc)
+        return False
+
+
+def get_latest_challenger_evaluation(training_run_id: str) -> dict | None:
+    """Cel mai recent verdict imuabil (ADR-018) pentru un training_run_id —
+    ordonat după `evaluated_at`. None dacă nu există niciunul încă (stare
+    legitimă, nu eroare — Regula #8)."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("challenger_evaluations")
+            .select("*")
+            .eq("training_run_id", training_run_id)
+            .order("evaluated_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Supabase] get_latest_challenger_evaluation failed pentru %s: %s",
+                        training_run_id, exc)
+        return None
+
+
+def rpc_promote_challenger(training_run_id: str, promoted_by: str) -> str:
+    """Apelează funcția Postgres `promote_challenger` (migration 005) —
+    ADR-019/Contract de Atomicitate: o singură tranzacție, ambele efecte
+    (model_champions + challengers) aplicate atomic sau deloc. Întoarce
+    'promoted' | 'already_active'.
+
+    EXCEPȚIE deliberată de la convenția restului fișierului (return None/
+    False la eșec): aici excepția e lăsată să urce necontrolat — mesajul
+    exact al unui RAISE EXCEPTION server-side (precondiție structurală
+    nesatisfăcută, ex. „Challenger nu e SUCCEEDED") e informație pe care
+    apelantul (un om care declanșează o promovare manuală) trebuie s-o
+    vadă exact, nu doar „a eșuat". `learning_core/promotion_service.py`
+    prinde această excepție la propriul nivel și o mapează la
+    `PromotionResult(status="rejected", reason=str(exc))` — el rămâne
+    punctul unde nicio excepție nu mai scapă necontrolat mai departe."""
+    client = get_client()
+    if client is None:
+        raise RuntimeError("Supabase indisponibil — imposibil de apelat promote_challenger")
+    res = client.rpc("promote_challenger", {
+        "p_training_run_id": training_run_id,
+        "p_promoted_by": promoted_by,
+    }).execute()
+    return res.data
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -553,3 +916,21 @@ def record_provider_call(provider: str, endpoint: str, success: bool, latency_ms
     except Exception as exc:
         logger.debug("[Supabase] record_provider_call failed: %s", exc)
         return False
+
+
+def get_provider_metrics() -> list[dict]:
+    """[ADAUGAT] Citește provider_metrics (calls/errors/consecutive_failures/
+    avg_latency_ms/last_success/last_failure) — scris deja de
+    record_provider_call() din oracle_api.py/football_providers.py, dar
+    niciodată citit înainte de acest apel (gol găsit la audit — infrastructura
+    ADR-003 de observabilitate exista pe jumătate, doar scriere, fără citire).
+    Read-only, aditiv."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = client.table("provider_metrics").select("*").execute()
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Supabase] get_provider_metrics failed: %s", exc)
+        return []
