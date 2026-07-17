@@ -135,6 +135,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # shadow_mode_enabled (acela ramane legat exclusiv de experimentul
     # apifootball_injuries_coaches). Implicit OPRIT.
     "challenger_shadow_logging_enabled": False,
+    # [ADAUGAT — ADR-033] Captura Faza 1 (Consensus Validation) — flag
+    # DEDICAT, explicit independent de challenger_shadow_logging_enabled si
+    # de learning_core_enabled (ADR-030, citit separat din model_config, nu
+    # din acest dict). Implicit OPRIT.
+    "consensus_capture_enabled": False,
 }
 
 DEFAULT_WEIGHTS: dict[str, Any] = {
@@ -1321,6 +1326,15 @@ class FootballOracleEngine:
             pred, home_p, away_p, h2h, home_xg, away_xg, ph, pd, pa, mc, w_pen,
         )
 
+        # [ADAUGAT — ADR-033, Faza 1] Captură observațională a ieșirilor
+        # brute (raw_predictions, ADR-031) — flag DEDICAT
+        # (consensus_capture_enabled, implicit False), separat de
+        # challenger_shadow_logging_enabled și de learning_core_enabled.
+        # Zero impact asupra producției: rulează după ce `pred` a fost deja
+        # construită complet, nu o modifică niciodată, rezultatul acestei
+        # metode e ignorat de apelant.
+        self._log_consensus_capture(pred)
+
         return pred
 
     # ── Utility methods ───────────────────────────────────────────────────
@@ -1472,6 +1486,32 @@ class FootballOracleEngine:
             )
         except Exception as exc:
             logger.debug("[ChallengerShadow] _log_challenger_shadow failed: %s", exc)
+            return False
+
+    # [ADAUGAT — ADR-033, Faza 1] Singura frontieră spre infrastructura
+    # proprie de eșantionare Consensus Validation — trece exclusiv prin
+    # learning_core.consensus_capture (adapter), simetric cu granița deja
+    # impusă pentru Shadow (OracleEngine -> Adapter, niciodată direct la
+    # persistență/decizie). oracle_engine.py nu importă niciodată
+    # learning_core.consensus_validation (Faza 2, T1) — cele două faze
+    # comunică exclusiv prin tabela persistată, niciodată prin apel direct.
+    def _log_consensus_capture(self, pred: MatchPrediction) -> bool:
+        """Nu face nimic dacă consensus_capture_enabled=False (implicit) —
+        return imediat, zero import, zero apel Supabase, zero cost. Nu
+        modifică NICIODATĂ `pred`. Orice eșec e prins aici, niciodată
+        propagat către evaluate_match()."""
+        if not self.config.get("consensus_capture_enabled", False):
+            return False
+        try:
+            from learning_core.consensus_capture import capture_raw_predictions
+
+            return capture_raw_predictions(
+                fixture_id=pred.fixture_id, raw_predictions=pred.raw_predictions,
+                league=pred.league, home_team=pred.home_team, away_team=pred.away_team,
+                kickoff_date=pred.kickoff_date,
+            )
+        except Exception as exc:
+            logger.debug("[ConsensusCapture] _log_consensus_capture failed: %s", exc)
             return False
 
     def _load_prediction(self, fixture_id: str) -> dict | None:
