@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, "/home/claude/stubs")
 
+import supabase_client as sb
 import sync.sync_results as sr
 
 
@@ -70,3 +71,55 @@ def test_fetch_results_custom_days_back():
         assert captured_params.get("dateFrom") == expected_date_from
     finally:
         sr._rate_limited_get = original
+
+
+def _fake_match_row_and_result():
+    match_row = {"home_xg_pred": 1.5, "away_xg_pred": 1.0, "fixture_id": "test-fixture"}
+    r = {
+        "league": "Premier League", "home_team": "A", "away_team": "B",
+        "home_goals": 2, "away_goals": 1, "kickoff_date": "2026-01-01",
+    }
+    return match_row, r
+
+
+def test_recalibrate_for_result_respects_disabled_flag(monkeypatch):
+    """[ADR-004] Cand auto_recalibration_enabled=False (setat explicit in
+    model_config), recalibrarea nu se mai executa - save_weights nu se apeleaza."""
+    calls = {"save_weights": 0}
+
+    monkeypatch.setattr(sb, "load_config", lambda default: {**default, "auto_recalibration_enabled": False})
+    monkeypatch.setattr(sb, "load_weights", lambda default: dict(default))
+    monkeypatch.setattr(sb, "save_weights", lambda data: calls.__setitem__("save_weights", calls["save_weights"] + 1) or True)
+    monkeypatch.setattr(sb, "append_recalibration_log", lambda row: True)
+
+    match_row, r = _fake_match_row_and_result()
+    sr._recalibrate_for_result(match_row, r)
+
+    assert calls["save_weights"] == 0
+
+
+def test_recalibrate_for_result_default_enabled_preserves_current_behavior(monkeypatch):
+    """[ADR-004] Comportament implicit NESCHIMBAT prin acest fix - fara
+    auto_recalibration_enabled setat explicit in model_config (cazul de azi,
+    in productie), recalibrarea tot ruleaza (implicit True)."""
+    calls = {"save_weights": 0}
+
+    # simuleaza model_config fara cheia noua inca scrisa - exact cazul real
+    monkeypatch.setattr(sb, "load_config", lambda default: dict(default))
+    monkeypatch.setattr(sb, "load_weights", lambda default: dict(default))
+    monkeypatch.setattr(sb, "save_weights", lambda data: calls.__setitem__("save_weights", calls["save_weights"] + 1) or True)
+    monkeypatch.setattr(sb, "append_recalibration_log", lambda row: True)
+
+    match_row, r = _fake_match_row_and_result()
+    sr._recalibrate_for_result(match_row, r)
+
+    assert calls["save_weights"] == 1
+
+
+def test_recalibrate_for_result_skips_when_no_predicted_xg():
+    """Comportament deja existent, neschimbat - fara xG predictat, iese
+    devreme, inainte de a atinge flag-ul sau Supabase."""
+    r = {"league": "Premier League", "home_team": "A", "away_team": "B",
+         "home_goals": 1, "away_goals": 0, "kickoff_date": "2026-01-01"}
+    # nu ar trebui sa arunce nicio exceptie (nu atinge deloc supabase_client)
+    sr._recalibrate_for_result({"fixture_id": "no-xg"}, r)

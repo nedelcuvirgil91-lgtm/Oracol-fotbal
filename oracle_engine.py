@@ -130,6 +130,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # [ADAUGAT] Shadow testing - vezi architecture/ADR-002-shadow-testing.md.
     # Implicit OPRIT - nicio schimbare de comportament fara activare explicita.
     "shadow_mode_enabled":         False,
+    # [ADAUGAT — Pasul 3, Implementation Contract Learning Core] Shadow
+    # logging pt Challenger activ — vezi ADR-016. Flag DEDICAT, separat de
+    # shadow_mode_enabled (acela ramane legat exclusiv de experimentul
+    # apifootball_injuries_coaches). Implicit OPRIT.
+    "challenger_shadow_logging_enabled": False,
 }
 
 DEFAULT_WEIGHTS: dict[str, Any] = {
@@ -196,6 +201,18 @@ class TeamProfile:
     data_source:       str
     data_quality:      str
     data_quality_note: str
+    # Statistici reale, informative (Task 2, ADR-011) — NU sunt încă
+    # parametri ai compute_team_offdef_rating(), doar afișate. None dacă
+    # nu există date reale (nu se aproximează).
+    avg_corners:       float | None = None
+    avg_fouls:         float | None = None
+    avg_yellow_cards:  float | None = None
+    avg_ht_goals:      float | None = None
+    # [ADAUGAT — ADR-021/P7.1] Șuturi TOTALE reale (nu pe poartă — vezi
+    # avg_shots_ot mai sus, deja existent). Sursă pentru shot_dominance
+    # (FEATURE_COLUMNS), promovat prin ablație — vezi
+    # docs/03_ENGINE/SHOT_DOMINANCE_ABLATION_2026-07-15.md.
+    avg_shots:         float | None = None
 
 
 @dataclass
@@ -331,16 +348,96 @@ class FootballOracleEngine:
         # Foloseste aceleasi key_manager/cache singleton-uri deja existente.
         self.apifootball = ApiFootballProvider() if API_FOOTBALL_AVAILABLE else None
 
-        self.ml = MLPredictorEngine() if ML_MODULE_AVAILABLE else None
-        if self.ml and self.use_supabase:
-            train_result = self.ml.train()
-            logger.info("[ML] Inițializare: %s — %s", train_result.status, train_result.message)
+        self._initialize_ml()
 
         logger.info(
-            "FootballOracleEngine v3.0 ready. Supabase=%s Injuries=%s Cache=%s KeyMgr=%s ML=%s",
+            "FootballOracleEngine v3.0 ready. Supabase=%s Injuries=%s Cache=%s KeyMgr=%s ML=%s ml_source=%s champion_status=%s",
             self.use_supabase, INJURY_MANAGER_AVAILABLE, CACHE_MANAGER_AVAILABLE,
-            KEY_MANAGER_AVAILABLE, ML_MODULE_AVAILABLE,
+            KEY_MANAGER_AVAILABLE, ML_MODULE_AVAILABLE, self.ml_source,
+            self.champion_diagnostic.get("status"),
         )
+
+    # [ADAUGAT — Pasul 7B, Implementation Contract Learning Core] Decizie
+    # UNICĂ Champion vs Local vs None — vezi RUNTIME_CONTRACT.md și
+    # ADR-019/Architecture Gate 7B. Extrasă din __init__ într-o metodă
+    # separată exact ca să fie testabilă direct (garda "Champion wins over
+    # Local" cere să poată mock-ui MLPredictorEngine.train() ca să ridice
+    # excepție dacă e apelat, fără să construiască un engine complet).
+    #
+    # UN singur apel către champion_loader (`_resolve_champion()`) —
+    # rezultatul lui alimentează SIMULTAN decizia de servire,
+    # `champion_diagnostic` și seeding-ul lui `self.ml` — zero al doilea
+    # apel, zero cursă posibilă între diagnostic și ce chiar servește.
+    #
+    # Invariant (Architecture Gate 7B): `train()` NU e apelat NICIODATĂ
+    # când Champion reușește — nu doar rezultatul ignorat, apelul însuși
+    # lipsește. Motiv: `train()` are efect secundar Supabase
+    # (`sb.save_ml_status`) care ar corupe `ml_model_status` cu
+    # statisticile antrenării locale, chiar dacă Champion e cel care
+    # servește efectiv (Defectul A, găsit la audit).
+    def _initialize_ml(self) -> None:
+        self.ml = MLPredictorEngine() if ML_MODULE_AVAILABLE else None
+
+        champion_result = None
+        if self.ml and self.use_supabase:
+            champion_result = self._resolve_champion()
+
+        if champion_result is not None:
+            self.ml_source = "champion"
+            self.champion_diagnostic = self._champion_diagnostic_from_result(champion_result)
+        elif self.ml and self.use_supabase:
+            train_result = self.ml.train()
+            logger.info("[ML] Inițializare: %s — %s", train_result.status, train_result.message)
+            self.ml_source = "local" if self.ml.is_trained else "none"
+            self.champion_diagnostic = self._champion_diagnostic_unavailable("no_valid_champion")
+        else:
+            self.ml_source = "none"
+            reason = "no_supabase" if not self.use_supabase else "ml_module_unavailable"
+            self.champion_diagnostic = self._champion_diagnostic_unavailable(reason)
+
+    @staticmethod
+    def _champion_diagnostic_unavailable(reason: str) -> dict:
+        return {
+            "status": "unavailable", "reason": reason,
+            "training_run_id": None, "algorithm_version": None,
+            "validated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    @staticmethod
+    def _champion_diagnostic_from_result(result) -> dict:
+        return {
+            "status": "validated", "reason": None,
+            "training_run_id": result.training_run_id,
+            "algorithm_version": result.algorithm_version,
+            "validated_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def _resolve_champion(self):
+        """UN singur apel către `champion_loader.load_champion_or_none()`
+        per construcție — dacă reușește, seedează `self.ml` DIRECT (Golul A,
+        Pasul 6) și întoarce rezultatul (folosit apoi pentru
+        `champion_diagnostic`, fără al doilea apel). None dacă Champion nu
+        e disponibil — `self.ml` rămâne neatins, apelantul cade pe
+        `train()`. `load_champion_or_none()` însuși nu ridică niciodată
+        excepție (contract propriu, testat) — try/except-ul de aici e
+        plasă de siguranță suplimentară pe cel mai sensibil punct din tot
+        Learning Core (primul care schimbă efectiv ce se servește)."""
+        try:
+            from learning_core.champion_loader import load_champion_or_none
+            from ml_predictor import _ALGORITHM_FAMILY, _LEAGUE_SCOPE
+
+            result = load_champion_or_none(_ALGORITHM_FAMILY, _LEAGUE_SCOPE)
+            if result is None:
+                return None
+
+            self.ml.seed_from_champion(
+                result.model, result.samples_used,
+                accuracy=result.accuracy, log_loss=result.log_loss, trained_at=result.trained_at,
+            )
+            return result
+        except Exception as exc:
+            logger.warning("[Champion] Rezolvare eșuată neașteptat — fallback pe antrenare locală: %s", exc)
+            return None
 
     def _persist_weights(self) -> None:
         if self.use_supabase:
@@ -440,6 +537,80 @@ class FootballOracleEngine:
         )
 
     # ── _build_profile — v2.3 cascade cu Free Live Football primar ────────
+    @staticmethod
+    def _real_avg_shots_on_target(canonical: str, league: str, last_n: int = 5) -> float | None:
+        """
+        Șuturi pe poartă REALE (nu proxy sintetic gf*0.45), din ultimele
+        `last_n` meciuri terminate ale echipei în match_history — populate
+        prin MatchStatsBackfillService (Premier League/La Liga/Serie A/
+        Bundesliga/Ligue 1). Întoarce None dacă nu există date reale — NU
+        se aproximează aici, apelantul păstrează fallback-ul sintetic
+        existent (Regula #8 — nicio stare necunoscută nu se aproximează).
+        """
+        if not SUPABASE_MODULE_AVAILABLE:
+            return None
+        try:
+            rows = sb.get_team_recent_shots(canonical, league, last_n=last_n)
+        except Exception:
+            return None
+        if not rows:
+            return None
+        values = []
+        for r in rows:
+            if r.get("home_team") == canonical:
+                v = r.get("home_shots_on_target")
+            elif r.get("away_team") == canonical:
+                v = r.get("away_shots_on_target")
+            else:
+                continue
+            if v is not None:
+                values.append(float(v))
+        if not values:
+            return None
+        return sum(values) / len(values)
+
+    @staticmethod
+    def _real_match_events(canonical: str, league: str, last_n: int = 5) -> dict:
+        """
+        Cornere/faulturi/cartonașe galbene/gol la pauză/șuturi totale REALE,
+        medie pe ultimele `last_n` meciuri terminate — pur informativ
+        (Task 2/3 ADR-011, șuturi ADR-021/P7.1), NU alimentează formula de
+        rating. Valorile lipsă rămân None — nu se aproximează.
+        """
+        empty = {"avg_corners": None, "avg_fouls": None, "avg_yellow_cards": None,
+                  "avg_ht_goals": None, "avg_shots": None}
+        if not SUPABASE_MODULE_AVAILABLE:
+            return empty
+        try:
+            rows = sb.get_team_recent_match_events(canonical, league, last_n=last_n)
+        except Exception:
+            return empty
+        if not rows:
+            return empty
+        corners, fouls, yellows, ht_goals, shots = [], [], [], [], []
+        for r in rows:
+            is_home = r.get("home_team") == canonical
+            is_away = r.get("away_team") == canonical
+            if not (is_home or is_away):
+                continue
+            c  = r.get("home_corners") if is_home else r.get("away_corners")
+            f  = r.get("home_fouls") if is_home else r.get("away_fouls")
+            y  = r.get("home_yellow_cards") if is_home else r.get("away_yellow_cards")
+            ht = r.get("home_ht_goals") if is_home else r.get("away_ht_goals")
+            s  = r.get("home_shots") if is_home else r.get("away_shots")
+            if c is not None: corners.append(float(c))
+            if f is not None: fouls.append(float(f))
+            if y is not None: yellows.append(float(y))
+            if ht is not None: ht_goals.append(float(ht))
+            if s is not None: shots.append(float(s))
+        return {
+            "avg_shots": sum(shots) / len(shots) if shots else None,
+            "avg_corners": sum(corners) / len(corners) if corners else None,
+            "avg_fouls": sum(fouls) / len(fouls) if fouls else None,
+            "avg_yellow_cards": sum(yellows) / len(yellows) if yellows else None,
+            "avg_ht_goals": sum(ht_goals) / len(ht_goals) if ht_goals else None,
+        }
+
     def _build_profile(self, team_id: str, team_name: str, league: str) -> TeamProfile:
         """
         Cascade:
@@ -457,6 +628,7 @@ class FootballOracleEngine:
         d_cap     = float(w.get("defensive_cap",  2.5))
         last_n    = int(self.config.get("last_n_fixtures", 5))
         canonical = normalize_team_name(team_name)
+        real_sot  = self._real_avg_shots_on_target(canonical, league, last_n)
 
         elo_raw   = self.api.get_elo_rating(canonical)
         elo_off   = self._elo_to_multiplier(elo_raw)           if elo_raw else None
@@ -497,7 +669,7 @@ class FootballOracleEngine:
             if season_entry:
                 gf     = season_entry.get("avg_gf", 1.25)
                 ga     = season_entry.get("avg_ga", 1.25)
-                sot    = gf * 0.45
+                sot    = real_sot if real_sot is not None else gf * 0.45
                 pos    = 50.0
                 played = season_entry.get("played", 5)
                 stats  = [
@@ -566,12 +738,12 @@ class FootballOracleEngine:
             if season_entry:
                 gf  = season_entry.get("avg_gf", sum(s["goals_for"]     for s in stats) / n)
                 ga  = season_entry.get("avg_ga", sum(s["goals_against"] for s in stats) / n)
-                sot = gf * 0.45
+                sot = real_sot if real_sot is not None else gf * 0.45
                 pos = 50.0
             else:
                 gf  = sum(s["goals_for"]                       for s in stats) / n
                 ga  = sum(s["goals_against"]                   for s in stats) / n
-                sot = sum(s.get("shots_on_goal", gf * 0.45)   for s in stats) / n
+                sot = real_sot if real_sot is not None else sum(s.get("shots_on_goal", gf * 0.45) for s in stats) / n
                 pos = sum(s.get("possession",    50.0)         for s in stats) / n
 
             form_source = recent_form if recent_form else stats
@@ -603,7 +775,7 @@ class FootballOracleEngine:
             def_rating = round(elo_def, 4)
             gf         = baseline * elo_off
             ga         = baseline * elo_def
-            sot        = gf * 0.45
+            sot        = real_sot if real_sot is not None else gf * 0.45
             pos        = 50.0
             n          = 0
             results    = []
@@ -618,7 +790,7 @@ class FootballOracleEngine:
             def_rating = round(baseline, 4)
             gf         = baseline
             ga         = baseline
-            sot        = gf * 0.45
+            sot        = real_sot if real_sot is not None else gf * 0.45
             pos        = 50.0
             n          = 0
             results    = []
@@ -630,6 +802,8 @@ class FootballOracleEngine:
 
         off_rating = min(off_rating, o_cap)
         def_rating = min(def_rating, d_cap)
+
+        events = self._real_match_events(canonical, league, last_n)
 
         return TeamProfile(
             team_id=team_id, team_name=canonical,
@@ -643,6 +817,11 @@ class FootballOracleEngine:
             elo_rating=elo_raw, data_source=data_source,
             data_quality=data_quality,
             data_quality_note=DATA_QUALITY_NOTES[data_quality],
+            avg_corners=round(events["avg_corners"], 2) if events["avg_corners"] is not None else None,
+            avg_fouls=round(events["avg_fouls"], 2) if events["avg_fouls"] is not None else None,
+            avg_yellow_cards=round(events["avg_yellow_cards"], 2) if events["avg_yellow_cards"] is not None else None,
+            avg_ht_goals=round(events["avg_ht_goals"], 2) if events["avg_ht_goals"] is not None else None,
+            avg_shots=round(events["avg_shots"], 2) if events["avg_shots"] is not None else None,
         )
 
     # ── League weights (cold-start blending) ──────────────────────────────
@@ -843,6 +1022,26 @@ class FootballOracleEngine:
             "away_elo":                away_p.elo_rating or 1500,
             "h2h_modifier":            h2h.h2h_modifier if h2h else 0.0,
             "h2h_meetings":            h2h.meetings if h2h else 0,
+            # [ADAUGAT — ADR-012] Aceeași derivare ca în ml_predictor.
+            # _fetch_training_dataframe(): diferență, nu medii brute
+            # stocate redundant. None dacă istoricul real lipsește pentru
+            # oricare echipă — XGBoost gestionează nativ (missing-value
+            # split), niciodată aproximat.
+            "corner_dominance":        (home_p.avg_corners - away_p.avg_corners)
+                                        if home_p.avg_corners is not None and away_p.avg_corners is not None
+                                        else None,
+            "card_diff":               (away_p.avg_yellow_cards - home_p.avg_yellow_cards)
+                                        if home_p.avg_yellow_cards is not None and away_p.avg_yellow_cards is not None
+                                        else None,
+            # [ADAUGAT — ADR-013] Aceeași disciplină ca mai sus.
+            "foul_diff":               (away_p.avg_fouls - home_p.avg_fouls)
+                                        if home_p.avg_fouls is not None and away_p.avg_fouls is not None
+                                        else None,
+            # [ADAUGAT — ADR-021/P7.1] Aceeași disciplină, promovat prin
+            # ablație (docs/03_ENGINE/SHOT_DOMINANCE_ABLATION_2026-07-15.md).
+            "shot_dominance":          (home_p.avg_shots - away_p.avg_shots)
+                                        if home_p.avg_shots is not None and away_p.avg_shots is not None
+                                        else None,
             "weather_penalty":         weather_penalty,
             "mc_prob_home":            mc["mc_prob_home"],
             "mc_prob_draw":            mc["mc_prob_draw"],
@@ -1067,6 +1266,16 @@ class FootballOracleEngine:
                 feature_metadata=apifootball_metadata, processing_stage="final",
             )
 
+        # [ADAUGAT — Pasul 3, Implementation Contract Learning Core] Shadow
+        # logging pt Challenger activ (daca exista) — flag DEDICAT
+        # (challenger_shadow_logging_enabled, implicit False), separat de
+        # shadow_mode_enabled. Zero impact asupra productiei: ruleaza dupa
+        # ce `pred` a fost deja construita complet mai sus, nu o modifica
+        # niciodata, iar rezultatul acestei metode e ignorat de apelant.
+        self._log_challenger_shadow(
+            pred, home_p, away_p, h2h, home_xg, away_xg, ph, pd, pa, mc, w_pen,
+        )
+
         return pred
 
     # ── Utility methods ───────────────────────────────────────────────────
@@ -1173,6 +1382,53 @@ class FootballOracleEngine:
             logger.debug("[ShadowTesting] log_shadow_experiment failed: %s", exc)
             return False
 
+    # [ADAUGAT — Pasul 3, Implementation Contract Learning Core] Shadow
+    # logging pt Challenger activ — vezi ADR-016 (Challenger FSM, Pasul 2) și
+    # docs/00_GOVERNANCE/ADR-017-challenger-shadow-logging.md (+ addendum
+    # Chief Architect Review: Shadow e un SIDE EFFECT, nu parte din
+    # Prediction Pipeline). Flag DEDICAT (`challenger_shadow_logging_enabled`,
+    # implicit False) — NU reutilizează `shadow_mode_enabled`, care rămâne
+    # legat exclusiv de experimentul apifootball_injuries_coaches.
+    #
+    # REGULĂ ARHITECTURALĂ: OracleEngine → Shadow Adapter → ChallengerManager.
+    # Această metodă NU importă niciodată learning_core.challenger_manager
+    # direct — trece exclusiv prin learning_core.challenger_shadow (adapter),
+    # singura frontieră permisă. Verificat prin gardă arhitecturală
+    # (tests/test_challenger_shadow_logging.py).
+    def _log_challenger_shadow(
+        self, pred: MatchPrediction, home_p: TeamProfile, away_p: TeamProfile,
+        h2h: H2HRecord, home_xg: float, away_xg: float,
+        ph: float, pd_: float, pa: float, mc: dict, weather_penalty: float,
+    ) -> bool:
+        """Nu face nimic dacă challenger_shadow_logging_enabled=False
+        (implicit) — return imediat, zero import, zero apel Supabase, zero
+        cost. Nu modifică NICIODATĂ `pred` — parametrii sunt folosiți doar
+        pentru a reconstrui feature-urile ML deja calculate mai sus
+        (_build_ml_features e pură, fără efecte secundare), nu pentru a
+        recalcula predicția servită. Orice eșec e prins aici — niciodată
+        propagat către evaluate_match()."""
+        if not self.config.get("challenger_shadow_logging_enabled", False):
+            return False
+        try:
+            from ml_predictor import _ALGORITHM_FAMILY, _LEAGUE_SCOPE
+            from learning_core.challenger_shadow import log_shadow_for_active_challenger
+
+            ml_features = self._build_ml_features(
+                home_p, away_p, h2h, home_xg, away_xg, ph, pd_, pa, mc, weather_penalty,
+            )
+            return log_shadow_for_active_challenger(
+                algorithm_family=_ALGORITHM_FAMILY, league_scope=_LEAGUE_SCOPE,
+                features=ml_features,
+                fixture_id=pred.fixture_id, home_xg=home_xg, away_xg=away_xg,
+                control_prob_home=pred.prob_home_win, control_prob_draw=pred.prob_draw,
+                control_prob_away=pred.prob_away_win,
+                league=pred.league, home_team=pred.home_team, away_team=pred.away_team,
+                kickoff_date=pred.kickoff_date,
+            )
+        except Exception as exc:
+            logger.debug("[ChallengerShadow] _log_challenger_shadow failed: %s", exc)
+            return False
+
     def _load_prediction(self, fixture_id: str) -> dict | None:
         safe_id = str(fixture_id).replace("/", "_")
         p = PREDICTIONS_DIR / f"{safe_id}.json"
@@ -1216,6 +1472,9 @@ class FootballOracleEngine:
                 "home_team":         cache.get("home_team", ""),
                 "away_team":         cache.get("away_team", ""),
                 "league":            cache.get("league", "default"),
+                # [ID-025-03] Cheia naturala completa — RPC-ul canonic cauta
+                # randul dupa (home, away, kickoff_date), nu dupa fixture_id.
+                "kickoff_date":      cache.get("kickoff_date", ""),
                 "actual_home_goals": actual_home_goals,
                 "actual_away_goals": actual_away_goals,
                 "actual_result":     actual_result,

@@ -35,6 +35,54 @@ logger = logging.getLogger("FootballOracle.ML")
 
 MIN_SAMPLES_TO_TRAIN = 30  # sub acest prag, ML nu se activează — doar Poisson
 
+# [ADAUGAT — ADR-015] Identitate fixă pentru istoricul de antrenare — trebuie
+# să coincidă exact cu learning_core.algorithms.xgboost_v1.XGBoostV1Algorithm
+# (name/version/league_scope), fiindcă reprezintă același algoritm; train()
+# e apelat direct de fluxul de producție (run_daily.py, oracle_engine.py),
+# nu doar prin adaptorul Learning Core — de aceea înregistrarea se face aici,
+# nu doar în XGBoostV1Algorithm.fit().
+_ALGORITHM_FAMILY  = "xgboost_v1"
+_ALGORITHM_VERSION = "1"
+_LEAGUE_SCOPE       = "all"
+
+
+def _record_training_run(status: str, samples_used: int, walk_forward_metrics: dict,
+                          message: str) -> None:
+    """Înregistrează rularea în training_runs (local + Supabase best-effort)
+    și compară cu campionul activ, dacă există — pur informativ, loghează
+    rezultatul. Nu decide, nu promovează, nu întrerupe niciodată train():
+    orice eșec aici e prins și logat, fără să afecteze MLTrainingResult
+    returnat apelantului."""
+    try:
+        import uuid
+        from learning_core import champion_comparison, storage
+        from learning_core.model_registry import TrainingRunResult
+
+        run_id = str(uuid.uuid4())
+        storage.save_training_run(
+            TrainingRunResult(
+                training_run_id=run_id, status=status, samples_used=samples_used,
+                walk_forward_metrics=walk_forward_metrics, message=message,
+            ),
+            algorithm_name=_ALGORITHM_FAMILY,
+            algorithm_version=_ALGORITHM_VERSION,
+            league_scope=_LEAGUE_SCOPE,
+        )
+        if walk_forward_metrics:
+            comparison = champion_comparison.compare_to_champion(
+                algorithm_family=_ALGORITHM_FAMILY,
+                algorithm_version=_ALGORITHM_VERSION,
+                league_scope=_LEAGUE_SCOPE,
+                new_training_run_id=run_id,
+                new_metrics=walk_forward_metrics,
+            )
+            logger.info("[ML] training_run %s înregistrat. %s", run_id, comparison.message)
+        else:
+            logger.info("[ML] training_run %s înregistrat (status=%s, fără metrici de comparat).",
+                         run_id, status)
+    except Exception as exc:
+        logger.warning("[ML] Înregistrare training_run eșuată (nu afectează antrenarea): %s", exc)
+
 FEATURE_COLUMNS = [
     # [ELIMINAT — audit de feature importance, permutation importance
     # măsurată pe 53.409 meciuri reale: "home_xg_pred", "away_xg_pred",
@@ -49,6 +97,27 @@ FEATURE_COLUMNS = [
     "home_form_score", "away_form_score",
     "home_elo", "away_elo",
     "h2h_modifier", "h2h_meetings",
+    # [ADAUGAT — ADR-012] Promovate prin test de ablație walk-forward pe
+    # 5.253 meciuri reale (docs/03_ENGINE/CORNER_CARD_DOMINANCE_ABLATION_
+    # 2026-07-13.md): acuratețe/log-loss/Brier îmbunătățite simultan.
+    # Calculate în _fetch_training_dataframe() din cele 4 coloane brute
+    # (home/away_corner_avg_recent, home/away_card_avg_recent) — nu
+    # stocate redundant ca atare în match_history.
+    "corner_dominance", "card_diff",
+    # [ADAUGAT — ADR-013] Promovat prin test de ablație walk-forward pe
+    # 5.253 meciuri reale (docs/03_ENGINE/FOULS_DOMINANCE_ABLATION_
+    # 2026-07-14.md): acuratețe/log-loss/Brier îmbunătățite simultan
+    # (magnitudine mică, raportată onest). Calculat din cele 2 coloane
+    # brute (home/away_foul_avg_recent) — nu stocat redundant. `ht_goal_
+    # diff` a fost testat separat și RESPINS (docs/03_ENGINE/HT_SCORE_
+    # ABLATION_2026-07-14.md) — accuracy câștigă, log-loss/Brier regresează.
+    "foul_diff",
+    # [ADAUGAT — ADR-021, P7.1] Promovat prin test de ablație walk-forward
+    # pe 5.253 meciuri reale (docs/03_ENGINE/SHOT_DOMINANCE_ABLATION_
+    # 2026-07-15.md): acuratețe/log-loss/Brier îmbunătățite simultan
+    # (Δacc +0,0046, Δlog-loss -0,0062, Δbrier -0,0047). Calculat din cele
+    # 2 coloane brute (home/away_shot_avg_recent) — nu stocat redundant.
+    "shot_dominance",
 ]
 
 RESULT_TO_LABEL = {"H": 0, "D": 1, "A": 2}
@@ -84,6 +153,37 @@ class MLPredictorEngine:
         self.samples_used: int = 0
         self.is_trained: bool = False
         self.last_train_status: str = "not_trained"
+        # [ADAUGAT — Pasul 7B] Metadate specifice sursei Champion — citite
+        # DOAR de status_summary() când last_train_status ==
+        # "trained_from_champion", ca să nu raporteze niciodată statisticile
+        # unei antrenări locale diferite de modelul care servește efectiv
+        # (Architecture Gate 7B, Defectul B).
+        self.champion_accuracy: float | None = None
+        self.champion_log_loss: float | None = None
+        self.champion_trained_at: str | None = None
+
+    # [ADAUGAT — Pasul 6, Implementation Contract Learning Core] Populează
+    # starea internă dintr-un model deja antrenat, încărcat dintr-un
+    # Champion (learning_core.champion_loader) — fără să treacă prin
+    # train() local. Garantează aceeași reprezentare internă
+    # (is_trained/model_version/samples_used/feature_names) indiferent de
+    # proveniența modelului — nicio dublă reprezentare a aceluiași obiect
+    # (Chief Architect Review, Architecture Gate 6, "Golul A").
+    #
+    # Nu modifică NIMIC din train()/predict() — metodă complet aditivă.
+    def seed_from_champion(
+        self, model, samples_used: int, model_version: int = 1,
+        accuracy: float | None = None, log_loss: float | None = None, trained_at: str | None = None,
+    ) -> None:
+        self.model = model
+        self.model_version = model_version
+        self.samples_used = samples_used
+        self.feature_names = list(FEATURE_COLUMNS)
+        self.is_trained = True
+        self.last_train_status = "trained_from_champion"
+        self.champion_accuracy = accuracy
+        self.champion_log_loss = log_loss
+        self.champion_trained_at = trained_at
 
     # ── Pregătire date ──────────────────────────────────────────────────
     def _fetch_training_dataframe(self) -> pd.DataFrame | None:
@@ -91,6 +191,28 @@ class MLPredictorEngine:
         if not rows:
             return None
         df = pd.DataFrame(rows)
+        # [ADAUGAT — ADR-012] corner_dominance/card_diff se calculează din
+        # cele 4 coloane brute, nu se citesc direct — dacă lipsesc brutele
+        # (meci fără istoric de cornere/cartonașe), rezultă NaN, gestionat
+        # nativ de XGBoost (missing-value split), niciodată aproximat.
+        if "home_corner_avg_recent" in df.columns and "away_corner_avg_recent" in df.columns:
+            df["corner_dominance"] = df["home_corner_avg_recent"] - df["away_corner_avg_recent"]
+        else:
+            df["corner_dominance"] = np.nan
+        if "home_card_avg_recent" in df.columns and "away_card_avg_recent" in df.columns:
+            df["card_diff"] = df["away_card_avg_recent"] - df["home_card_avg_recent"]
+        else:
+            df["card_diff"] = np.nan
+        # [ADAUGAT — ADR-013] foul_diff, aceeași disciplină ca mai sus.
+        if "home_foul_avg_recent" in df.columns and "away_foul_avg_recent" in df.columns:
+            df["foul_diff"] = df["away_foul_avg_recent"] - df["home_foul_avg_recent"]
+        else:
+            df["foul_diff"] = np.nan
+        # [ADAUGAT — ADR-021, P7.1] shot_dominance, aceeași disciplină.
+        if "home_shot_avg_recent" in df.columns and "away_shot_avg_recent" in df.columns:
+            df["shot_dominance"] = df["home_shot_avg_recent"] - df["away_shot_avg_recent"]
+        else:
+            df["shot_dominance"] = np.nan
         missing = [c for c in FEATURE_COLUMNS if c not in df.columns]
         for c in missing:
             df[c] = np.nan
@@ -180,6 +302,8 @@ class MLPredictorEngine:
     def train(self) -> MLTrainingResult:
         if not sb.is_available():
             self.last_train_status = "unavailable"
+            _record_training_run("unavailable", 0, {},
+                                  "Supabase indisponibil — verifică SUPABASE_URL / SUPABASE_SECRET_KEY în secrets.")
             return MLTrainingResult(
                 status="unavailable",
                 message="Supabase indisponibil — verifică SUPABASE_URL / SUPABASE_SECRET_KEY în secrets.",
@@ -189,10 +313,9 @@ class MLPredictorEngine:
         if df is None or len(df) < MIN_SAMPLES_TO_TRAIN:
             n = 0 if df is None else len(df)
             self.last_train_status = "insufficient_data"
-            return MLTrainingResult(
-                status="insufficient_data", samples_used=n,
-                message=f"Doar {n} meciuri cu rezultat cunoscut — minim {MIN_SAMPLES_TO_TRAIN} necesare pentru antrenare ML.",
-            )
+            msg = f"Doar {n} meciuri cu rezultat cunoscut — minim {MIN_SAMPLES_TO_TRAIN} necesare pentru antrenare ML."
+            _record_training_run("insufficient_data", n, {}, msg)
+            return MLTrainingResult(status="insufficient_data", samples_used=n, message=msg)
 
         try:
             from xgboost import XGBClassifier
@@ -207,7 +330,18 @@ class MLPredictorEngine:
                 logger.warning("[ML] kickoff_date absent din date — walk-forward validation "
                                 "degradează la ordinea brută din DB (posibil nesigur temporal).")
 
-            X = df[FEATURE_COLUMNS].astype(float).fillna(df[FEATURE_COLUMNS].astype(float).median())
+            # [ADAUGAT — fix leakage walk-forward] NU se impută cu mediana
+            # globală — acea mediană era calculată pe tot setul deja sortat
+            # cronologic, deci "vedea" segmente viitoare la imputarea
+            # fold-urilor timpurii (scurgere informațională în preprocesare,
+            # distinctă de scurgerea de etichete). XGBoost gestionează NaN
+            # nativ (missing-value split, `missing=np.nan` implicit) — exact
+            # designul deja documentat pentru corner_dominance/card_diff
+            # (ADR-012) și foul_diff (ADR-013), extins acum consecvent la
+            # toate cele 13 coloane. Verificat empiric (2026-07-14): cele 10
+            # coloane originale au 0 NULL din 53.409 rânduri — schimbarea e
+            # no-op pentru ele.
+            X = df[FEATURE_COLUMNS].astype(float)
             y = df["actual_result"].map(RESULT_TO_LABEL).astype(int)
 
             # Validare onestă, temporală (nu mai afectează modelul final)
@@ -264,16 +398,25 @@ class MLPredictorEngine:
                 self.model_version, self.samples_used, acc, ll, brier, len(wf["folds"]),
             )
 
+            train_message = (
+                f"Model antrenat pe {self.samples_used} meciuri. "
+                f"Validare walk-forward: {len(wf['folds'])} folds, Brier mediu={brier}."
+            )
+            _record_training_run(
+                "trained", self.samples_used,
+                {"accuracy": acc, "log_loss": ll, "brier_score": brier},
+                train_message,
+            )
             return MLTrainingResult(
                 status="trained", samples_used=self.samples_used,
                 accuracy=acc, log_loss=ll,
-                message=f"Model antrenat pe {self.samples_used} meciuri. "
-                        f"Validare walk-forward: {len(wf['folds'])} folds, Brier mediu={brier}.",
+                message=train_message,
             )
 
         except Exception as exc:
             logger.error("[ML] Training failed: %s", exc)
             self.last_train_status = "error"
+            _record_training_run("error", 0, {}, str(exc))
             return MLTrainingResult(status="error", message=str(exc))
 
     # ── Predicție ─────────────────────────────────────────────────────────
@@ -285,9 +428,12 @@ class MLPredictorEngine:
         if not self.is_trained or self.model is None:
             return None
         try:
+            # NaN trece nativ către XGBoost, exact ca la antrenare (train())
+            # — nicio imputare separată aici, altfel modelul ar ruta prin
+            # split-uri diferite de missing-value la predicție față de
+            # antrenare (regim inconsistent, nu doar o valoare aproximată).
             row = pd.DataFrame([{c: features.get(c, np.nan) for c in self.feature_names}])
             row = row.astype(float)
-            row = row.fillna(row.median(numeric_only=True)).fillna(0.0)
             probs = self.model.predict_proba(row)[0]
             ph, pd_, pa = float(probs[0]), float(probs[1]), float(probs[2])
             confidence = float(max(ph, pd_, pa))
@@ -302,6 +448,24 @@ class MLPredictorEngine:
 
     # ── Status pentru UI ─────────────────────────────────────────────────
     def status_summary(self) -> dict:
+        # [ADAUGAT — Pasul 7B] Champion-aware — Defectul B, Architecture
+        # Gate 7B: dacă modelul servit vine dintr-un Champion,
+        # accuracy/log_loss/last_trained_at trebuie să reflecte ACEL model,
+        # nu ml_model_status (tabelă legacy, scrisă exclusiv de antrenări
+        # locale — ar rămâne stale/greșită dacă am citi-o oricum). Nicio a
+        # doua sursă de adevăr concurentă: ramura aleasă e determinată
+        # exclusiv de last_train_status, populat o singură dată, fie de
+        # train(), fie de seed_from_champion().
+        if self.last_train_status == "trained_from_champion":
+            return {
+                "is_trained_this_session": self.is_trained,
+                "model_version": self.model_version,
+                "samples_used": self.samples_used,
+                "last_trained_at": self.champion_trained_at,
+                "accuracy": self.champion_accuracy,
+                "log_loss": self.champion_log_loss,
+                "min_samples_required": MIN_SAMPLES_TO_TRAIN,
+            }
         remote = sb.get_ml_status()
         return {
             "is_trained_this_session": self.is_trained,

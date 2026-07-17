@@ -5,7 +5,7 @@ FOOTBALL ORACLE v4.0 — Backfill Historical Features
 Module: sync/backfill_features.py
 
 Calculează retrospectiv feature-urile ML pentru toate meciurile din
-match_history care nu au fost încă procesate (backfill_done = false).
+match_history care au cel puțin o coloană de feature NULL.
 
 Feature-uri calculate per meci (la momentul t al meciului):
   - ELO acasă/deplasare (calculat din toate meciurile ANTERIOARE acelui meci)
@@ -13,10 +13,28 @@ Feature-uri calculate per meci (la momentul t al meciului):
   - Rating ofensiv/defensiv (din forma recentă)
   - H2H modifier (din meciurile anterioare dintre cele două echipe)
 
-Strategia de resume:
-  - Meciurile procesate sunt marcate cu backfill_done = true
-  - La reluare, scriptul sare automat peste meciurile deja procesate
-  - Sigur să fie oprit și reluat oricând
+Strategia de resume — NON-DESTRUCTIVĂ, gating PER-COLOANĂ (v4.1):
+  [FIX] Înainte, gating-ul era per-rând (`backfill_done`): dacă fals, se
+  scriau toate cele 10 coloane necondiționat, inclusiv peste un `home_elo`
+  real deja existent (Kaggle) — asta a produs disjuncția completă demonstrată
+  în DATA_PIPELINE_INVESTIGATION_2026-07-12.md (0% din rânduri cu ELO ȘI
+  toate feature-urile simultan). Acum gating-ul e per-coloană: se calculează
+  întotdeauna toate cele 10 valori (calcul Python, ieftin), dar se scrie DOAR
+  subsetul ale cărui valori curente sunt NULL. O coloană deja populată nu
+  e niciodată suprascrisă, indiferent de `backfill_done`. Strategie proiectată
+  și documentată în BACKFILL_NON_DESTRUCTIVE_STRATEGY_2026-07-12.md — vezi
+  acel document pentru riscurile NEREZOLVATE de acest fix (§3.2 — ordinea
+  cronologică între rulări succesive cu istoric nou mai vechi; §3.4 —
+  offensive/defensive_rating folosesc mereu ELO-ul din replay-ul intern,
+  niciodată ELO-ul real stocat, chiar și după acest fix).
+  - Un rând cu toate cele 10 coloane deja populate e complet sărit (fără
+    niciun apel de UPDATE).
+  - `backfill_done` rămâne un indicator agregat pentru raportare rapidă
+    (setat True doar când, după scriere, toate cele 10 coloane sunt
+    populate — garantat prin construcție, fiindcă se scrie exact setul de
+    coloane care lipseau).
+  - Idempotent: o a doua rulare, fără date noi, nu mai scrie nimic.
+  - Sigur să fie oprit și reluat oricând.
 
 Rulare:
   python sync/backfill_features.py
@@ -28,6 +46,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
 import sys
 import time
 from datetime import date, datetime, timezone
@@ -62,6 +81,44 @@ FORM_WINDOW    = 10     # ultimele N meciuri pentru formă (mărit de la 5 la 10
                         # 760 meciuri: Brier 0.6312→0.6047, testat 5-15,
                         # câștigul devine neglijabil după ~10-11)
 
+# Cele 10 coloane de feature completate de acest script — sursă unică pentru
+# SELECT-ul din fetch_all_matches() și pentru gating-ul per-coloană din
+# run_backfill(). Nu conține niciodată actual_result/actual_home_goals/
+# actual_away_goals — scriptul nu rescrie și nu a rescris niciodată rezultate.
+FEATURE_COLUMNS: tuple[str, ...] = (
+    "home_elo", "away_elo",
+    "home_form_score", "away_form_score",
+    "home_offensive_rating", "home_defensive_rating",
+    "away_offensive_rating", "away_defensive_rating",
+    "h2h_modifier", "h2h_meetings",
+    # [ADAUGAT — ADR-012] Medii reale de cornere/cartonașe, promovate la
+    # FEATURE_COLUMNS in ml_predictor.py dupa dovada de ablatie
+    # (docs/03_ENGINE/CORNER_CARD_DOMINANCE_ABLATION_2026-07-13.md).
+    "home_corner_avg_recent", "away_corner_avg_recent",
+    "home_card_avg_recent", "away_card_avg_recent",
+    # [ADAUGAT — ADR-013] Medie reală de faulturi, promovată la
+    # FEATURE_COLUMNS in ml_predictor.py dupa dovada de ablatie
+    # (docs/03_ENGINE/FOULS_DOMINANCE_ABLATION_2026-07-14.md).
+    "home_foul_avg_recent", "away_foul_avg_recent",
+    # [ADAUGAT — P7.1, docs/03_ENGINE/P7_1_IMPLEMENTATION_PLAN.md] Medie
+    # reală de șuturi TOTALE. Candidat la ml_predictor.FEATURE_COLUMNS
+    # DOAR dacă ablația (SHOT_DOMINANCE_ABLATION_2026-07-15.md) e Accepted
+    # — până atunci, coloane pur informative, fără niciun consumator ML.
+    "home_shot_avg_recent", "away_shot_avg_recent",
+    # [ADAUGAT — ADR-023, docs/00_GOVERNANCE/ADR-023-canonical-live-elo-source.md]
+    # Canonical Live ELO Snapshot — ratingul ELO al fiecărei echipe IMEDIAT
+    # DUPĂ meci (spre deosebire de home_elo/away_elo, care rămân pre-meci,
+    # neschimbate, sursă exclusivă de antrenare ML). Consumator: servirea
+    # live (Phase 4-6), NU ml_predictor.FEATURE_COLUMNS — nu se adaugă acolo.
+    "home_elo_after", "away_elo_after",
+)
+
+
+def _missing_feature_columns(match: dict) -> list[str]:
+    """Subsetul din FEATURE_COLUMNS ale căror valori curente sunt NULL
+    pentru acest rând. Listă goală == rând complet, de sărit fără UPDATE."""
+    return [col for col in FEATURE_COLUMNS if match.get(col) is None]
+
 
 def get_client():
     from supabase_client import get_client as _gc
@@ -85,7 +142,11 @@ def fetch_all_matches(league: str | None = None) -> list[dict]:
             client.table("match_history")
             .select("id,fixture_id,home_team,away_team,league,kickoff_date,"
                     "actual_home_goals,actual_away_goals,actual_result,"
-                    "backfill_done")
+                    "backfill_done,home_shots_on_target,away_shots_on_target,"
+                    "home_shots,away_shots,"
+                    "home_corners,away_corners,home_yellow_cards,away_yellow_cards,"
+                    "home_fouls,away_fouls,"
+                    + ",".join(FEATURE_COLUMNS))
             .not_.is_("actual_result", "null")
             .order("kickoff_date", desc=False)
             .order("id", desc=False)
@@ -158,6 +219,28 @@ def _k_factor(matches_played: int) -> float:
     return K_FACTOR_NEW if matches_played < 10 else K_FACTOR_BASE
 
 
+# [ADAUGAT — ADR-022, P3 Accepted] Multiplicator Margin of Victory (MOV),
+# formula FiveThirtyEight-style (P3_0_DESIGN_REVIEW_ELO_MOV_2026-07-15.md),
+# constante V2_damped — alese pe baza P3_REVALIDATION_POST_P3_5_2026-07-15.md
+# (singura variantă, alături de V1, care îmbunătățește simultan ambele axe
+# de fidelitate ELO — eroare absolută ȘI Spearman rank correlation — față
+# de referință; cea mai bună dintre toate 5 variante testate pe ambele axe).
+MOV_C = 4.4
+MOV_D = 0.0005
+
+
+def _mov_multiplier(goal_diff: int, elo_diff_signed: float) -> float:
+    """La egal (goal_diff=0), multiplicator neutru 1.0 — "marja de victorie"
+    nu are sens pentru un rezultat fără victorie (ln(1)=0 ar anula complet
+    actualizarea, caz special descoperit la implementarea originală P3,
+    nu în document). `elo_diff_signed` = rating câștigător − rating învins,
+    folosind ratingurile pre-meci (home advantage inclus) — o surpriză
+    (câștigătorul avea rating mai mic) amplifică multiplicatorul."""
+    if goal_diff <= 0:
+        return 1.0
+    return math.log(goal_diff + 1) * (MOV_C / (MOV_D * elo_diff_signed + MOV_C))
+
+
 class ELOTracker:
     """
     Urmărește ratingurile ELO pentru toate echipele în timp real,
@@ -181,8 +264,14 @@ class ELOTracker:
         """Returnează ELO-urile ÎNAINTE de a procesa meciul."""
         return round(self.get_elo(home)), round(self.get_elo(away))
 
-    def process_match(self, home: str, away: str, result: str) -> None:
-        """Actualizează ELO după un meci. Apelat DUPĂ ce am salvat ELO-ul pre-meci."""
+    def process_match(self, home: str, away: str, home_goals: int, away_goals: int, result: str) -> None:
+        """Actualizează ELO după un meci. Apelat DUPĂ ce am salvat ELO-ul pre-meci.
+
+        [SCHIMBAT — ADR-022] `home_goals`/`away_goals` obligatorii — folosite
+        pentru multiplicatorul MOV (§ADR-022). Semnătura veche (doar
+        `result`) nu mai există; ambii apelanți (run_backfill(),
+        sync/bootstrap_league_learning.py) transmit golurile, deja
+        disponibile la punctul de apel."""
         r_home = self.get_elo(home) + HOME_ADVANTAGE
         r_away = self.get_elo(away)
 
@@ -191,16 +280,22 @@ class ELOTracker:
 
         if result == "H":
             score_home, score_away = 1.0, 0.0
+            elo_diff = r_home - r_away
         elif result == "A":
             score_home, score_away = 0.0, 1.0
+            elo_diff = r_away - r_home
         else:
             score_home, score_away = 0.5, 0.5
+            elo_diff = 0.0
+
+        goal_diff = abs(int(home_goals) - int(away_goals))
+        multiplier = _mov_multiplier(goal_diff, elo_diff)
 
         k_home = _k_factor(self.get_count(home))
         k_away = _k_factor(self.get_count(away))
 
-        self.ratings[home] = self.get_elo(home) + k_home * (score_home - exp_home)
-        self.ratings[away] = self.get_elo(away) + k_away * (score_away - exp_away)
+        self.ratings[home] = self.get_elo(home) + k_home * multiplier * (score_home - exp_home)
+        self.ratings[away] = self.get_elo(away) + k_away * multiplier * (score_away - exp_away)
         self.match_counts[home] = self.get_count(home) + 1
         self.match_counts[away] = self.get_count(away) + 1
 
@@ -269,6 +364,144 @@ class FormTracker:
         # Păstrăm doar ultimele 20 de meciuri (suficient pentru calcule)
         self.history[home] = self.history[home][-20:]
         self.history[away] = self.history[away][-20:]
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# ȘUTURI PE POARTĂ REALE (înlocuiește proxy-ul avg_gf*0.45, când există)
+# ════════════════════════════════════════════════════════════════════════════
+
+class ShotsTracker:
+    """
+    Urmărește șuturile pe poartă REALE (populate de MatchStatsBackfillService,
+    Task 1) pentru fiecare echipă, procesând meciurile în ordine cronologică —
+    identic ca disciplină cu FormTracker. La fiecare meci, returnează media
+    ÎNAINTE de acel meci, doar din meciuri cu valoare reală cunoscută.
+
+    O echipă fără niciun meci cu șuturi reale în istoric întoarce None —
+    apelantul păstrează fallback-ul sintetic (avg_gf*0.45), nu se aproximează
+    aici (Regula #8).
+    """
+
+    def __init__(self, window: int = FORM_WINDOW):
+        self.window = window
+        self.history: dict[str, list[float]] = {}
+
+    def get_avg_shots_on_target(self, team: str) -> float | None:
+        values = self.history.get(team, [])[-self.window:]
+        if not values:
+            return None
+        return sum(values) / len(values)
+
+    def process_match(self, home: str, away: str,
+                       home_sot: float | None, away_sot: float | None) -> None:
+        if home_sot is not None:
+            self.history.setdefault(home, []).append(float(home_sot))
+            self.history[home] = self.history[home][-20:]
+        if away_sot is not None:
+            self.history.setdefault(away, []).append(float(away_sot))
+            self.history[away] = self.history[away][-20:]
+
+
+class FoulsTracker:
+    """
+    Medie glisantă reală de faulturi per echipă — identică ca disciplină cu
+    ShotsTracker. Sursă pentru home_foul_avg_recent/away_foul_avg_recent
+    (ADR-013), promovată la ml_predictor.FEATURE_COLUMNS după ablație
+    (docs/03_ENGINE/FOULS_DOMINANCE_ABLATION_2026-07-14.md).
+    """
+
+    def __init__(self, window: int = FORM_WINDOW):
+        self.window = window
+        self.history: dict[str, list[float]] = {}
+
+    def get_avg_fouls(self, team: str) -> float | None:
+        values = self.history.get(team, [])[-self.window:]
+        if not values:
+            return None
+        return sum(values) / len(values)
+
+    def process_match(self, home: str, away: str,
+                       home_fouls: float | None, away_fouls: float | None) -> None:
+        if home_fouls is not None:
+            self.history.setdefault(home, []).append(float(home_fouls))
+            self.history[home] = self.history[home][-20:]
+        if away_fouls is not None:
+            self.history.setdefault(away, []).append(float(away_fouls))
+            self.history[away] = self.history[away][-20:]
+
+
+class ShotCountTracker:
+    """
+    Medie glisantă reală de șuturi TOTALE (nu pe poartă — vezi ShotsTracker,
+    care rămâne neatins, calculează shots_on_target) per echipă — identică
+    ca disciplină cu FoulsTracker. Sursă pentru home_shot_avg_recent/
+    away_shot_avg_recent (P7.1, docs/03_ENGINE/P7_1_DESIGN_SHOT_DOMINANCE_
+    2026-07-15.md), candidat la ml_predictor.FEATURE_COLUMNS doar dacă
+    ablația (docs/03_ENGINE/SHOT_DOMINANCE_ABLATION_2026-07-15.md) e Accepted.
+
+    Comportament pe istoric incomplet intenționat identic cu FoulsTracker/
+    CornerCardTracker: media se calculează pe toate valorile disponibile
+    (1..window), fără a impune minimum `window` meciuri — `None` doar când
+    istoricul e complet gol (Regula #8, nicio stare necunoscută aproximată).
+    """
+
+    def __init__(self, window: int = FORM_WINDOW):
+        self.window = window
+        self.history: dict[str, list[float]] = {}
+
+    def get_avg_shots(self, team: str) -> float | None:
+        values = self.history.get(team, [])[-self.window:]
+        if not values:
+            return None
+        return sum(values) / len(values)
+
+    def process_match(self, home: str, away: str,
+                       home_shots: float | None, away_shots: float | None) -> None:
+        if home_shots is not None:
+            self.history.setdefault(home, []).append(float(home_shots))
+            self.history[home] = self.history[home][-20:]
+        if away_shots is not None:
+            self.history.setdefault(away, []).append(float(away_shots))
+            self.history[away] = self.history[away][-20:]
+
+
+class CornerCardTracker:
+    """
+    Medie glisantă reală de cornere/cartonașe galbene per echipă — identică
+    ca disciplină cu ShotsTracker. Sursă pentru home_corner_avg_recent/
+    away_corner_avg_recent/home_card_avg_recent/away_card_avg_recent
+    (ADR-012), promovate la ml_predictor.FEATURE_COLUMNS după ablație
+    (docs/03_ENGINE/CORNER_CARD_DOMINANCE_ABLATION_2026-07-13.md).
+    """
+
+    def __init__(self, window: int = FORM_WINDOW):
+        self.window = window
+        self.corners: dict[str, list[float]] = {}
+        self.cards: dict[str, list[float]] = {}
+
+    def get_avg_corners(self, team: str) -> float | None:
+        values = self.corners.get(team, [])[-self.window:]
+        return sum(values) / len(values) if values else None
+
+    def get_avg_cards(self, team: str) -> float | None:
+        values = self.cards.get(team, [])[-self.window:]
+        return sum(values) / len(values) if values else None
+
+    def process_match(self, home: str, away: str,
+                       home_corners: float | None, away_corners: float | None,
+                       home_cards: float | None, away_cards: float | None) -> None:
+        if home_corners is not None:
+            self.corners.setdefault(home, []).append(float(home_corners))
+            self.corners[home] = self.corners[home][-20:]
+        if away_corners is not None:
+            self.corners.setdefault(away, []).append(float(away_corners))
+            self.corners[away] = self.corners[away][-20:]
+        if home_cards is not None:
+            self.cards.setdefault(home, []).append(float(home_cards))
+            self.cards[home] = self.cards[home][-20:]
+        if away_cards is not None:
+            self.cards.setdefault(away, []).append(float(away_cards))
+            self.cards[away] = self.cards[away][-20:]
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -504,6 +737,7 @@ def team_pre_match_rating(
     team: str, league: str,
     elo_tracker: "ELOTracker", form_tracker: "FormTracker",
     weights: dict, config: dict,
+    shots_tracker: "ShotsTracker | None" = None,
 ) -> tuple[float, float, float, int]:
     """
     Calculează (offensive_rating, defensive_rating, form_score, elo_before)
@@ -546,7 +780,8 @@ def team_pre_match_rating(
     if form:
         avg_gf = sum(gf for _, gf, _ in form) / len(form)
         avg_ga = sum(ga for _, _, ga in form) / len(form)
-        avg_sot = avg_gf * 0.45   # proxy — șuturi pe poartă absente 100% din Kaggle
+        real_sot = shots_tracker.get_avg_shots_on_target(team) if shots_tracker else None
+        avg_sot = real_sot if real_sot is not None else avg_gf * 0.45  # proxy — fallback cand nu exista date reale
         avg_pos = 50.0            # neutru — posesie absentă 100% din Kaggle
 
         off_rating, def_rating = compute_team_offdef_rating(
@@ -582,14 +817,20 @@ def run_backfill(
     """
     Procesează toate meciurile din match_history și completează feature-urile ML.
 
-    Strategia:
-    1. Încarcă TOATE meciurile în ordine cronologică
+    Strategia (gating per-coloană, non-destructiv — v4.1):
+    1. Încarcă TOATE meciurile în ordine cronologică, cu toate cele 10
+       coloane de feature (pentru a putea verifica NULL per-coloană)
     2. Procesează-le unul câte unul, menținând starea ELO/formă/H2H
     3. Pentru fiecare meci:
-       a. Citește ELO/formă/H2H ÎNAINTE de meci (feature-uri ML)
-       b. Dacă meciul nu e deja procesat (backfill_done=False), salvează feature-urile
-       c. Actualizează ELO/formă/H2H cu rezultatul meciului
-    4. Meciurile deja procesate (backfill_done=True) sară la pasul c direct
+       a. Citește ELO/formă/H2H ÎNAINTE de meci (feature-uri ML) — se
+          calculează întotdeauna, indiferent de completitudinea rândului
+       b. Scrie DOAR coloanele ale căror valori curente sunt NULL — o
+          coloană deja populată nu e niciodată suprascrisă
+       c. Actualizează ELO/formă/H2H cu rezultatul meciului (întotdeauna,
+          indiferent dacă rândul a fost scris sau sărit — starea replay-ului
+          trebuie să avanseze pe toate meciurile, nu doar pe cele incomplete)
+    4. Un rând deja complet (toate cele 10 coloane populate) e sărit la
+       pasul b, fără niciun apel de UPDATE
 
     [UNIFICARE — v3] `weights`/`config`: dacă nu sunt date explicit, se
     încarcă din Supabase (model_weights/model_config — sursa reală de adevăr
@@ -626,20 +867,27 @@ def run_backfill(
         return {"status": "error", "message": "Niciun meci găsit"}
 
     total = len(all_matches)
-    already_done = sum(1 for m in all_matches if m.get("backfill_done"))
+    # [FIX v4.1] Completitudinea reală se verifică per-coloană (NULL check),
+    # nu prin flag-ul `backfill_done` — acesta poate fi inexact tocmai din
+    # cauza disjuncției pe care acest fix o repară (vezi header-ul modulului).
+    already_done = sum(1 for m in all_matches if not _missing_feature_columns(m))
     to_process = total - already_done
 
-    logger.info("[Backfill] Total meciuri: %d | Deja procesate: %d | De procesat: %d",
-                total, already_done, to_process)
+    logger.info("[Backfill] Total meciuri: %d | Deja complete (toate cele %d coloane): %d | De completat: %d",
+                total, len(FEATURE_COLUMNS), already_done, to_process)
 
     if to_process == 0:
         logger.info("[Backfill] Toate meciurile sunt deja procesate!")
         return {"status": "done", "processed": 0, "already_done": already_done}
 
     # 2. Inițializăm tracker-ele
-    elo_tracker  = ELOTracker()
-    form_tracker = FormTracker()
-    h2h_tracker  = H2HTracker()
+    elo_tracker        = ELOTracker()
+    form_tracker       = FormTracker()
+    h2h_tracker        = H2HTracker()
+    shots_tracker      = ShotsTracker()
+    corner_card_tracker = CornerCardTracker()
+    fouls_tracker       = FoulsTracker()
+    shot_count_tracker   = ShotCountTracker()
 
     # 3. Procesăm meciurile în ordine cronologică
     pending_updates: list[tuple[int, dict]] = []
@@ -661,16 +909,53 @@ def run_backfill(
         match_league = match.get("league", "") or (league or "")
         home_elo, away_elo = elo_tracker.get_elos_before_match(home, away)
         home_off, home_def, home_form, _ = team_pre_match_rating(
-            home, match_league, elo_tracker, form_tracker, weights, config
+            home, match_league, elo_tracker, form_tracker, weights, config, shots_tracker
         )
         away_off, away_def, away_form, _ = team_pre_match_rating(
-            away, match_league, elo_tracker, form_tracker, weights, config
+            away, match_league, elo_tracker, form_tracker, weights, config, shots_tracker
         )
         h2h_mod, h2h_meet  = h2h_tracker.get_h2h_before(home, away)
+        home_corner_avg = corner_card_tracker.get_avg_corners(home)
+        away_corner_avg = corner_card_tracker.get_avg_corners(away)
+        home_card_avg   = corner_card_tracker.get_avg_cards(home)
+        away_card_avg   = corner_card_tracker.get_avg_cards(away)
+        home_foul_avg   = fouls_tracker.get_avg_fouls(home)
+        away_foul_avg   = fouls_tracker.get_avg_fouls(away)
+        home_shot_avg   = shot_count_tracker.get_avg_shots(home)
+        away_shot_avg   = shot_count_tracker.get_avg_shots(away)
 
-        # Dacă meciul nu e deja procesat, adăugăm la lista de update-uri
-        if not match.get("backfill_done"):
-            features = {
+        # [FIX v4.1] Gating per-coloană: se scrie DOAR subsetul de coloane
+        # ale căror valori curente sunt NULL — o coloană deja populată
+        # (ex. home_elo real din Kaggle) nu e niciodată inclusă în payload,
+        # deci nu e niciodată suprascrisă. Rândurile complete (toate cele
+        # 10 coloane deja populate) primesc missing == [] și sunt sărite
+        # complet, fără niciun apel de UPDATE.
+        missing = _missing_feature_columns(match)
+
+        # Actualizăm starea tracker-elor (indiferent dacă meciul era deja procesat)
+        elo_tracker.process_match(home, away, hg, ag, result)
+        form_tracker.process_match(home, away, hg, ag, result)
+        h2h_tracker.process_match(home, away, result, hg, ag)
+        shots_tracker.process_match(home, away, match.get("home_shots_on_target"), match.get("away_shots_on_target"))
+        corner_card_tracker.process_match(
+            home, away,
+            match.get("home_corners"), match.get("away_corners"),
+            match.get("home_yellow_cards"), match.get("away_yellow_cards"),
+        )
+        fouls_tracker.process_match(home, away, match.get("home_fouls"), match.get("away_fouls"))
+        shot_count_tracker.process_match(home, away, match.get("home_shots"), match.get("away_shots"))
+
+        # [ADR-023] home_elo_after/away_elo_after — ratingul ELO imediat DUPĂ
+        # acest meci (Canonical Live ELO Snapshot). Citite DUPĂ
+        # elo_tracker.process_match() de mai sus, spre deosebire de
+        # home_elo/away_elo (pre-meci, citite înainte de bucla de update-uri
+        # a tracker-elor) — singurele 2 coloane din FEATURE_COLUMNS care
+        # reflectă starea de după meci, nu de dinainte.
+        home_elo_after = round(elo_tracker.get_elo(home))
+        away_elo_after = round(elo_tracker.get_elo(away))
+
+        if missing:
+            computed = {
                 "home_elo":               home_elo,
                 "away_elo":               away_elo,
                 "home_form_score":        home_form,
@@ -681,13 +966,25 @@ def run_backfill(
                 "away_defensive_rating":  away_def,
                 "h2h_modifier":           h2h_mod,
                 "h2h_meetings":           h2h_meet,
+                "home_corner_avg_recent": home_corner_avg,
+                "away_corner_avg_recent": away_corner_avg,
+                "home_card_avg_recent":   home_card_avg,
+                "away_card_avg_recent":   away_card_avg,
+                "home_foul_avg_recent":   home_foul_avg,
+                "away_foul_avg_recent":   away_foul_avg,
+                "home_shot_avg_recent":   home_shot_avg,
+                "away_shot_avg_recent":   away_shot_avg,
+                "home_elo_after":         home_elo_after,
+                "away_elo_after":         away_elo_after,
             }
-            pending_updates.append((match["id"], features))
-
-        # Actualizăm starea tracker-elor (indiferent dacă meciul era deja procesat)
-        elo_tracker.process_match(home, away, result)
-        form_tracker.process_match(home, away, hg, ag, result)
-        h2h_tracker.process_match(home, away, result, hg, ag)
+            # [Regula #13] Nu scriem None peste None — dacă tracker-ul de
+            # cornere/cartonașe nu are încă istoric real (ex. primul meci al
+            # unei echipe din dataset), valoarea calculată e None și rămâne
+            # None la infinit; scrierea ei ar genera UPDATE-uri redundante
+            # la fiecare rulare, fără să schimbe vreodată starea din DB.
+            features = {col: computed[col] for col in missing if computed[col] is not None}
+            if features:
+                pending_updates.append((match["id"], features))
 
         # Scriem în batch
         if len(pending_updates) >= batch_size:

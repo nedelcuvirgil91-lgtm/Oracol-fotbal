@@ -7,8 +7,8 @@ on:
   # Permite și rulare manuală din GitHub Actions UI
   workflow_dispatch:
     inputs:
-      skip_elo:
-        description: "Sări recalcularea ELO"
+      skip_features:
+        description: "Sări actualizarea feature-urilor derivate (formă, H2H, cornere, cartonașe, faulturi)"
         required: false
         default: "false"
         type: boolean
@@ -47,7 +47,7 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: |
           ARGS=""
-          if [ "${{ github.event.inputs.skip_elo }}" = "true" ]; then ARGS="$ARGS --no-elo"; fi
+          if [ "${{ github.event.inputs.skip_features }}" = "true" ]; then ARGS="$ARGS --no-features"; fi
           if [ "${{ github.event.inputs.skip_ml }}" = "true" ]; then ARGS="$ARGS --no-ml"; fi
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
           python sync/run_daily.py $ARGS

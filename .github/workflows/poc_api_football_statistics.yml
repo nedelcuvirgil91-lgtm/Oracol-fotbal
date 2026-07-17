@@ -1,0 +1,48 @@
+name: Football Oracle — Probă API-Football Statistics
+
+on:
+  workflow_dispatch:
+    inputs:
+      league:
+        description: "Ligă de verificat (selecție manuală — optimizare de quota)"
+        required: true
+        default: "Premier League"
+        type: choice
+        options:
+          - "Premier League"
+          - "La Liga"
+          - "Serie A"
+          - "Bundesliga"
+          - "Ligue 1"
+          - "Romania SuperLiga"
+          - "MLS"
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run API-Football statistics probe (discovery, nu integrare)
+        env:
+          # Necesar pentru ca cache-ul (team_id/fixture_id/verdict 403-404)
+          # să supraviețuiască între rulări separate ale acestui workflow —
+          # fiecare rulare e un runner efemer, fără disc local persistent.
+          # Fără Supabase, optimizarea de quota funcționează doar în cadrul
+          # aceleiași rulări, nu între rulări.
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          python sync/poc_api_football_statistics.py --league "${{ github.event.inputs.league }}"

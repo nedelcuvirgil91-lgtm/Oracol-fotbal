@@ -359,7 +359,9 @@ def _bootstrap_one_league(
             recalibrated_count += 1
 
         # ── 3. Actualizăm trackerele DUPĂ ce am folosit starea "înainte" ──
-        elo_tracker.process_match(home, away, result_code)
+        # [SCHIMBAT — ADR-022] ELOTracker.process_match() cere acum goluri
+        # (multiplicator MOV, V2_damped) — deja disponibile aici.
+        elo_tracker.process_match(home, away, home_goals, away_goals, result_code)
         form_tracker.process_match(home, away, home_goals, away_goals, result_code)
         h2h_tracker.process_match(home, away, result_code, home_goals, away_goals)
 

@@ -6,7 +6,9 @@ FOOTBALL ORACLE — v3.0  |  Sport Dashboard UI
 from __future__ import annotations
 
 import json
+import logging
 import sys
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -14,6 +16,8 @@ import pandas as pd
 import streamlit as st
 
 import supabase_client as sb
+
+logger = logging.getLogger(__name__)
 
 st.set_page_config(
     page_title="Football Oracle",
@@ -166,14 +170,51 @@ engine = engine_obj
 
 # ── NAV ──────────────────────────────────────────────────────────────────────
 if "nav" not in st.session_state: st.session_state["nav"] = "matches"
-cn1, cn2, cn3 = st.columns(3)
+cn1, cn2, cn3, cn4 = st.columns(4)
 with cn1:
     if st.button("⚽  MECIURI", use_container_width=True): st.session_state["nav"] = "matches"; st.rerun()
 with cn2:
-    if st.button("📊  PORTFOLIO", use_container_width=True): st.session_state["nav"] = "portfolio"; st.rerun()
+    if st.button("💰  VALUE BETS", use_container_width=True): st.session_state["nav"] = "value_bets"; st.rerun()
 with cn3:
+    if st.button("📊  PORTFOLIO", use_container_width=True): st.session_state["nav"] = "portfolio"; st.rerun()
+with cn4:
     if st.button("⚙️  SETĂRI", use_container_width=True): st.session_state["nav"] = "settings"; st.rerun()
 nav = st.session_state["nav"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CACHE PREDICȚII — la nivel de sesiune Streamlit, partajat între cardul de
+# meci individual și Value Betting Dashboard. Un meci deja analizat (din
+# oricare din cele două ecrane) nu se recalculează până nu expiră TTL-ul —
+# vezi cerința sprintului: "nu vreau ca dashboard-ul să devină dependent de
+# apeluri live pentru fiecare refresh".
+# ─────────────────────────────────────────────────────────────────────────────
+PREDICTION_CACHE_TTL_SECONDS = 900  # 15 min — suficient pt o sesiune de analiză
+
+
+def _cache_prediction(fixture_id: str, pred) -> None:
+    st.session_state[f"pred_{fixture_id}"] = {"pred": pred, "cached_at": time.time()}
+
+
+def _read_cached_prediction(fixture_id: str):
+    """Citire FĂRĂ verificare de prospețime — folosită de cardul de meci
+    individual: o predicție deja deschisă rămâne vizibilă până la închidere
+    explicită (✕), indiferent de vârstă (comportament neschimbat față de
+    versiunea anterioară a UI-ului)."""
+    entry = st.session_state.get(f"pred_{fixture_id}")
+    return entry.get("pred") if entry else None
+
+
+def _read_fresh_cached_prediction(fixture_id: str, ttl: float = PREDICTION_CACHE_TTL_SECONDS):
+    """Citire CU verificare de prospețime (TTL) — folosită de Value Betting
+    Dashboard: o predicție prea veche trebuie recalculată, nu doar reafișată,
+    ca lista de value bets să nu rămână permanent pe date vechi."""
+    entry = st.session_state.get(f"pred_{fixture_id}")
+    if entry is None:
+        return None
+    if time.time() - entry.get("cached_at", 0) > ttl:
+        return None
+    return entry.get("pred")
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # VIEW 1 — MECIURI
@@ -217,12 +258,12 @@ def _render_match_card(match: dict, engine) -> None:
                 pred = engine.evaluate_match(match)
             if pred is None:
                 st.error("Analiză eșuată — date insuficiente."); return
-            st.session_state[f"pred_{fid}"] = pred
+            _cache_prediction(fid, pred)
     with cb:
         if st.button("✕", key=f"close_{fid}", help="Închide"):
             if f"pred_{fid}" in st.session_state: del st.session_state[f"pred_{fid}"]
 
-    pred = st.session_state.get(f"pred_{fid}")
+    pred = _read_cached_prediction(fid)
     if pred is None: return
 
     # ── xG ────────────────────────────────────────────────────────────────
@@ -244,6 +285,45 @@ def _render_match_card(match: dict, engine) -> None:
         + _prob_bar(f"✈️ {away[:14]}", pred.prob_away_win, "#ff3d57")
         + "</div>", unsafe_allow_html=True
     )
+
+    # ── Explainability ─────────────────────────────────────────────────────
+    # [ADAUGAT] De ce arată predicția așa — cascadă de ablație reală (nu
+    # estimare), vezi explainability.py. Zero atingere oracle_engine.py.
+    with st.expander("🔎 De ce această predicție?"):
+        try:
+            from explainability import explain_prediction
+            explanation = explain_prediction(pred, engine.weights, engine.config)
+        except Exception as exc:
+            explanation = None
+            st.caption(f"Explicație indisponibilă: {exc}")
+
+        if explanation is None:
+            st.caption("Explicație indisponibilă pentru acest meci (profil de echipă incomplet).")
+        else:
+            for i, stage in enumerate(explanation.stages):
+                detail_html = ""
+                if stage.detail:
+                    items = " · ".join(f"{k}: {v}" for k, v in stage.detail.items())
+                    detail_html = f"<div style='padding:0 0 .2rem 0;font-size:.72rem;color:var(--t3);'>{items}</div>"
+                if i == 0:
+                    st.markdown(
+                        f"<div style='padding:.15rem 0 0 0;color:var(--t3);'>{stage.factor}: "
+                        f"<b>{stage.prob_home_after*100:.1f}%</b></div>{detail_html}",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    sign  = "+" if stage.delta_pct >= 0 else ""
+                    color = "#00e676" if stage.delta_pct >= 0 else "#ff3d57"
+                    st.markdown(
+                        f"<div style='padding:.15rem 0 0 0;'>{stage.factor}: "
+                        f"<span style='color:{color};font-weight:600;'>{sign}{stage.delta_pct:.1f}%</span></div>{detail_html}",
+                        unsafe_allow_html=True,
+                    )
+            st.markdown(
+                f"<div style='padding:.4rem 0;border-top:1px solid var(--border);margin-top:.3rem;'>"
+                f"→ Probabilitate finală {home[:14]}: <b>{explanation.final_prob_home*100:.1f}%</b></div>",
+                unsafe_allow_html=True,
+            )
 
     # ── Scoruri ───────────────────────────────────────────────────────────
     st.markdown('<span class="sub-label">Scoruri probabile</span>', unsafe_allow_html=True)
@@ -370,6 +450,11 @@ def _render_match_card(match: dict, engine) -> None:
                 <div class="dna-stat"><span class="dna-stat-k">DEF</span><span class="dna-stat-v">{hp.defensive_rating:.3f}</span></div>
                 <div class="dna-stat"><span class="dna-stat-k">Formă</span><span class="dna-stat-v">{"".join(hp.form_results[-5:]) or "N/A"}</span></div>
                 <div class="dna-stat"><span class="dna-stat-k">ELO</span><span class="dna-stat-v">{hp.elo_rating or "—"}</span></div>
+                <div class="dna-stat"><span class="dna-stat-k">Șuturi/meci</span><span class="dna-stat-v">{hp.avg_shots_ot:.1f}</span></div>
+                <div class="dna-stat"><span class="dna-stat-k">Cornere/meci</span><span class="dna-stat-v">{f"{hp.avg_corners:.1f}" if hp.avg_corners is not None else "—"}</span></div>
+                <div class="dna-stat"><span class="dna-stat-k">Cartonașe/meci</span><span class="dna-stat-v">{f"{hp.avg_yellow_cards:.1f}" if hp.avg_yellow_cards is not None else "—"}</span></div>
+                <div class="dna-stat"><span class="dna-stat-k">Faulturi/meci</span><span class="dna-stat-v">{f"{hp.avg_fouls:.1f}" if hp.avg_fouls is not None else "—"}</span></div>
+                <div class="dna-stat"><span class="dna-stat-k">Gol la pauză/meci</span><span class="dna-stat-v">{f"{hp.avg_ht_goals:.2f}" if hp.avg_ht_goals is not None else "—"}</span></div>
                 <div class="dna-stat"><span class="dna-stat-k">Sursă</span><span class="dna-stat-v" style="font-size:.6rem;">{hp.data_source}</span></div>
             </div>
             <div class="dna-box"><div class="dna-box-title">{away}</div>
@@ -378,6 +463,11 @@ def _render_match_card(match: dict, engine) -> None:
                 <div class="dna-stat"><span class="dna-stat-k">DEF</span><span class="dna-stat-v">{ap.defensive_rating:.3f}</span></div>
                 <div class="dna-stat"><span class="dna-stat-k">Formă</span><span class="dna-stat-v">{"".join(ap.form_results[-5:]) or "N/A"}</span></div>
                 <div class="dna-stat"><span class="dna-stat-k">ELO</span><span class="dna-stat-v">{ap.elo_rating or "—"}</span></div>
+                <div class="dna-stat"><span class="dna-stat-k">Șuturi/meci</span><span class="dna-stat-v">{ap.avg_shots_ot:.1f}</span></div>
+                <div class="dna-stat"><span class="dna-stat-k">Cornere/meci</span><span class="dna-stat-v">{f"{ap.avg_corners:.1f}" if ap.avg_corners is not None else "—"}</span></div>
+                <div class="dna-stat"><span class="dna-stat-k">Cartonașe/meci</span><span class="dna-stat-v">{f"{ap.avg_yellow_cards:.1f}" if ap.avg_yellow_cards is not None else "—"}</span></div>
+                <div class="dna-stat"><span class="dna-stat-k">Faulturi/meci</span><span class="dna-stat-v">{f"{ap.avg_fouls:.1f}" if ap.avg_fouls is not None else "—"}</span></div>
+                <div class="dna-stat"><span class="dna-stat-k">Gol la pauză/meci</span><span class="dna-stat-v">{f"{ap.avg_ht_goals:.2f}" if ap.avg_ht_goals is not None else "—"}</span></div>
                 <div class="dna-stat"><span class="dna-stat-k">Sursă</span><span class="dna-stat-v" style="font-size:.6rem;">{ap.data_source}</span></div>
             </div>
         </div>""", unsafe_allow_html=True)
@@ -475,6 +565,105 @@ if nav == "matches":
         st.session_state["force_reload"] = True
         if "all_matches" in st.session_state: del st.session_state["all_matches"]
         st.rerun()
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# VIEW — VALUE BETS (Top Value Bets Today)
+# ═════════════════════════════════════════════════════════════════════════════
+# [ADAUGAT] Agregă value bets peste toate meciurile de azi. Regulă explicită
+# a sprintului: NU dependent de apeluri live la fiecare refresh — folosește
+# întâi cache-ul de sesiune (all_matches + predicții deja calculate), și
+# recalculează DOAR meciurile neanalizate sau cu cache expirat (vezi
+# PREDICTION_CACHE_TTL_SECONDS). Implementare simplă, sincronă — fără
+# paralelizare, fără precomputare (optimizări lăsate pentru un sprint separat,
+# dacă timpul de încărcare chiar devine o problemă reală, nu presupusă).
+elif nav == "value_bets":
+    from value_dashboard import collect_value_bets
+
+    st.markdown('<div class="section-bar"><div class="section-bar-title">💰 Top Value Bets — Azi</div></div>',
+                unsafe_allow_html=True)
+
+    # Reutilizează lista deja încărcată de VIEW 1 (MECIURI), dacă există în
+    # sesiune — un singur fetch live per sesiune, nu unul separat per ecran.
+    if "all_matches" not in st.session_state:
+        with st.spinner("📡 Se încarcă meciurile..."):
+            all_matches = engine.api.get_matches_for_week(
+                days_ahead=7, competitions=[c["key"] for c in COMPETITIONS_META]
+            )
+        st.session_state["all_matches"] = all_matches
+    else:
+        all_matches = st.session_state["all_matches"]
+
+    today_iso     = date.today().isoformat()
+    today_matches = [m for m in all_matches if m.get("kickoff_date", "") == today_iso]
+
+    if not today_matches:
+        st.info("Niciun meci azi în competițiile urmărite.")
+    else:
+        force_refresh = st.button("🔄 Recalculează tot (ignoră cache-ul)")
+
+        predictions: list = []
+        n_reused = n_computed = 0
+        cache_hit_times: list[float] = []
+        live_compute_times: list[float] = []
+        t_loop_start = time.perf_counter()
+        with st.spinner(f"Analizez {len(today_matches)} meciuri de azi..."):
+            for match in today_matches:
+                fid  = match.get("fixture_id", "?")
+                t_match_start = time.perf_counter()
+                pred = None if force_refresh else _read_fresh_cached_prediction(fid)
+                if pred is not None:
+                    n_reused += 1
+                    cache_hit_times.append(time.perf_counter() - t_match_start)
+                else:
+                    pred = engine.evaluate_match(match)
+                    n_computed += 1
+                    live_compute_times.append(time.perf_counter() - t_match_start)
+                    if pred is not None:
+                        _cache_prediction(fid, pred)
+                predictions.append(pred)
+        total_elapsed = time.perf_counter() - t_loop_start
+
+        # [ADAUGAT] Mini audit de performanță — doar loguri + Diagnostics, nu
+        # afișat utilizatorului (cerință explicită). Nu duplică infrastructura
+        # existentă de provider_metrics (vezi tab Diagnostics — "Status
+        # provideri"), care acoperă deja numărul de apeluri per provider.
+        avg_cache_s = sum(cache_hit_times) / len(cache_hit_times) if cache_hit_times else 0.0
+        avg_live_s  = sum(live_compute_times) / len(live_compute_times) if live_compute_times else 0.0
+        logger.info(
+            "[Perf][ValueBets] meciuri=%d din_cache=%d recalculate=%d timp_total=%.2fs "
+            "timp_mediu_cache=%.3fs timp_mediu_live=%.2fs",
+            len(today_matches), n_reused, n_computed, total_elapsed, avg_cache_s, avg_live_s,
+        )
+        st.session_state["perf_value_bets"] = {
+            "matches": len(today_matches), "from_cache": n_reused, "recomputed": n_computed,
+            "total_seconds": round(total_elapsed, 2),
+            "avg_cache_seconds": round(avg_cache_s, 3), "avg_live_seconds": round(avg_live_s, 2),
+            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        }
+
+        st.caption(f"{n_reused} din cache · {n_computed} recalculate acum · "
+                   f"TTL cache: {PREDICTION_CACHE_TTL_SECONDS // 60} min")
+
+        rows = collect_value_bets(predictions)
+
+        if not rows:
+            threshold = engine.config.get("value_bet_threshold_pct", 5.0)
+            st.info(f"Niciun value bet peste pragul configurat ({threshold}%) pentru meciurile de azi.")
+        else:
+            table = pd.DataFrame([{
+                "Meci":         f"{r.home_team} - {r.away_team}",
+                "Oră":          r.kickoff_utc[11:16] if len(r.kickoff_utc) > 16 else "TBA",
+                "Ligă":         r.league,
+                "Piață":        r.market,
+                "Selecție":     r.selection,
+                "Edge %":       r.edge_pct,
+                "Prob. model":  f"{r.model_prob_pct:.1f}%",
+                "Cotă":         r.bk_odds,
+                "Kelly stake":  f"€{r.kelly_stake:.2f}" if r.kelly_stake is not None else "—",
+                "Rating":       r.rating,
+            } for r in rows])
+            st.dataframe(table, use_container_width=True, hide_index=True)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -612,9 +801,196 @@ elif nav == "settings":
                     else:
                         st.warning("✅ Salvat doar local — Supabase indisponibil.")
     with t3:
+        st.markdown('<span class="sub-label">Stare model ML</span>', unsafe_allow_html=True)
+
+        if "ml_train_result" in st.session_state:
+            res = st.session_state.pop("ml_train_result")
+            if res.get("status") == "trained":
+                st.success(f"✅ Model antrenat — {res.get('samples_used')} meciuri, "
+                           f"accuracy={res.get('accuracy')}, log_loss={res.get('log_loss')}.")
+            elif res.get("status") == "insufficient_data":
+                st.warning(f"ℹ️ {res.get('message', 'Date insuficiente pentru antrenare.')}")
+            else:
+                st.error(f"⚠️ {res.get('message', 'Antrenare eșuată.')}")
+
+        ml_status = engine.get_ml_status()
+        if not ml_status.get("available"):
+            st.warning("Modulul ML indisponibil (ml_predictor.py lipsește).")
+        else:
+            mc1, mc2, mc3, mc4 = st.columns(4)
+            acc = ml_status.get("accuracy")
+            ll  = ml_status.get("log_loss")
+            mc1.metric("Accuracy", f"{acc*100:.1f}%" if acc is not None else "N/A")
+            mc2.metric("Log-loss", f"{ll:.3f}" if ll is not None else "N/A")
+            mc3.metric("Samples antrenare", ml_status.get("samples_used", 0))
+            mc4.metric("Versiune model", ml_status.get("model_version", 0))
+
+            last_trained = ml_status.get("last_trained_at")
+            supa_note = "" if ml_status.get("supabase_connected") else "  ·  ⚠️ Supabase indisponibil — status posibil neactualizat"
+            st.caption(f"Ultima antrenare: {last_trained or 'niciodată'}{supa_note}")
+
+            # [ADAUGAT] Progres — reutilizează database.queries.get_ml_sample_count(),
+            # deja folosit de sync/run_daily.py pentru decizia de reantrenare automată.
+            try:
+                from database.queries import get_ml_sample_count
+                current_samples = get_ml_sample_count()
+            except Exception:
+                current_samples = 0
+
+            min_required = ml_status.get("min_samples_required", 30)
+            samples_used = ml_status.get("samples_used", 0)
+            if samples_used == 0:
+                target = min_required
+                progress_label = f"Progres până la prima antrenare: {current_samples}/{target}"
+            else:
+                target = samples_used + 20
+                progress_label = f"Progres până la următoarea reantrenare: {current_samples}/{target}"
+            st.progress(min(current_samples / target, 1.0) if target else 0.0, text=progress_label)
+
+            if st.button("🎓 Antrenează ML acum", use_container_width=True):
+                with st.spinner("Antrenare ML în curs..."):
+                    result = engine.retrain_ml_model()
+                st.session_state["ml_train_result"] = result
+                st.rerun()
+
+        st.markdown("---")
+        st.markdown('<span class="sub-label">League Learning — ponderi per ligă</span>', unsafe_allow_html=True)
         ldf=engine.get_league_learning_stats()
-        st.dataframe(ldf,use_container_width=True,hide_index=True) if not ldf.empty else st.info("Fără date de calibrare.")
+        # [FIX] Expresia ternară anterioară era o instrucțiune "goală" — Streamlit
+        # "magic" o afișa automat, ca text (repr-ul DeltaGenerator întors de
+        # st.dataframe()), vizibil ca text urât în UI. if/else explicit, nu expresie.
+        if ldf.empty:
+            st.info("Fără date de calibrare.")
+        else:
+            st.dataframe(ldf, use_container_width=True, hide_index=True)
     with t4:
+        st.markdown('<span class="sub-label">Ultima sincronizare</span>', unsafe_allow_html=True)
+        from database.queries import get_sync_status
+        sync_sources = [
+            ("football_data",        "Meciuri — football-data.org"),
+            ("openfootball",         "Meciuri — openfootball"),
+            ("experiment_evaluation", "Evaluare experimente shadow"),
+            ("odds_persistence",      "Persistare cote"),
+        ]
+        sync_rows = []
+        for source_key, label in sync_sources:
+            status = get_sync_status(source_key) or {}
+            sync_rows.append({
+                "Sursă":         label,
+                "Ultima rulare": status.get("last_sync", "—"),
+                "Status":        status.get("status", "fără date"),
+                "Note":          status.get("notes", ""),
+            })
+        st.dataframe(pd.DataFrame(sync_rows), use_container_width=True, hide_index=True)
+        error_rows = [r for r in sync_rows if r["Status"] not in ("ok", "fără date")]
+        if error_rows:
+            st.warning(f"⚠️ {len(error_rows)} sursă/surse cu status diferit de „ok\" — vezi tabelul de mai sus.")
+
+        st.markdown("---")
+        ds1, ds2 = st.columns(2)
+        with ds1:
+            st.markdown('<span class="sub-label">Stare ML</span>', unsafe_allow_html=True)
+            ml_status = engine.get_ml_status()
+            if ml_status.get("available"):
+                st.caption(
+                    f"Model v{ml_status.get('model_version', 0)} · {ml_status.get('samples_used', 0)} samples · "
+                    f"accuracy={ml_status.get('accuracy')} · "
+                    f"ultima antrenare: {ml_status.get('last_trained_at') or 'niciodată'}"
+                )
+            else:
+                st.caption("Modul ML indisponibil.")
+        with ds2:
+            st.markdown('<span class="sub-label">Stare cache local</span>', unsafe_allow_html=True)
+            cache_stats = engine.cache.stats() if engine.cache else None
+            if cache_stats:
+                st.caption(
+                    f"{cache_stats.get('total_files', 0)} fișiere · "
+                    f"{cache_stats.get('stale_files', 0)} expirate · "
+                    f"{cache_stats.get('total_size_kb', 0):.1f} KB"
+                )
+            else:
+                st.caption("Cache indisponibil.")
+
+        st.markdown("---")
+        st.markdown('<span class="sub-label">Status provideri</span>', unsafe_allow_html=True)
+        # [ADAUGAT] Foloseste get_provider_metrics() - infrastructura ADR-003
+        # exista deja (record_provider_call, apelat din oracle_api.py si
+        # football_providers.py), dar nu era citita nicaieri pana acum.
+        provider_metrics = sb.get_provider_metrics()
+        if provider_metrics:
+            pm_df = pd.DataFrame(provider_metrics)
+            pm_cols = [c for c in ["provider", "endpoint", "calls", "errors",
+                                    "consecutive_failures", "avg_latency_ms",
+                                    "last_success", "last_failure"] if c in pm_df.columns]
+            st.dataframe(pm_df[pm_cols], use_container_width=True, hide_index=True)
+            degraded = sorted({m["provider"] for m in provider_metrics if (m.get("consecutive_failures") or 0) >= 3})
+            if degraded:
+                st.warning(f"⚠️ Provideri cu eșecuri consecutive: {', '.join(degraded)}")
+        else:
+            st.caption("Fără date de sănătate provideri încă (necesită Supabase activ + apeluri recente).")
+
+        st.markdown("---")
+        st.markdown('<span class="sub-label">Performanță — ultima rulare Value Bets</span>', unsafe_allow_html=True)
+        # [ADAUGAT] Mini audit de performanță (nefuncțional pentru utilizator,
+        # doar informativ) — populat de view-ul VALUE BETS la fiecare rulare.
+        perf = st.session_state.get("perf_value_bets")
+        if perf:
+            st.caption(
+                f"{perf['matches']} meciuri · {perf['from_cache']} din cache · {perf['recomputed']} recalculate · "
+                f"timp total {perf['total_seconds']}s · "
+                f"timp mediu/meci: {perf['avg_cache_seconds']}s (cache) / {perf['avg_live_seconds']}s (live) · "
+                f"la {perf['at']}"
+            )
+        else:
+            st.caption("Fără date încă — deschide tab-ul VALUE BETS pentru a genera statistici.")
+
+        st.markdown("---")
+        st.markdown('<span class="sub-label">🔬 Sondaj API-Football — /fixtures/statistics (discovery, nu integrare)</span>', unsafe_allow_html=True)
+        # [ADAUGAT] Complet izolat de Prediction Engine — vezi
+        # diagnostics_api_football.py. NU rulează automat (consumă quota
+        # reală API-Football, comună cu injuries/coaches din producție) —
+        # doar la apăsarea explicită a butonului.
+        st.caption("Verifică dacă /fixtures/statistics există pe planul nostru și ce câmpuri livrează (posesie, șuturi, cornere, cartonașe, xG). Nu scrie nimic în match_history.")
+        # [OPTIMIZARE QUOTA] Selecție manuală, o singură ligă — nu mai
+        # rulează implicit pe toate cele 7. team_id/fixture_id/verdict
+        # 403-404 sunt cache-uite (vezi diagnostics_api_football.py) — o
+        # verificare repetată, în aceeași fereastră, costă 1 apel sau 0.
+        from diagnostics_api_football import PROBE_TEAMS
+        probe_league_choice = st.selectbox("Ligă de verificat", sorted(PROBE_TEAMS.keys()), key="api_football_probe_league")
+        if st.button("🔬 Rulează sondajul acum"):
+            from diagnostics_api_football import run_probe
+            with st.spinner(f"Sondez API-Football pentru {probe_league_choice}..."):
+                st.session_state["api_football_probe_report"] = run_probe(leagues=[probe_league_choice])
+
+        probe_report = st.session_state.get("api_football_probe_report")
+        if probe_report:
+            st.caption(f"Ultimul sondaj: {probe_report.generated_at} · {probe_report.quota_note}")
+            for r in probe_report.leagues:
+                cache_bits = [b for b, flag in (
+                    ("team_id din cache", r.team_id_from_cache),
+                    ("fixture_id din cache", r.fixture_id_from_cache),
+                    ("verdict din cache — 0 apeluri", r.statistics_result_from_cache),
+                ) if flag]
+                title = f"{r.league} — {r.verdict}" + (f" [{', '.join(cache_bits)}]" if cache_bits else "")
+                with st.expander(title, expanded=(r.verdict != "ok")):
+                    st.caption(f"Echipă probă: {r.team_name}")
+                    if r.fixture_id:
+                        st.caption(f"Fixture: {r.home_team} vs {r.away_team} ({(r.fixture_date or '')[:10]})")
+                    stat_probe = r.statistics_probe
+                    if stat_probe:
+                        st.caption(f"HTTP: {stat_probe.http_status} ({stat_probe.latency_ms} ms)")
+                    if r.verdict == "ok":
+                        for fc in r.field_checks:
+                            label = f"{fc.label}" + (f' — "{fc.matched_raw_type}"' if fc.matched_raw_type else "")
+                            (st.success if fc.found else st.error)(("✓ " if fc.found else "✗ ") + label)
+                        st.caption(f"Toate câmpurile brute găsite: {', '.join(r.all_raw_types_found)}")
+                    else:
+                        st.warning(f"{r.verdict} — {r.verdict_detail}")
+        else:
+            st.caption("Fără sondaj rulat încă în această sesiune.")
+
+        st.markdown("---")
+        st.markdown('<span class="sub-label">Module încărcate</span>', unsafe_allow_html=True)
         mods=[("mappings.py","mappings"),("cache_manager.py","cache_manager"),("key_manager.py","key_manager"),("injury_manager.py","injury_manager"),("oracle_api.py","oracle_api"),("oracle_engine.py","oracle_engine")]
         mc1,mc2=st.columns(2)
         for i,(fn,mod) in enumerate(mods):
