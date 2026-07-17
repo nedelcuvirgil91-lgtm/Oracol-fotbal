@@ -269,18 +269,26 @@ def _phase_b_train_new(family: str, league: str, algorithm, version: str, target
 
 
 def _count_finished_matches(league: str, since: str | None = None) -> int:
-    """Meciuri terminate (actual_result cunoscut) pentru o ligă, opțional
-    doar cele mai noi decât `since`. Read-only, nu atinge nicio scriere."""
+    """Meciuri terminate (actual_result cunoscut), opțional doar cele mai noi
+    decât `since`. Read-only, nu atinge nicio scriere.
+
+    [Descoperit prin observare pre-activare learning_core_enabled, corectat
+    generic] `league="all"` e SENTINELUL folosit de league_scope pentru "nu
+    e restrâns la o singură ligă" (valoarea league_scope a tuturor
+    algoritmilor înregistrați azi) — NU o valoare reală din coloana
+    match_history.league (care conține "Premier League", "La Liga", etc.).
+    Fără acest tratament, .eq("league", "all") nu s-ar potrivi niciodată cu
+    vreun rând real, iar Faza B nu ar porni NICIODATĂ o antrenare automată
+    pentru un algoritm cu league_scope="all", indiferent de câte meciuri
+    există. Tratat generic (pe valoare, nu pe nume de algoritm) — pentru o
+    ligă reală, filtrul .eq() rămâne exact ca înainte."""
     client = get_client()
     if client is None:
         return 0
     try:
-        q = (
-            client.table("match_history")
-            .select("id")
-            .eq("league", league)
-            .not_.is_("actual_result", "null")
-        )
+        q = client.table("match_history").select("id").not_.is_("actual_result", "null")
+        if league != "all":
+            q = q.eq("league", league)
         if since:
             q = q.gt("created_at", since)
         res = q.execute()
