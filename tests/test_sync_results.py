@@ -98,14 +98,32 @@ def test_recalibrate_for_result_respects_disabled_flag(monkeypatch):
     assert calls["save_weights"] == 0
 
 
-def test_recalibrate_for_result_default_enabled_preserves_current_behavior(monkeypatch):
-    """[ADR-004] Comportament implicit NESCHIMBAT prin acest fix - fara
-    auto_recalibration_enabled setat explicit in model_config (cazul de azi,
-    in productie), recalibrarea tot ruleaza (implicit True)."""
+def test_recalibrate_for_result_default_disabled_after_adr028(monkeypatch):
+    """[ADR-028] Comportament implicit SCHIMBAT intentionat: fara
+    auto_recalibration_enabled setat explicit in model_config, calea legacy
+    NU mai ruleaza (implicit False - vezi CLAUDE.md North Star #3). Sursa
+    canonica de invatare devine league_weights_adaptive (Model Registry)."""
     calls = {"save_weights": 0}
 
-    # simuleaza model_config fara cheia noua inca scrisa - exact cazul real
+    # simuleaza model_config fara cheia noua inca scrisa - exact cazul real de azi
     monkeypatch.setattr(sb, "load_config", lambda default: dict(default))
+    monkeypatch.setattr(sb, "load_weights", lambda default: dict(default))
+    monkeypatch.setattr(sb, "save_weights", lambda data: calls.__setitem__("save_weights", calls["save_weights"] + 1) or True)
+    monkeypatch.setattr(sb, "append_recalibration_log", lambda row: True)
+
+    match_row, r = _fake_match_row_and_result()
+    sr._recalibrate_for_result(match_row, r)
+
+    assert calls["save_weights"] == 0
+
+
+def test_recalibrate_for_result_explicit_enabled_still_works(monkeypatch):
+    """[ADR-028] Calea legacy nu a fost stearsa - activata explicit
+    (auto_recalibration_enabled=True in model_config), tot functioneaza
+    identic ca inainte."""
+    calls = {"save_weights": 0}
+
+    monkeypatch.setattr(sb, "load_config", lambda default: {**default, "auto_recalibration_enabled": True})
     monkeypatch.setattr(sb, "load_weights", lambda default: dict(default))
     monkeypatch.setattr(sb, "save_weights", lambda data: calls.__setitem__("save_weights", calls["save_weights"] + 1) or True)
     monkeypatch.setattr(sb, "append_recalibration_log", lambda row: True)

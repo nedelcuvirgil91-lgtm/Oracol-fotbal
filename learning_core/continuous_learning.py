@@ -101,6 +101,18 @@ def run_cycle() -> dict:
 def _process_pair(family: str, league: str, algorithm, version: str, summary: dict) -> None:
     target_key = f"{family}|{league}"
 
+    # [ADR-028] Descoperire de reconnaissance, nu presupusă: nu orice algoritm
+    # din Model Registry e Challenger-compatibil — lanțul shadow/promotion e
+    # construit peste artefacte XGBoost (model_artifact_storage.py). Un
+    # algoritm care declară explicit participates_in_challenger_framework=False
+    # (ex. league_weights_adaptive) e sărit complet aici — altfel Faza B ar
+    # crea un Challenger "zombie", fără nicio cale spre evaluare reală, care
+    # ar ocupa la nesfârșit slotul "cel mult un Challenger activ". Implicit
+    # True — comportamentul existent (xgboost_v1, production_champion) rămâne
+    # neschimbat.
+    if not algorithm.describe().get("participates_in_challenger_framework", True):
+        return
+
     active_count = sb.count_active_challengers(family, league)
     if active_count not in (0, 1):
         run_id = ar.write_run(PRODUCER, "consistency_guard", "T1", target_key=target_key)

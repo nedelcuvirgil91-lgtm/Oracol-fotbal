@@ -284,6 +284,30 @@ def test_phase_c_marks_commit_failed_when_promotion_rejected(recorder, fake_algo
     assert len(fail_calls) == 1 and fail_calls[0][1] == 100
 
 
+def test_algorithm_opted_out_of_challenger_framework_is_skipped_entirely(recorder, monkeypatch):
+    """[ADR-028] Un algoritm cu participates_in_challenger_framework=False
+    (ex. league_weights_adaptive) e sarit complet - checked se incrementeaza
+    (a fost vazut in Registry), dar nicio Faza A/B/C nu ruleaza pentru el:
+    fara automation_runs, fara count_active_challengers, fara Challenger nou."""
+    class _OptedOutAlgorithm(_FakeAlgorithm):
+        def describe(self):
+            return {"participates_in_challenger_framework": False}
+
+    model_registry.register(_OptedOutAlgorithm(name="league_weights_adaptive", league_scope="all"))
+
+    def _fail_if_called(*a, **kw):
+        raise AssertionError("count_active_challengers nu trebuie apelat pentru un algoritm opted-out")
+
+    monkeypatch.setattr(cl.sb, "count_active_challengers", _fail_if_called)
+
+    result = cl.run_cycle()
+
+    assert result["checked"] == 1
+    assert result["trained"] == 0
+    assert result["evaluated"] == 0
+    assert recorder.calls == [], "niciun automation_run nu trebuie creat pentru un algoritm opted-out"
+
+
 def test_generic_over_multiple_registry_entries(recorder, monkeypatch):
     """Fara nicio ramura speciala per algoritm — un al doilea algoritm
     inregistrat e procesat identic, fara nicio schimbare de cod."""
