@@ -735,7 +735,7 @@ elif nav == "portfolio":
 # ═════════════════════════════════════════════════════════════════════════════
 elif nav == "settings":
     st.markdown('<div class="section-bar"><div class="section-bar-title">⚙️ Setări model</div></div>', unsafe_allow_html=True)
-    t1,t2,t3,t4=st.tabs(["🎛 Weights","⚡ Config","🧠 League Learning","🔍 Diagnostics"])
+    t1,t2,t3,t4,t5=st.tabs(["🎛 Weights","⚡ Config","🧠 League Learning","🔍 Diagnostics","📋 Activitate"])
     with t1:
         # [REPARAT] Inainte citea direct din weights.json, ignorand Supabase
         # complet - arata valori vechi cand Supabase e sursa reala activa.
@@ -1004,3 +1004,41 @@ elif nav == "settings":
             st.toast("Cache șters!",icon="🗑️")
 
         st.markdown(f'<div style="font-size:.7rem;color:var(--t3);margin-top:.5rem;">Python {sys.version[:6]} · Football Oracle v3.0</div>',unsafe_allow_html=True)
+
+    with t5:
+        # [ADAUGAT — ADR-026] Activity Log + Decision Feed. Substrat comun
+        # pentru orice proces autonom (ADR-027…034) — vezi automation_runs.py.
+        # Decision Feed gol implicit e proprietatea de design cea mai
+        # importanta: daca nu apare nimic mai jos, sistemul e sanatos, nu stricat.
+        import automation_runs as ar
+
+        st.markdown('<span class="sub-label">🔔 Decision Feed — decizii care așteaptă aprobare</span>', unsafe_allow_html=True)
+        pending = ar.list_pending_decisions()
+        if not pending:
+            st.success("Nimic în așteptare — sistemul funcționează autonom, fără decizii blocate.")
+        else:
+            for d in pending:
+                with st.expander(f"[{d.get('tier')}] decizie #{d['id']} · run_id={d.get('run_id')}", expanded=True):
+                    ev = d.get("evidence")
+                    if ev:
+                        st.json(ev)
+                    st.caption(f"Plan de rollback: {d.get('rollback_plan') or '—'}")
+                    if d.get("correction_method"):
+                        st.caption(f"Metodă de corecție statistică: {d['correction_method']}")
+                    ac1, ac2 = st.columns(2)
+                    if ac1.button("✅ Aprobă", key=f"approve_{d['id']}"):
+                        ar.approve_decision(d["id"], resolved_by="owner")
+                        st.rerun()
+                    if ac2.button("❌ Respinge", key=f"reject_{d['id']}"):
+                        ar.reject_decision(d["id"], resolved_by="owner")
+                        st.rerun()
+
+        st.markdown("---")
+        st.markdown('<span class="sub-label">📜 Activity Log — ultimele rulări autonome</span>', unsafe_allow_html=True)
+        runs = ar.list_recent_runs(limit=50)
+        if runs:
+            runs_df = pd.DataFrame(runs)
+            cols = [c for c in ["created_at", "producer", "process_type", "tier", "status", "skip_reason"] if c in runs_df.columns]
+            st.dataframe(runs_df[cols], use_container_width=True, hide_index=True)
+        else:
+            st.caption("Fără rulări autonome înregistrate încă.")
