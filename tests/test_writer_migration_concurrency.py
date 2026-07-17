@@ -66,6 +66,12 @@ CREATE TABLE match_history (
   superseded_at timestamptz, superseded_reason text,
   CONSTRAINT match_history_fixture_id_key UNIQUE (fixture_id)
 );
+-- Indexul natural-key UNIQUE PARTIAL (ID-025-04 / Gate-08) — backstop pasiv:
+-- RPC-ul migrat nu produce oricum duplicate (lock advisory), dar indexul
+-- garanteaza structural aceeasi proprietate pentru orice cale care ar ocoli RPC-ul.
+CREATE UNIQUE INDEX idx_match_history_natural_key_canonical
+  ON match_history (home_team, away_team, kickoff_date)
+  WHERE superseded_by IS NULL;
 """
 
 
@@ -251,6 +257,37 @@ def test_V11_compound_bulk_and_single_concurrent():
     assert _count("S", "T", "2025-08-01") == 1
     r = _row("S", "T", "2025-08-01")
     assert r[0] == 2 and r[1] == 5
+
+
+def test_V10_direct_insert_bypassing_rpc_violates_unique_index():
+    # ID-025-05 V-10 / ID-025-04 "Comportament la violare": o scriere directa
+    # care ocoleste RPC-ul, pentru o cheie naturala deja canonica, esueaza dur cu
+    # violare a indexului unic partial — backstop-ul pasiv.
+    c = _conn(); cur = c.cursor()
+    _rpc(cur, {"fixture_id": "fd_10", "home_team": "Aa", "away_team": "Bb", "league": "L",
+               "kickoff_date": "2025-10-01"})
+    c2 = _conn(autocommit=True); cur2 = c2.cursor()
+    with pytest.raises(psycopg2.errors.UniqueViolation):
+        cur2.execute(
+            "INSERT INTO match_history (fixture_id,home_team,away_team,league,kickoff_date) "
+            "VALUES ('kaggle_10','Aa','Bb','L','2025-10-01')")
+    c2.close(); c.close()
+
+
+def test_V10_superseded_row_coexists_with_canonical_key():
+    # Indexul e PARTIAL (WHERE superseded_by IS NULL): un rand superseded poate
+    # coexista cu cheia naturala a canonicului sau, fara sa violeze indexul.
+    c = _conn(autocommit=True); cur = c.cursor()
+    cur.execute("INSERT INTO match_history (fixture_id,home_team,away_team,league,kickoff_date) "
+                "VALUES ('fd_c','Cc','Dd','L','2025-11-01') RETURNING id")
+    canid = cur.fetchone()[0]
+    # inserarea unui rand superseded cu ACEEASI cheie naturala nu esueaza
+    cur.execute("INSERT INTO match_history (fixture_id,home_team,away_team,league,kickoff_date,"
+                "superseded_by,superseded_at,superseded_reason) "
+                "VALUES ('kaggle_c','Cc','Dd','L','2025-11-01',%s,now(),'t')", (canid,))
+    assert _count("Cc", "Dd", "2025-11-01", live_only=True) == 1
+    assert _count("Cc", "Dd", "2025-11-01", live_only=False) == 2
+    c.close()
 
 
 def test_stress_many_threads_single_row():
