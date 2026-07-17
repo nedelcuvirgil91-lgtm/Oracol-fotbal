@@ -2,6 +2,17 @@
 
 Toate schimbările notabile ale proiectului sunt documentate aici.
 
+## [4.1.0] — 2026-07-17
+
+### Adăugat (Learning Core)
+- ADR-026 — substrat de guvernanță pentru automatizare (`automation_runs`, `decision_feed`), stări impuse prin trigger Postgres, nu doar logică de aplicație.
+- ADR-028 — `league_weights_adaptive`, primul algoritm din `recalibration.py` migrat în Model Registry ca `LearningAlgorithm` real (traseabil în `training_runs`); calea legacy din `sync/sync_results.py` devine opt-in (`auto_recalibration_enabled`, implicit `False`, era `True`).
+- ADR-030 — Continuous Learning, funcție decuplată de `sync/run_daily.py` (workflow GitHub Actions propriu), gated de `learning_core_enabled` (implicit `False`, neactivat încă în producție).
+- ADR-031 — N-way Serving Policy: ieșirile brute per motor de predicție expuse aditiv, view-ul compus rămâne neschimbat.
+
+### Corectat
+- **Hotfix ADR-030** (`learning_core/continuous_learning.py`, `_count_finished_matches()`): `league_scope="all"` era tratat ca nume literal de ligă, deci numărătoarea de meciuri terminate întorcea mereu 0 pentru orice algoritm cu acest scope (toți cei 3 înregistrați azi) — Faza B (antrenare automată) n-ar fi pornit niciodată. Descoperit exclusiv în etapa de pregătire a activării `learning_core_enabled` în producție, nu mai devreme, fiindcă flag-ul n-a fost pornit până acum — nicio consecință reală până la acest punct. Nu e o schimbare de arhitectură, doar o corecție locală, generică (pe valoare, nu pe nume de algoritm).
+
 ## [4.0.0] — 2026-07-12
 
 ### Adăugat
