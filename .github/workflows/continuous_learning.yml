@@ -1,0 +1,42 @@
+name: Football Oracle — Continuous Learning (ADR-030)
+
+# Decuplat explicit de daily.yml — cadență proprie, independentă de
+# sincronizarea zilnică. Gated de learning_core_enabled (model_config),
+# implicit False — rularea workflow-ului fără flag activ e un no-op sigur
+# (run_cycle() întoarce {"enabled": False} și iese imediat).
+
+on:
+  schedule:
+    # O dată pe zi, la o oră diferită de daily.yml (03:00 UTC) — evită
+    # coliziunea directă; concurrency de mai jos previne suprapunerea la
+    # rulări manuale declanșate în paralel.
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: continuous-learning
+  cancel-in-progress: false
+
+jobs:
+  continuous-learning:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run continuous learning cycle
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python learning_core/run_continuous_learning.py

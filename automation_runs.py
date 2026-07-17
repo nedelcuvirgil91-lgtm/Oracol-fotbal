@@ -375,6 +375,38 @@ def list_recent_runs(limit: int = 50) -> list[dict[str, Any]]:
         return []
 
 
+def list_approved_decisions_for_target(target_key: str) -> list[dict[str, Any]]:
+    """Decizii T3a `approved`, neexecutate încă, pentru o cheie de target
+    dată — folosit de faza C (execuție) a orchestratorilor decuplați
+    (ex. ADR-030): la fiecare rulare, verifică propriile decizii aprobate
+    de om dar încă necomise, și le finalizează. Fără coadă/scheduler nou —
+    aceeași rulare periodică idempotentă acoperă și acest caz."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        runs = (
+            client.table("automation_runs")
+            .select("id")
+            .eq("target_key", target_key)
+            .execute()
+        )
+        run_ids = [r["id"] for r in (runs.data or [])]
+        if not run_ids:
+            return []
+        res = (
+            client.table("decision_feed")
+            .select("*")
+            .in_("run_id", run_ids)
+            .eq("status", "approved")
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.error("[AutomationRuns] list_approved_decisions_for_target esuat: %s", exc)
+        return []
+
+
 def list_pending_decisions() -> list[dict[str, Any]]:
     """Decision Feed — exclusiv elementele care chiar așteaptă o decizie
     umană (status='pending'). Gol implicit, per design."""

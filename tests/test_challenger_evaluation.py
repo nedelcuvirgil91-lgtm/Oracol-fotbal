@@ -245,16 +245,25 @@ def test_new_evaluation_window_produces_new_row(monkeypatch):
 
 # ── Izolare de modul ─────────────────────────────────────────────────────────
 
-def test_module_has_zero_importers_outside_own_test():
+def test_module_has_only_known_importers():
+    """La închiderea Pasului 4 (ADR-018), acest modul avea ZERO importatori
+    de producție. ADR-030 (Continuous Learning) adaugă
+    learning_core/continuous_learning.py ca primul apelant real legitim —
+    exact rolul anticipat explicit în docstring-ul acestui modul ("apelat
+    exclusiv manual (CLI/UI viitoare, nescrise încă)"). Garda rămâne utilă
+    sub formă de whitelist explicit: nimeni altcineva nu are voie să
+    importe modulul direct."""
     import ast
     import pathlib
+
+    SKIP = {"challenger_evaluation.py", "test_challenger_evaluation.py", "continuous_learning.py"}
 
     root = pathlib.Path(__file__).resolve().parent.parent
     offenders = []
     for path in root.rglob("*.py"):
         if ".git" in path.parts:
             continue
-        if path.name in ("challenger_evaluation.py", "test_challenger_evaluation.py"):
+        if path.name in SKIP:
             continue
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"), filename=str(path))
@@ -271,4 +280,4 @@ def test_module_has_zero_importers_outside_own_test():
                 ):
                     offenders.append(str(path.relative_to(root)))
 
-    assert offenders == [], f"challenger_evaluation e importat in afara scopului Pasului 4: {offenders}"
+    assert offenders == [], f"challenger_evaluation e importat in afara whitelist-ului cunoscut: {offenders}"

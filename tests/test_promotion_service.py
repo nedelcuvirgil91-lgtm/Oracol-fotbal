@@ -209,16 +209,24 @@ def test_module_does_not_import_shadow_testing():
 
 # ── Izolare de modul ─────────────────────────────────────────────────────────
 
-def test_module_has_zero_importers_outside_own_test():
+def test_module_has_only_known_importers():
+    """La închiderea Pasului 5 (ADR-019), acest modul avea ZERO importatori
+    de producție ("apelat exclusiv manual (CLI/UI viitoare, nescrise
+    încă)"). ADR-030 (Continuous Learning) adaugă
+    learning_core/continuous_learning.py ca primul apelant real legitim —
+    Faza C (execuția promovărilor deja aprobate de om). Garda rămâne utilă
+    sub formă de whitelist explicit."""
     import ast
     import pathlib
+
+    SKIP = {"promotion_service.py", "test_promotion_service.py", "continuous_learning.py"}
 
     root = pathlib.Path(__file__).resolve().parent.parent
     offenders = []
     for path in root.rglob("*.py"):
         if ".git" in path.parts:
             continue
-        if path.name in ("promotion_service.py", "test_promotion_service.py"):
+        if path.name in SKIP:
             continue
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"), filename=str(path))
@@ -235,4 +243,4 @@ def test_module_has_zero_importers_outside_own_test():
                 ):
                     offenders.append(str(path.relative_to(root)))
 
-    assert offenders == [], f"promotion_service e importat in afara scopului Pasului 5: {offenders}"
+    assert offenders == [], f"promotion_service e importat in afara whitelist-ului cunoscut: {offenders}"
