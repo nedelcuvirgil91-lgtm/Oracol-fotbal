@@ -749,6 +749,107 @@ def get_latest_challenger_evaluation(training_run_id: str) -> dict | None:
         return None
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# CONSENSUS VALIDATION (ADR-033) — strict append-only, independent de
+# shadow_predictions/challenger_evaluations (infrastructură proprie, per
+# decizia explicită din ADR-033).
+# ════════════════════════════════════════════════════════════════════════════
+
+def save_consensus_capture_sample(
+    fixture_id: str, league: str, home_team: str, away_team: str,
+    kickoff_date: str | None, raw_predictions: list,
+) -> bool:
+    """Persistă o pereche de ieșiri brute (ADR-031) — Faza 1, captură la
+    serving-time. `UNIQUE(fixture_id)` + `ignore_duplicates=True` => ON
+    CONFLICT DO NOTHING la nivel Postgres: o a doua captură pentru același
+    fixture (rerulare Streamlit, retry) nu modifică rândul deja existent.
+    True dacă rândul a fost scris SAU exista deja — ambele sunt „fapt
+    înregistrat", nu eșec."""
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("consensus_capture_samples").upsert({
+            "fixture_id": fixture_id, "league": league,
+            "home_team": home_team, "away_team": away_team,
+            "kickoff_date": kickoff_date, "raw_predictions": raw_predictions,
+        }, on_conflict="fixture_id", ignore_duplicates=True).execute()
+        return True
+    except Exception as exc:
+        logger.debug("[Supabase] save_consensus_capture_sample failed pentru %s: %s",
+                      fixture_id, exc)
+        return False
+
+
+def get_unevaluated_consensus_samples(limit: int = 5000) -> list[dict]:
+    """Perechi capturate (Faza 1) care au acum un rezultat real cunoscut în
+    `match_history`, pentru a fi consumate de studiul T1 (Faza 2). Read-only
+    pe ambele tabele — nu scrie nimic. Join în Python (nu SQL brut), pe
+    `fixture_id`, exact tiparul deja folosit de
+    `shadow_testing.evaluate_experiment()`."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        samples_res = (
+            client.table("consensus_capture_samples")
+            .select("fixture_id,raw_predictions,kickoff_date")
+            .order("captured_at")
+            .limit(limit)
+            .execute()
+        )
+        samples = samples_res.data or []
+        if not samples:
+            return []
+
+        fixture_ids = [s["fixture_id"] for s in samples]
+        mh_res = (
+            client.table("match_history")
+            .select("fixture_id,actual_result")
+            .in_("fixture_id", fixture_ids)
+            .not_.is_("actual_result", "null")
+            .execute()
+        )
+        mh_by_fixture = {r["fixture_id"]: r["actual_result"] for r in (mh_res.data or [])}
+
+        return [
+            {**s, "actual_result": mh_by_fixture[s["fixture_id"]]}
+            for s in samples if s["fixture_id"] in mh_by_fixture
+        ]
+    except Exception as exc:
+        logger.warning("[Supabase] get_unevaluated_consensus_samples failed: %s", exc)
+        return []
+
+
+def save_consensus_validation_verdict(
+    metric_name: str, is_primary_metric: bool, n_samples_evaluated: int,
+    evaluation_window_start: str | None, evaluation_window_end: str | None,
+    verdict: str, statistical_method: str, metrics: dict,
+) -> bool:
+    """Persistă verdictul unui studiu ADR-033 ca fapt istoric IMUABIL.
+    `UNIQUE(metric_name, n_samples_evaluated)` + `ignore_duplicates=True` =>
+    ON CONFLICT DO NOTHING — o rerulare cu ACEEAȘI fereastră nu poate
+    schimba verdictul deja scris, identic ca disciplină cu
+    `record_challenger_evaluation()` (ADR-018)."""
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("consensus_validation_verdicts").upsert({
+            "metric_name": metric_name, "is_primary_metric": is_primary_metric,
+            "n_samples_evaluated": n_samples_evaluated,
+            "evaluation_window_start": evaluation_window_start,
+            "evaluation_window_end": evaluation_window_end,
+            "verdict": verdict, "statistical_method": statistical_method,
+            "metrics": metrics,
+        }, on_conflict="metric_name,n_samples_evaluated", ignore_duplicates=True).execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Supabase] save_consensus_validation_verdict failed pentru %s (n=%s): %s",
+                        metric_name, n_samples_evaluated, exc)
+        return False
+
+
 def rpc_promote_challenger(training_run_id: str, promoted_by: str) -> str:
     """Apelează funcția Postgres `promote_challenger` (migration 005) —
     ADR-019/Contract de Atomicitate: o singură tranzacție, ambele efecte

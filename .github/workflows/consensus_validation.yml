@@ -1,0 +1,42 @@
+name: Football Oracle — Consensus Validation (ADR-033)
+
+# Complet decuplat de daily.yml ȘI de continuous_learning.yml (ADR-030) —
+# cadență proprie, concurrency proprie, flag propriu
+# (consensus_validation_enabled, model_config), implicit False. Un eșec aici
+# nu poate bloca sau influența ciclul Continuous Learning, și invers —
+# cerință explicită la aprobarea planului de implementare ADR-033.
+
+on:
+  schedule:
+    # Oră distinctă de daily.yml (03:00 UTC) ȘI de continuous_learning.yml
+    # (06:00 UTC) — evită orice coliziune, nu doar directă.
+    - cron: "0 9 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: consensus-validation
+  cancel-in-progress: false
+
+jobs:
+  consensus-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run consensus validation cycle
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python learning_core/run_consensus_validation.py
