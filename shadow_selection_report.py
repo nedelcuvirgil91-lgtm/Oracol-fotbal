@@ -10,8 +10,12 @@ rămâne izolată toată cunoașterea de Supabase). Nu apelează niciodată
 provider_selector.py, nu influențează Selection Engine sau Prediction
 Engine în niciun fel.
 
-`build_report(rows)` e o funcție pură — primește rânduri deja citite,
-produce text. Testabilă direct cu fixture-uri, fără rețea.
+`build_report(rows)` și `build_readiness_verdict(rows)` sunt funcții pure —
+primesc rânduri deja citite, produc text. Testabile direct cu fixture-uri,
+fără rețea. `build_readiness_verdict()` (Shadow Readiness Report) NU
+pretinde niciodată un verdict "READY" complet — criteriile 2 și 4 din
+ADR-034 sunt marcate explicit NEVERIFICAT, niciodată aproximate ca „0"
+sau „✅", indiferent cât de bune sunt cifrele calculabile automat.
 
 Notă onestă despre schema disponibilă: `shadow_provider_recommendations`
 stochează scorurile TOTALE (current_score/recommended_score) și DELTAS
@@ -118,24 +122,72 @@ def build_report(rows: list[dict]) -> str:
         )
 
     lines.append("\n" + "=" * 78)
-    lines.append("Criteriul de ieșire din Shadow Mode (ADR-034, PR5→PR6)")
-    lines.append("=" * 78)
-    match_rate = len(identical) / total if total else 0.0
+    lines.append(build_readiness_verdict(rows))
+
+    return "\n".join(lines)
+
+
+def build_readiness_verdict(rows: list[dict]) -> str:
+    """Rezumat compact, standardizat, pentru decizia PR5→PR6 (cerut explicit
+    — "Shadow Readiness Report"). Funcție pură, aceleași rânduri produc mereu
+    același text.
+
+    Verdictul se bazează STRICT pe criteriile calculabile automat din
+    shadow_provider_recommendations (eșantion minim + rata de coincidență —
+    Criteriul 1, ADR-034). Criteriile 2 (zero regresii funcționale) și 4
+    (consum de cereri în limitele estimate) NU pot fi verificate din
+    această tabelă singură — raportul nu inventează un "0" sau un "✅"
+    pentru ele, indiferent cât de bine arată restul cifrelor. Un verdict
+    "READY" complet ar fi o pretenție falsă de certitudine — exact ce
+    filosofia proiectului interzice ("verificat, nu presupus")."""
+    lines: list[str] = []
+    total = len(rows)
+    lines.append("Shadow mode — Readiness Report (ADR-034 PR5 → PR6)")
+    lines.append("=" * 52)
+
+    if total == 0:
+        lines.append("Nicio observație încă — nimic de evaluat.")
+        lines.append("\nPR6 readiness:")
+        lines.append("❌ NOT READY (fără date)")
+        return "\n".join(lines)
+
+    identical = [r for r in rows if not r.get("decision_changed") and r.get("recommended_provider")]
+    different = [r for r in rows if r.get("decision_changed")]
+    unavailable = [r for r in rows if not r.get("recommended_provider")]
+    observed_dates = sorted({(r.get("observed_at") or "")[:10] for r in rows if r.get("observed_at")})
+    n_days = len(observed_dates)
+    match_rate = len(identical) / total
+
     enough_sample = n_days >= MIN_DAYS_FOR_EXIT_CRITERION and total >= MIN_SAMPLES_FOR_EXIT_CRITERION
-    lines.append(
-        f"  Eșantion minim (≥{MIN_DAYS_FOR_EXIT_CRITERION} zile ȘI ≥{MIN_SAMPLES_FOR_EXIT_CRITERION} recomandări): "
-        f"{'DA' if enough_sample else 'NU'} ({n_days} zile, {total} recomandări)"
-    )
-    lines.append(
-        f"  Criteriul 1 (rata de coincidență ≥{MATCH_RATE_THRESHOLD * 100:.0f}%): "
-        f"{'DA' if match_rate >= MATCH_RATE_THRESHOLD else 'NU'} ({match_rate * 100:.1f}%)"
-    )
-    lines.append("  Criteriul 2 (zero regresii funcționale): necesită corelare manuală cu fetch-uri "
-                  "reale — nu calculabil automat din această tabelă.")
-    lines.append("  Criteriul 3 (rata de erori de fetch neschimbată): necesită comparație cu "
-                  "provider_metrics — raport separat.")
-    lines.append("  Criteriul 4 (consum de cereri în limitele estimate): necesită comparație cu "
-                  "key_manager/provider_metrics — raport separat.")
+    match_ok = match_rate >= MATCH_RATE_THRESHOLD
+
+    lines.append(f"Perioadă observată: {n_days} zile")
+    lines.append(f"Recomandări totale: {total}")
+    lines.append("")
+    lines.append(f"Match rate:            {match_rate * 100:.1f}%   "
+                 f"{'✅' if match_ok else '❌'} (prag ≥{MATCH_RATE_THRESHOLD * 100:.0f}%)")
+    lines.append(f"Eșantion minim:        {'✅' if enough_sample else '❌'} "
+                 f"(≥{MIN_DAYS_FOR_EXIT_CRITERION} zile ȘI ≥{MIN_SAMPLES_FOR_EXIT_CRITERION} recomandări)")
+    lines.append(f"Provider indisponibil: {len(unavailable)} cazuri")
+    lines.append(f"Recomandări diferite:  {len(different)}")
+    lines.append("")
+    lines.append("Regresii funcționale:  NEVERIFICAT — necesită corelare manuală cu fetch-uri "
+                 "reale (criteriul 2, ADR-034)")
+    lines.append("Erori recorder:        NEVERIFICAT — nu există în shadow_provider_recommendations, "
+                 "verifică logurile (logger.warning, shadow_recorder.py)")
+    lines.append("Consum de cereri:      NEVERIFICAT — necesită comparație cu provider_metrics/"
+                 "key_manager (criteriul 4, ADR-034)")
+    lines.append("")
+    lines.append("PR6 readiness:")
+    if enough_sample and match_ok:
+        lines.append("⚠️  PARȚIAL — criteriile automate (eșantion + match rate) sunt îndeplinite,")
+        lines.append("    dar criteriile 2 și 4 din ADR-034 cer verificare manuală înainte de orice")
+        lines.append("    decizie reală de activare (PR6).")
+    elif not enough_sample:
+        lines.append(f"❌ NOT READY — eșantion insuficient ({n_days} zile, {total} recomandări)")
+    else:
+        lines.append(f"❌ NOT READY — match rate sub prag ({match_rate * 100:.1f}% < "
+                     f"{MATCH_RATE_THRESHOLD * 100:.0f}%)")
 
     return "\n".join(lines)
 
