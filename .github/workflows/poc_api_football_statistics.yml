@@ -46,6 +46,11 @@ on:
         required: false
         default: "false"
         type: boolean
+      run_sportapi_season_call_check:
+        description: "OPȚIONAL — dacă true, testează dacă unique-tournament/.../eventsbyuniquetournamentanddate fără date întoarce tot sezonul — 2 apeluri reale"
+        required: false
+        default: "false"
+        type: boolean
 
 jobs:
   probe:
@@ -98,8 +103,13 @@ jobs:
         run: |
           python sync/poc_sportapi_deep_check.py
 
+      - name: Run SportAPI season-call check (discovery, nu integrare)
+        if: github.event.inputs.run_sportapi_season_call_check == 'true'
+        run: |
+          python sync/poc_sportapi_season_call_check.py
+
       - name: Run API-Football statistics probe (discovery, nu integrare)
-        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == '' && github.event.inputs.run_sportapi_check == 'false' && github.event.inputs.run_sportapi_deep_check == 'false'
+        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == '' && github.event.inputs.run_sportapi_check == 'false' && github.event.inputs.run_sportapi_deep_check == 'false' && github.event.inputs.run_sportapi_season_call_check == 'false'
         env:
           # Necesar pentru ca cache-ul (team_id/fixture_id/verdict 403-404)
           # să supraviețuiască între rulări separate ale acestui workflow —
