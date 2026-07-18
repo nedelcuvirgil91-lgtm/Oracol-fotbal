@@ -32,6 +32,12 @@ class _FakeTable:
     def eq(self, *_a, **_kw):
         return self
 
+    def gte(self, *_a, **_kw):
+        return self
+
+    def order(self, *_a, **_kw):
+        return self
+
     def execute(self):
         class _Res:
             def __init__(self, data):
@@ -156,3 +162,30 @@ def test_get_shadow_observations_degrades_gracefully_on_exception(monkeypatch):
 
     monkeypatch.setattr(sb, "get_client", _raise)
     assert shadow_recorder.get_shadow_observations() == []
+
+
+def test_get_shadow_rows_returns_raw_dicts_unconverted(monkeypatch):
+    rows = [{"league": "Romania SuperLiga", "data_type": "fixtures", "observed_at": "2026-07-19T10:00:00+00:00",
+             "current_provider": "espn", "recommended_provider": "sportapi", "decision_changed": True,
+             "component_deltas": {"coverage": 0.4}}]
+    import supabase_client as sb
+    monkeypatch.setattr(sb, "get_client", lambda: _FakeClient([], rows=rows))
+
+    result = shadow_recorder.get_shadow_rows()
+    assert result == rows  # neconvertit - exact rândul brut
+
+
+def test_get_shadow_rows_empty_when_supabase_unavailable(monkeypatch):
+    import supabase_client as sb
+    monkeypatch.setattr(sb, "get_client", lambda: None)
+    assert shadow_recorder.get_shadow_rows() == []
+
+
+def test_get_shadow_rows_degrades_gracefully_on_exception(monkeypatch):
+    import supabase_client as sb
+
+    def _raise():
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(sb, "get_client", _raise)
+    assert shadow_recorder.get_shadow_rows() == []

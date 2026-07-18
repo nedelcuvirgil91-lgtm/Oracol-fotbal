@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import date
 
 from provider_selector import ALGORITHM_VERSION, ProviderRecommendation, ShadowObservation
 
@@ -99,3 +100,25 @@ def get_shadow_observations(shadow_run_id: uuid.UUID | None = None) -> list[Shad
         )
         for row in rows
     ]
+
+
+def get_shadow_rows(since: date | None = None) -> list[dict]:
+    """Rânduri BRUTE, neconvertite în obiecte de domeniu — exclusiv pentru
+    raportare/analiză (shadow_selection_report.py), nu pentru Selection
+    Engine sau orice cod de producție. Include câmpuri (league, data_type,
+    observed_at, component_deltas complet) pe care ShadowObservation le omite
+    deliberat (formă minimală, doar ce are nevoie compute_shadow_statistics()).
+    `since` filtrează pe observed_at >= since (dată calendaristică)."""
+    try:
+        import supabase_client as _sb
+        client = _sb.get_client()
+        if client is None:
+            return []
+        query = client.table(_TABLE).select("*")
+        if since is not None:
+            query = query.gte("observed_at", since.isoformat())
+        res = query.order("observed_at").execute()
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[ShadowRecorder] get_shadow_rows eșuat: %s", exc)
+        return []
