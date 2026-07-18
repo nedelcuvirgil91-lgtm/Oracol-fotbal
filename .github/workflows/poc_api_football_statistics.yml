@@ -51,6 +51,11 @@ on:
         required: false
         default: "false"
         type: boolean
+      debug_romania_superliga:
+        description: "OPȚIONAL — dacă true, rulează diagnosticul complet pentru bug-ul raportat 'Romania SuperLiga 0 meciuri' (toate etapele pipeline-ului, apeluri reale)"
+        required: false
+        default: "false"
+        type: boolean
 
 jobs:
   probe:
@@ -108,8 +113,16 @@ jobs:
         run: |
           python sync/poc_sportapi_season_call_check.py
 
+      - name: Run Romania SuperLiga zero-matches debug (discovery, nu integrare)
+        if: github.event.inputs.debug_romania_superliga == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          python sync/poc_romania_superliga_debug.py
+
       - name: Run API-Football statistics probe (discovery, nu integrare)
-        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == '' && github.event.inputs.run_sportapi_check == 'false' && github.event.inputs.run_sportapi_deep_check == 'false' && github.event.inputs.run_sportapi_season_call_check == 'false'
+        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == '' && github.event.inputs.run_sportapi_check == 'false' && github.event.inputs.run_sportapi_deep_check == 'false' && github.event.inputs.run_sportapi_season_call_check == 'false' && github.event.inputs.debug_romania_superliga == 'false'
         env:
           # Necesar pentru ca cache-ul (team_id/fixture_id/verdict 403-404)
           # să supraviețuiască între rulări separate ale acestui workflow —
