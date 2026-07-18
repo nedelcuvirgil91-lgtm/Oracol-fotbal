@@ -61,6 +61,11 @@ on:
         required: false
         default: "false"
         type: boolean
+      app_runtime_trace:
+        description: "OPȚIONAL — dacă true, reproduce LITERAL fluxul din app.py (nav='matches') cu date reale, pentru comparație directă cu UI-ul live"
+        required: false
+        default: "false"
+        type: boolean
 
 jobs:
   probe:
@@ -131,8 +136,16 @@ jobs:
         run: |
           python sync/poc_tsdb_romania_league_lookup.py
 
+      - name: Run app.py runtime trace (discovery, nu integrare)
+        if: github.event.inputs.app_runtime_trace == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          python sync/poc_app_runtime_trace.py
+
       - name: Run API-Football statistics probe (discovery, nu integrare)
-        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == '' && github.event.inputs.run_sportapi_check == 'false' && github.event.inputs.run_sportapi_deep_check == 'false' && github.event.inputs.run_sportapi_season_call_check == 'false' && github.event.inputs.debug_romania_superliga == 'false' && github.event.inputs.tsdb_romania_lookup == 'false'
+        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == '' && github.event.inputs.run_sportapi_check == 'false' && github.event.inputs.run_sportapi_deep_check == 'false' && github.event.inputs.run_sportapi_season_call_check == 'false' && github.event.inputs.debug_romania_superliga == 'false' && github.event.inputs.tsdb_romania_lookup == 'false' && github.event.inputs.app_runtime_trace == 'false'
         env:
           # Necesar pentru ca cache-ul (team_id/fixture_id/verdict 403-404)
           # să supraviețuiască între rulări separate ale acestui workflow —
