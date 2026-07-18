@@ -36,6 +36,11 @@ on:
         required: false
         default: ""
         type: string
+      run_sportapi_check:
+        description: "OPȚIONAL — dacă true, rulează verificarea practică SportAPI (sportapi7) — 5 apeluri reale, cotă 50/lună"
+        required: false
+        default: "false"
+        type: boolean
 
 jobs:
   probe:
@@ -78,8 +83,13 @@ jobs:
         run: |
           python sync/poc_freelf_romania_check.py --dates ${{ github.event.inputs.freelf_romania_dates }}
 
+      - name: Run SportAPI (sportapi7) live check (discovery, nu integrare)
+        if: github.event.inputs.run_sportapi_check == 'true'
+        run: |
+          python sync/poc_sportapi_check.py
+
       - name: Run API-Football statistics probe (discovery, nu integrare)
-        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == ''
+        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == '' && github.event.inputs.run_sportapi_check == 'false'
         env:
           # Necesar pentru ca cache-ul (team_id/fixture_id/verdict 403-404)
           # să supraviețuiască între rulări separate ale acestui workflow —
