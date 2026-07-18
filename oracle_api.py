@@ -1146,15 +1146,19 @@ class FootballOracleAPI:
                     _add(self._fetch_matches_espn(league, target))
                     logger.info("[WeekLoop] ESPN done:  %s / %s", league, target)
 
-        # 5. TheSportsDB fallback — condiție PER LIGĂ (patch interimar
-        #    operațional, separat de ADR-034 — va fi eliminat la PR7 când
-        #    Selection Engine preia selecția providerilor). ÎNAINTE: gate
-        #    global `len(matches) < 5`, care bloca structural orice ligă
-        #    apărută după ce alte ligi (World Cup + oricare altele) umpleau
-        #    pragul global — exact BUG-014B, verificat live 2026-07-18
-        #    (Romania SuperLiga nu ajungea niciodată la TSDB, deși avea 0
-        #    meciuri). Aceeași filozofie ca pasul 6 (API-Football) de mai
-        #    jos — condiție per ligă, nu globală.
+        # 5. TheSportsDB fallback — condiție PER LIGĂ (HOTFIX interimar,
+        #    operațional, separat de ADR-034 — NU evoluție de arhitectură).
+        #    ÎNAINTE: gate global `len(matches) < 5`, care bloca structural
+        #    orice ligă apărută după ce alte ligi (World Cup + oricare
+        #    altele) umpleau pragul global — exact BUG-014B, verificat live
+        #    2026-07-18 (Romania SuperLiga nu ajungea niciodată la TSDB,
+        #    deși avea 0 meciuri). Aceeași filozofie ca pasul 6
+        #    (API-Football) de mai jos — condiție per ligă, nu globală.
+        #
+        #    TECH-DEBT-ADR034-004 (Issue #27): acest bloc TREBUIE ELIMINAT
+        #    la PR7 (ADR-034), când Selection Engine preia complet selecția
+        #    providerilor — nu doar lăsat inert. Referință explicită aici ca
+        #    să nu devină permanent prin inerție (semnalat la review PR #26).
         for league in comps:
             lid = TSDB_LEAGUE_IDS.get(league)
             if not lid:
