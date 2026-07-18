@@ -66,6 +66,11 @@ on:
         required: false
         default: "false"
         type: boolean
+      petrolul_dinamo_investigation:
+        description: "OPȚIONAL — dacă true, investighează exclusiv de ce Petrolul-Dinamo (19.07) nu ajunge în all_matches, provider cu provider"
+        required: false
+        default: "false"
+        type: boolean
 
 jobs:
   probe:
@@ -144,8 +149,13 @@ jobs:
         run: |
           python sync/poc_app_runtime_trace.py
 
+      - name: Run Petrolul-Dinamo investigation (discovery, nu integrare)
+        if: github.event.inputs.petrolul_dinamo_investigation == 'true'
+        run: |
+          python sync/poc_petrolul_dinamo_investigation.py
+
       - name: Run API-Football statistics probe (discovery, nu integrare)
-        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == '' && github.event.inputs.run_sportapi_check == 'false' && github.event.inputs.run_sportapi_deep_check == 'false' && github.event.inputs.run_sportapi_season_call_check == 'false' && github.event.inputs.debug_romania_superliga == 'false' && github.event.inputs.tsdb_romania_lookup == 'false' && github.event.inputs.app_runtime_trace == 'false'
+        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == '' && github.event.inputs.run_sportapi_check == 'false' && github.event.inputs.run_sportapi_deep_check == 'false' && github.event.inputs.run_sportapi_season_call_check == 'false' && github.event.inputs.debug_romania_superliga == 'false' && github.event.inputs.tsdb_romania_lookup == 'false' && github.event.inputs.app_runtime_trace == 'false' && github.event.inputs.petrolul_dinamo_investigation == 'false'
         env:
           # Necesar pentru ca cache-ul (team_id/fixture_id/verdict 403-404)
           # să supraviețuiască între rulări separate ale acestui workflow —
