@@ -76,6 +76,11 @@ on:
         required: false
         default: "false"
         type: boolean
+      remaining_teams_check:
+        description: "OPȚIONAL — dacă true, verifică ultimele 4 echipe (Corvinul, Csikszereda, Rapid, Sepsi) prin searchteams.php + eventsnext.php"
+        required: false
+        default: "false"
+        type: boolean
 
 jobs:
   probe:
@@ -164,8 +169,13 @@ jobs:
         run: |
           python sync/poc_tsdb_season_round_ratelimit_check.py
 
+      - name: Run remaining teams check (discovery, nu integrare)
+        if: github.event.inputs.remaining_teams_check == 'true'
+        run: |
+          python sync/poc_remaining_teams_check.py
+
       - name: Run API-Football statistics probe (discovery, nu integrare)
-        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == '' && github.event.inputs.run_sportapi_check == 'false' && github.event.inputs.run_sportapi_deep_check == 'false' && github.event.inputs.run_sportapi_season_call_check == 'false' && github.event.inputs.debug_romania_superliga == 'false' && github.event.inputs.tsdb_romania_lookup == 'false' && github.event.inputs.app_runtime_trace == 'false' && github.event.inputs.petrolul_dinamo_investigation == 'false' && github.event.inputs.tsdb_season_round_ratelimit_check == 'false'
+        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == '' && github.event.inputs.run_sportapi_check == 'false' && github.event.inputs.run_sportapi_deep_check == 'false' && github.event.inputs.run_sportapi_season_call_check == 'false' && github.event.inputs.debug_romania_superliga == 'false' && github.event.inputs.tsdb_romania_lookup == 'false' && github.event.inputs.app_runtime_trace == 'false' && github.event.inputs.petrolul_dinamo_investigation == 'false' && github.event.inputs.tsdb_season_round_ratelimit_check == 'false' && github.event.inputs.remaining_teams_check == 'false'
         env:
           # Necesar pentru ca cache-ul (team_id/fixture_id/verdict 403-404)
           # să supraviețuiască între rulări separate ale acestui workflow —
