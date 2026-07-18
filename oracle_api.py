@@ -37,7 +37,7 @@ except ImportError:
 
 from mappings import (
     ODDS_SPORT_KEYS, SPORT_KEY_TO_LEAGUE, FD_COMPETITIONS,
-    ESPN_LEAGUE_SLUGS, TSDB_LEAGUE_IDS,
+    ESPN_LEAGUE_SLUGS, TSDB_LEAGUE_IDS, API_FOOTBALL_LEAGUE_IDS,
     ELO_RATINGS_FALLBACK, FREE_LF_LEAGUE_IDS,
     normalize_team_name, match_key,
 )
@@ -136,6 +136,7 @@ class FootballOracleAPI:
         self._ttl = 30
         self._dead_keys: set[str] = set()
         self._freelf_exhausted: bool = False
+        self._api_football = None  # lazy - vezi _fetch_matches_api_football
         self._active_sport_keys: set[str]   = set()
         # [REPARAT] Inainte, _cget/_cset foloseau DOAR self._mem (dict simplu,
         # in memorie, per-instanta) - complet deconectat de CacheManager
@@ -793,6 +794,21 @@ class FootballOracleAPI:
             except (KeyError, TypeError): continue
         return results
 
+    # ── API-Football — fallback ultim, generic prin mappings.py ─────────────
+    def _fetch_matches_api_football(self, league: str, date_from: str, date_to: str) -> list[dict]:
+        """Nu e sursa primara pentru nicio liga — apelata DOAR din pasul 6 al
+        get_matches_for_week(), cand liga respectiva nu are niciun meci de la
+        providerii de mai sus. Orice liga noua devine eligibila doar prin
+        completarea provider_ids["api_football"] in mappings.py, fara nicio
+        schimbare aici."""
+        league_id = API_FOOTBALL_LEAGUE_IDS.get(league)
+        if not league_id:
+            return []
+        if self._api_football is None:
+            from football_providers import ApiFootballProvider
+            self._api_football = ApiFootballProvider(key_manager=self._key_manager, cache=self._cache_mgr)
+        return self._api_football.get_fixtures(league, league_id, date_from, date_to, season=DEFAULT_SEASON)
+
     def get_team_last_events_tsdb(self, team_id: str) -> list[dict]:
         tid = team_id.replace("tsdb_", "")
         if not tid.isdigit(): return []
@@ -1136,7 +1152,23 @@ class FootballOracleAPI:
                 lid = TSDB_LEAGUE_IDS.get(league)
                 if lid: _add(self._fetch_matches_tsdb(lid, league))
 
-        # 6. Demo mode când nu există date
+        # 6. API-Football — fallback ultim, DOAR pentru ligile cu
+        #    provider_ids["api_football"] setat in mappings.py (generic —
+        #    orice liga noua completata acolo devine eligibila automat) SI
+        #    doar daca liga respectiva inca nu are niciun meci gasit de
+        #    providerii de mai sus. Conditie PER LIGA, nu globala (spre
+        #    deosebire de gate-ul TSDB, len(matches) < 5, care e global si
+        #    de-asta nu a acoperit niciodata Romania — vezi BUG-014B).
+        for league in comps:
+            if league not in API_FOOTBALL_LEAGUE_IDS:
+                continue
+            if any(m.get("league") == league for m in matches):
+                continue
+            logger.info("[WeekLoop] API-Football fallback start: %s", league)
+            _add(self._fetch_matches_api_football(league, d_from, d_to))
+            logger.info("[WeekLoop] API-Football fallback done: %s", league)
+
+        # 7. Demo mode când nu există date
         if len(matches) < 3:
             _add(self._generate_demo_matches(comps))
 

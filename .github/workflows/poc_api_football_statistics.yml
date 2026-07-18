@@ -16,6 +16,41 @@ on:
           - "Ligue 1"
           - "Romania SuperLiga"
           - "MLS"
+      lookup_country:
+        description: "OPȚIONAL — dacă completat, rulează DOAR sondajul /leagues pentru această țară (căutare league_id real), sare peste proba de statistici de mai sus"
+        required: false
+        default: ""
+        type: string
+      verify_fixtures_league:
+        description: "OPȚIONAL — dacă completat, rulează DOAR verificarea end-to-end a fallback-ului de fixtures (get_matches_for_week) pentru această ligă"
+        required: false
+        default: ""
+        type: string
+      season_restriction_league_id:
+        description: "OPȚIONAL — dacă completat, testează next=/date=/live= pentru acest league_id (ocolesc restricția de sezon?)"
+        required: false
+        default: ""
+        type: string
+      freelf_romania_dates:
+        description: "OPȚIONAL — date separate prin spațiu (YYYY-MM-DD), verifică dacă Free Live Football are meciuri Romania SuperLiga în acele zile"
+        required: false
+        default: ""
+        type: string
+      run_sportapi_check:
+        description: "OPȚIONAL — dacă true, rulează verificarea practică SportAPI (sportapi7) — 5 apeluri reale, cotă 50/lună"
+        required: false
+        default: "false"
+        type: boolean
+      run_sportapi_deep_check:
+        description: "OPȚIONAL — dacă true, rulează sondajul de adâncime SportAPI (statistics/incidents/lineups/h2h/managers/squad/injuries/odds) — 9 apeluri reale"
+        required: false
+        default: "false"
+        type: boolean
+      run_sportapi_season_call_check:
+        description: "OPȚIONAL — dacă true, testează dacă unique-tournament/.../eventsbyuniquetournamentanddate fără date întoarce tot sezonul — 2 apeluri reale"
+        required: false
+        default: "false"
+        type: boolean
 
 jobs:
   probe:
@@ -35,7 +70,46 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Run API-Football /leagues lookup (discovery, league_id real)
+        if: github.event.inputs.lookup_country != ''
+        run: |
+          python sync/poc_api_football_league_lookup.py --country "${{ github.event.inputs.lookup_country }}"
+
+      - name: Run end-to-end fixtures fallback check (get_matches_for_week)
+        if: github.event.inputs.verify_fixtures_league != ''
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          python sync/poc_api_football_fixtures_check.py --league "${{ github.event.inputs.verify_fixtures_league }}"
+
+      - name: Run season restriction check (next=/date=/live=)
+        if: github.event.inputs.season_restriction_league_id != ''
+        run: |
+          python sync/poc_api_football_season_restriction_check.py --league-id "${{ github.event.inputs.season_restriction_league_id }}"
+
+      - name: Run FreeLF Romania SuperLiga check (discovery, nu integrare)
+        if: github.event.inputs.freelf_romania_dates != ''
+        run: |
+          python sync/poc_freelf_romania_check.py --dates ${{ github.event.inputs.freelf_romania_dates }}
+
+      - name: Run SportAPI (sportapi7) live check (discovery, nu integrare)
+        if: github.event.inputs.run_sportapi_check == 'true'
+        run: |
+          python sync/poc_sportapi_check.py
+
+      - name: Run SportAPI (sportapi7) deep check (discovery, nu integrare)
+        if: github.event.inputs.run_sportapi_deep_check == 'true'
+        run: |
+          python sync/poc_sportapi_deep_check.py
+
+      - name: Run SportAPI season-call check (discovery, nu integrare)
+        if: github.event.inputs.run_sportapi_season_call_check == 'true'
+        run: |
+          python sync/poc_sportapi_season_call_check.py
+
       - name: Run API-Football statistics probe (discovery, nu integrare)
+        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == '' && github.event.inputs.run_sportapi_check == 'false' && github.event.inputs.run_sportapi_deep_check == 'false' && github.event.inputs.run_sportapi_season_call_check == 'false'
         env:
           # Necesar pentru ca cache-ul (team_id/fixture_id/verdict 403-404)
           # să supraviețuiască între rulări separate ale acestui workflow —

@@ -78,8 +78,28 @@ def test_coverage_blocks_unknown_league():
 
 def test_coverage_allows_unknown_provider_state():
     p = _provider()
-    # Romania SuperLiga are api_football="necunoscut" - nu trebuie blocat
-    assert p._covered("Romania SuperLiga", "api_football") is True
+    # World Cup 2026 are api_football="necunoscut" - nu trebuie blocat
+    assert p._covered("World Cup 2026", "api_football") is True
+
+
+def test_coverage_blocks_plan_restricted_romania_superliga():
+    """Romania SuperLiga: league_id=283 confirmat live, dar planul Free
+    blocheaza sezonul curent pe /fixtures (verificat live, run 29616468120/
+    29616932623) - supported="plan_restricted" trebuie tratat ca False,
+    NU ca "necunoscut" (nu e o stare nedeterminata, e confirmata)."""
+    p = _provider()
+    assert p._covered("Romania SuperLiga", "api_football") is False
+
+
+def test_get_fixtures_makes_zero_http_calls_when_plan_restricted():
+    """0 cereri irosite: get_fixtures() nu trebuie sa apeleze _get() deloc
+    pentru Romania SuperLiga - gate-ul de coverage opreste inainte de HTTP."""
+    p = _provider()
+    calls = []
+    p._get = lambda *a, **kw: calls.append(a) or {"response": []}
+    result = p.get_fixtures("Romania SuperLiga", 283, "2026-07-17", "2026-07-24", season=2026)
+    assert result == []
+    assert calls == []
 
 
 def test_normalize_coach_confirmed_structure():
@@ -138,6 +158,59 @@ def test_normalize_injury_defensive_on_wrong_shape():
     assert injury is not None
     assert injury.injury_type == "necunoscut"
     assert injury.reason == "necunoscut"
+
+
+def test_get_fixtures_sends_league_season_range_params():
+    """World Cup 2026 ("necunoscut", nu "plan_restricted") - folosita aici
+    doar ca liga acoperita, ca sa testam parametrii trimisi, nu semantica
+    reala a competitiei."""
+    p = _provider()
+    captured_params = {}
+    def spy_get(path, params, category, cache_key):
+        captured_params.update(params)
+        assert category == "matches"
+        return {"response": []}
+    p._get = spy_get
+    p.get_fixtures("World Cup 2026", 1, "2026-07-18", "2026-07-25", season=2026)
+    assert captured_params == {"league": 1, "season": 2026, "from": "2026-07-18", "to": "2026-07-25"}
+
+
+def test_get_fixtures_blocked_for_unsupported_league():
+    """football_data e explicit False pentru Romania SuperLiga - dar aici testam
+    coverage pe categoria 'api_football', nu 'football_data'; folosim o liga
+    complet necunoscuta pentru a confirma blocarea reala."""
+    p = _provider()
+    assert p.get_fixtures("Liga Complet Necunoscuta", 999, "2026-07-18", "2026-07-25", season=2026) == []
+
+
+def test_normalize_fixture_confirmed_structure():
+    p = _provider()
+    sample = {
+        "fixture": {"id": 1234567, "date": "2026-07-19T16:00:00+00:00",
+                    "venue": {"city": "Bucuresti"}},
+        "teams": {"home": {"id": 1, "name": "FCSB"}, "away": {"id": 2, "name": "CFR Cluj"}},
+    }
+    fx = p._normalize_fixture(sample, "Romania SuperLiga", 2026)
+    assert fx["fixture_id"] == "apifootball_1234567"
+    assert fx["home_team"] == "FCSB"
+    assert fx["away_team"] == "CFR Cluj"
+    assert fx["kickoff_date"] == "2026-07-19"
+    assert fx["league"] == "Romania SuperLiga"
+    assert fx["season"] == 2026
+    assert fx["source"] == "apifootball"
+
+
+def test_normalize_fixture_defensive_on_missing_fixture_id():
+    p = _provider()
+    wrong = {"fixture": {"date": "2026-07-19T16:00:00+00:00"},
+              "teams": {"home": {"name": "FCSB"}, "away": {"name": "CFR Cluj"}}}
+    assert p._normalize_fixture(wrong, "Romania SuperLiga", 2026) is None
+
+
+def test_normalize_fixture_defensive_on_missing_teams():
+    p = _provider()
+    wrong = {"fixture": {"id": 1}, "teams": {}}
+    assert p._normalize_fixture(wrong, "Romania SuperLiga", 2026) is None
 
 
 def test_placeholders_raise_not_implemented():

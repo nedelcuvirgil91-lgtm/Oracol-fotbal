@@ -144,7 +144,13 @@ class ApiFootballProvider(FootballDataProvider):
             return False
         # False explicit -> nu incercam. True sau "necunoscut" -> incercam
         # (necunoscut nu blocheaza, doar nu era inca confirmat la audit).
-        return league_def.supported.get(category) is not False
+        # "plan_restricted" -> nu incercam: provider/cheie/ID confirmate
+        # corecte, dar planul curent (Free) blocheaza explicit accesul la
+        # sezonul curent - confirmat live, nu presupus (vezi comentariul
+        # din mappings.py, Romania SuperLiga). Tratat la fel ca False, ca
+        # sa nu iroseasca cereri pe un apel garantat sa esueze.
+        state = league_def.supported.get(category)
+        return state is not False and state != "plan_restricted"
 
     def _get(self, path: str, params: dict, cache_category: str, cache_key: str) -> dict | None:
         # 1. health check
@@ -280,6 +286,78 @@ class ApiFootballProvider(FootballDataProvider):
             fixture_id=str(fixture["id"]) if fixture.get("id") is not None else None,
             source_provider=self.PROVIDER_ID,
         )
+
+    # ── Fixtures — fallback generic, orice ligă cu provider_ids["api_football"]
+    #    setat în mappings.py (nu doar Romania SuperLiga) ────────────────
+    def get_fixtures(self, league: str, league_id: int, date_from: str, date_to: str, season: int) -> list[dict]:
+        """
+        Fixtures viitoare pentru o ligă, prin /fixtures?league=&season=&from=&to=.
+        Generic — orice ligă cu provider_ids["api_football"] completat în
+        mappings.py devine eligibilă automat, fără nicio schimbare aici.
+        Folosit DOAR ca fallback (ultimul, înainte de demo mode) pentru
+        ligi fără acoperire suficientă la ceilalți provideri, niciodată ca
+        sursă primară — vezi ordinea din oracle_api.get_matches_for_week().
+        Același mecanism (_get) ca get_injuries/get_coaches: health check
+        -> coverage check -> cache L1+L2 -> HTTP -> cache+metrics update.
+        """
+        if not self._covered(league, "api_football"):
+            return []
+        cache_key = f"{league}:{league_id}:fixtures:{date_from}:{date_to}:{season}"
+        raw = self._get(
+            "fixtures",
+            {"league": league_id, "season": season, "from": date_from, "to": date_to},
+            "matches", cache_key,
+        )
+        if not raw or "response" not in raw:
+            if raw and raw.get("errors"):
+                logger.warning("[ApiFootball] /fixtures a intors erori: %r", raw["errors"])
+            return []
+        results = []
+        for item in raw["response"]:
+            fx = self._normalize_fixture(item, league, season)
+            if fx is not None:
+                results.append(fx)
+        return results
+
+    def _normalize_fixture(self, item: dict, league: str, season: int) -> dict | None:
+        if not isinstance(item, dict):
+            logger.warning("[ApiFootball] /fixtures — element neasteptat (nu e dict): %r", item)
+            return None
+        from mappings import normalize_team_name
+
+        fixture = item.get("fixture") or {}
+        teams = item.get("teams") or {}
+        home_team = teams.get("home") or {}
+        away_team = teams.get("away") or {}
+        home = normalize_team_name(home_team.get("name", "") or "")
+        away = normalize_team_name(away_team.get("name", "") or "")
+        if not home or not away:
+            logger.warning(
+                "[ApiFootball] /fixtures — echipe lipsa/necompletate, structura "
+                "reala difera de presupunere: %r", item
+            )
+            return None
+        kickoff_utc = fixture.get("date", "") or ""
+        fixture_id = fixture.get("id")
+        if fixture_id is None:
+            logger.warning(
+                "[ApiFootball] /fixtures — 'fixture.id' lipsa, structura reala "
+                "difera de presupunere, meci ignorat: %r", item
+            )
+            return None
+        return {
+            "fixture_id":    f"apifootball_{fixture_id}",
+            "home_team":     home, "away_team": away,
+            "home_team_id":  f"apifootball_{home_team.get('id', '')}",
+            "away_team_id":  f"apifootball_{away_team.get('id', '')}",
+            "kickoff_utc":   kickoff_utc,
+            "kickoff_date":  kickoff_utc[:10] if kickoff_utc else "",
+            "league":        league, "season": season,
+            "venue_city":    (fixture.get("venue") or {}).get("city", "") or "",
+            "status":        "scheduled", "coverage_level": "",
+            "home_odds":     None, "draw_odds": None, "away_odds": None,
+            "odds_source":   None, "source": self.PROVIDER_ID,
+        }
 
     # ── Coaches — structură confirmată exact din documentație ────────────
     def get_coaches(self, team_name: str, team_id: int | str) -> list[CoachInfo]:
