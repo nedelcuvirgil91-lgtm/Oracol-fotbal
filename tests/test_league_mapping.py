@@ -1,6 +1,9 @@
 """Teste pentru league_mapping.py (ADR-034, PR3) — fără rețea."""
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import pytest
 
 from mappings import LEAGUE_PROVIDERS
@@ -9,6 +12,59 @@ from league_mapping import (
     Confidence, LeagueProviderState, ProviderState,
     _translate_legacy_state, get_league_provider_state,
 )
+
+
+def test_provider_state_enum_values_are_unique():
+    values = [s.value for s in ProviderState]
+    assert len(values) == len(set(values))
+
+
+def test_confidence_enum_values_are_unique():
+    values = [c.value for c in Confidence]
+    assert len(values) == len(set(values))
+
+
+def test_state_must_be_provider_state_instance_not_raw_string():
+    """Enum-ul e sursa unica de adevar - un string brut nu poate trece
+    drept stare, nici prin apel direct la constructor."""
+    with pytest.raises(TypeError):
+        LeagueProviderState(
+            league="X", provider_id="y", legacy_key="z",
+            state="plan_restricted", confidence=Confidence.UNKNOWN,  # type: ignore[arg-type]
+        )
+
+
+def test_confidence_must_be_confidence_instance_not_raw_string():
+    with pytest.raises(TypeError):
+        LeagueProviderState(
+            league="X", provider_id="y", legacy_key="z",
+            state=ProviderState.AVAILABLE, confidence="confirmed",  # type: ignore[arg-type]
+        )
+
+
+_ENUM_MEMBER_DEFINITION = re.compile(r'^\s*[A-Z_]+\s*=\s*"[a-z_]+"\s*(#.*)?$')
+
+
+def test_league_mapping_and_translation_files_use_no_stray_state_strings():
+    """Verifica direct in sursa (nu presupune): string-urile brute de stare
+    ("necunoscut"/"plan_restricted"/etc) au voie sa apara DOAR in 2 locuri
+    legitime - definitia proprie a membrilor Enum (ProviderState.X = "x")
+    si granita de traducere din _translate_legacy_state() (raw == "...").
+    Nicaieri altundeva in league_mapping.py/provider_id_translation.py."""
+    pattern = re.compile(r'"(necunoscut|plan_restricted|dead_key|quota_exhausted)"')
+    for filename in ("league_mapping.py", "provider_id_translation.py"):
+        source = Path(filename).read_text(encoding="utf-8")
+        for lineno, line in enumerate(source.splitlines(), start=1):
+            if not pattern.search(line):
+                continue
+            allowed = (
+                "raw ==" in line or "raw is" in line or _ENUM_MEMBER_DEFINITION.match(line)
+            )
+            assert allowed, (
+                f"{filename}:{lineno} folosește un string brut de stare în "
+                f"afara granițelor permise (definiție Enum sau _translate_legacy_state): "
+                f"{line.strip()!r}"
+            )
 
 
 def test_translate_legacy_state_true_to_available():

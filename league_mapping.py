@@ -33,8 +33,8 @@ from provider_id_translation import to_legacy
 class ProviderState(Enum):
     AVAILABLE = "available"
     UNAVAILABLE = "unavailable"
-    UNTESTED = "untested"          # "nu am testat încă" — mappings.py: "necunoscut"
-    UNKNOWN = "unknown"            # "nu știm" — distinct de UNTESTED, rezervat
+    UNTESTED = "untested"          # nu a fost testat încă — vezi _translate_legacy_state
+    UNKNOWN = "unknown"            # nu se știe deloc — distinct de UNTESTED, rezervat
     PLAN_RESTRICTED = "plan_restricted"
     DEAD_KEY = "dead_key"
     QUOTA_EXHAUSTED = "quota_exhausted"
@@ -74,6 +74,13 @@ class LeagueProviderState:
     confidence: Confidence
 
     def __post_init__(self) -> None:
+        # Enum-ul e sursa unică de adevăr — niciun string liber nu poate
+        # trece drept stare/încredere, nici măcar prin apel direct la
+        # constructor (nu doar prin type hints, verificate doar static).
+        if not isinstance(self.state, ProviderState):
+            raise TypeError(f"state trebuie să fie ProviderState, nu {type(self.state).__name__}: {self.state!r}")
+        if not isinstance(self.confidence, Confidence):
+            raise TypeError(f"confidence trebuie să fie Confidence, nu {type(self.confidence).__name__}: {self.confidence!r}")
         if self.state != ProviderState.AVAILABLE and self.confidence not in _NON_AVAILABLE_ALLOWED_CONFIDENCE:
             raise ValueError(
                 f"confidence={self.confidence} invalid pentru state={self.state} "

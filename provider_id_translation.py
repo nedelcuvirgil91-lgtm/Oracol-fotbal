@@ -39,6 +39,17 @@ CANONICAL_TO_LEGACY: Mapping[str, str] = MappingProxyType(
     {canonical: legacy for legacy, canonical in LEGACY_TO_CANONICAL.items()}
 )
 
+# Fail loud, la import, nu doar la testare: daca vreo editare viitoare
+# introduce doua chei legacy care traduc catre acelasi canonical_id,
+# CANONICAL_TO_LEGACY ar pierde tacit una dintre ele (last-write-wins in
+# dict comprehension) - bijectivitatea trebuie sa fie adevarata structural,
+# nu doar verificata ulterior de teste.
+if len(set(LEGACY_TO_CANONICAL.values())) != len(LEGACY_TO_CANONICAL):
+    raise AssertionError(
+        "LEGACY_TO_CANONICAL nu e bijectiv - exista valori (canonical_id) "
+        "duplicate, cel putin doua chei legacy ar traduce catre acelasi provider."
+    )
+
 
 def to_canonical(legacy_key: str) -> str | None:
     return LEGACY_TO_CANONICAL.get(legacy_key)
