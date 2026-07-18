@@ -31,6 +31,11 @@ on:
         required: false
         default: ""
         type: string
+      freelf_romania_dates:
+        description: "OPȚIONAL — date separate prin spațiu (YYYY-MM-DD), verifică dacă Free Live Football are meciuri Romania SuperLiga în acele zile"
+        required: false
+        default: ""
+        type: string
 
 jobs:
   probe:
@@ -68,8 +73,13 @@ jobs:
         run: |
           python sync/poc_api_football_season_restriction_check.py --league-id "${{ github.event.inputs.season_restriction_league_id }}"
 
+      - name: Run FreeLF Romania SuperLiga check (discovery, nu integrare)
+        if: github.event.inputs.freelf_romania_dates != ''
+        run: |
+          python sync/poc_freelf_romania_check.py --dates ${{ github.event.inputs.freelf_romania_dates }}
+
       - name: Run API-Football statistics probe (discovery, nu integrare)
-        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == ''
+        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == ''
         env:
           # Necesar pentru ca cache-ul (team_id/fixture_id/verdict 403-404)
           # să supraviețuiască între rulări separate ale acestui workflow —
