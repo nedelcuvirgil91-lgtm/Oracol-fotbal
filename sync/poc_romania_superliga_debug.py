@@ -142,11 +142,42 @@ def main() -> None:
           "(vezi oracle_api.py, chiar inainte de _cset/return) — nu-l poate modifica structural. "
           "Rezultatul end-to-end de mai jos e produs de ACEEASI rulare in care flag-ul e True live.")
 
-    section("REZULTAT FINAL — apel real get_matches_for_week() (exact ca in productie/app.py)")
-    final = api.get_matches_for_week(days_ahead=7, competitions=[LEAGUE])
-    print(f"Rezultat: {len(final)} meciuri pentru {LEAGUE!r}")
+    section("STARE CACHE — dovada ca citirea de mai jos e proaspata, nu stale")
+    ALL_COMPETITIONS = ["World Cup 2026", "Champions League", "Premier League", "La Liga",
+                         "Serie A", "Bundesliga", "Ligue 1", "Europa League", "Romania SuperLiga"]
+    d_from_full = today.isoformat()
+    cache_key_full = f"week_{d_from_full}_{days_ahead}_{','.join(sorted(ALL_COMPETITIONS))}"
+    try:
+        import supabase_client as _sb
+        client = _sb.get_client()
+        if client is not None:
+            res = (client.table("api_cache").select("expires_at,created_at")
+                   .eq("category", "matches").eq("cache_key", cache_key_full)
+                   .order("created_at", desc=True).limit(1).execute())
+            rows = res.data or []
+            now_iso = datetime.now(timezone.utc).isoformat()
+            if not rows:
+                print(f"  NICIO intrare in api_cache pentru acest cache_key -> MISS garantat (fetch complet proaspat)")
+            else:
+                expires_at = rows[0]["expires_at"]
+                is_expired = expires_at < now_iso
+                print(f"  Intrare gasita: created_at={rows[0]['created_at']}  expires_at={expires_at}")
+                print(f"  Acum (UTC): {now_iso}")
+                print(f"  {'EXPIRAT (MISS garantat, fetch complet proaspat)' if is_expired else 'INCA VALID (ar putea fi HIT)'}")
+        else:
+            print("  Supabase indisponibil - nu pot verifica direct, dar get_cached_response() insusi filtreaza server-side pe expires_at > now()")
+    except Exception as exc:
+        print(f"  Verificare esuata: {exc}")
+
+    section("REZULTAT FINAL — apel real get_matches_for_week() (exact ca in productie/app.py, toate cele 9 competitii)")
+    all_matches = api.get_matches_for_week(days_ahead=7, competitions=ALL_COMPETITIONS)
+    final = [m for m in all_matches if m.get("league") == LEAGUE]
+    print(f"Total meciuri (toate competitiile, ca in app.py): {len(all_matches)}")
+    print(f"Rezultat filtrat pentru {LEAGUE!r} (exact ce ar vedea utilizatorul in tab-ul SuperLiga): {len(final)} meciuri")
     for m in final:
         print(f"  {m.get('home_team')} vs {m.get('away_team')}  ({m.get('kickoff_date')})  source={m.get('source')}")
+    if not final:
+        print("  (niciun meci)")
 
     section("STAGE 3 — Selection Engine (shadow, DOAR referinta — nu afecteaza rezultatul de mai sus)")
     from provider_capabilities import DataType
