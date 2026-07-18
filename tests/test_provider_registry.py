@@ -149,6 +149,57 @@ def test_real_registry_includes_keyless_providers():
     assert "thesportsdb" not in REAL_KEY_MANAGER_PROVIDERS
 
 
+def test_key_manager_never_resolved_for_keyless_only_usage(monkeypatch):
+    """TECH-DEBT-ADR034-001 (rezolvat in PR4): daca nu se injecteaza
+    key_manager explicit si Registry-ul e folosit DOAR pentru provideri
+    fara credentiale, get_key_manager() nu trebuie apelat niciodata -
+    Registry-ul nu are voie sa atinga key_manager.py doar pentru ca a fost
+    construit."""
+    calls: list[None] = []
+
+    def _spy_get_key_manager():
+        calls.append(None)
+        return _FakeKeyManager()
+
+    monkeypatch.setattr("key_manager.get_key_manager", _spy_get_key_manager)
+
+    reg = ProviderRegistry(providers=_FAKE_PROVIDERS)  # fara key_manager injectat
+    assert reg.is_available("beta") is True
+    assert reg.get_headers("beta") is None
+    assert reg.record_result("beta") is None
+    assert reg.get_quota_status("beta") is None
+    assert calls == []
+
+
+def test_key_manager_resolved_lazily_and_cached_for_credentialed_usage(monkeypatch):
+    """Pentru un provider CU credentiale, get_key_manager() trebuie apelat -
+    dar o singura data per instanta de Registry (cache dupa prima
+    rezolvare), indiferent de cate metode operationale sunt apelate."""
+    calls: list[None] = []
+    fake = _FakeKeyManager()
+
+    def _spy_get_key_manager():
+        calls.append(None)
+        return fake
+
+    monkeypatch.setattr("key_manager.get_key_manager", _spy_get_key_manager)
+
+    reg = ProviderRegistry(providers=_FAKE_PROVIDERS)  # fara key_manager injectat
+    assert reg.is_available("alpha") is True
+    assert reg.get_headers("alpha") == {"x-api-key": "k1"}
+    reg.record_result("alpha")
+    assert reg.get_quota_status("alpha") is not None
+    assert len(calls) == 1  # rezolvat o singura data, apoi cache-uit
+
+
+def test_key_manager_not_imported_at_module_load_time():
+    """Regresie directa: provider_registry.py nu importa key_manager la
+    nivel de modul - doar in interiorul _resolve_km(). Verificam ca numele
+    'get_key_manager' nu exista in namespace-ul modulului la nivel de top."""
+    import provider_registry
+    assert "get_key_manager" not in vars(provider_registry)
+
+
 def test_real_registry_credentialed_providers_are_consistent_with_key_manager():
     """Toti providerii marcati requires_credentials=True in Registry
     TREBUIE sa aiba o intrare reala in key_manager.PROVIDERS - regresie
