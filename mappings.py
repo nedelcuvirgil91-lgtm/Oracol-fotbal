@@ -459,7 +459,12 @@ LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
         # fel ca False - blocheaza apelul, 0 cereri irosite. Daca planul se
         # schimba (upgrade), un singur rand aici (True) reactiveaza fallback-ul
         # complet, fara nicio alta modificare de cod.
-        provider_ids={"football_data": None, "espn": "rou.1", "tsdb": "4652",
+        # tsdb=4691 ("Romanian Liga I") — CORECTAT 2026-07-18, verificat live
+        # (run GH Actions 29643951959): vechea valoare 4652 era 'Macedonian
+        # First League' (lookupleague.php?id=4652 → Macedonia, dovada in log),
+        # iar eventsnextleague.php?id=4691 a intors meciul real al zilei
+        # ('Oțelul Galați' vs 'CFR Cluj', 2026-07-18 15:30) — nu presupus.
+        provider_ids={"football_data": None, "espn": "rou.1", "tsdb": "4691",
                        "odds": "soccer_romania_1_liga", "freelf": None, "api_football": 283},
         supported={
             "football_data": False,  # CONFIRMAT: planul gratuit football-data.org
