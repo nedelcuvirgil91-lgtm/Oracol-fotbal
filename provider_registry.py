@@ -36,8 +36,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from key_manager import get_key_manager
-
 
 @dataclass(frozen=True)
 class ProviderRecord:
@@ -67,8 +65,22 @@ class ProviderRegistry:
         # key_manager e folosit DOAR pentru providerii cu
         # requires_credentials=True, în cele 4 metode operaționale de mai
         # jos — list_providers()/get_provider() nu-l ating niciodată.
-        self._km = key_manager or get_key_manager()
+        #
+        # Rezolvare LENEȘĂ (TECH-DEBT-ADR034-001, rezolvat în PR4): dacă nu
+        # e injectat explicit, key_manager NU se importă/instanțiază la
+        # construirea Registry-ului, ci abia la primul apel care chiar are
+        # nevoie de el — un Registry folosit exclusiv pentru provideri fără
+        # credențiale (espn, thesportsdb) nu atinge niciodată key_manager.py.
+        # Rezultatul se cache-uiește după prima rezolvare (un singur import
+        # per instanță de Registry).
+        self._km = key_manager
         self._providers = providers if providers is not None else _PROVIDER_DECLARATIONS
+
+    def _resolve_km(self):
+        if self._km is None:
+            from key_manager import get_key_manager
+            self._km = get_key_manager()
+        return self._km
 
     def list_providers(self) -> list[ProviderRecord]:
         return list(self._providers)
@@ -85,13 +97,13 @@ class ProviderRegistry:
             return False
         if not record.requires_credentials:
             return True  # niciun gate de credential nu se aplica
-        return self._km.is_available(provider_id)
+        return self._resolve_km().is_available(provider_id)
 
     def get_headers(self, provider_id: str) -> dict | None:
         record = self.get_provider(provider_id)
         if record is None or not record.requires_credentials:
             return None  # fara schema de autentificare
-        return self._km.get_headers(provider_id)
+        return self._resolve_km().get_headers(provider_id)
 
     def record_result(self, provider_id: str, success: bool = True) -> None:
         """
@@ -100,20 +112,20 @@ class ProviderRegistry:
         consumă din cotă), de-asta record_request() se apelează
         necondiționat pentru providerii cu credențiale. Pentru cei fără
         credențiale, nu există concept de cotă — no-op. 'success' e
-        păstrat pentru Health Monitor (PR4), care va avea nevoie de eșecuri
+        păstrat pentru Health Monitor (PR4), care are nevoie de eșecuri
         pentru scorul de reliability — semnătura rămâne stabilă de acum,
         nu se rupe contractul în PR4.
         """
         record = self.get_provider(provider_id)
         if record is None or not record.requires_credentials:
             return
-        self._km.record_request(provider_id)
+        self._resolve_km().record_request(provider_id)
 
     def get_quota_status(self, provider_id: str) -> dict | None:
         record = self.get_provider(provider_id)
         if record is None or not record.requires_credentials:
             return None  # fara concept de cota
-        status = self._km.get_status()
+        status = self._resolve_km().get_status()
         return status.get("providers", {}).get(provider_id)
 
 
