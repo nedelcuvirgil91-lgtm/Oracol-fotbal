@@ -1176,7 +1176,37 @@ class FootballOracleAPI:
                    if d_from <= (m.get("kickoff_date") or "9999") <= d_to]
         matches = self._attach_odds(matches)
         matches.sort(key=lambda m: m.get("kickoff_utc", ""))
+        self._shadow_evaluate_selection_engine(comps, matches)
         self._cset(cache_key, matches); return matches
+
+    def _shadow_evaluate_selection_engine(self, comps: list[str], matches: list[dict]) -> None:
+        """[ADAUGAT] ADR-034 PR5 — efect secundar, STRICT observațional.
+        Nu modifică niciodată `matches` (doar îl citește, deja finalizat) —
+        nu poate influența valoarea de retur a get_matches_for_week(). Nu
+        face nimic (return imediat) dacă
+        selection_engine_shadow_enabled=False (implicit, North Star #3) —
+        un singur boolean check, zero cost dincolo de el. Best-effort: orice
+        eroare e prinsă aici, niciodată propagată (Regula #8, degradare
+        grațioasă, consistent cu learning_core/challenger_shadow.py)."""
+        try:
+            import shadow_config
+            if not shadow_config.is_enabled():
+                return
+
+            from provider_capabilities import DataType
+            from provider_selector import recommend_provider
+            from provider_source_resolver import determine_current_provider
+            import shadow_recorder
+
+            shadow_run_id = shadow_recorder.new_shadow_run_id()
+            for league in comps:
+                current_provider = determine_current_provider(league, matches)
+                if current_provider is None:
+                    continue  # nicio sursa reala (non-demo) pentru aceasta liga
+                recommendation = recommend_provider(league, DataType.FIXTURES, current_provider)
+                shadow_recorder.record_shadow_recommendation(recommendation, shadow_run_id)
+        except Exception as exc:
+            logger.debug("[SelectionEngineShadow] evaluare shadow eșuată: %s", exc)
 
     def get_matches_for_date(self, target_date: str) -> list[dict]:
         return [m for m in self.get_matches_for_week(days_ahead=7)
