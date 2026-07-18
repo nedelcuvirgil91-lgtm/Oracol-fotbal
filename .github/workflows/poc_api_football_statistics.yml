@@ -41,6 +41,11 @@ on:
         required: false
         default: "false"
         type: boolean
+      run_sportapi_deep_check:
+        description: "OPȚIONAL — dacă true, rulează sondajul de adâncime SportAPI (statistics/incidents/lineups/h2h/managers/squad/injuries/odds) — 9 apeluri reale"
+        required: false
+        default: "false"
+        type: boolean
 
 jobs:
   probe:
@@ -88,8 +93,13 @@ jobs:
         run: |
           python sync/poc_sportapi_check.py
 
+      - name: Run SportAPI (sportapi7) deep check (discovery, nu integrare)
+        if: github.event.inputs.run_sportapi_deep_check == 'true'
+        run: |
+          python sync/poc_sportapi_deep_check.py
+
       - name: Run API-Football statistics probe (discovery, nu integrare)
-        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == '' && github.event.inputs.run_sportapi_check == 'false'
+        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == '' && github.event.inputs.run_sportapi_check == 'false' && github.event.inputs.run_sportapi_deep_check == 'false'
         env:
           # Necesar pentru ca cache-ul (team_id/fixture_id/verdict 403-404)
           # să supraviețuiască între rulări separate ale acestui workflow —
