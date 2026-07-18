@@ -74,6 +74,21 @@ def main() -> None:
             print(f"    {ev.get('strHomeTeam')!r} vs {ev.get('strAwayTeam')!r}  "
                   f"date={ev.get('dateEvent')}  time={ev.get('strTime')}")
 
+    print()
+    print("=" * 78)
+    print("4. eventsday.php — TOATE meciurile Ligii I de azi (U Craiova-UTA exista?)")
+    print("=" * 78)
+    from datetime import date as _date
+    today = _date.today().isoformat()
+    data = get("eventsday.php", {"d": today, "l": "Romanian Liga I"})
+    events = (data or {}).get("events") or []
+    if not events:
+        print(f"  (niciun meci returnat pentru {today})")
+    for ev in events:
+        print(f"    {ev.get('strHomeTeam')!r} vs {ev.get('strAwayTeam')!r}  "
+              f"date={ev.get('dateEvent')}  time={ev.get('strTime')}  "
+              f"league={ev.get('strLeague')!r}")
+
 
 if __name__ == "__main__":
     main()
