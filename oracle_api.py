@@ -819,11 +819,21 @@ class FootballOracleAPI:
             return results
 
         # Reconciliere (dovedita necesara — vezi TSDB_TEAM_IDS, mappings.py):
-        # eventsseason.php (62.5% completitudine fata de calendarul oficial
-        # LPF, vs. 12.5% pentru eventsnextleague.php) + supliment per echipa
-        # pentru meciurile inca absente (dovedite prezente STRICT la nivel
-        # de echipa, eventsnext.php). Deduplicare prin match_key(), acelasi
-        # mecanism deja folosit in get_matches_for_week().
+        # UNIUNEA a trei surse, fiecare cu goluri diferite, confirmate live:
+        #   1. eventsnextleague.php — singurul care are, azi, Universitatea
+        #      Cluj-Farul Constanța (absent din eventsseason.php).
+        #   2. eventsseason.php (sezon calculat dinamic) — 62.5% completitudine
+        #      fata de calendarul oficial LPF, vs. 12.5% pentru
+        #      eventsnextleague.php singur.
+        #   3. supliment per echipa (eventsnext.php, TSDB_TEAM_IDS) — pentru
+        #      meciurile absente din AMBELE endpointuri de mai sus, dovedite
+        #      prezente STRICT la nivel de echipa.
+        # Niciuna dintre cele trei, singura, nu e completa — dovedit live,
+        # 2026-07-19: eventsseason.php a intors 0 evenimente viitoare (toate
+        # meciurile rundei 1 deja jucate/in curs), iar fara #1 mai sus,
+        # Universitatea Cluj-Farul Constanța ar fi disparut complet.
+        # Deduplicare prin match_key(), acelasi mecanism deja folosit in
+        # get_matches_for_week().
         season = self._tsdb_season_string()
         seen_keys: set[str] = set()
         results: list[dict] = []
@@ -836,6 +846,9 @@ class FootballOracleAPI:
                 if mk in seen_keys: continue
                 seen_keys.add(mk)
                 results.append(parsed)
+
+        nextleague_data = self._get(f"{THESPORTSDB_URL}/eventsnextleague.php", params={"id": league_id})
+        _add((nextleague_data or {}).get("events") or [])
 
         season_data = self._get(f"{THESPORTSDB_URL}/eventsseason.php", params={"id": league_id, "s": season})
         _add((season_data or {}).get("events") or [])

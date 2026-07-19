@@ -71,16 +71,21 @@ def test_league_without_team_ids_uses_only_eventsnextleague():
     assert results[0]["source"] == "thesportsdb"
 
 
-def test_romania_superliga_uses_eventsseason_and_team_supplement_not_eventsnextleague():
+def test_romania_superliga_unions_all_three_tsdb_sources():
     """Romania SuperLiga are TSDB_TEAM_IDS populat (5 echipe) — trebuie să
-    apeleze eventsseason.php O SINGURĂ DATĂ + eventsnext.php o dată per
-    echipă (5 apeluri), NICIODATĂ eventsnextleague.php."""
+    apeleze TOATE TREI sursele (eventsnextleague.php O SINGURĂ DATĂ +
+    eventsseason.php O SINGURĂ DATĂ + eventsnext.php o dată per echipă,
+    5 apeluri), nu doar un subset — dovedit necesar live 2026-07-19:
+    eventsnextleague.php e singurul care are Universitatea Cluj-Farul
+    Constanța, absent din eventsseason.php in acel moment."""
     api = _api_no_network()
     calls: list[tuple[str, dict]] = []
 
     def _fake_get(url: str, headers=None, params=None, timeout: int = 12):
         endpoint = url.rsplit("/", 1)[-1]
         calls.append((endpoint, dict(params or {})))
+        if endpoint == "eventsnextleague.php":
+            return {"events": [_event("Universitatea Cluj", "Farul Constanța", FUTURE, "nl1")]}
         if endpoint == "eventsseason.php":
             return {"events": [_event("FCSB", "FC Argeș", FUTURE, "s1")]}
         if endpoint == "eventsnext.php":
@@ -92,8 +97,8 @@ def test_romania_superliga_uses_eventsseason_and_team_supplement_not_eventsnextl
     results = api._fetch_matches_tsdb("4691", "Romania SuperLiga")
 
     endpoints_called = [c[0] for c in calls]
-    assert "eventsnextleague.php" not in endpoints_called, (
-        f"eventsnextleague.php NU trebuie apelat pentru Romania SuperLiga — apeluri: {endpoints_called}"
+    assert endpoints_called.count("eventsnextleague.php") == 1, (
+        f"eventsnextleague.php trebuie apelat exact o data pentru Romania SuperLiga — apeluri: {endpoints_called}"
     )
     assert endpoints_called.count("eventsseason.php") == 1
     assert endpoints_called.count("eventsnext.php") == 5, (
@@ -104,8 +109,9 @@ def test_romania_superliga_uses_eventsseason_and_team_supplement_not_eventsnextl
     assert season_call[1].get("id") == "4691"
     assert "s" in season_call[1] and "-" in season_call[1]["s"]
 
-    assert len(results) == 1
-    assert results[0]["home_team"] == "FCSB"
+    assert len(results) == 2
+    home_teams = {r["home_team"] for r in results}
+    assert home_teams == {"Universitatea Cluj", "FCSB"}
 
 
 def test_dedup_across_season_and_team_supplement():
