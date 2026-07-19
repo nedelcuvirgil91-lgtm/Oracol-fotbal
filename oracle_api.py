@@ -37,7 +37,7 @@ except ImportError:
 
 from mappings import (
     ODDS_SPORT_KEYS, SPORT_KEY_TO_LEAGUE, FD_COMPETITIONS,
-    ESPN_LEAGUE_SLUGS, TSDB_LEAGUE_IDS, API_FOOTBALL_LEAGUE_IDS,
+    ESPN_LEAGUE_SLUGS, TSDB_LEAGUE_IDS, TSDB_TEAM_IDS, API_FOOTBALL_LEAGUE_IDS,
     ELO_RATINGS_FALLBACK, FREE_LF_LEAGUE_IDS,
     normalize_team_name, match_key,
 )
@@ -768,30 +768,95 @@ class FootballOracleAPI:
         self._cset(cache_key, results); return results
 
     # ── TheSportsDB ───────────────────────────────────────────────────────
+    def _tsdb_season_string(self, on_date: date | None = None) -> str:
+        """Sezon fotbal european ('2026-2027'), calculat DINAMIC din data
+        curenta (sezonul incepe in iulie) — niciodata hardcodat."""
+        d = on_date or date.today()
+        start_year = d.year if d.month >= 7 else d.year - 1
+        return f"{start_year}-{start_year + 1}"
+
+    def _parse_tsdb_event(self, ev: dict, league_name: str, today: str) -> dict | None:
+        try:
+            ev_date = ev.get("dateEvent", "")
+            if ev_date and ev_date < today: return None
+            home = normalize_team_name(ev.get("strHomeTeam", "") or "")
+            away = normalize_team_name(ev.get("strAwayTeam", "") or "")
+            if not home or not away: return None
+            ev_time = ev.get("strTime", "00:00:00") or "00:00:00"
+            ko_utc  = f"{ev_date}T{ev_time[:8]}Z" if ev_date else ""
+            return {
+                "fixture_id":    f"tsdb_{ev.get('idEvent','')}",
+                "home_team":     home, "away_team": away,
+                "home_team_id":  f"tsdb_{ev.get('idHomeTeam','')}",
+                "away_team_id":  f"tsdb_{ev.get('idAwayTeam','')}",
+                "kickoff_utc":   ko_utc, "kickoff_date": ev_date,
+                "league":        league_name, "season": DEFAULT_SEASON,
+                "venue_city":    ev.get("strVenue", ""), "status": "scheduled",
+                "coverage_level": "",
+                "home_odds":     None, "draw_odds": None, "away_odds": None,
+                "odds_source":   None, "source": "thesportsdb",
+            }
+        except (KeyError, TypeError):
+            return None
+
     def _fetch_matches_tsdb(self, league_id: str, league_name: str) -> list[dict]:
-        data = self._get(f"{THESPORTSDB_URL}/eventsnextleague.php", params={"id": league_id})
-        if not data: return []
-        today = date.today().isoformat(); results: list[dict] = []
-        for ev in data.get("events") or []:
-            try:
-                ev_date  = ev.get("dateEvent", "")
-                ev_time  = ev.get("strTime", "00:00:00") or "00:00:00"
-                ko_utc   = f"{ev_date}T{ev_time[:8]}Z" if ev_date else ""
-                if ev_date and ev_date < today: continue
-                results.append({
-                    "fixture_id":    f"tsdb_{ev['idEvent']}",
-                    "home_team":     normalize_team_name(ev.get("strHomeTeam", "") or ""),
-                    "away_team":     normalize_team_name(ev.get("strAwayTeam", "") or ""),
-                    "home_team_id":  f"tsdb_{ev.get('idHomeTeam','')}",
-                    "away_team_id":  f"tsdb_{ev.get('idAwayTeam','')}",
-                    "kickoff_utc":   ko_utc, "kickoff_date": ev_date,
-                    "league":        league_name, "season": DEFAULT_SEASON,
-                    "venue_city":    ev.get("strVenue", ""), "status": "scheduled",
-                    "coverage_level": "",
-                    "home_odds":     None, "draw_odds": None, "away_odds": None,
-                    "odds_source":   None, "source": "thesportsdb",
-                })
-            except (KeyError, TypeError): continue
+        today = date.today().isoformat()
+        team_ids = TSDB_TEAM_IDS.get(league_name)
+
+        if not team_ids:
+            # Cale NESCHIMBATA — eventsnextleague.php, fara reconciliere.
+            # Ligile fara TSDB_TEAM_IDS populat raman pe calea veche,
+            # verificata ani de zile. Reconcilierea de mai jos e aplicata
+            # STRICT ligilor cu dovada live de necesitate (investigatia
+            # Etapa 1 SuperLiga) — un endpoint nou, netestat pe cupe
+            # europene (Champions/Europa/Conference/World Cup), ar risca
+            # o regresie nedemonstrata pe ligi care functioneaza deja corect.
+            data = self._get(f"{THESPORTSDB_URL}/eventsnextleague.php", params={"id": league_id})
+            results: list[dict] = []
+            for ev in (data or {}).get("events") or []:
+                parsed = self._parse_tsdb_event(ev, league_name, today)
+                if parsed: results.append(parsed)
+            return results
+
+        # Reconciliere (dovedita necesara — vezi TSDB_TEAM_IDS, mappings.py):
+        # UNIUNEA a trei surse, fiecare cu goluri diferite, confirmate live:
+        #   1. eventsnextleague.php — singurul care are, azi, Universitatea
+        #      Cluj-Farul Constanța (absent din eventsseason.php).
+        #   2. eventsseason.php (sezon calculat dinamic) — 62.5% completitudine
+        #      fata de calendarul oficial LPF, vs. 12.5% pentru
+        #      eventsnextleague.php singur.
+        #   3. supliment per echipa (eventsnext.php, TSDB_TEAM_IDS) — pentru
+        #      meciurile absente din AMBELE endpointuri de mai sus, dovedite
+        #      prezente STRICT la nivel de echipa.
+        # Niciuna dintre cele trei, singura, nu e completa — dovedit live,
+        # 2026-07-19: eventsseason.php a intors 0 evenimente viitoare (toate
+        # meciurile rundei 1 deja jucate/in curs), iar fara #1 mai sus,
+        # Universitatea Cluj-Farul Constanța ar fi disparut complet.
+        # Deduplicare prin match_key(), acelasi mecanism deja folosit in
+        # get_matches_for_week().
+        season = self._tsdb_season_string()
+        seen_keys: set[str] = set()
+        results: list[dict] = []
+
+        def _add(events: list[dict]) -> None:
+            for ev in events:
+                parsed = self._parse_tsdb_event(ev, league_name, today)
+                if parsed is None: continue
+                mk = match_key(parsed["home_team"], parsed["away_team"], parsed["kickoff_date"])
+                if mk in seen_keys: continue
+                seen_keys.add(mk)
+                results.append(parsed)
+
+        nextleague_data = self._get(f"{THESPORTSDB_URL}/eventsnextleague.php", params={"id": league_id})
+        _add((nextleague_data or {}).get("events") or [])
+
+        season_data = self._get(f"{THESPORTSDB_URL}/eventsseason.php", params={"id": league_id, "s": season})
+        _add((season_data or {}).get("events") or [])
+
+        for team_id in team_ids.values():
+            team_data = self._get(f"{THESPORTSDB_URL}/eventsnext.php", params={"id": team_id})
+            _add((team_data or {}).get("events") or [])
+
         return results
 
     # ── API-Football — fallback ultim, generic prin mappings.py ─────────────

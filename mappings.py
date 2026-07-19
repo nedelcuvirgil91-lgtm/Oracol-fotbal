@@ -531,6 +531,41 @@ TSDB_LEAGUE_IDS: dict[str, str] = {
     if d.provider_ids.get("tsdb") is not None
 }
 
+# Mapare MANUALĂ, per echipă, id-uri TheSportsDB — NU derivată automat.
+# lookup_all_teams.php s-a dovedit nefiabil (verificat live: pentru
+# Romanian Liga I a întors 24 echipe engleze de eșalon inferior, zero
+# echipe românești) — nicio populare automată nu e posibilă azi.
+#
+# Scop: supliment per-echipă (eventsnext.php) în _fetch_matches_tsdb(),
+# pentru meciurile absente atât din eventsnextleague.php CÂT ȘI din
+# eventsseason.php/eventsround.php — dovedit necesar prin reconciliere
+# cu calendarul oficial LPF Etapa 1 2026-2027 (8 meciuri): 3 meciuri
+# (Petrolul-Dinamo, Corvinul-Csíkszereda, Rapid-Sepsi) există în TSDB
+# STRICT la nivel de echipă, absente din orice endpoint la nivel de ligă.
+#
+# Intenționat INCOMPLET — doar echipele deja verificate live (id + nume
+# confirmate prin searchteams.php), nu tot lotul de 16 echipe SuperLiga.
+# O ligă absentă din acest dict → _fetch_matches_tsdb() rămâne pe calea
+# veche, neschimbată (eventsnextleague.php) — vezi gate-ul din funcție.
+# Echipă nouă necesară: se adaugă DOAR după verificare live prin
+# searchteams.php, niciodată presupusă.
+#
+# TODO (regulă explicită, nu opțională): extinderea strategiei de
+# reconciliere la ALTE ligi se face DOAR după o investigație similară
+# celei pentru SuperLiga (reconciliere cu calendarul oficial al ligii,
+# dovadă live că endpointurile de ligă sunt incomplete) și după popularea
+# TSDB_TEAM_IDS pentru acele ligi. NU se generalizează automat — filosofia
+# proiectului: „Verificat, nu presupus".
+TSDB_TEAM_IDS: dict[str, dict[str, str]] = {
+    "Romania SuperLiga": {
+        "Petrolul Ploiești": "134398",
+        "Dinamo București": "134121",
+        "Corvinul Hunedoara": "147629",
+        "Csíkszereda Miercurea Ciuc": "138930",
+        "Sepsi OSK": "138192",
+    },
+}
+
 # Ligile pentru care API-Football poate fi folosit ca fallback — generat
 # direct din LEAGUE_PROVIDERS, la fel ca dictionarele de mai sus. O liga
 # noua devine eligibila DOAR prin completarea provider_ids["api_football"]

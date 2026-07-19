@@ -61,6 +61,41 @@ on:
         required: false
         default: "false"
         type: boolean
+      app_runtime_trace:
+        description: "OPȚIONAL — dacă true, reproduce LITERAL fluxul din app.py (nav='matches') cu date reale, pentru comparație directă cu UI-ul live"
+        required: false
+        default: "false"
+        type: boolean
+      petrolul_dinamo_investigation:
+        description: "OPȚIONAL — dacă true, investighează exclusiv de ce Petrolul-Dinamo (19.07) nu ajunge în all_matches, provider cu provider"
+        required: false
+        default: "false"
+        type: boolean
+      tsdb_season_round_ratelimit_check:
+        description: "OPȚIONAL — dacă true, testează eventsseason.php/eventsround.php/lookup_all_teams.php + rate limit real TheSportsDB pentru SuperLiga"
+        required: false
+        default: "false"
+        type: boolean
+      remaining_teams_check:
+        description: "OPȚIONAL — dacă true, verifică ultimele 4 echipe (Corvinul, Csikszereda, Rapid, Sepsi) prin searchteams.php + eventsnext.php"
+        required: false
+        default: "false"
+        type: boolean
+      odds_api_romania_viability:
+        description: "OPȚIONAL — dacă true, verifică dacă Odds API poate fi sursă principală pentru Romania SuperLiga (meciuri + cote)"
+        required: false
+        default: "false"
+        type: boolean
+      espn_full_round_check:
+        description: "OPȚIONAL — dacă true, verifică completitudinea ESPN (rou.1) pe toate cele 4 zile ale Etapei 1 SuperLiga"
+        required: false
+        default: "false"
+        type: boolean
+      tsdb_reconciliation_live_verify:
+        description: "OPȚIONAL — dacă true, verifică live reconcilierea TSDB (post-fix) pentru Romania SuperLiga fata de calendarul oficial Etapa 1"
+        required: false
+        default: "false"
+        type: boolean
 
 jobs:
   probe:
@@ -131,8 +166,49 @@ jobs:
         run: |
           python sync/poc_tsdb_romania_league_lookup.py
 
+      - name: Run app.py runtime trace (discovery, nu integrare)
+        if: github.event.inputs.app_runtime_trace == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          python sync/poc_app_runtime_trace.py
+
+      - name: Run Petrolul-Dinamo investigation (discovery, nu integrare)
+        if: github.event.inputs.petrolul_dinamo_investigation == 'true'
+        run: |
+          python sync/poc_petrolul_dinamo_investigation.py
+
+      - name: Run TSDB eventsseason/eventsround/lookup_all_teams/rate-limit check (discovery, nu integrare)
+        if: github.event.inputs.tsdb_season_round_ratelimit_check == 'true'
+        run: |
+          python sync/poc_tsdb_season_round_ratelimit_check.py
+
+      - name: Run remaining teams check (discovery, nu integrare)
+        if: github.event.inputs.remaining_teams_check == 'true'
+        run: |
+          python sync/poc_remaining_teams_check.py
+
+      - name: Run Odds API Romania viability check (discovery, nu integrare)
+        if: github.event.inputs.odds_api_romania_viability == 'true'
+        run: |
+          python sync/poc_odds_api_romania_viability.py
+
+      - name: Run ESPN full round completeness check (discovery, nu integrare)
+        if: github.event.inputs.espn_full_round_check == 'true'
+        run: |
+          python sync/poc_espn_full_round_check.py
+
+      - name: Run TSDB reconciliation live verify (discovery, nu integrare)
+        if: github.event.inputs.tsdb_reconciliation_live_verify == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          python sync/poc_tsdb_reconciliation_live_verify.py
+
       - name: Run API-Football statistics probe (discovery, nu integrare)
-        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == '' && github.event.inputs.run_sportapi_check == 'false' && github.event.inputs.run_sportapi_deep_check == 'false' && github.event.inputs.run_sportapi_season_call_check == 'false' && github.event.inputs.debug_romania_superliga == 'false' && github.event.inputs.tsdb_romania_lookup == 'false'
+        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == '' && github.event.inputs.run_sportapi_check == 'false' && github.event.inputs.run_sportapi_deep_check == 'false' && github.event.inputs.run_sportapi_season_call_check == 'false' && github.event.inputs.debug_romania_superliga == 'false' && github.event.inputs.tsdb_romania_lookup == 'false' && github.event.inputs.app_runtime_trace == 'false' && github.event.inputs.petrolul_dinamo_investigation == 'false' && github.event.inputs.tsdb_season_round_ratelimit_check == 'false' && github.event.inputs.remaining_teams_check == 'false' && github.event.inputs.odds_api_romania_viability == 'false' && github.event.inputs.espn_full_round_check == 'false' && github.event.inputs.tsdb_reconciliation_live_verify == 'false'
         env:
           # Necesar pentru ca cache-ul (team_id/fixture_id/verdict 403-404)
           # să supraviețuiască între rulări separate ale acestui workflow —
