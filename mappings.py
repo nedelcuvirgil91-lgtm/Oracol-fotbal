@@ -549,6 +549,13 @@ TSDB_LEAGUE_IDS: dict[str, str] = {
 # veche, neschimbată (eventsnextleague.php) — vezi gate-ul din funcție.
 # Echipă nouă necesară: se adaugă DOAR după verificare live prin
 # searchteams.php, niciodată presupusă.
+#
+# TODO (regulă explicită, nu opțională): extinderea strategiei de
+# reconciliere la ALTE ligi se face DOAR după o investigație similară
+# celei pentru SuperLiga (reconciliere cu calendarul oficial al ligii,
+# dovadă live că endpointurile de ligă sunt incomplete) și după popularea
+# TSDB_TEAM_IDS pentru acele ligi. NU se generalizează automat — filosofia
+# proiectului: „Verificat, nu presupus".
 TSDB_TEAM_IDS: dict[str, dict[str, str]] = {
     "Romania SuperLiga": {
         "Petrolul Ploiești": "134398",
