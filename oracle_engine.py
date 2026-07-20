@@ -1537,6 +1537,16 @@ class FootballOracleEngine:
 
         if self.use_supabase:
             mlf = data["ml_features"]
+            # [ADR-036 / D3.5 Stage 1] Prediction Engine scrie DOAR ieșirile
+            # proprii de predicție. Cele 10 FEATURE_COLUMNS owner-ate de
+            # backfill (home/away_offensive_rating, home/away_defensive_rating,
+            # home/away_form_score, home/away_elo, h2h_modifier, h2h_meetings)
+            # NU se mai trimit de aici — rămân NULL până le completează
+            # sync/backfill_features.run_backfill() cu recalculul walk-forward,
+            # sursa canonică unică. Astfel `first-writer-wins` (COALESCE) nu mai
+            # îngheață valori din cascada live peste recalculul corect. RPC-ul
+            # (upsert_match_canonical) rămâne neschimbat — coloanele absente din
+            # payload nu sunt atinse (COALESCE(existing, NULL) = existing).
             sb.upsert_match_history({
                 "fixture_id":   pred.fixture_id,
                 "home_team":    pred.home_team,
@@ -1545,16 +1555,6 @@ class FootballOracleEngine:
                 "kickoff_date": pred.kickoff_date,
                 "home_xg_pred": mlf["home_xg_pred"],
                 "away_xg_pred": mlf["away_xg_pred"],
-                "home_offensive_rating": mlf["home_offensive_rating"],
-                "home_defensive_rating": mlf["home_defensive_rating"],
-                "away_offensive_rating": mlf["away_offensive_rating"],
-                "away_defensive_rating": mlf["away_defensive_rating"],
-                "home_form_score": mlf["home_form_score"],
-                "away_form_score": mlf["away_form_score"],
-                "home_elo": mlf["home_elo"],
-                "away_elo": mlf["away_elo"],
-                "h2h_modifier": mlf["h2h_modifier"],
-                "h2h_meetings": mlf["h2h_meetings"],
                 "weather_penalty": mlf["weather_penalty"],
                 "home_data_quality": pred.data_quality_home,
                 "away_data_quality": pred.data_quality_away,
@@ -1705,26 +1705,15 @@ class FootballOracleEngine:
         if cache is None:
             return {"status": "error", "message": f"No cached prediction for {fixture_id}."}
 
-        # ── v3.0: completează match_history cu rezultatul real ────────────
-        if self.use_supabase:
-            actual_result = (
-                "H" if actual_home_goals > actual_away_goals
-                else "A" if actual_home_goals < actual_away_goals
-                else "D"
-            )
-            sb.upsert_match_history({
-                "fixture_id":        fixture_id,
-                "home_team":         cache.get("home_team", ""),
-                "away_team":         cache.get("away_team", ""),
-                "league":            cache.get("league", "default"),
-                # [ID-025-03] Cheia naturala completa — RPC-ul canonic cauta
-                # randul dupa (home, away, kickoff_date), nu dupa fixture_id.
-                "kickoff_date":      cache.get("kickoff_date", ""),
-                "actual_home_goals": actual_home_goals,
-                "actual_away_goals": actual_away_goals,
-                "actual_result":     actual_result,
-            })
-
+        # [ADR-036 / D3.5 Stage 3] Scrierea legacy a rezultatului real
+        # (actual_home_goals/actual_away_goals/actual_result) în match_history
+        # a fost ELIMINATĂ de aici. Owner-ul canonic al coloanelor `actual_*`
+        # este `sync/sync_results.py` (overwrite permis, pentru corecție de
+        # scor). Această funcție e o cale manuală/legacy, neapelată în niciun
+        # flux automat (verificat AST: zero apeluri reale), iar scrierea ei era
+        # `COALESCE` fill-once — strict mai slabă decât `sync_results`. Rămâne
+        # exclusiv recalibrarea (scopul ei real), fără efect asupra contractului
+        # de scriere al `actual_*`.
         pred_h = float(cache.get("home_xg", 1.25))
         pred_a = float(cache.get("away_xg", 1.00))
         league = cache.get("league", "default")
