@@ -367,6 +367,78 @@ def upsert_elo_history_bulk(rows: list[dict]) -> tuple[int, int]:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# ELO CANONIC — Canonical Live ELO Snapshot (ADR-023 Variant C, executat de
+# ADR-035 D2 pe calea de servire)
+# ════════════════════════════════════════════════════════════════════════════
+
+_team_elo_cache: dict[str, int | None] = {}
+
+
+def get_latest_team_elo(team: str, lookback: int = 5) -> int | None:
+    """
+    Sursa canonică pentru ELO-ul de club folosit de servirea live
+    (oracle_engine._build_profile()) — ADR-023 (Variant C) / ADR-035 (D2).
+
+    Returnează home_elo_after/away_elo_after (din perspectiva echipei
+    `team`) al celui mai recent meci TERMINAT al ei, căutat GLOBAL — fără
+    filtru de ligă. ELO e urmărit per club, nu per competiție (ELOTracker,
+    sync/backfill_features.py, cheie doar pe numele echipei, populat de
+    run_backfill() fără filtru de ligă în ambii apelanți de producție,
+    sync/run_daily.py și sync/sync_results.py) — un club care joacă în mai
+    multe competiții sincronizate are un singur traseu ELO continuu.
+
+    Caută în ultimele `lookback` meciuri terminate, nu doar cel mai recent:
+    home_elo_after/away_elo_after pot rămâne temporar NULL pe rânduri deja
+    scrise dacă backfill-ul de features n-a ajuns încă la ele (risc
+    rezidual documentat, ADR-023 Consecința #4 — inserție istorică
+    întârziată). Dacă niciun rând din fereastră nu are valoare, se
+    întoarce None — nu se aproximează (Regula #8) — iar apelantul cade pe
+    fallback-ul de provider existent (oracle_api.get_elo_rating()).
+
+    Cache in-memory, per proces (nu per-cerere HTTP): evită interogări
+    Supabase repetate pentru aceeași echipă în cadrul aceleiași rulări
+    (ex. o echipă apare ca oponent în mai multe meciuri prezise în același
+    batch). Fără TTL/staleness detection — explicit Phase 7 (ADR-023), nu
+    responsabilitatea acestei funcții.
+    """
+    if team in _team_elo_cache:
+        return _team_elo_cache[team]
+
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("match_history")
+            .select("home_team,away_team,home_elo_after,away_elo_after,kickoff_date")
+            .or_(f"home_team.eq.{team},away_team.eq.{team}")
+            .not_.is_("actual_result", "null")
+            .order("kickoff_date", desc=True)
+            .order("id", desc=True)
+            .limit(lookback)
+            .execute()
+        )
+        rows = res.data or []
+    except Exception as exc:
+        logger.warning("[Queries] get_latest_team_elo failed pentru %s: %s", team, exc)
+        return None
+
+    elo: int | None = None
+    for row in rows:
+        is_home = row.get("home_team") == team
+        is_away = row.get("away_team") == team
+        if not (is_home or is_away):
+            continue
+        val = row.get("home_elo_after") if is_home else row.get("away_elo_after")
+        if val is not None:
+            elo = int(round(val))
+            break
+
+    _team_elo_cache[team] = elo
+    return elo
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # ML STATUS
 # ════════════════════════════════════════════════════════════════════════════
 

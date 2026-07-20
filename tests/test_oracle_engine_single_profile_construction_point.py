@@ -20,7 +20,7 @@ ROOT = Path(__file__).parent.parent
 # documentate explicit ca "identic cu _build_profile", nu calea live.
 PRODUCTION_FILES = [
     "app.py", "oracle_api.py", "oracle_engine.py", "feature_engine.py",
-    "football_providers.py", "supabase_client.py",
+    "football_providers.py", "supabase_client.py", "database/queries.py",
 ]
 
 
@@ -84,3 +84,46 @@ def test_tsdb_team_stats_only_called_from_build_profile():
         t = ast.parse(p.read_text(encoding="utf-8"), filename=fname)
         lines = _calls_matching(t, {"get_team_stats", "get_team_last_events_tsdb"})
         assert not lines, f"{fname} apelează direct TSDB team-stats la liniile {lines}"
+
+
+def test_elo_read_only_called_from_build_profile():
+    """ADR-023 (Variant C) / ADR-035 D2: get_elo_rating() (provider extern)
+    și get_latest_team_elo() (sursa canonică, match_history) trebuie
+    apelate DINTR-UN SINGUR loc de producție — _build_profile(). O a doua
+    cale ar putea citi ELO fără să respecte ordinea Database-First (DB
+    întâi, provider doar ca fallback condiționat pe elo_raw is None)."""
+    names = {"get_elo_rating", "get_latest_team_elo"}
+    path = ROOT / "oracle_engine.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename="oracle_engine.py")
+
+    calls_by_function: dict[str, list[int]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            lines = _calls_matching(node, names)
+            if lines:
+                calls_by_function[node.name] = lines
+
+    assert calls_by_function == {"_build_profile": calls_by_function.get("_build_profile", [])}, (
+        f"get_elo_rating/get_latest_team_elo apelate din afara "
+        f"_build_profile(): {calls_by_function} — cale paralelă către sursa "
+        f"ELO, ocolește ordinea Database-First (ADR-023/ADR-035 D2)."
+    )
+    assert "_build_profile" in calls_by_function
+    assert len(calls_by_function["_build_profile"]) == 2, (
+        f"Așteptam exact 2 apeluri în _build_profile() — get_latest_team_elo "
+        f"(primar) și get_elo_rating (fallback) — găsit "
+        f"{calls_by_function['_build_profile']}."
+    )
+
+    # Nicio altă locație din PRODUCTION_FILES (în afara oracle_api.py și
+    # database/queries.py, unde funcțiile sunt DEFINITE, nu apelate) nu le
+    # apelează direct.
+    for fname in PRODUCTION_FILES:
+        if fname in ("oracle_engine.py", "oracle_api.py", "database/queries.py"):
+            continue
+        p = ROOT / fname
+        if not p.exists():
+            continue
+        t = ast.parse(p.read_text(encoding="utf-8"), filename=fname)
+        lines = _calls_matching(t, names)
+        assert not lines, f"{fname} apelează direct sursa ELO la liniile {lines}"

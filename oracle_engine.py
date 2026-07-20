@@ -90,6 +90,12 @@ except ModuleNotFoundError:
     SUPABASE_MODULE_AVAILABLE = False
 
 try:
+    from database.queries import get_latest_team_elo
+    DB_QUERIES_MODULE_AVAILABLE = True
+except ModuleNotFoundError:
+    DB_QUERIES_MODULE_AVAILABLE = False
+
+try:
     from ml_predictor import MLPredictorEngine, blend_predictions
     ML_MODULE_AVAILABLE = True
 except ModuleNotFoundError:
@@ -662,6 +668,12 @@ class FootballOracleEngine:
            5. ELO sigmoid                  (întotdeauna blended)
            6. Neutral defaults
 
+        ELO de club (separat de cascada de mai sus, rulează în paralel):
+        match_history.home_elo_after/away_elo_after (get_latest_team_elo,
+        ADR-023/ADR-035 D2) — PRIMAR, global per club, indiferent de ligă;
+        fallback pe get_elo_rating() (eloratings.net + hardcodat) doar dacă
+        echipa n-are meciuri de club sincronizate (tipic: naționale).
+
         Principiul de proiectare (ADR-035): niciun provider extern nu poate
         avea prioritate asupra unei informații deja sincronizate și
         validate în baza canonică Supabase — Level DB rulează primul, iar
@@ -674,7 +686,22 @@ class FootballOracleEngine:
         canonical = normalize_team_name(team_name)
         real_sot  = self._real_avg_shots_on_target(canonical, league, last_n)
 
-        elo_raw   = self.api.get_elo_rating(canonical)
+        # ── ELO (ADR-023 Variant C / ADR-035 D2): match_history canonic,
+        # PRIMUL ──────────────────────────────────────────────────────────
+        # Principiul de proiectare (ADR-035): niciun provider extern nu
+        # poate avea prioritate asupra unei informații deja sincronizate în
+        # baza canonică. get_elo_rating() (eloratings.net + fallback
+        # hardcodat) rămâne fallback — singura sursă reală pentru echipele
+        # naționale, care nu au meciuri de club în match_history.
+        elo_raw = None
+        if DB_QUERIES_MODULE_AVAILABLE:
+            try:
+                elo_raw = get_latest_team_elo(canonical)
+            except Exception as exc:
+                elo_raw = None
+                logger.warning("[Profile] DB-first ELO read failed for %s: %s", canonical, exc)
+        if elo_raw is None:
+            elo_raw = self.api.get_elo_rating(canonical)
         elo_off   = self._elo_to_multiplier(elo_raw)           if elo_raw else None
         elo_def   = self._elo_to_defensive_multiplier(elo_raw) if elo_raw else None
         elo_blend = float(self.config.get("elo_blend_weight", 0.35))
