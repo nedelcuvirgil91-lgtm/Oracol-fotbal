@@ -148,9 +148,34 @@ statisticilor de meci pentru România (P1, constatarea 4).
    cascadei, zero regresii pe cele 9 ligi, ADR-023 neatins, zero atingere
    ML/Poisson/MC/Selection Engine, o singură datorie tehnică minoră
    corectată înainte de merge — docstring).
-6. ⬜ Implementare D2 + verificare — **în curs**: conectarea ELO-ului de
-   club la sursa canonică ADR-023, pe calea de servire (profil + ML
-   features). Analiza de arhitectură se prezintă înainte de cod.
+6. ✅ **Implementare D2 + verificare — FINALIZAT 2026-07-20, PR #32
+   (merged `d94d332`).** Execută Phase 6 („Oracle Switch") din ADR-023:
+   `database.queries.get_latest_team_elo()` — nouă, bulk-fetch + cache,
+   globală per club (fără filtru de ligă) — devine sursa PRIMARĂ pentru
+   ELO în `_build_profile()`; `oracle_api.get_elo_rating()` rămâne
+   fallback neschimbat, singura sursă reală pentru echipele fără meciuri
+   de club sincronizate (naționale). Verificat live: DB câștigă în toate
+   cazurile în care există — inclusiv acolo unde diferă vizibil de
+   provider (Arsenal 1931 vs 1915, Real Madrid 1849 vs 1945, Bayern 1992
+   vs 1940, PSG 1939 vs 1920) — dovadă directă că providerul nu
+   suprascrie o valoare deja sincronizată; Franța (națională, World Cup
+   2026) cade corect pe fallback; cazul central (Petrolul 1481/Dinamo
+   1640) are acum ELO real, nu `None`. 16 teste noi (fail-before/
+   pass-after), gardă AST extinsă pentru unicitatea punctului de citire
+   ELO. Zero regresie (`pytest tests/`: 699 passed, aceleași 3 eșecuri
+   pre-existente fragile la dată). Review arhitectural în 3 runde:
+   analiză de arhitectură pre-cod (6 criterii, inclusiv scope ADR-023
+   Phase 6 exact), decizie separată privind `elo_source` pe `TeamProfile`
+   (verdict: AMÂNAT pentru D4/ADR dedicat — nu era necesar pentru D2,
+   fără cost la introducere ulterioară), și **Temporal Integrity Review**
+   dedicat: future leakage (C→B) exclus structural prin garda
+   `actual_result IS NOT NULL` (identică disciplinei D1); self-leakage
+   (B→B — re-analiza unui meci deja încheiat) identificat ca
+   **pre-existent, comun D1/D2, neintrodus de această implementare** —
+   clasificat **Known Product Contract Gap** (lipsă definiție explicită a
+   domeniului de utilizare al `evaluate_match()`: exclusiv pre-kickoff sau
+   și reanaliză post-meci), netratat aici, rezervat unui task separat de
+   guvernanță/produs, în afara scope-ului D2.
 7. ⬜ Implementare D3 + verificare.
 8. ⬜ Implementare D4 + verificare.
 9. ⬜ Abia după aceea începe Learning Core (Faza următoare).
