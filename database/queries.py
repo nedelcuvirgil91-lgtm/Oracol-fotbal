@@ -439,6 +439,56 @@ def get_latest_team_elo(team: str, lookback: int = 5) -> int | None:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# H2H CANONIC — Head-to-Head Database-First (ADR-035 D3)
+# ════════════════════════════════════════════════════════════════════════════
+
+def get_h2h_from_history(home: str, away: str, last_n: int = 10) -> list[dict]:
+    """
+    Sursa canonică pentru H2H folosită de servirea live
+    (oracle_engine._build_h2h()) — ADR-035 (D3).
+
+    Returnează ultimele `last_n` confruntări directe TERMINATE dintre cele
+    două cluburi (ambele orientări gazdă/oaspete), ca RÂNDURI BRUTE — apelantul
+    recalculează bilanțul din `actual_result`/`actual_home_goals`/
+    `actual_away_goals`, exact cum D1 recalculează forma din rezultate brute.
+    NU se folosesc niciodată coloanele precalculate `h2h_modifier`/
+    `h2h_meetings` (Decizia 2, D3): sunt scrise concurent de două căi și pot
+    fi contaminate — vezi D3.5 (Feature Canonicalization).
+
+    Căutare GLOBALĂ — fără filtru de ligă (Decizia 1, D3): H2H reprezintă
+    istoricul confruntărilor dintre două cluburi indiferent de competiție,
+    consecvent cu ELO-ul global per club (D2). Cheia naturală a perechii e
+    simetrică: (home vs away) SAU (away vs home).
+
+    Zero scurgere temporală: doar meciuri cu `actual_result` populat — un meci
+    viitor de prezis nu are încă rezultat, deci nu poate apărea aici, pentru
+    niciuna dintre cele două echipe. Apelantul aplică pragul minim de
+    confruntări (Decizia 3, D3) și, sub prag, cade pe cascada de provideri
+    existentă — nu se aproximează aici (Regula #8).
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("match_history")
+            .select("home_team,away_team,actual_home_goals,actual_away_goals,"
+                    "actual_result,kickoff_date,league")
+            .or_(f"and(home_team.eq.{home},away_team.eq.{away}),"
+                 f"and(home_team.eq.{away},away_team.eq.{home})")
+            .not_.is_("actual_result", "null")
+            .order("kickoff_date", desc=True)
+            .order("id", desc=True)
+            .limit(last_n)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Queries] get_h2h_from_history failed pentru %s vs %s: %s", home, away, exc)
+        return []
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # ML STATUS
 # ════════════════════════════════════════════════════════════════════════════
 

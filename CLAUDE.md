@@ -59,7 +59,7 @@ Guvernanța (ADR-uri, documente Frozen, promovare manuală) e tratată ca avanta
 | `feature_engine.py` | Calcul formă, H2H, rest days (existent, neapelat — vezi `REST_DAYS_VALIDATION.md`). | (date brute) | `oracle_engine.py` |
 | `mappings.py` | Sursă canonică unică pentru ligi/provideri (`LEAGUE_PROVIDERS`, ADR-001). | (niciuna) | `oracle_api.py`, `sync/sync_results.py` |
 | `supabase_client.py` | Client Supabase + query-uri de nivel înalt (weights, config, ML status). | Supabase (proiect `Prediction`) | `oracle_engine.py`, `ml_predictor.py`, `sync/*` |
-| `database/queries.py` | Interogări structurate pentru match_history, ELO, sync status. | Supabase | `sync/*` |
+| `database/queries.py` | Interogări structurate pentru match_history, ELO canonic (D2), H2H canonic (D3), sync status. | Supabase | `sync/*`, `oracle_engine.py` (servire live — ELO/H2H Database-First) |
 | `services/odds_persistence_service.py` | Persistare istorică cote (opening/closing) — **Frozen**, ADR-005/006. | `database/migrations/001_odds_history.sql` | `sync/run_daily.py` |
 | `cache_manager.py` / `key_manager.py` | Cache local (nivel 1) + quota API — nivel 2 (ADR-003) încă neimplementat. | (disc local) | `oracle_api.py` |
 | `football_providers.py` / `injury_manager.py` | Adaptoare API-Football (accidentări, antrenori). | `key_manager.py` | `oracle_engine.py` |
@@ -68,6 +68,8 @@ Guvernanța (ADR-uri, documente Frozen, promovare manuală) e tratată ca avanta
 | `config.json` / `weights.json` | Configurare globală + ponderi per ligă, aditiv, compatibilitate păstrată. | (fișier local / `model_config` Supabase) | `oracle_engine.py`, `recalibration.py` |
 
 **Notă de tranziție (ADR-023 Phase 6 / ADR-035 D2, finalizată 2026-07-20)**: `oracle_engine._build_profile()` citește ELO-ul de club PRIMAR din `match_history.home_elo_after`/`away_elo_after` (Canonical Live ELO Snapshot) prin `database.queries.get_latest_team_elo()` — global per club, fără filtru de ligă (ELOTracker urmărește ratingul per echipă, nu per competiție). `oracle_api.get_elo_rating()` rămâne fallback, singura sursă reală pentru echipele fără meciuri de club sincronizate (tipic: naționale). Cleanup-ul sursei vechi (`_fetch_elo_ratings()`, `ELO_RATINGS_FALLBACK` dacă rămâne neapelat) rămâne programat pentru Phase 8 (ADR-023), neînceput.
+
+**Notă de tranziție (ADR-035 D3 — H2H Database-First, Completed 2026-07-20)**: `oracle_engine._build_h2h()` citește H2H-ul PRIMAR din `match_history` prin `database.queries.get_h2h_from_history()` — confruntări directe BRUTE, globale per pereche de cluburi (fără filtru de ligă, consecvent cu ELO-ul D2), recalculate din `actual_result`/`actual_home_goals`/`actual_away_goals` (niciodată din coloanele precalculate `h2h_modifier`/`h2h_meetings`). Fluxul: DB (≥3 confruntări, `MIN_H2H_MEETINGS`) → FreeLF `get_h2h(event_id)` → Odds API scores → `H2HRecord.empty()`. Logica de recalcul e în `oracle_engine._h2h_record_from_history_rows()` (punct unic, garda AST); NU mai există o cale live care să citească H2H direct din provider fără să treacă întâi prin DB. `H2HTracker` (`sync/backfill_features.py`) rămâne scriitorul coloanelor precalculate pentru antrenarea ML, neatins. Cursa de scriere concurentă pe `FEATURE_COLUMNS` (`_save_prediction` vs. `run_backfill`, semantică `COALESCE`) e documentată ca task separat **D3.5 — Feature Canonicalization** (`docs/00_GOVERNANCE/D3.5-FEATURE_CANONICALIZATION_TASK.md`), neînceput.
 
 ## Disciplina ADR
 
