@@ -652,14 +652,20 @@ class FootballOracleEngine:
     def _build_profile(self, team_id: str, team_name: str, league: str) -> TeamProfile:
         """
         Cascade:
-          -1. Date naționale hardcodate (World Cup + naționale)
-           0. Free Live Football standings (get_freelf_standings)   ← PRIMAR v2.3
-           1. Free Live Football form      (get_team_form_freelf)
-           2. Odds API /scores             (get_team_recent_form)
-           3. fd.org standings             (get_standings_form)
-           4. TheSportsDB events           (get_team_stats)
+           DB. Supabase match_history (get_team_recent_results)      ← PRIMAR, ADR-035/D1
+          -1. Date naționale hardcodate (World Cup + naționale)      — fallback, doar dacă Level DB nu are date
+           0. Free Live Football standings (get_freelf_standings)    — fallback, doar dacă Level DB nu are date
+           1. Free Live Football form      (get_team_form_freelf)    — fallback
+           2. Odds API /scores             (get_team_recent_form)    — fallback
+           3. fd.org standings             (get_standings_form)      — fallback
+           4. TheSportsDB events           (get_team_stats)          — fallback
            5. ELO sigmoid                  (întotdeauna blended)
            6. Neutral defaults
+
+        Principiul de proiectare (ADR-035): niciun provider extern nu poate
+        avea prioritate asupra unei informații deja sincronizate și
+        validate în baza canonică Supabase — Level DB rulează primul, iar
+        toate nivelurile de mai jos sunt gate-uite `if not stats`.
         """
         w         = self.weights
         o_cap     = float(w.get("offensive_cap",  3.5))
