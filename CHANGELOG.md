@@ -32,6 +32,20 @@ exclusiv fluxul de date de intrare.
   - Nu se folosesc niciodată coloanele precalculate `h2h_modifier`/
     `h2h_meetings` (cursă de scriere concurentă documentată separat ca task
     **D3.5 — Feature Canonicalization**, neatins în D3).
+- **D3.5 — Canonical Feature Ownership (ADR-036, PR #35, `f8bd73a`) — COMPLETED** —
+  repară contractul de SCRIERE al `match_history` descoperit în review-ul D3:
+  fiecare coloană canonică are un owner clar; `first-writer-wins` (`COALESCE`)
+  încetează să fie arbitraj între componente.
+  - **Stage 1**: `oracle_engine._cache_prediction()` nu mai scrie cele 10
+    `FEATURE_COLUMNS` owner-ate de backfill — rămân NULL până le completează
+    `run_backfill()` walk-forward (sursă canonică unică).
+  - **Stage 3**: `update_weights_from_result()` nu mai scrie `actual_*`
+    (owner: `sync/sync_results.py`); gărzi AST Single-Writer permanente.
+  - **Neatins**: RPC `upsert_match_canonical` (contract generic, folosit
+    legitim de import), formulele ML, D1/D2/D3.
+  - **Stage 2** (curățarea ≤29 rânduri pendinte) = **Deferred Operational
+    Task**, documentat în ADR-036, NEexecutat — mentenanță de date, nu
+    corectitudine de arhitectură.
 
 ### Verificare
 - Fiecare pas (D1/D2/D3) cu teste fail-before/pass-after, gardă statică AST
