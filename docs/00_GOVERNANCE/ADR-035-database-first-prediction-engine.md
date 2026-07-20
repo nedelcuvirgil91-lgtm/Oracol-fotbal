@@ -54,7 +54,21 @@ a fluxului de date este:
         ↓
     Supabase (sursa canonică INTERNĂ — match_history / elo_ratings)
         ↓
-    Prediction Engine (citește exclusiv de aici, în regim normal)
+    Prediction Engine
+
+Prediction Engine utilizează Supabase ca sursă canonică în regim normal.
+Apelul direct către provideri este permis doar atunci când datele lipsesc
+sau sunt insuficiente, conform politicii de fallback de mai jos — ADR-ul
+definește fluxul normal, fără să interzică excepțiile legitime (de exemplu,
+un meci nou care încă nu a fost sincronizat).
+
+## Principiul de proiectare
+
+**Niciun provider extern nu poate avea prioritate asupra unei informații
+deja sincronizate și validate în baza canonică Supabase.**
+
+Această propoziție sintetizează filosofia Database-First și este criteriul
+de arbitraj pentru orice situație neacoperită explicit de acest ADR.
 
 Pentru CITIRILE Prediction Engine-ului (formă, goluri medii, ELO, H2H),
 ordinea de fallback devine:
