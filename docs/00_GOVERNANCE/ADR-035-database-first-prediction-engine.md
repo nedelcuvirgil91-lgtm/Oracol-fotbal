@@ -41,12 +41,27 @@ exclusiv din fallback-uri, contrazicând simultan piața și propriile date.
 
 ## Decizie
 
-**Prediction Engine devine Database-First.** Ordinea de citire pentru orice
-componentă a profilului de echipă (formă, goluri medii, ELO, H2H) devine:
+**Prediction Engine devine Database-First.** Clarificare arhitecturală
+explicită (cerută la aprobare): **providerii rămân sursa de adevăr pentru
+ACHIZIȚIA datelor; Supabase devine sursa canonică pentru Prediction Engine
+DUPĂ sincronizare.** Supabase nu înlocuiește providerii — înlocuiește doar
+accesul DIRECT al Prediction Engine-ului la provideri. Ordinea arhitecturală
+a fluxului de date este:
 
-    Supabase (match_history / elo_ratings)
-        ↓ (doar dacă datele lipsesc sau sunt insuficiente)
-    Provideri externi (FreeLF, Odds API, fd.org, TSDB)
+    Providers (achiziție — sursa de adevăr externă)
+        ↓
+    Sync Pipeline (sync/run_daily.py — aduce datele în casă)
+        ↓
+    Supabase (sursa canonică INTERNĂ — match_history / elo_ratings)
+        ↓
+    Prediction Engine (citește exclusiv de aici, în regim normal)
+
+Pentru CITIRILE Prediction Engine-ului (formă, goluri medii, ELO, H2H),
+ordinea de fallback devine:
+
+    Supabase (sursa canonică internă)
+        ↓ (doar dacă datele lipsesc sau sunt insuficiente pentru echipa/liga cerută)
+    Provideri externi, apel direct (FreeLF, Odds API, fd.org, TSDB) — excepție, nu regulă
         ↓ (doar dacă și providerii eșuează)
     Fallback sintetic — etichetat EXPLICIT ca atare, niciodată ca „date reale"
 
@@ -70,9 +85,13 @@ statisticilor de meci pentru România (P1, constatarea 4).
 
 ## Ce NU se schimbă (explicit, la cererea arhitectului)
 
-- Formulele ML / xG / Poisson / Monte Carlo — problema demonstrată e de
-  input, nu de model („garbage in → garbage out"); modelele nu se ating
-  până când inputul nu e reparat și efectul măsurat.
+- Formulele ML / xG / Poisson / Monte Carlo — **nu se modifică în această
+  serie de PR-uri, fără excepție**. Problema demonstrată e de input, nu de
+  model („garbage in → garbage out"); obiectivul seriei D1–D4 este exclusiv
+  repararea fluxului de date către Prediction Engine. Orice ajustare de
+  model vine ulterior, separat, măsurată pe inputul reparat.
+- Rolul providerilor în achiziție — Sync Pipeline continuă să colecteze de
+  la provideri exact ca azi; acest ADR nu atinge sincronizarea.
 - ADR-034 / Selection Engine — rămâne în shadow mode, neatins; acel sistem
   alege PROVIDERUL pentru fixtures, acest ADR decide SURSA datelor de profil.
 - ADR-023 — rămâne autoritatea pentru sursa canonică ELO; ADR-035 doar îl
@@ -92,6 +111,22 @@ statisticilor de meci pentru România (P1, constatarea 4).
   să dispară.
 - Implementarea se face în PR-uri mici (D1–D4 separate), fiecare cu teste
   fail-before/pass-after și verificare live, conform Definition of Done.
+
+## Ordinea de execuție (obligatorie — nu se sare peste ea)
+
+1. Închiderea Fazei 1 (pe scope-ul ei declarat: pipeline fixtures).
+2. Baseline Faza 1 — include obligatoriu secțiunea **Known Limitations**,
+   care consemnează explicit: (a) limitarea Database-First exista DEJA
+   înainte de ADR-035, nu a apărut după închiderea Fazei 1; (b) Prediction
+   Engine încă utilizează fallback-uri în locul bazei istorice la momentul
+   baseline-ului; (c) problema e documentată și se rezolvă prin ADR-035.
+3. DEFINITION_OF_DONE.md.
+4. Aprobarea finală a acestui ADR.
+5. Implementare D1 + verificare (Engineering → Product → Governance).
+6. Implementare D2 + verificare.
+7. Implementare D3 + verificare.
+8. Implementare D4 + verificare.
+9. Abia după aceea începe Learning Core (Faza următoare).
 
 ## Dependencies
 
