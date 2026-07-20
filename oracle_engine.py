@@ -175,10 +175,10 @@ DATA_QUALITY_ELO     = "elo"
 DATA_QUALITY_NEUTRAL = "neutral"
 
 DATA_QUALITY_NOTES = {
-    DATA_QUALITY_LIVE:    "✅ Date reale — meciuri terminate",
-    DATA_QUALITY_PARTIAL: "🟠 Date parțiale — estimate din agregate/proxy",
-    DATA_QUALITY_ELO:     "🟡 Date parțiale — ELO disponibil",
-    DATA_QUALITY_NEUTRAL: "⚠️ Date estimate — fără statistici reale",
+    DATA_QUALITY_LIVE:    "Date reale — meciuri terminate",
+    DATA_QUALITY_PARTIAL: "Date parțiale — estimate din agregate/proxy",
+    DATA_QUALITY_ELO:     "Date parțiale — ELO disponibil",
+    DATA_QUALITY_NEUTRAL: "Date estimate — fără statistici reale",
 }
 
 
