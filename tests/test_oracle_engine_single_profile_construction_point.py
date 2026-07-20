@@ -127,3 +127,46 @@ def test_elo_read_only_called_from_build_profile():
         t = ast.parse(p.read_text(encoding="utf-8"), filename=fname)
         lines = _calls_matching(t, names)
         assert not lines, f"{fname} apelează direct sursa ELO la liniile {lines}"
+
+
+def test_h2h_read_only_called_from_build_h2h():
+    """ADR-035 D3: get_h2h() (provider FreeLF) și get_h2h_from_history()
+    (sursa canonică, match_history) trebuie apelate DINTR-UN SINGUR loc de
+    producție — _build_h2h(). O a doua cale ar putea citi H2H fără să
+    respecte ordinea Database-First (DB întâi, prag ≥3, provider doar ca
+    fallback)."""
+    names = {"get_h2h", "get_h2h_from_history"}
+    path = ROOT / "oracle_engine.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename="oracle_engine.py")
+
+    calls_by_function: dict[str, list[int]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            lines = _calls_matching(node, names)
+            if lines:
+                calls_by_function[node.name] = lines
+
+    assert calls_by_function == {"_build_h2h": calls_by_function.get("_build_h2h", [])}, (
+        f"get_h2h/get_h2h_from_history apelate din afara _build_h2h(): "
+        f"{calls_by_function} — cale paralelă către sursa H2H, ocolește "
+        f"ordinea Database-First (ADR-035 D3)."
+    )
+    assert "_build_h2h" in calls_by_function
+    assert len(calls_by_function["_build_h2h"]) == 2, (
+        f"Așteptam exact 2 apeluri în _build_h2h() — get_h2h_from_history "
+        f"(primar) și get_h2h (fallback FreeLF) — găsit "
+        f"{calls_by_function['_build_h2h']}."
+    )
+
+    # Nicio altă locație din PRODUCTION_FILES (în afara oracle_api.py și
+    # database/queries.py, unde funcțiile sunt DEFINITE, nu apelate) nu le
+    # apelează direct.
+    for fname in PRODUCTION_FILES:
+        if fname in ("oracle_engine.py", "oracle_api.py", "database/queries.py"):
+            continue
+        p = ROOT / fname
+        if not p.exists():
+            continue
+        t = ast.parse(p.read_text(encoding="utf-8"), filename=fname)
+        lines = _calls_matching(t, names)
+        assert not lines, f"{fname} apelează direct sursa H2H la liniile {lines}"

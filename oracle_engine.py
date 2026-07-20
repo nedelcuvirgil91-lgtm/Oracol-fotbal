@@ -90,7 +90,7 @@ except ModuleNotFoundError:
     SUPABASE_MODULE_AVAILABLE = False
 
 try:
-    from database.queries import get_latest_team_elo
+    from database.queries import get_latest_team_elo, get_h2h_from_history
     DB_QUERIES_MODULE_AVAILABLE = True
 except ModuleNotFoundError:
     DB_QUERIES_MODULE_AVAILABLE = False
@@ -506,8 +506,92 @@ class FootballOracleEngine:
         scale = float(self.config.get("elo_sigmoid_scale", 400.0))
         return elo_to_defensive_multiplier(elo, ref, scale)
 
-    # ── H2H — v2.3 folosește Free Live Football ───────────────────────────
+    # ── H2H ───────────────────────────────────────────────────────────────
+    # Prag minim de confruntări sub care H2H din DB e considerat insuficient
+    # (Decizia 3, ADR-035 D3) — sub el, se cade pe cascada de provideri
+    # existentă, exact ca la Level DB din _build_profile (D1, MIN_DB_MATCHES=3).
+    MIN_H2H_MEETINGS = 3
+
+    @staticmethod
+    def _h2h_record_from_history_rows(
+        home_c: str, away_c: str, rows: list[dict], weight: float
+    ) -> H2HRecord | None:
+        """Recalculează H2H din rânduri BRUTE match_history (ADR-035 D3,
+        Decizia 2) — din perspectiva echipei gazdă curente (`home_c`).
+        Nicio coloană precalculată (`h2h_modifier`/`h2h_meetings`) nu e
+        atinsă. Rândurile incomplete nu se aproximează (Regula #8) — se
+        ignoră. Returnează None dacă niciun rând valid (apelantul cade pe
+        cascada veche)."""
+        home_wins = draws = away_wins = 0
+        home_g = away_g = 0.0
+        last_5: list[str] = []
+        n = 0
+        for r in rows:
+            r_home = r.get("home_team")
+            r_away = r.get("away_team")
+            if {r_home, r_away} != {home_c, away_c}:
+                continue
+            hg, ag = r.get("actual_home_goals"), r.get("actual_away_goals")
+            res    = r.get("actual_result")
+            if hg is None or ag is None or res not in ("H", "D", "A"):
+                continue
+            home_was_host = (r_home == home_c)
+            gf = float(hg if home_was_host else ag)
+            ga = float(ag if home_was_host else hg)
+            home_g += gf
+            away_g += ga
+            if res == "D":
+                draws += 1
+                letter = "D"
+            elif (res == "H") == home_was_host:
+                home_wins += 1
+                letter = "H"
+            else:
+                away_wins += 1
+                letter = "A"
+            if len(last_5) < 5:
+                last_5.append(letter)
+            n += 1
+
+        if n == 0:
+            return None
+
+        h2h_modifier = compute_h2h_modifier(home_wins, away_wins, n, weight=weight)
+        summary = (
+            f"H2H ({n} meciuri): {home_wins}W {draws}D {away_wins}L | "
+            f"Goluri: {round(home_g/n, 1)}–{round(away_g/n, 1)} | "
+            f"Ultimele: {''.join(last_5)}"
+        )
+        return H2HRecord(
+            home_team=home_c, away_team=away_c, meetings=n,
+            home_wins=home_wins, draws=draws, away_wins=away_wins,
+            home_goals_avg=round(home_g/n, 2), away_goals_avg=round(away_g/n, 2),
+            last_5=last_5, h2h_modifier=h2h_modifier, summary=summary,
+        )
+
     def _build_h2h(self, home_name: str, away_name: str, match: dict) -> H2HRecord:
+        # ── Level DB (ADR-035 / D3): match_history global, recalc din brute ──
+        # PRIMAR. Principiul de proiectare (ADR-035): niciun provider extern
+        # nu poate avea prioritate asupra unei informații deja sincronizate în
+        # baza canonică. Sub MIN_H2H_MEETINGS confruntări, DB e insuficient —
+        # se cade pe cascada de provideri existentă, neschimbată (fluxul
+        # normal, nu excepția), exact ca Level DB din _build_profile (D1).
+        if DB_QUERIES_MODULE_AVAILABLE:
+            home_c = normalize_team_name(home_name)
+            away_c = normalize_team_name(away_name)
+            try:
+                db_rows = get_h2h_from_history(home_c, away_c)
+            except Exception as exc:
+                db_rows = []
+                logger.warning("[H2H] DB-first read failed for %s vs %s: %s", home_c, away_c, exc)
+            db_h2h = self._h2h_record_from_history_rows(
+                home_c, away_c, db_rows, float(self.config.get("h2h_weight", 0.15))
+            )
+            if db_h2h is not None and db_h2h.meetings >= self.MIN_H2H_MEETINGS:
+                logger.info("[H2H] %s vs %s — supabase-history (%d confruntări)",
+                            home_c, away_c, db_h2h.meetings)
+                return db_h2h
+
         event_id = match.get("_freelf_event_id")
 
         if event_id:
