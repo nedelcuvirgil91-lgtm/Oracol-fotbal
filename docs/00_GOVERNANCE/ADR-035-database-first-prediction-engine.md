@@ -1,6 +1,8 @@
 # ADR-035 — Database-First Prediction Engine
 
-**Status**: PROPUS — necesită aprobare explicită înainte de orice implementare
+**Status**: APROBAT — 2026-07-19, aprobat de utilizator (rev.3, după două
+runde de ajustări cerute la review). Implementarea D1–D4 autorizată strict
+în Ordinea de execuție de mai jos.
 
 **Data**: 2026-07-19
 
