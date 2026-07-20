@@ -148,10 +148,40 @@ statisticilor de meci pentru România (P1, constatarea 4).
    cascadei, zero regresii pe cele 9 ligi, ADR-023 neatins, zero atingere
    ML/Poisson/MC/Selection Engine, o singură datorie tehnică minoră
    corectată înainte de merge — docstring).
-6. ⬜ Implementare D2 + verificare — **în curs**: conectarea ELO-ului de
-   club la sursa canonică ADR-023, pe calea de servire (profil + ML
-   features). Analiza de arhitectură se prezintă înainte de cod.
-7. ⬜ Implementare D3 + verificare.
+6. ✅ **Implementare D2 + verificare — FINALIZAT 2026-07-20, PR #32
+   (merged `d94d332`).** Execută Phase 6 („Oracle Switch") din ADR-023:
+   `database.queries.get_latest_team_elo()` (nouă, bulk-fetch + cache,
+   globală per club, fără filtru de ligă) devine sursa PRIMARĂ pentru ELO
+   în `_build_profile()`; `oracle_api.get_elo_rating()` rămâne fallback,
+   singura sursă reală pentru echipele fără meciuri de club sincronizate
+   (naționale). Verificat live: DB câștigă în toate cazurile în care
+   există — inclusiv acolo unde diferă de provider (Arsenal 1931 vs 1915,
+   Real Madrid 1849 vs 1945, Bayern 1992 vs 1940, PSG 1939 vs 1920);
+   Franța cade corect pe fallback; Petrolul 1481/Dinamo 1640 au ELO real.
+   Temporal Integrity Review: future leakage exclus structural
+   (`actual_result IS NOT NULL`); self-leakage (B→B) clasificat **Known
+   Product Contract Gap**, pre-existent, comun D1/D2, în afara scope-ului.
+   Decizie separată `elo_source` pe `TeamProfile`: AMÂNAT (D4/ADR dedicat).
+7. ✅ **Implementare D3 + verificare — FINALIZAT 2026-07-20 (implementare
+   `e0a80f2`, PR #__D3__).** H2H devine Database-First:
+   `database.queries.get_h2h_from_history()` (nouă, în `database/queries.py`
+   — Decizia 4) întoarce RÂNDURI BRUTE ale confruntărilor directe, globale
+   per pereche de cluburi (fără filtru de ligă — Decizia 1, consecvent cu
+   ELO-ul global D2). `oracle_engine._build_h2h()` primește un nivel DB
+   PRIMAR care recalculează bilanțul din `actual_result`/`actual_home_goals`/
+   `actual_away_goals` (Decizia 2 — niciodată coloanele precalculate
+   `h2h_modifier`/`h2h_meetings`, contaminate de scrieri concurente), cu
+   prag minim 3 confruntări (Decizia 3, `MIN_H2H_MEETINGS`); sub prag →
+   cascada FreeLF/Odds existentă, neschimbată. Verificat live: 6 perechi
+   reale (Petrolul–Dinamo 8 conf. `-0.0375`, Rapid–Dinamo 10 conf. `0.075`,
+   Real Madrid–Atletico 10 conf. `0.03`, Arsenal–Chelsea 10 conf. `0.075`,
+   etc.), toate din DB, recalculate global. Temporal Integrity: future/
+   replay leakage exclus structural (aceeași gardă ca D1/D2); self-leakage
+   = același Known Product Contract Gap, nu nou. Gardă AST extinsă
+   (unicitatea punctului de citire H2H). Ce NU s-a implementat: cursa de
+   scriere `FEATURE_COLUMNS`/`COALESCE` — documentată separat ca task
+   **D3.5 — Feature Canonicalization** (`D3.5-FEATURE_CANONICALIZATION_TASK.md`),
+   NEATINSĂ în D3 (Decizia 5).
 8. ⬜ Implementare D4 + verificare.
 9. ⬜ Abia după aceea începe Learning Core (Faza următoare).
 

@@ -2,6 +2,42 @@
 
 Toate schimbările notabile ale proiectului sunt documentate aici.
 
+## [Nelansat] — Database-First Prediction Engine (ADR-035)
+
+Seria D1–D4 mută Prediction Engine-ul pe sursa canonică internă (Supabase
+`match_history`) înaintea providerilor externi. Principiul: niciun provider
+extern nu poate avea prioritate asupra unei informații deja sincronizate în
+baza canonică. Formulele ML/xG/Poisson/Monte Carlo rămân neatinse — se repară
+exclusiv fluxul de date de intrare.
+
+### Adăugat
+- **D1 (PR #30, `ddf376a`)** — `oracle_engine._build_profile()` primește un
+  nivel DB PRIMAR care citește forma/goluri din `match_history`, înaintea
+  cascadei de provideri (prag `MIN_DB_MATCHES=3`).
+- **D2 (PR #32, `d94d332`)** — ELO de club citit PRIMAR din
+  `match_history.home_elo_after`/`away_elo_after` (Canonical Live ELO Snapshot,
+  Phase 6 din ADR-023) prin `database.queries.get_latest_team_elo()`, global
+  per club; `oracle_api.get_elo_rating()` rămâne fallback (naționale).
+- **D3 (H2H Database-First)** — `database.queries.get_h2h_from_history()`
+  (nouă) devine sursa canonică pentru Head-to-Head:
+  - **Noul flux**: `oracle_engine._build_h2h()` recalculează bilanțul direct
+    din rânduri BRUTE (`actual_result`/`actual_home_goals`/`actual_away_goals`),
+    global per pereche de cluburi (fără filtru de ligă), înaintea FreeLF/Odds.
+  - **Fallback**: sub 3 confruntări în DB (`MIN_H2H_MEETINGS`), se cade pe
+    cascada FreeLF → Odds API → `H2HRecord.empty()` (influence 0), neschimbată.
+  - **Impact asupra Oracle Engine**: H2H-ul folosit în blend-ul xG
+    (`h2h_modifier`) provine acum din propriile date sincronizate, recalculat
+    walk-forward-safe, nu din coloane precalculate contaminabile. Zero atingere
+    a formulelor de model.
+  - Nu se folosesc niciodată coloanele precalculate `h2h_modifier`/
+    `h2h_meetings` (cursă de scriere concurentă documentată separat ca task
+    **D3.5 — Feature Canonicalization**, neatins în D3).
+
+### Verificare
+- Fiecare pas (D1/D2/D3) cu teste fail-before/pass-after, gardă statică AST
+  pentru unicitatea punctelor de citire, și verificare live pe date reale
+  (GitHub Actions). Zero regresii pe cele 9 ligi.
+
 ## [4.1.0] — 2026-07-17
 
 ### Adăugat (Learning Core)
