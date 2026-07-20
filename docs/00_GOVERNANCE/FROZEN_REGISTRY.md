@@ -17,6 +17,7 @@ Acest document reprezintă registrul oficial al tuturor specificațiilor tehnice
 | docs/04_LEARNING_CORE/PROMOTION_CONTRACT.md | 1.0.0 | Frozen via ADR-019; Clarified by ADR-019 addendum (E2E) | FROZEN | 2026-07-14 |
 | docs/04_LEARNING_CORE/ATOMICITY_CONTRACT.md | 1.0.0 | Frozen via ADR-019; Clarified by ADR-019 addendum (E2E) | FROZEN | 2026-07-14 |
 | docs/04_LEARNING_CORE/PROMOTION_SERVICE_CONTRACT.md | 1.0.0 | Frozen via ADR-019; Clarified by ADR-019 addendum (E2E) | FROZEN | 2026-07-14 |
+| docs/00_GOVERNANCE/BASELINE_FAZA1_2026-07.md | 1.0.0 | Snapshot istoric, aprobat de utilizator la închiderea Fazei 1. Regim special: nu se modifică în practică; modificabil DOAR printr-un ADR care documentează o eroare factuală (nu o evoluție a proiectului). O fază nouă primește un baseline nou. | FROZEN | 2026-07-19 |
 
 ## Not Yet Frozen
 
