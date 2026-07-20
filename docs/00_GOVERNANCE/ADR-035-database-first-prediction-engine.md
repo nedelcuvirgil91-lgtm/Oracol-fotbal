@@ -130,19 +130,30 @@ statisticilor de meci pentru România (P1, constatarea 4).
 
 ## Ordinea de execuție (obligatorie — nu se sare peste ea)
 
-1. Închiderea Fazei 1 (pe scope-ul ei declarat: pipeline fixtures).
-2. Baseline Faza 1 — include obligatoriu secțiunea **Known Limitations**,
-   care consemnează explicit: (a) limitarea Database-First exista DEJA
-   înainte de ADR-035, nu a apărut după închiderea Fazei 1; (b) Prediction
-   Engine încă utilizează fallback-uri în locul bazei istorice la momentul
-   baseline-ului; (c) problema e documentată și se rezolvă prin ADR-035.
-3. DEFINITION_OF_DONE.md.
-4. Aprobarea finală a acestui ADR.
-5. Implementare D1 + verificare (Engineering → Product → Governance).
-6. Implementare D2 + verificare.
-7. Implementare D3 + verificare.
-8. Implementare D4 + verificare.
-9. Abia după aceea începe Learning Core (Faza următoare).
+1. ✅ Închiderea Fazei 1 (pe scope-ul ei declarat: pipeline fixtures) — 2026-07-19.
+2. ✅ Baseline Faza 1 (`BASELINE_FAZA1_2026-07.md`, Frozen) — cu secțiunea
+   Known Limitations — 2026-07-19, PR #29.
+3. ✅ `DEFINITION_OF_DONE.md` — 2026-07-19, PR #29.
+4. ✅ Aprobarea finală a acestui ADR — 2026-07-19 (rev.3).
+5. ✅ **Implementare D1 + verificare — FINALIZAT 2026-07-20, PR #30
+   (merged `ddf376a`).** Level DB (`match_history`) devine primul nivel
+   în `_build_profile()`. Verificat live: cazul central (Petrolul–Dinamo,
+   `data_source=supabase-history`, ≥3 meciuri reale) + regresie zero pe
+   Premier League/La Liga/Bundesliga/Champions League/World Cup 2026.
+   Gardă statică permanentă (`test_oracle_engine_single_profile_construction_point.py`):
+   `TeamProfile()` construit într-un singur loc, TSDB apelat exclusiv din
+   `_build_profile()`. Review arhitectural: APPROVED FOR MERGE (9 criterii
+   verificate cu dovezi din cod/date live — respectarea ADR-035, principiul
+   Database-First, unicitatea punctului de construire, integritatea
+   cascadei, zero regresii pe cele 9 ligi, ADR-023 neatins, zero atingere
+   ML/Poisson/MC/Selection Engine, o singură datorie tehnică minoră
+   corectată înainte de merge — docstring).
+6. ⬜ Implementare D2 + verificare — **în curs**: conectarea ELO-ului de
+   club la sursa canonică ADR-023, pe calea de servire (profil + ML
+   features). Analiza de arhitectură se prezintă înainte de cod.
+7. ⬜ Implementare D3 + verificare.
+8. ⬜ Implementare D4 + verificare.
+9. ⬜ Abia după aceea începe Learning Core (Faza următoare).
 
 ## Dependencies
 
