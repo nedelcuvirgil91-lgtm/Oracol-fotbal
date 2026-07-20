@@ -1537,6 +1537,16 @@ class FootballOracleEngine:
 
         if self.use_supabase:
             mlf = data["ml_features"]
+            # [ADR-036 / D3.5 Stage 1] Prediction Engine scrie DOAR ieșirile
+            # proprii de predicție. Cele 10 FEATURE_COLUMNS owner-ate de
+            # backfill (home/away_offensive_rating, home/away_defensive_rating,
+            # home/away_form_score, home/away_elo, h2h_modifier, h2h_meetings)
+            # NU se mai trimit de aici — rămân NULL până le completează
+            # sync/backfill_features.run_backfill() cu recalculul walk-forward,
+            # sursa canonică unică. Astfel `first-writer-wins` (COALESCE) nu mai
+            # îngheață valori din cascada live peste recalculul corect. RPC-ul
+            # (upsert_match_canonical) rămâne neschimbat — coloanele absente din
+            # payload nu sunt atinse (COALESCE(existing, NULL) = existing).
             sb.upsert_match_history({
                 "fixture_id":   pred.fixture_id,
                 "home_team":    pred.home_team,
@@ -1545,16 +1555,6 @@ class FootballOracleEngine:
                 "kickoff_date": pred.kickoff_date,
                 "home_xg_pred": mlf["home_xg_pred"],
                 "away_xg_pred": mlf["away_xg_pred"],
-                "home_offensive_rating": mlf["home_offensive_rating"],
-                "home_defensive_rating": mlf["home_defensive_rating"],
-                "away_offensive_rating": mlf["away_offensive_rating"],
-                "away_defensive_rating": mlf["away_defensive_rating"],
-                "home_form_score": mlf["home_form_score"],
-                "away_form_score": mlf["away_form_score"],
-                "home_elo": mlf["home_elo"],
-                "away_elo": mlf["away_elo"],
-                "h2h_modifier": mlf["h2h_modifier"],
-                "h2h_meetings": mlf["h2h_meetings"],
                 "weather_penalty": mlf["weather_penalty"],
                 "home_data_quality": pred.data_quality_home,
                 "away_data_quality": pred.data_quality_away,
