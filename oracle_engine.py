@@ -1705,26 +1705,15 @@ class FootballOracleEngine:
         if cache is None:
             return {"status": "error", "message": f"No cached prediction for {fixture_id}."}
 
-        # ── v3.0: completează match_history cu rezultatul real ────────────
-        if self.use_supabase:
-            actual_result = (
-                "H" if actual_home_goals > actual_away_goals
-                else "A" if actual_home_goals < actual_away_goals
-                else "D"
-            )
-            sb.upsert_match_history({
-                "fixture_id":        fixture_id,
-                "home_team":         cache.get("home_team", ""),
-                "away_team":         cache.get("away_team", ""),
-                "league":            cache.get("league", "default"),
-                # [ID-025-03] Cheia naturala completa — RPC-ul canonic cauta
-                # randul dupa (home, away, kickoff_date), nu dupa fixture_id.
-                "kickoff_date":      cache.get("kickoff_date", ""),
-                "actual_home_goals": actual_home_goals,
-                "actual_away_goals": actual_away_goals,
-                "actual_result":     actual_result,
-            })
-
+        # [ADR-036 / D3.5 Stage 3] Scrierea legacy a rezultatului real
+        # (actual_home_goals/actual_away_goals/actual_result) în match_history
+        # a fost ELIMINATĂ de aici. Owner-ul canonic al coloanelor `actual_*`
+        # este `sync/sync_results.py` (overwrite permis, pentru corecție de
+        # scor). Această funcție e o cale manuală/legacy, neapelată în niciun
+        # flux automat (verificat AST: zero apeluri reale), iar scrierea ei era
+        # `COALESCE` fill-once — strict mai slabă decât `sync_results`. Rămâne
+        # exclusiv recalibrarea (scopul ei real), fără efect asupra contractului
+        # de scriere al `actual_*`.
         pred_h = float(cache.get("home_xg", 1.25))
         pred_a = float(cache.get("away_xg", 1.00))
         league = cache.get("league", "default")
