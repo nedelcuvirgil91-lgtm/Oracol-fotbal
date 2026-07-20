@@ -52,7 +52,7 @@ Guvernanța (ADR-uri, documente Frozen, promovare manuală) e tratată ca avanta
 | Modul | Rol (o propoziție) | Depinde de | Consumat de |
 |---|---|---|---|
 | `oracle_api.py` | Strat unificat de acces la provideri externi (cote, meciuri, vreme, ELO), cu fallback între surse. | `key_manager.py`, `cache_manager.py`, `mappings.py` | `oracle_engine.py`, `sync/run_daily.py` |
-| `oracle_engine.py` | Motorul de predicție — Poisson, Monte Carlo, blend ELO/ML, de-vig, value betting. | `oracle_api.py`, `feature_engine.py`, `ml_predictor.py`, `recalibration.py`, `shadow_testing.py` | `app.py` |
+| `oracle_engine.py` | Motorul de predicție — Poisson, Monte Carlo, blend ELO/ML, de-vig, value betting. | `oracle_api.py`, `feature_engine.py`, `ml_predictor.py`, `recalibration.py`, `shadow_testing.py`, `supabase_client.py`, `database/queries.py` | `app.py` |
 | `ml_predictor.py` | Model XGBoost, antrenat pe `match_history`, walk-forward validation (expanding window). | `supabase_client.py` | `oracle_engine.py`, `sync/run_daily.py` |
 | `recalibration.py` | Funcție pură de ajustare a ponderilor per ligă, fără I/O. | (niciuna) | `oracle_engine.py`, `sync/sync_results.py` |
 | `shadow_testing.py` | Infrastructură generică de shadow testing + Statistics Engine, independentă de `oracle_engine.py`. | `supabase_client.py` | `oracle_engine.py` (gated), `sync/run_daily.py` |
@@ -67,7 +67,7 @@ Guvernanța (ADR-uri, documente Frozen, promovare manuală) e tratată ca avanta
 | `app.py` | UI Streamlit — predicții, config, League Learning, diagnostics. | `oracle_engine.py`, `supabase_client.py` | Utilizator final |
 | `config.json` / `weights.json` | Configurare globală + ponderi per ligă, aditiv, compatibilitate păstrată. | (fișier local / `model_config` Supabase) | `oracle_engine.py`, `recalibration.py` |
 
-**Notă de tranziție (ADR-023, aprobat, în implementare pe faze)**: `oracle_engine.py` va înceta să depindă de `oracle_api.py` pentru ELO — sursa devine `match_history.home_elo_after`/`away_elo_after` (Canonical Live ELO Snapshot), citită prin `database/queries.py`. Până la finalizarea Phase 6 (Oracle Switch) a Execution Plan-ului, dependența din tabelul de mai sus rămâne exactă, neschimbată.
+**Notă de tranziție (ADR-023 Phase 6 / ADR-035 D2, finalizată 2026-07-20)**: `oracle_engine._build_profile()` citește ELO-ul de club PRIMAR din `match_history.home_elo_after`/`away_elo_after` (Canonical Live ELO Snapshot) prin `database.queries.get_latest_team_elo()` — global per club, fără filtru de ligă (ELOTracker urmărește ratingul per echipă, nu per competiție). `oracle_api.get_elo_rating()` rămâne fallback, singura sursă reală pentru echipele fără meciuri de club sincronizate (tipic: naționale). Cleanup-ul sursei vechi (`_fetch_elo_ratings()`, `ELO_RATINGS_FALLBACK` dacă rămâne neapelat) rămâne programat pentru Phase 8 (ADR-023), neînceput.
 
 ## Disciplina ADR
 
