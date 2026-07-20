@@ -678,10 +678,51 @@ class FootballOracleEngine:
         data_source  = ""
         data_quality = DATA_QUALITY_NEUTRAL
 
+        # ── Level DB (ADR-035 / D1): Supabase match_history — PRIMUL ─────
+        # Sursa canonică internă. Principiul de proiectare (ADR-035):
+        # niciun provider extern nu poate avea prioritate asupra unei
+        # informații deja sincronizate și validate în baza canonică.
+        # Sub MIN_DB_MATCHES meciuri terminate recente, se cade pe cascada
+        # de provideri existentă, neschimbată — fluxul normal, nu excepția.
+        MIN_DB_MATCHES = 3
+        if SUPABASE_MODULE_AVAILABLE:
+            try:
+                db_rows = sb.get_team_recent_results(canonical, league, last_n)
+            except Exception as exc:
+                db_rows = []
+                logger.warning("[Profile] DB-first read failed for %s: %s", canonical, exc)
+            db_stats: list[dict] = []
+            for r in db_rows:
+                is_home = r.get("home_team") == canonical
+                is_away = r.get("away_team") == canonical
+                if not (is_home or is_away):
+                    continue
+                hg, ag = r.get("actual_home_goals"), r.get("actual_away_goals")
+                res    = r.get("actual_result")
+                if hg is None or ag is None or res not in ("H", "D", "A"):
+                    continue
+                gf_i = float(hg if is_home else ag)
+                ga_i = float(ag if is_home else hg)
+                if res == "D":
+                    letter = "D"
+                else:
+                    letter = "W" if (res == "H") == is_home else "L"
+                db_stats.append({
+                    "result": letter, "goals_for": gf_i, "goals_against": ga_i,
+                    "shots_on_goal": real_sot if real_sot is not None else gf_i * 0.45,
+                    "possession": 50.0,
+                })
+            if len(db_stats) >= MIN_DB_MATCHES:
+                stats        = db_stats
+                data_source  = "supabase-history"
+                data_quality = DATA_QUALITY_LIVE
+                logger.info("[Profile] %s — supabase-history (%d meciuri terminate)",
+                            canonical, len(db_stats))
+
         # ── Level -1: Date naționale hardcodate ───────────────────────────
         from mappings import NATIONAL_TEAM_STATS
         nat = NATIONAL_TEAM_STATS.get(canonical)
-        if nat:
+        if nat and not stats:
             gf      = float(nat["avg_gf"])
             ga      = float(nat["avg_ga"])
             sot     = float(nat.get("avg_sot", gf * 0.45))
@@ -698,8 +739,10 @@ class FootballOracleEngine:
             logger.info("[Profile] %s — national stats hardcoded (gf=%.2f ga=%.2f)", canonical, gf, ga)
 
         # ── Level 0: Free Live Football standings ─────────────────────────
+        # (subordonat Level DB — ADR-035: providerii nu pot avea prioritate
+        # asupra datelor deja sincronizate în baza canonică)
         try:
-            standings_list = self.api.get_freelf_standings(league)
+            standings_list = self.api.get_freelf_standings(league) if not stats else []
             for entry in standings_list:
                 if entry.get("team", "").lower() == canonical.lower():
                     season_entry = entry
