@@ -96,6 +96,16 @@ on:
         required: false
         default: "false"
         type: boolean
+      db_first_profile_check:
+        description: "OPȚIONAL — dacă true, verifică live ADR-035/D1: profiluri construite din match_history (Petrolul/Dinamo)"
+        required: false
+        default: "false"
+        type: boolean
+      d1_regression_check:
+        description: "OPȚIONAL — dacă true, verifică live regresie D1 pe alte ligi (PL/La Liga/Bundesliga/Champions League/World Cup)"
+        required: false
+        default: "false"
+        type: boolean
 
 jobs:
   probe:
@@ -207,8 +217,24 @@ jobs:
         run: |
           python sync/poc_tsdb_reconciliation_live_verify.py
 
+      - name: Run DB-first profile check (verificare ADR-035/D1)
+        if: github.event.inputs.db_first_profile_check == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          python sync/poc_db_first_profile_check.py
+
+      - name: Run D1 regression check on other leagues (verificare PR #30)
+        if: github.event.inputs.d1_regression_check == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          python sync/poc_d1_regression_check.py
+
       - name: Run API-Football statistics probe (discovery, nu integrare)
-        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == '' && github.event.inputs.run_sportapi_check == 'false' && github.event.inputs.run_sportapi_deep_check == 'false' && github.event.inputs.run_sportapi_season_call_check == 'false' && github.event.inputs.debug_romania_superliga == 'false' && github.event.inputs.tsdb_romania_lookup == 'false' && github.event.inputs.app_runtime_trace == 'false' && github.event.inputs.petrolul_dinamo_investigation == 'false' && github.event.inputs.tsdb_season_round_ratelimit_check == 'false' && github.event.inputs.remaining_teams_check == 'false' && github.event.inputs.odds_api_romania_viability == 'false' && github.event.inputs.espn_full_round_check == 'false' && github.event.inputs.tsdb_reconciliation_live_verify == 'false'
+        if: github.event.inputs.lookup_country == '' && github.event.inputs.verify_fixtures_league == '' && github.event.inputs.season_restriction_league_id == '' && github.event.inputs.freelf_romania_dates == '' && github.event.inputs.run_sportapi_check == 'false' && github.event.inputs.run_sportapi_deep_check == 'false' && github.event.inputs.run_sportapi_season_call_check == 'false' && github.event.inputs.debug_romania_superliga == 'false' && github.event.inputs.tsdb_romania_lookup == 'false' && github.event.inputs.app_runtime_trace == 'false' && github.event.inputs.petrolul_dinamo_investigation == 'false' && github.event.inputs.tsdb_season_round_ratelimit_check == 'false' && github.event.inputs.remaining_teams_check == 'false' && github.event.inputs.odds_api_romania_viability == 'false' && github.event.inputs.espn_full_round_check == 'false' && github.event.inputs.tsdb_reconciliation_live_verify == 'false' && github.event.inputs.db_first_profile_check == 'false' && github.event.inputs.d1_regression_check == 'false'
         env:
           # Necesar pentru ca cache-ul (team_id/fixture_id/verdict 403-404)
           # să supraviețuiască între rulări separate ale acestui workflow —

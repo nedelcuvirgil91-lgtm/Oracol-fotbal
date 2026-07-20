@@ -332,6 +332,43 @@ def get_training_data(only_with_results: bool = True) -> list[dict]:
         return all_rows
 
 
+def get_team_recent_results(team: str, league: str, last_n: int = 5,
+                             lookback_days: int = 365) -> list[dict]:
+    """
+    ADR-035 / D1 — sursa canonică pentru forma și golurile echipei în
+    _build_profile(): ultimele `last_n` meciuri TERMINATE ale echipei
+    `team` în liga `league`, din match_history, limitate la ultimele
+    `lookback_days` zile (forma veche de ani nu e „formă").
+
+    Zero scurgere temporală: doar meciuri cu actual_result populat —
+    pentru un meci viitor de prezis, toate rândurile întoarse sunt
+    garantat din trecut. O echipă fără istoric suficient primește listă
+    goală/scurtă — apelantul decide pragul minim și cade pe cascada de
+    provideri existentă, nu se aproximează aici (Regula #8).
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).date().isoformat()
+        res = (
+            client.table("match_history")
+            .select("home_team,away_team,actual_home_goals,actual_away_goals,"
+                    "actual_result,kickoff_date")
+            .eq("league", league)
+            .or_(f"home_team.eq.{team},away_team.eq.{team}")
+            .not_.is_("actual_result", "null")
+            .gte("kickoff_date", cutoff)
+            .order("kickoff_date", desc=True)
+            .limit(last_n)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Supabase] get_team_recent_results failed pentru %s/%s: %s", team, league, exc)
+        return []
+
+
 def get_team_recent_shots(team: str, league: str, last_n: int = 5) -> list[dict]:
     """
     Ultimele `last_n` meciuri TERMINATE ale echipei `team` în liga `league`,
