@@ -163,7 +163,7 @@ statisticilor de meci pentru România (P1, constatarea 4).
    Product Contract Gap**, pre-existent, comun D1/D2, în afara scope-ului.
    Decizie separată `elo_source` pe `TeamProfile`: AMÂNAT (D4/ADR dedicat).
 7. ✅ **Implementare D3 + verificare — FINALIZAT 2026-07-20 (implementare
-   `e0a80f2`, PR #__D3__).** H2H devine Database-First:
+   `e0a80f2`, PR #34).** H2H devine Database-First:
    `database.queries.get_h2h_from_history()` (nouă, în `database/queries.py`
    — Decizia 4) întoarce RÂNDURI BRUTE ale confruntărilor directe, globale
    per pereche de cluburi (fără filtru de ligă — Decizia 1, consecvent cu
