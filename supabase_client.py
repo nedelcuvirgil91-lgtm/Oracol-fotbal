@@ -599,6 +599,56 @@ def get_active_champion(algorithm_family: str, league_scope: str) -> dict | None
         return None
 
 
+def get_champion_predecessor(algorithm_family: str, league_scope: str) -> str | None:
+    """training_run_id-ul predecesorului campionului activ pentru
+    (algorithm_family, league_scope) — rândul pe care campionul activ l-a
+    supersedat (superseded_by = training_run-ul campionului activ). None dacă
+    nu există campion activ, sau dacă acesta nu are predecesor (a fost primul
+    campion) — stare legitimă, nu eroare (Regula #8, nu se aproximează).
+
+    Folosit de learning_core/rollback_service.py DOAR ca precondiție Python
+    (fail-fast + validarea artefactului predecesorului + sămânța
+    compare-and-swap). Sursa autoritară de derivare rămâne funcția Postgres
+    rollback_champion (migrarea 014), care re-derivă predecesorul server-side
+    sub lock; de aceea această citire nu trebuie să fie fără-cursă — CAS-ul din
+    RPC prinde orice stare învechită. Derivarea de aici oglindește exact
+    ORDER BY superseded_at DESC LIMIT 1 din RPC (predecesorul IMEDIAT), ca
+    valoarea trimisă ca expected_predecessor să coincidă cu ce verifică RPC-ul."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        active_res = (
+            client.table("model_champions")
+            .select("training_run_id")
+            .eq("algorithm_family", algorithm_family)
+            .eq("league_scope", league_scope)
+            .is_("superseded_at", "null")
+            .execute()
+        )
+        active_rows = active_res.data or []
+        if not active_rows:
+            return None
+        active_training_run_id = active_rows[0]["training_run_id"]
+
+        pred_res = (
+            client.table("model_champions")
+            .select("training_run_id")
+            .eq("algorithm_family", algorithm_family)
+            .eq("league_scope", league_scope)
+            .eq("superseded_by", active_training_run_id)
+            .order("superseded_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        pred_rows = pred_res.data or []
+        return pred_rows[0]["training_run_id"] if pred_rows else None
+    except Exception as exc:
+        logger.warning("[Supabase] get_champion_predecessor failed pentru %s/%s: %s",
+                        algorithm_family, league_scope, exc)
+        return None
+
+
 def create_challenger(training_run_id: str, algorithm_family: str, league_scope: str) -> dict | None:
     """Creează un Challenger nou, în starea CREATED. None la orice eșec —
     fie Supabase indisponibil, fie constrângerea de invariant (cel mult un
@@ -908,6 +958,37 @@ def rpc_promote_challenger(training_run_id: str, promoted_by: str) -> str:
     res = client.rpc("promote_challenger", {
         "p_training_run_id": training_run_id,
         "p_promoted_by": promoted_by,
+    }).execute()
+    return res.data
+
+
+def rpc_rollback_champion(
+    algorithm_family: str, league_scope: str,
+    expected_predecessor_training_run_id: str, reason: str, rolled_back_by: str,
+) -> str:
+    """Apelează funcția Postgres `rollback_champion` (migrarea 014) —
+    ADR-037/Contract de Atomicitate: o singură tranzacție, ambele efecte pe
+    model_champions (supersedare campion activ + reactivare predecesor prin
+    rând nou) aplicate atomic sau deloc. Întoarce 'rolled_back' | 'already_active'.
+
+    EXCEPȚIE deliberată de la convenția restului fișierului (return None/False
+    la eșec), simetrică cu `rpc_promote_challenger`: aici excepția e lăsată să
+    urce necontrolat — mesajul exact al unui RAISE EXCEPTION server-side
+    (precondiție structurală nesatisfăcută, `no_predecessor`,
+    `predecessor_mismatch` de la garda compare-and-swap, sau cursă concurentă)
+    e informație pe care apelantul trebuie s-o vadă exact. `learning_core/
+    rollback_service.py` prinde această excepție la propriul nivel și o mapează
+    la `RollbackResult(status="rejected", reason=str(exc))` — el rămâne punctul
+    unde nicio excepție nu mai scapă necontrolat mai departe."""
+    client = get_client()
+    if client is None:
+        raise RuntimeError("Supabase indisponibil — imposibil de apelat rollback_champion")
+    res = client.rpc("rollback_champion", {
+        "p_algorithm_family": algorithm_family,
+        "p_league_scope": league_scope,
+        "p_expected_predecessor_training_run_id": expected_predecessor_training_run_id,
+        "p_reason": reason,
+        "p_rolled_back_by": rolled_back_by,
     }).execute()
     return res.data
 
