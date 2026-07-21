@@ -29,6 +29,25 @@ fără orchestrare/apelanți automați (R3), fără activare (R4).
   rânduri modificate** (conturi `model_champions`/`challengers`/`training_runs`/
   `challenger_evaluations` = baseline), trigger 005 + `promote_challenger`
   intacte, invariantul „un singur campion activ" respectat.
+- **R1.3 — `learning_core/rollback_service.py`**: owner exclusiv al evenimentului
+  „Rollback Champion", simetric cu `promotion_service.py`. Precondiții în Python
+  ÎNAINTE de RPC (motiv ∈ set de 6 → citire predecesor → validare artefact
+  predecesor), CAS (predecesorul validat trimis ca `expected_predecessor`),
+  niciodată nu propagă excepții (`RollbackResult`), izolat, declanșare manuală.
+- **R1.4 — `supabase_client`**: `get_champion_predecessor()` (derivă predecesorul
+  imediat, `ORDER BY superseded_at DESC LIMIT 1`, oglindind RPC-ul) și
+  `rpc_rollback_champion()` (wrapper simetric cu `rpc_promote_challenger`).
+- **R1.5–R1.7 — teste** (29 total, fără rețea): comportament serviciu (16,
+  fail-fast + CAS + idempotență + excepții), wrapper-e `supabase_client` (client
+  fabricat), gărzi AST de ownership (`rpc_rollback_champion` un singur apelant;
+  `rollback_service` izolat; nu importă `shadow_testing`).
+- **R1.8 — verificare de integrare `validated without state mutation`**: pe DB
+  live, cele 3 gărzi ale RPC-ului confirmate prin căi negative (motiv invalid,
+  `expected_predecessor` NULL, fără campion activ) — toate ridică excepție înainte
+  de orice scriere; `model_champions` neschimbat (4 rânduri, 3 activi, 0 rollback).
+  **Happy-path (swap-ul atomic real) e DEFERAT** deliberat: presupune modificarea
+  campionului activ din producție și se va executa doar într-o operație controlată
+  (prima utilizare reală guvernată, R2/R3, sau un mediu dedicat).
 
 ### Notă operațională (disciplină de deployment)
 - Migrarea 014 a fost aplicată prin **Supabase SQL Editor**, nu prin
