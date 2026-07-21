@@ -46,6 +46,17 @@ exclusiv fluxul de date de intrare.
   - **Stage 2** (curățarea ≤29 rânduri pendinte) = **Deferred Operational
     Task**, documentat în ADR-036, NEexecutat — mentenanță de date, nu
     corectitudine de arhitectură.
+- **D4 — Honest Data Quality Labeling (PR #37, `4ba8bb2`) — COMPLETED** —
+  `data_quality` nu mai raportează „statistici reale" pentru eșantioane
+  sintetice/subțiri. Taxonomie finală **LIVE / PARTIAL / ELO / NEUTRAL**
+  (nivel nou `PARTIAL` pentru surse agregat/proxy/sintetice).
+  `_classify_data_quality()` = punct UNIC de decizie (cele 9 atribuiri inline
+  eliminate); LIVE doar pentru `supabase-history` cu n≥3. Text LIVE onest
+  („Date reale — meciuri terminate"). UI: badge PARTIAL, un singur emoji
+  (dublu-emoji curățat). Value Bets neatins (zero schimbare comportamentală),
+  zero migrare. Cazul central (1 meci TSDB) nu mai e „statistici reale".
+
+**Seria Database-First (D1–D4) e ÎNCHISĂ.** Următorul obiectiv: Learning Core.
 
 ### Verificare
 - Fiecare pas (D1/D2/D3) cu teste fail-before/pass-after, gardă statică AST
