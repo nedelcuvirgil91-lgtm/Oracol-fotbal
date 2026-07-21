@@ -225,6 +225,28 @@ def _read_fresh_cached_prediction(fixture_id: str, ttl: float = PREDICTION_CACHE
 # ─────────────────────────────────────────────────────────────────────────────
 # MATCH CARD
 # ─────────────────────────────────────────────────────────────────────────────
+def _match_row_html(ko_time: str, home: str, away: str,
+                    demo_badge: str, odds_html: str, src: str) -> str:
+    """HTML pentru un rând de meci, pe O SINGURĂ linie.
+
+    Fără indentare / linii goale intercalate: când `odds_html` e "" (meciuri
+    fără cote afișate), un f-string multi-linie ar lăsa o linie goală care
+    termină blocul HTML în CommonMark, iar `<div class="match-src">` indentat
+    ar fi randat ca bloc de cod monospace. Concatenarea pe o linie elimină
+    complet acest risc, indiferent de care segmente sunt goale."""
+    return (
+        '<div class="match-row">'
+        f'<div class="match-time">{ko_time}</div>'
+        '<div class="match-teams">'
+        f'<div class="match-home">{home}{demo_badge}</div>'
+        f'<div class="match-away">{away}</div>'
+        '</div>'
+        f'{odds_html}'
+        f'<div class="match-src">{src}</div>'
+        '</div>'
+    )
+
+
 def _render_match_card(match: dict, engine) -> None:
     home    = match["home_team"]; away = match["away_team"]
     ko_utc  = match.get("kickoff_utc","")
@@ -242,16 +264,8 @@ def _render_match_card(match: dict, engine) -> None:
         odds_html = f'<div class="match-odds"><div class="odd-pill home">{bk_h:.2f}</div><div class="odd-pill draw">{bk_d:.2f}</div><div class="odd-pill away">{bk_a:.2f}</div></div>'
     demo_badge = ' <span style="font-size:.58rem;color:#4a9eff;background:rgba(74,158,255,.12);border:1px solid #4a9eff33;border-radius:3px;padding:.08rem .25rem;">DEMO</span>' if is_demo else ""
 
-    st.markdown(f"""
-    <div class="match-row">
-        <div class="match-time">{ko_time}</div>
-        <div class="match-teams">
-            <div class="match-home">{home}{demo_badge}</div>
-            <div class="match-away">{away}</div>
-        </div>
-        {odds_html}
-        <div class="match-src">{src}</div>
-    </div>""", unsafe_allow_html=True)
+    st.markdown(_match_row_html(ko_time, home, away, demo_badge, odds_html, src),
+                unsafe_allow_html=True)
 
     ca, cb = st.columns([4, 1])
     with ca:
