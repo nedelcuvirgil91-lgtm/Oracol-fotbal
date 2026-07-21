@@ -242,6 +242,10 @@ Doar responsabilități; fără SQL. Diviziunea Python vs. RPC urmează exact pr
 
 **Rezultat**: un tip structurat, niciodată excepție necontrolată către apelant — status `rolled_back` / `already_active` / `rejected` (+ motiv, ex. `no_predecessor`, `predecessor_mismatch`).
 
+**Idempotență — secvențial vs. concurent (comportament real, reconciliat cu auditul pre-R1):**
+- **Secvențial** (re-apel după ce un rollback anterior s-a încheiat complet): campionul activ e deja predecesorul → `already_active`, curat, zero scriere.
+- **Concurent** (două rollback-uri simultane pe același `(algorithm_family, league_scope)`): garanția tare e **SIGURANȚA** — lock-ul `FOR UPDATE` pe rândul activ + indexul parțial unic `idx_model_champions_active_unique` asigură exact un câștigător, zero dublă-scriere, zero corupție. Dar pierzătorul **NU** primește garantat `already_active`: în funcție de momentul snapshot-ului de statement (READ COMMITTED), poate primi o **respingere** (`rejected` — ex. „niciun campion activ", fiindcă rândul activ pe care îl aștepta a fost supersedat concurent) și **trebuie să reia** cu starea actuală. Aceasta e exact distincția secvențial/concurent din `PROMOTION_CONTRACT.md` (secțiunea Idempotență): pe calea concurentă se garantează siguranța, nu un status uniform. Operatorul/serviciul tratează `rejected` pe această cale ca semnal de retry, nu ca eroare de corupție.
+
 ---
 
 ## 12. Failure Scenarios
