@@ -170,14 +170,39 @@ DEFAULT_WEIGHTS: dict[str, Any] = {
 }
 
 DATA_QUALITY_LIVE    = "live"
+DATA_QUALITY_PARTIAL = "partial"
 DATA_QUALITY_ELO     = "elo"
 DATA_QUALITY_NEUTRAL = "neutral"
 
 DATA_QUALITY_NOTES = {
-    DATA_QUALITY_LIVE:    "✅ Date live — statistici reale",
-    DATA_QUALITY_ELO:     "🟡 Date parțiale — ELO disponibil",
-    DATA_QUALITY_NEUTRAL: "⚠️ Date estimate — fără statistici reale",
+    DATA_QUALITY_LIVE:    "Date reale — meciuri terminate",
+    DATA_QUALITY_PARTIAL: "Date parțiale — estimate din agregate/proxy",
+    DATA_QUALITY_ELO:     "Date parțiale — ELO disponibil",
+    DATA_QUALITY_NEUTRAL: "Date estimate — fără statistici reale",
 }
+
+
+# ── Clasificarea data_quality (ADR-035 D4) — PUNCT UNIC de decizie ──────────
+# LIVE reprezintă date provenite din meciuri REALE (chiar dacă unele câmpuri —
+# posesie, șuturi — folosesc fallback), adică `supabase-history` cu eșantion
+# suficient. Sursa e deja gate-uită la MIN_DB_MATCHES=3 în _build_profile, deci
+# pragul n>=3 de aici e o plasă de siguranță aliniată D1, NU un prag numeric
+# nou. Sursele agregat/hardcodat/proxy/sintetice (national, freelf, scores-api,
+# fd, thesportsdb) → PARTIAL, onest (nu „statistici reale"). elo-only → ELO;
+# fără date → NEUTRAL. Nicio altă locație nu atribuie DATA_QUALITY_LIVE — garda
+# AST tests/test_data_quality_classification.py impune asta.
+_DATA_QUALITY_LIVE_MIN_MATCHES = 3
+
+
+def _classify_data_quality(data_source: str, matches_analysed: int) -> str:
+    """Singurul punct de decizie pentru data_quality (ADR-035 D4)."""
+    if data_source == "supabase-history" and matches_analysed >= _DATA_QUALITY_LIVE_MIN_MATCHES:
+        return DATA_QUALITY_LIVE
+    if data_source == "elo-only":
+        return DATA_QUALITY_ELO
+    if data_source in ("", "neutral-defaults"):
+        return DATA_QUALITY_NEUTRAL
+    return DATA_QUALITY_PARTIAL
 
 
 def _load_json(path: Path, default: dict) -> dict:
@@ -793,7 +818,6 @@ class FootballOracleEngine:
         stats: list[dict]     = []
         season_entry: dict | None = None
         data_source  = ""
-        data_quality = DATA_QUALITY_NEUTRAL
 
         # ── Level DB (ADR-035 / D1): Supabase match_history — PRIMUL ─────
         # Sursa canonică internă. Principiul de proiectare (ADR-035):
@@ -832,7 +856,6 @@ class FootballOracleEngine:
             if len(db_stats) >= MIN_DB_MATCHES:
                 stats        = db_stats
                 data_source  = "supabase-history"
-                data_quality = DATA_QUALITY_LIVE
                 logger.info("[Profile] %s — supabase-history (%d meciuri terminate)",
                             canonical, len(db_stats))
 
@@ -852,7 +875,6 @@ class FootballOracleEngine:
                 for r in (results or ["W"] * 5)
             ]
             data_source  = "national-stats-hardcoded"
-            data_quality = DATA_QUALITY_LIVE
             logger.info("[Profile] %s — national stats hardcoded (gf=%.2f ga=%.2f)", canonical, gf, ga)
 
         # ── Level 0: Free Live Football standings ─────────────────────────
@@ -875,7 +897,6 @@ class FootballOracleEngine:
                      "shots_on_goal": sot, "possession": pos}
                 ] * min(played, 5)
                 data_source  = "freelf-standings"
-                data_quality = DATA_QUALITY_LIVE
         except Exception as exc:
             logger.warning("[Profile] FreeLF standings error for %s: %s", team_name, exc)
 
@@ -895,7 +916,6 @@ class FootballOracleEngine:
                 if scores_form:
                     stats        = scores_form
                     data_source  = "scores-api"
-                    data_quality = DATA_QUALITY_LIVE
             except Exception:
                 pass
 
@@ -915,7 +935,6 @@ class FootballOracleEngine:
                         for r in results
                     ]
                     data_source  = "standings-fd"
-                    data_quality = DATA_QUALITY_LIVE
             except Exception:
                 pass
 
@@ -926,7 +945,6 @@ class FootballOracleEngine:
                 if tsdb_stats:
                     stats        = tsdb_stats
                     data_source  = "thesportsdb"
-                    data_quality = DATA_QUALITY_LIVE
             except Exception:
                 pass
 
@@ -978,7 +996,6 @@ class FootballOracleEngine:
             n          = 0
             results    = []
             data_source  = "elo-only"
-            data_quality = DATA_QUALITY_ELO
 
         # ── Level 6: Neutral defaults ─────────────────────────────────────
         else:
@@ -993,7 +1010,6 @@ class FootballOracleEngine:
             n          = 0
             results    = []
             data_source  = "neutral-defaults"
-            data_quality = DATA_QUALITY_NEUTRAL
 
         # ── Form score ────────────────────────────────────────────────────
         form_score = compute_form_score(results)
@@ -1003,9 +1019,14 @@ class FootballOracleEngine:
 
         events = self._real_match_events(canonical, league, last_n)
 
+        # [ADR-035 D4] data_quality derivat într-un PUNCT UNIC, din data_source
+        # final + numărul de meciuri — nu mai e atribuit inline per nivel.
+        matches_analysed = n if stats else 0
+        data_quality = _classify_data_quality(data_source, matches_analysed)
+
         return TeamProfile(
             team_id=team_id, team_name=canonical,
-            matches_analysed=n if stats else 0,
+            matches_analysed=matches_analysed,
             avg_goals_for=round(gf, 3), avg_goals_against=round(ga, 3),
             avg_shots_ot=round(sot, 3), avg_possession=round(pos, 1),
             offensive_rating=off_rating, defensive_rating=def_rating,

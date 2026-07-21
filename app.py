@@ -87,7 +87,7 @@ section[data-testid="stSidebar"]{display:none!important;}
 .dna-box-title{font-size:.62rem;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:.35rem;}
 .dna-stat{display:flex;justify-content:space-between;font-size:.74rem;margin:.12rem 0;}
 .dna-stat-k{color:var(--t2);} .dna-stat-v{color:var(--t1);font-weight:600;font-family:var(--oswald);}
-.dq-live{color:var(--accent3);font-size:.63rem;} .dq-elo{color:var(--amber);font-size:.63rem;} .dq-neutral{color:var(--accent2);font-size:.63rem;}
+.dq-live{color:var(--accent3);font-size:.63rem;} .dq-partial{color:#ff8c00;font-size:.63rem;} .dq-elo{color:var(--amber);font-size:.63rem;} .dq-neutral{color:var(--accent2);font-size:.63rem;}
 .xg-block{display:flex;align-items:center;justify-content:space-evenly;padding:.5rem 1.5rem 0;}
 .xg-team{text-align:center;}
 .xg-label{font-size:.62rem;color:var(--t2);text-transform:uppercase;letter-spacing:.1em;margin-bottom:.2rem;}
@@ -151,9 +151,11 @@ def _odds_cell(label, odds, model_pct, edge):
     return f'<div class="odds-cell"><div class="odds-cell-label">{label}</div><div class="odds-cell-val">{od}</div><div class="odds-cell-model">Model {model_pct:.1f}%</div><div class="odds-cell-edge {ec}">{es}</div></div>'
 
 def _dq(dq, note):
-    cls = {"live":"dq-live","elo":"dq-elo","neutral":"dq-neutral"}.get(dq,"dq-neutral")
-    ic  = {"live":"✅","elo":"🟡","neutral":"⚠️"}.get(dq,"⚠️")
-    return f'<span class="{cls}">{ic} {note[:38]}</span>'
+    # [ADR-035 D4] Icon-ul e furnizat EXCLUSIV de maparea de aici; `note`
+    # conține doar text (fără emoji) — un singur emoji în badge, nu dublu.
+    cls = {"live":"dq-live","partial":"dq-partial","elo":"dq-elo","neutral":"dq-neutral"}.get(dq,"dq-neutral")
+    ic  = {"live":"✅","partial":"🟠","elo":"🟡","neutral":"⚠️"}.get(dq,"⚠️")
+    return f'<span class="{cls}">{ic} {note}</span>'
 
 # ── TOP BAR ──────────────────────────────────────────────────────────────────
 now = datetime.now(timezone.utc)
