@@ -182,8 +182,27 @@ statisticilor de meci pentru România (P1, constatarea 4).
    scriere `FEATURE_COLUMNS`/`COALESCE` — documentată separat ca task
    **D3.5 — Feature Canonicalization** (`D3.5-FEATURE_CANONICALIZATION_TASK.md`),
    NEATINSĂ în D3 (Decizia 5).
-8. ⬜ Implementare D4 + verificare.
-9. ⬜ Abia după aceea începe Learning Core (Faza următoare).
+8. ✅ **Implementare D4 + verificare — FINALIZAT 2026-07-20, PR #37
+   (merged `4ba8bb2`).** Honest Data Quality Labeling: `data_quality` nu mai
+   raportează „statistici reale" pentru eșantioane sintetice/subțiri.
+   Taxonomie finală **LIVE / PARTIAL / ELO / NEUTRAL**; nivel nou `PARTIAL`
+   pentru surse agregat/hardcodat/proxy/sintetice (national, freelf,
+   scores-api, standings-fd, thesportsdb). `_classify_data_quality()` devine
+   PUNCT UNIC de decizie (cele 9 atribuiri inline din `_build_profile`
+   eliminate; derivare o singură dată la construcție); LIVE doar pentru
+   `supabase-history` cu n≥3 (plasă de siguranță aliniată `MIN_DB_MATCHES`,
+   nu prag numeric nou). Text LIVE reformulat: „Date reale — meciuri
+   terminate" (definiția A: date din meciuri reale, chiar dacă posesie/
+   șuturi folosesc fallback). UI (Stage 2): badge `PARTIAL` (clasă/icon/
+   culoare), iconul furnizat exclusiv de `_dq`, note fără emoji (dublu-emoji
+   curățat). Gardă AST: `DATA_QUALITY_LIVE` doar în clasificator. Value Bets
+   NEATINS → zero schimbare comportamentală; zero migrare (nefolosită de
+   ML). Fără ADR nou (execută contractul D4 din ADR-035, ca D1/D3).
+   Verificat: 12 teste noi, suită 729 passed, zero regresii, cazul central
+   Petrolul–Dinamo (1 meci TSDB) nu mai e „statistici reale".
+9. ✅ **Seria Database-First (ADR-035, D1–D4) — ÎNCHISĂ 2026-07-20.** Abia
+   acum începe Learning Core (Faza următoare): Challenger Runner →
+   Promotion Engine → Champion Manager.
 
 ## Dependencies
 
