@@ -1,6 +1,6 @@
 # CHAMPION_GUARDIAN_IMPLEMENTATION.md — Football Oracle
 
-**Status**: Document de implementare (design detaliat) — pre-implementare. NU e cod, NU e SQL. Detaliază, la nivel executabil-fără-reinterpretare, deciziile deja înghețate în `docs/00_GOVERNANCE/ADR-037-learning-core-rollback-and-champion-guardian.md`.
+**Status**: Document de implementare (design detaliat). Capitolele 1–15 descriu designul înghețat înainte de cod; **cap. 16 consemnează starea reală de implementare după închiderea R1 (Rollback Engine) și R2 (Champion Guardian)** — la orice divergență inline față de codul livrat, cap. 16 e normativ. Detaliază, la nivel executabil-fără-reinterpretare, deciziile deja înghețate în `docs/00_GOVERNANCE/ADR-037-learning-core-rollback-and-champion-guardian.md`.
 
 **Referință de autoritate**: ADR-037 (stabil, aprobat). Acest document **nu** modifică ADR-037; îl detaliază. Orice contradicție între acest document și ADR-037 se rezolvă în favoarea ADR-037.
 
@@ -86,7 +86,7 @@ Tabelă nouă, aditivă, append-only, imuabilă — precedent exact `challenger_
 ### 3.2 Invariants
 - **Append-only**: fiecare evaluare e un rând nou; nu se face UPDATE pe rânduri existente.
 - **Imutabilitate**: un rând, odată scris, nu se mai modifică niciodată — un fapt istoric, nu o stare mutabilă. (Consecvent cu `challenger_evaluations`; dacă e nevoie de garanție la nivel de bază de date, se aplică același tipar de trigger ca la `odds_history`/`model_champions`, decis la implementare.)
-- **UNIQUE (training_run_id, window_end)**: aceeași fereastră (același campion + același sfârșit de fereastră) nu poate produce decât un singur rând, pentru totdeauna — o rerulare cu aceeași fereastră e un no-op garantat. O fereastră NOUĂ (mai multe meciuri acumulate între timp) produce un rând NOU, distinct — un fapt nou, nu o corecție.
+- **UNIQUE (training_run_id, n_matches_evaluated)** *(implementat — vezi cap. 16.1; înlocuiește `window_end` din designul inițial)*: aceeași fereastră (același campion + același număr de meciuri evaluate) nu poate produce decât un singur rând, pentru totdeauna — o rerulare cu aceeași fereastră e un no-op garantat. O fereastră NOUĂ (mai multe meciuri acumulate între timp → `n_matches_evaluated` mai mare) produce un rând NOU, distinct — un fapt nou, nu o corecție. `n_matches_evaluated` (monoton crescător pe măsură ce se acumulează dovezi) e cheia de fereastră stabilă folosită și de regula ferestrelor consecutive (cap. 16.3).
 - **Fereastră nouă = dovezi noi**: un rând nou se scrie doar când s-au acumulat suficiente meciuri noi de la fereastra precedentă (pas minim), nu la re-evaluarea acelorași meciuri — condiție necesară ca „ferestrele consecutive" să reflecte evidență nouă.
 
 ### 3.3 Indexuri (intenție, nu DDL)
@@ -113,10 +113,11 @@ Regula de selecție e deterministă: existența verdictului de promovare → `pr
 
 ## 5. Champion Health State Machine
 
-Patru stări, o singură clasificare derivată per evaluare (punct unic de decizie, tiparul `_classify_data_quality()`, ADR-035 D4). „Tranzițiile" nu sunt o mașină cu efecte laterale la runtime — sunt reclasificări succesive, fereastră după fereastră, fiecare persistată ca fapt.
+O singură clasificare derivată per evaluare (punct unic de decizie, tiparul `_classify_data_quality()`, ADR-035 D4). Designul inițial a enumerat patru stări; implementarea a adăugat explicit a cincea, **`insufficient_data`** (distinctă de Healthy — vezi cap. 16.2), astfel încât „date insuficiente" să nu fie niciodată confundat cu „sănătos". „Tranzițiile" nu sunt o mașină cu efecte laterale la runtime — sunt reclasificări succesive, fereastră după fereastră, fiecare persistată ca fapt.
 
 ### 5.1 Stări
 - **🟢 Healthy** — toate semnalele în limite. Acțiune: doar înregistrare.
+- **⚪ InsufficientData** *(implementat — cap. 16.2)* — sub `MIN_MATCHES_FOR_HEALTH` meciuri scorabile; nicio judecată statistică posibilă. Distinctă de Healthy (Regula #8: „necunoscut" nu se aproximează cu „sănătos"). Acțiune: doar înregistrare (dacă n≥1), zero recomandare.
 - **🟡 Watch** — un singur semnal statistic degradat, ori o deviație ușoară, ori un flag de instabilitate (cap. 8). Acțiune: doar log, nicio recomandare.
 - **🟠 Degrading** — degradare statistică susținută (ferestre degradate consecutive — cap. 7). Acțiune: propune rollback `regression` (T3a).
 - **🔴 Critical** — eșec structural (artifact_missing / model_error), ori colaps statistic sever. Acțiune: recomandare imediată; structural poate justifica `emergency`.
@@ -323,6 +324,46 @@ Mutate explicit aici, în afara Stage 1 (ADR-037 §14/§16):
 - **Rollback în lanț** — semantica reversiei cu mai mult de un pas.
 - **Monitoring dashboard** — UI read-only în Monitoring Layer care consumă `champion_health_evaluations`, fără a deține evaluarea.
 - **Politică de retenție/arhivare** pentru `champion_health_evaluations`, dacă volumul o cere — explicit, niciodată prin ștergere tăcută.
+
+---
+
+## 16. Stare de implementare — R2 închis (Champion Guardian)
+
+Consemnare a realității livrate (cod + migrare + teste). Normativ față de capitolele 1–15 la orice divergență inline. R1 (Rollback Engine) e închis separat (vezi `R1_IMPLEMENTATION_CHECKLIST.md` + `CHANGELOG.md`).
+
+### 16.1 Artefacte livrate (R2.1–R2.8)
+- **`database/migrations/015_champion_health.sql`** — tabela `champion_health_evaluations`, append-only, RLS activ, `UNIQUE(training_run_id, n_matches_evaluated)`, `CHECK health_state IN (5 valori)`, `CHECK baseline_source IN (3 valori)`, FK către `training_runs`, două indexuri. **Fără trigger de imuabilitate** — imuabilitatea e garantată de `UNIQUE + ON CONFLICT DO NOTHING` (precedent `challenger_evaluations`, ADR-018), nu de trigger.
+- **`supabase_client.py`** — trei funcții noi de acces: `get_champion_served_outcomes()` (citește doar rânduri scorabile: `prob_home_pred` ȘI `actual_result` prezente, `kickoff_date ≥ since_date`, ordine totală `(kickoff_date, fixture_id)`), `record_champion_health_evaluation()` (INSERT idempotent, `on_conflict="training_run_id,n_matches_evaluated"`, `ignore_duplicates=True`), `get_recent_champion_health_evaluations()` (istoric DESC după `n_matches_evaluated`).
+- **`learning_core/champion_guardian.py`** — punct unic de intrare public `evaluate_champion_health(algorithm_family, league_scope) -> ChampionHealthResult | None`; clasificare într-un singur punct de decizie `_classify_champion_health`.
+- **Teste** (35 dedicate, fără rețea): `tests/test_champion_guardian.py` (21), `tests/test_supabase_client_champion_health.py` + `tests/test_champion_guardian_ownership.py` (14).
+
+### 16.2 Constante stabilite (valori reale în cod)
+| Constantă | Valoare | Rol |
+|---|---|---|
+| `MIN_MATCHES_FOR_HEALTH` | **30** | prag minim de meciuri scorabile; sub el → `insufficient_data`, niciodată judecată statistică |
+| `BASELINE_DEGRADATION_MARGIN` | **0.10** | deviație Brier live vs. verdict de promovare peste care semnalul de baseline e degradat |
+| `TREND_DEGRADATION_MARGIN` | **0.10** | `recent_mean > earlier_mean * (1 + margin)` → fereastră de trend degradată |
+| `CONSECUTIVE_DEGRADED_WINDOWS` | **2** | ferestre degradate consecutive necesare pentru Degrading (spike izolat → doar Watch) |
+| `STABILITY_DISPERSION_THRESHOLD` | **0.20** | dispersie a probabilității max peste care se aprinde flag-ul de instabilitate (doar informațional → plafonat la Watch) |
+
+Prioritatea clasificării (un singur punct de decizie): **Critical (structural) > InsufficientData (n < MIN) > Degrading (consecutiv) > Watch > Healthy**.
+
+### 16.3 Politica de persistare și regula ferestrelor consecutive
+- **n == 0**: return-only — Guardian întoarce rezultatul (inclusiv un Critical structural, dacă sonda a picat), dar **NU persistă** niciun rând și nu deschide fereastră. *(F3 din audit: un Critical structural cu `n == 0` e returnat, nu scris — nu există fereastră de dovezi de imortalizat.)*
+- **n ≥ 1**: persistă exact o dată per fereastră (`n_matches_evaluated`), idempotent (`ON CONFLICT DO NOTHING`).
+- **Regula ferestrelor consecutive (F1 din audit)**: `_count_consecutive_degraded` exclude rândurile cu `n_matches_evaluated >= current_n`, ca o rerulare pe aceeași fereastră (același `n`) să nu dubleze numărătoarea și să escaladeze fals Watch → Degrading. Apelantul citește `limit = CONSECUTIVE_DEGRADED_WINDOWS + 1`.
+
+### 16.4 Granița de scriere R2 vs. R3 (impusă mecanic)
+Guardian scrie **exclusiv** `champion_health_evaluations` (prin unicul owner `record_champion_health_evaluation`). NU scrie `model_champions` (nu promovează, nu face rollback) și **NU scrie `automation_runs`** (nu orchestrează, nu deschide decizii T3a — aceasta e responsabilitatea R3, `continuous_learning`). Garda AST `tests/test_champion_guardian_ownership.py` impune: `champion_guardian` nu importă `promotion_service`/`rollback_service`/`oracle_engine`/`continuous_learning`, nu referențiază `rpc_promote_challenger`/`rpc_rollback_champion`/`promote_challenger`/`rollback_champion`/`automation_runs`, iar `record_champion_health_evaluation` are un singur apelant de producție (Guardian). „Propunerea T3a" din cap. 2.1/2.3/10 e deci descriere de arhitectură-țintă a fluxului R3 — Guardian-ul livrat în R2 **nu** emite propuneri, doar clasifică și persistă.
+
+### 16.5 R2.8 — validated without state mutation
+Închiderea R2 s-a validat pe DB live fără mutație de stare (oglindind R1.8): `champion_health_evaluations` = **0 rânduri**, 3 campioni activi neatinși. Calea statistică live (Healthy/Watch/Degrading) nu a putut fi exercitată pe date reale fiindcă **`scoreable = 0`** — zero rânduri din `match_history` au simultan `prob_home_pred` ȘI `actual_result`. Corectitudinea căii statistice e acoperită integral de cele 35 de teste dedicate pe ferestre sintetice; validarea live rămâne deferată (vezi limitarea de mai jos).
+
+### 16.6 Limitare operațională
+> **Limitare operațională**: Champion Guardian este complet implementat și testat, însă validarea live a căii statistice (Healthy/Watch/Degrading bazate pe meciuri scorabile) este amânată până când `match_history` conține predicții servite care au și rezultat (`scoreable > 0`). În starea actuală (`scoreable = 0`), Guardian intră în `insufficient_data` și nu produce mutații de stare.
+
+### 16.7 Notă operațională de deployment
+Migrarea 015 a fost aplicată prin **Supabase SQL Editor**, nu prin `apply_migration` (conexiunea MCP în mod read-only la momentul aplicării) — identic cu 014. Consecință: tabela nu apare în tracker-ul „Database Migrations" (oprit la 013). **Sursa canonică rămâne fișierul comitat** `database/migrations/015_champion_health.sql`.
 
 ---
 

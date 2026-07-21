@@ -2,6 +2,77 @@
 
 Toate schimbările notabile ale proiectului sunt documentate aici.
 
+## [Nelansat] — Learning Core: Champion Guardian (ADR-037, Stage R2)
+
+Evaluator **read-only** al sănătății campionului activ: clasifică starea în cinci
+valori și persistă fapte imuabile în `champion_health_evaluations`. NU promovează,
+NU face rollback, NU orchestrează, NU atinge servirea — doar citește, clasifică,
+persistă. Fără cablare în Continuous Learning (R3), fără activare (R4).
+
+### Adăugat
+- **R2.1 — migrarea 015 (`database/migrations/015_champion_health.sql`)**: tabela
+  `champion_health_evaluations`, aditivă, **append-only**, RLS activ,
+  `UNIQUE(training_run_id, n_matches_evaluated)` (aceeași fereastră → un singur
+  rând, pentru totdeauna), `CHECK health_state IN` (5 valori),
+  `CHECK baseline_source IN` (`promotion_evaluation`/`trend_only`/`manual_override`),
+  FK către `training_runs`, două indexuri. Imuabilitatea e garantată de
+  `UNIQUE + ON CONFLICT DO NOTHING` (precedent `challenger_evaluations`, ADR-018),
+  **fără trigger**.
+- **R2.3 — `supabase_client`**: `get_champion_served_outcomes()` (doar rânduri
+  scorabile — `prob_home_pred` ȘI `actual_result` prezente, `kickoff_date ≥
+  since_date`, ordine totală `(kickoff_date, fixture_id)`),
+  `record_champion_health_evaluation()` (INSERT idempotent, `on_conflict=
+  "training_run_id,n_matches_evaluated"`, `ignore_duplicates=True`),
+  `get_recent_champion_health_evaluations()` (istoric DESC după
+  `n_matches_evaluated`).
+- **R2.4 — `learning_core/champion_guardian.py`**: punct unic de intrare public
+  `evaluate_champion_health(algorithm_family, league_scope)`; patru dimensiuni de
+  sănătate (structural, deviație de la baseline, trend 50/50, stabilitate
+  informativă) reduse la o singură clasificare într-un punct unic de decizie
+  (`_classify_champion_health`). Reutilizează `shadow_testing._brier`. Constante
+  stabilite: `MIN_MATCHES_FOR_HEALTH=30`, `BASELINE_DEGRADATION_MARGIN=0.10`,
+  `TREND_DEGRADATION_MARGIN=0.10`, `CONSECUTIVE_DEGRADED_WINDOWS=2`,
+  `STABILITY_DISPERSION_THRESHOLD=0.20`. Prioritatea clasificării: **Critical
+  (structural) > InsufficientData (n<MIN) > Degrading (consecutiv) > Watch >
+  Healthy**.
+  - **Politica de persistare**: `n==0` → return-only (Critical structural e
+    returnat, dar NU persistat — F3); `n≥1` → persistă exact o dată per fereastră,
+    idempotent.
+  - **Regula ferestrelor consecutive (F1)**: `_count_consecutive_degraded` exclude
+    rândurile cu `n_matches_evaluated >= current_n` — o rerulare pe aceeași
+    fereastră nu mai dublează numărătoarea, nu mai escaladează fals Watch →
+    Degrading.
+- **R2.5–R2.7 — teste** (35 total, fără rețea): `test_champion_guardian.py` (21 —
+  toate cele 5 stări, prioritatea clasificatorului, regresie F1 unit +
+  end-to-end, persistență, best-effort); `test_supabase_client_champion_health.py`
+  + `test_champion_guardian_ownership.py` (14 — wrappere pe client fabricat +
+  gărzi AST de ownership).
+- **R2.7 — gărzi AST de ownership**: `champion_guardian` NU importă
+  `promotion_service`/`rollback_service`/`oracle_engine`/`continuous_learning`, NU
+  referențiază promovare/rollback/`automation_runs`; `record_champion_health_
+  evaluation` are un singur apelant de producție (Guardian). Impune mecanic
+  granița R2 vs. R3: Guardian scrie DOAR `champion_health_evaluations`.
+- **R2.8 — verificare de integrare `validated without state mutation`**: pe DB
+  live, `champion_health_evaluations` = 0 rânduri, 3 campioni activi neatinși.
+  Calea statistică live nu a putut fi exercitată pe date reale fiindcă
+  **`scoreable = 0`** (zero rânduri `match_history` cu `prob_home_pred` ȘI
+  `actual_result`); corectitudinea e acoperită integral de cele 35 de teste
+  sintetice.
+
+### Limitare operațională
+Champion Guardian este complet implementat și testat, însă validarea live a căii
+statistice (Healthy/Watch/Degrading bazate pe meciuri scorabile) este amânată
+până când `match_history` conține predicții servite care au și rezultat
+(`scoreable > 0`). În starea actuală (`scoreable = 0`), Guardian intră în
+`insufficient_data` și nu produce mutații de stare.
+
+### Notă operațională (disciplină de deployment)
+- Migrarea 015 a fost aplicată prin **Supabase SQL Editor**, nu prin
+  `apply_migration` (conexiunea MCP în mod read-only la momentul aplicării) —
+  identic cu 014. Consecință: tabela NU apare în tracker-ul „Database Migrations"
+  al Supabase (oprit la `013`). **Sursa canonică rămâne fișierul comitat**
+  `database/migrations/015_champion_health.sql`.
+
 ## [Nelansat] — Learning Core: Rollback Engine (ADR-037, Stage R1)
 
 Închiderea ciclului de viață al campionului — mecanism de rollback append-only,
