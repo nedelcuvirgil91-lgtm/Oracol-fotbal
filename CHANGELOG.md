@@ -2,6 +2,44 @@
 
 Toate schimbările notabile ale proiectului sunt documentate aici.
 
+## [Nelansat] — Learning Core: Rollback Engine (ADR-037, Stage R1)
+
+Închiderea ciclului de viață al campionului — mecanism de rollback append-only,
+simetric (dar separat) de Promotion, care reactivează predecesorul unui campion
+degradat. Doar fundația SQL + serviciul Python; fără Champion Guardian (R2),
+fără orchestrare/apelanți automați (R3), fără activare (R4).
+
+### Adăugat
+- **R1.1 — migrarea 014 (`database/migrations/014_rollback.sql`)**: funcția
+  Postgres `rollback_champion(algorithm_family, league_scope,
+  expected_predecessor_training_run_id, reason, by)` — eveniment de domeniu
+  „Rollback Champion", **append-only** (retrage campionul activ, reactivează
+  predecesorul printr-un rând nou), o singură tranzacție atomică pe
+  `model_champions`, cu **gardă compare-and-swap** (predecesor derivat
+  server-side sub lock, comparat cu cel așteptat → `predecessor_mismatch` la
+  neconcordanță). Oglindește `promote_challenger` (005); nu atinge
+  `challengers`, triggerul de imuabilitate (005), sau alte tabele.
+  - Modificări din auditul pre-R1: gardă `NULL` explicită pe
+    `expected_predecessor` (previne ocolirea CAS prin logică trivalentă SQL);
+    derivare deterministă a predecesorului (`ORDER BY superseded_at DESC
+    LIMIT 1` — predecesorul imediat, ADR-037 §3).
+- **R1.2 — deploy + verificare** pe proiectul `Prediction`: funcția aplicată și
+  verificată read-only — semnătură corectă (5×`text` → `text`), owner/privilegii
+  **identice cu `promote_challenger`** (`service_role` are `EXECUTE`), **zero
+  rânduri modificate** (conturi `model_champions`/`challengers`/`training_runs`/
+  `challenger_evaluations` = baseline), trigger 005 + `promote_challenger`
+  intacte, invariantul „un singur campion activ" respectat.
+
+### Notă operațională (disciplină de deployment)
+- Migrarea 014 a fost aplicată prin **Supabase SQL Editor**, nu prin
+  `apply_migration` (conexiunea MCP era în mod read-only în momentul aplicării).
+  Consecință: funcția NU apare în tracker-ul „Database Migrations" al Supabase
+  (care se oprește la `013`). **Sursa canonică rămâne fișierul comitat**
+  `database/migrations/014_rollback.sql`. Pe viitor, la folosirea migrării
+  automate (CLI / Supabase migrations), trebuie evitată reaplicarea aceleiași
+  funcții sau sincronizat istoricul migrărilor. Nu e un blocker pentru R1 —
+  doar disciplină operațională de consemnat.
+
 ## [Nelansat] — Database-First Prediction Engine (ADR-035)
 
 Seria D1–D4 mută Prediction Engine-ul pe sursa canonică internă (Supabase
