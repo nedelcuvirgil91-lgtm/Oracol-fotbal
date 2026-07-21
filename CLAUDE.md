@@ -94,6 +94,7 @@ Guvernanța (ADR-uri, documente Frozen, promovare manuală) e tratată ca avanta
 
 - Orice tabelă nouă: idempotentă la creare (`CREATE TABLE IF NOT EXISTS`), RLS activ, scriere doar prin `service_role` — vezi `database/migrations/001_odds_history.sql` ca precedent.
 - Scriere atomică (o singură operație `INSERT ... ON CONFLICT`), niciodată check-then-act.
+- **Canonical Feature Ownership (ADR-036 / D3.5, COMPLETED 2026-07-20)**: fiecare coloană canonică din `match_history` are un owner unic de scriere — `run_backfill` pentru `FEATURE_COLUMNS` (+ import pentru `home_elo`/`away_elo`), `sync_results` pentru `actual_*`, `_cache_prediction` doar pentru ieșirile de predicție. Prediction Engine NU scrie niciodată feature-uri ML sau rezultate; garda AST `tests/test_canonical_feature_ownership.py` impune asta. RPC `upsert_match_canonical` rămâne contract generic. Niciun cod nou nu scrie o coloană cu owner existent.
 - **Proiectul Supabase conectat e producție reală, nu sandbox** — `execute_sql`/`apply_migration` scriu direct, fără preview automat. Nicio migrare fără să fi arătat utilizatorului SQL-ul exact înainte de rulare.
 
 ## Regulile testelor
