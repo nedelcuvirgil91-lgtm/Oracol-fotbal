@@ -20,10 +20,21 @@ A doua ajustare: `supabase_client integration` trebuie să preceadă `rollback_s
 
 ---
 
+## Modificări aplicate din Auditul de arhitectură (pre-R1)
+
+Trei modificări minore aprobate, aplicate ÎNAINTE de orice cod. Niciun redesign, niciun ADR-037 atins, niciun fișier interzis (Oracle Engine, Promotion Service, Champion Loader, RUNTIME_CONTRACT, triggerul `model_champions`, migrarea 005) modificat.
+
+1. **Compare-and-Swap Guard (obligatoriu)** — RPC-ul `rollback_champion` primește `expected_predecessor_training_run_id`, derivă predecesorul server-side sub lock, îl compară, și refuză (`predecessor_mismatch`, zero scriere) la neconcordanță. Elimină complet TOCTOU-ul validare-Python → execuție-RPC. Impus exact ca `update_challenger_state(expected_current_state=...)`. Reflectat în R1.1, R1.3, R1.4, R1.6, R1.8.
+2. **Ownership explicit** — `model_champions` e agregarea Champion Lifecycle, cu **doi scriitori autorizați** (Promotion Service + Rollback Service), coordonați NU prin owner unic, ci prin: tranzacție atomică + index parțial unic + trigger de imuabilitate (Frozen, neatins) + row locking. Consemnat în `CHAMPION_GUARDIAN_IMPLEMENTATION.md` §13 și impus de gărzile AST din R1.7. Fără schimbare de design/trigger/migrarea 005.
+3. **Invariant pentru R3** — un `training_run` deja retras prin rollback NU trebuie niciodată re-promovat (rândul lui din `challengers` rămâne `PROMOTED`; `promote_challenger` are deja garda). Documentat în `CHAMPION_GUARDIAN_IMPLEMENTATION.md` §14 (R3); nu se atinge FSM-ul sau `promote_challenger`. În afara scope-ului execuției R1 (R1 e manual), consemnat pentru R3.
+
+---
+
 ## Task-uri
 
 ### R1.1 — Autorează migrarea 014 (`rollback_champion` RPC)
-- **Descriere**: fișier de migrare nou care definește funcția Postgres `rollback_champion` — o singură tranzacție: lock pe campionul activ, determinarea predecesorului (rândul supersedat de campionul activ), supersedarea campionului activ (mutația unică permisă de triggerul 005), INSERT rând nou activ pentru predecesor cu `promoted_by = rollback:<motiv>:<by>`, idempotență (`already_active` dacă predecesorul e deja activ), refuz explicit dacă nu există predecesor. NU atinge `challengers`. Idempotent la re-rulare (`CREATE OR REPLACE FUNCTION`). NU adaugă/modifică vreun trigger.
+- **Descriere**: fișier de migrare nou care definește funcția Postgres `rollback_champion(algorithm_family, league_scope, expected_predecessor_training_run_id, reason, by)` — o singură tranzacție: lock pe campionul activ; **idempotență (stare-țintă)** — dacă campionul activ e deja `expected_predecessor_training_run_id`, întoarce `already_active` fără scriere; derivarea server-side, sub lock, a predecesorului (rândul cu `superseded_by` = training_run-ul campionului activ); **gardă compare-and-swap** — dacă predecesorul derivat ≠ `expected_predecessor_training_run_id` (schimbare concurentă) → refuz (`predecessor_mismatch`), zero scriere, exact ca pattern-ul `update_challenger_state(expected_current_state=...)`; supersedarea campionului activ (mutația unică permisă de triggerul 005); INSERT rând nou activ pentru `expected_predecessor_training_run_id` cu `promoted_by = rollback:<motiv>:<by>`; refuz explicit dacă nu există predecesor (`no_predecessor`). NU atinge `challengers`. Idempotent la re-rulare (`CREATE OR REPLACE FUNCTION`). NU adaugă/modifică vreun trigger.
+- **[Audit — modificarea 1, CAS guard]** `expected_predecessor_training_run_id` e obligatoriu, elimină TOCTOU-ul dintre validarea artefactului în Python (R1.4) și execuția RPC — artefactul validat e EXACT cel activat, sau operația e respinsă.
 - **Fișiere**: `database/migrations/014_rollback.sql` (nou).
 - **Dependențe**: niciuna.
 - **DONE**: fișierul există, revizuit; funcția respectă diviziunea din `ATOMICITY_CONTRACT` (writes atomice server-side), append-only, zero atingere a triggerului.
@@ -41,7 +52,7 @@ A doua ajustare: `supabase_client integration` trebuie să preceadă `rollback_s
 - **Rollback plan**: `DROP FUNCTION rollback_champion` (arătat prin `supabase-safety` înainte de execuție). Aditiv — nicio tabelă/date atinse.
 
 ### R1.3 — Integrare `supabase_client` (acces la date)
-- **Descriere**: două funcții noi de acces: (a) citirea predecesorului campionului activ pentru `(algorithm_family, league_scope)` — precondiție Python înainte de RPC; (b) un wrapper `rpc_rollback_champion(...)` care apelează RPC-ul, oglindind exact `rpc_promote_challenger` (același pattern `client.rpc(...).execute()`, aceeași convenție de a lăsa excepția server-side să urce, prinsă mai sus în serviciu).
+- **Descriere**: două funcții noi de acces: (a) citirea predecesorului campionului activ pentru `(algorithm_family, league_scope)` — precondiție Python înainte de RPC, a cărei valoare devine `expected_predecessor_training_run_id`; (b) un wrapper `rpc_rollback_champion(algorithm_family, league_scope, expected_predecessor_training_run_id, reason, by)` care apelează RPC-ul, oglindind exact `rpc_promote_challenger` (același pattern `client.rpc(...).execute()`, aceeași convenție de a lăsa excepția server-side să urce, prinsă mai sus în serviciu). **[Audit — modificarea 1]** wrapper-ul transmite obligatoriu `expected_predecessor_training_run_id` (gardă CAS).
 - **Fișiere**: `supabase_client.py` (adăugiri; niciun cod existent modificat).
 - **Dependențe**: R1.1 (contractul RPC). Verificarea funcțională completă necesită R1.2.
 - **DONE**: ambele funcții prezente, cu docstring-uri consecvente cu vecinele; wrapper-ul identic ca formă cu `rpc_promote_challenger`.
@@ -50,7 +61,7 @@ A doua ajustare: `supabase_client integration` trebuie să preceadă `rollback_s
 - **Rollback plan**: se revine diff-ul din `supabase_client.py` (adăugiri izolate, ușor de eliminat).
 
 ### R1.4 — `learning_core/rollback_service.py` (serviciu single-owner)
-- **Descriere**: serviciul care deține evenimentul „Rollback Challenger". Un singur punct de intrare public. Precondiții structurale ÎNAINTE de orice scriere (campion activ există; predecesor există; artefactul predecesorului se re-validează funcțional; motivul ∈ setul închis de șase), fail-fast, zero apel RPC la primul eșec. Un singur apel `rpc_rollback_champion`. Niciodată excepție necontrolată către apelant — rezultat structurat `RollbackResult(status ∈ {rolled_back, already_active, rejected}, reason)`. Oglindește `promotion_service.py`.
+- **Descriere**: serviciul care deține evenimentul „Rollback Challenger". Un singur punct de intrare public. Precondiții structurale ÎNAINTE de orice scriere (campion activ există; predecesor există; artefactul predecesorului se re-validează funcțional; motivul ∈ setul închis de șase), fail-fast, zero apel RPC la primul eșec. **[Audit — modificarea 1]** predecesorul validat aici e transmis ca `expected_predecessor_training_run_id` la RPC (CAS) — garanția că artefactul validat = artefactul activat. Un singur apel `rpc_rollback_champion`. Niciodată excepție necontrolată către apelant — rezultat structurat `RollbackResult(status ∈ {rolled_back, already_active, rejected}, reason)`; mapează inclusiv `predecessor_mismatch` la `rejected` (operatorul reia cu starea actuală). Oglindește `promotion_service.py`.
 - **Fișiere**: `learning_core/rollback_service.py` (nou).
 - **Dependențe**: R1.3.
 - **DONE**: serviciu complet, izolat (zero apelanți reali în producție — ca `promotion_service.py` la creare); mapează excepția RPC la `rejected`.
@@ -68,7 +79,7 @@ A doua ajustare: `supabase_client integration` trebuie să preceadă `rollback_s
 - **Rollback plan**: se șterge fișierul de test.
 
 ### R1.6 — Teste RPC / atomicitate
-- **Descriere**: verificarea comportamentului `rollback_champion`: supersede+insert atomic (ambele sau niciunul); idempotență (`already_active`); refuz fără predecesor; respectarea triggerului de imuabilitate (niciun rând istoric mutat). Preferabil la nivel de logică cu DB fabricat/mock; verificarea reală de atomicitate/concurență se confirmă la R1.8 pe DB live.
+- **Descriere**: verificarea comportamentului `rollback_champion`: supersede+insert atomic (ambele sau niciunul); idempotență stare-țintă (`already_active` când campionul activ e deja `expected_predecessor`); **gardă CAS — `predecessor_mismatch` când predecesorul derivat ≠ `expected_predecessor_training_run_id`, zero scriere**; refuz fără predecesor (`no_predecessor`); respectarea triggerului de imuabilitate (niciun rând istoric mutat). Preferabil la nivel de logică cu DB fabricat/mock; verificarea reală de atomicitate/concurență se confirmă la R1.8 pe DB live.
 - **Fișiere**: `tests/test_supabase_client_rollback.py` (nou) și/sau extindere test dedicată RPC.
 - **Dependențe**: R1.3 (wrapper); R1.2 pentru orice verificare pe DB live.
 - **DONE**: cazurile de contract ale RPC verzi (fără rețea unde e posibil).
@@ -86,7 +97,7 @@ A doua ajustare: `supabase_client integration` trebuie să preceadă `rollback_s
 - **Rollback plan**: se șterge fișierul/secțiunea de test.
 
 ### R1.8 — Verificare de integrare (end-to-end, manual/fixture)
-- **Descriere**: pe date reale/fixture controlate: predecesor găsit → swap atomic (activul devine istoric, predecesorul devine activ, un singur activ per `(family, league)` — invariantul indexului parțial); fără predecesor → refuz curat; dublu rollback → `already_active`, nicio a doua scriere; confirmarea conceptuală că `champion_loader` ar citi noul rând activ la următoarea construcție de proces (fără a modifica `oracle_engine`). Read-only asupra oricărei stări pe care nu o mutăm deliberat.
+- **Descriere**: pe date reale/fixture controlate: predecesor găsit → swap atomic (activul devine istoric, predecesorul devine activ, un singur activ per `(family, league)` — invariantul indexului parțial); fără predecesor → refuz curat (`no_predecessor`); dublu rollback (ținta deja atinsă) → `already_active`, nicio a doua scriere; **[Audit — modificarea 1] CAS**: dacă campionul activ s-a schimbat concurent, predecesorul derivat ≠ `expected_predecessor` → `predecessor_mismatch`, zero scriere; confirmarea conceptuală că `champion_loader` ar citi noul rând activ la următoarea construcție de proces (fără a modifica `oracle_engine`). Read-only asupra oricărei stări pe care nu o mutăm deliberat.
 - **Fișiere**: niciun fișier de producție nou; opțional un script de verificare de tip `sync/poc_*` (neintegrat), consecvent cu precedentele `poc_*`.
 - **Dependențe**: R1.2, R1.4 (tot lanțul cablat).
 - **DONE**: toate scenariile de mai sus confirmate pe rulare reală; raport scris.

@@ -227,17 +227,20 @@ Doar responsabilități; fără SQL. Diviziunea Python vs. RPC urmează exact pr
 - există un campion activ pentru `(algorithm_family, league_scope)`;
 - există un predecesor (rândul pe care campionul activ l-a supersedat); altfel `no_predecessor`, refuz;
 - artefactul predecesorului e re-validat funcțional (se poate încărca și produce predicții) — nu readucem un campion care e el însuși mort;
-- motivul aparține setului închis de șase.
+- motivul aparține setului închis de șase;
+- **transmite `training_run_id`-ul predecesorului validat ca `expected_predecessor_training_run_id` către RPC** — sămânța de compare-and-swap (vezi mai jos). Astfel artefactul validat aici e EXACT cel activat de RPC, sau operația e respinsă — se elimină complet TOCTOU-ul „validează în Python → activează în RPC".
 
-**`rollback_champion()` (RPC, o singură tranzacție Postgres):**
-- re-verifică server-side, sub lock, că rândul activ e încă cel citit (apărare împotriva unei curse concurente);
+**`rollback_champion(algorithm_family, league_scope, expected_predecessor_training_run_id, reason, by)` (RPC, o singură tranzacție Postgres):**
+- ia lock pe campionul activ pentru `(algorithm_family, league_scope)`; dacă nu există campion activ → refuz;
+- **idempotență (stare-țintă)**: dacă campionul activ ESTE deja `expected_predecessor_training_run_id` (rollback deja aplicat, ținta atinsă) → întoarce `already_active`, nicio a doua scriere;
+- derivă server-side, sub lock, predecesorul campionului activ (rândul cu `superseded_by = training_run_id`-ul campionului activ); dacă nu există → `no_predecessor`, refuz;
+- **gardă compare-and-swap**: dacă predecesorul derivat server-side ≠ `expected_predecessor_training_run_id` (starea s-a schimbat concurent — ex. o promovare între citirea Python și RPC) → refuz explicit (`predecessor_mismatch`), **zero scriere**; operatorul reia cu starea actuală. Impus EXACT ca pattern-ul deja existent `update_challenger_state(expected_current_state=...)` (`challenger_manager.transition`) — niciun mecanism nou inventat;
 - supersedează campionul activ curent (singura mutație permisă de triggerul de imuabilitate: activ → istoric);
-- inserează un rând nou, activ, pentru `training_run_id`-ul predecesorului, cu `promoted_by = rollback:<motiv>:<by>`;
+- inserează un rând nou, activ, pentru `expected_predecessor_training_run_id`, cu `promoted_by = rollback:<motiv>:<by>`;
 - **nu** atinge `challengers` (ambele rânduri sunt deja terminale `PROMOTED`);
-- e **idempotent**: dacă predecesorul e deja campionul activ (rollback deja aplicat), întoarce un rezultat de tip „already-active", nu o a doua scriere;
 - garantează atomicitatea: fie ambele scrieri, fie niciuna — nicio stare intermediară observabilă (proprietatea cerută de ATOMICITY_CONTRACT, aplicată simetric la rollback).
 
-**Rezultat**: un tip structurat, niciodată excepție necontrolată către apelant — status `rolled_back` / `already_active` / `rejected` + motiv.
+**Rezultat**: un tip structurat, niciodată excepție necontrolată către apelant — status `rolled_back` / `already_active` / `rejected` (+ motiv, ex. `no_predecessor`, `predecessor_mismatch`).
 
 ---
 
@@ -262,6 +265,7 @@ Demonstrație explicită că nimic din ce funcționează nu se schimbă:
 
 - **Prediction Engine** (`oracle_engine.py`, Poisson/Monte Carlo/blend, `_cache_prediction`): zero schimbare. Guardian doar **citește** `prob_*_pred` deja scrise; nu modifică calea de predicție.
 - **Promotion Engine** (`promotion_service.py`, `promote_challenger` RPC): zero schimbare — Rollback e un serviciu și un RPC separate.
+- **Ownership `model_champions` (explicit — schimbare reală de la owner unic la doi scriitori coordonați)**: `model_champions` e **agregarea Champion Lifecycle**. De la R1, are **două evenimente de domeniu autorizate** care o pot modifica: **Promotion Service** (`promote_challenger`) și **Rollback Service** (`rollback_champion`). Coordonarea NU e prin owner unic — e garantată integral de invarianții de bază de date, deja existenți și **neatinși**: (1) tranzacția atomică a RPC-ului; (2) indexul parțial unic `idx_model_champions_active_unique` (un singur activ per `(algorithm_family, league_scope)`); (3) triggerul de imuabilitate `model_champions_guard` (migrarea 005, Frozen — o singură mutație activ→istoric); (4) row locking (`FOR UPDATE`) în RPC. Cei doi scriitori sunt tranzacții atomice serializate de aceleași constrângeri — fundamental diferit de o cursă cu arbitraj `COALESCE` first-writer-wins. **Nicio schimbare de design, de trigger sau de migrarea 005** — doar consemnarea explicită a acestei realități, ca un dezvoltator viitor să nu presupună owner unic.
 - **Champion Loader** (`champion_loader.py`, cele 6 condiții): zero schimbare — un rând reactivat prin rollback e indistinct ca formă de unul promovat; loader-ul îl încarcă identic.
 - **Oracle Engine** (`_initialize_ml`/`_resolve_champion`): zero schimbare de cod — citește rândul activ exact ca azi; rollback schimbă doar *care* rând e activ, preluat la următoarea construcție de proces (RUNTIME_CONTRACT).
 - **Contracte Frozen** (`RUNTIME_CONTRACT`, `PROMOTION_CONTRACT`, `ATOMICITY_CONTRACT`, `PROMOTION_SERVICE_CONTRACT`): zero modificare — Rollback e mecanismul separat pe care `PROMOTION_CONTRACT` îl rezervă explicit. Triggerul de imuabilitate `model_champions` (migrarea 005) rămâne neatins; designul append-only respectă exact mutația unică pe care el o permite.
@@ -289,6 +293,7 @@ Fiecare etapă e independent revizuibilă, în disciplina ADR-035 (fail-before/p
 - **Rollback plan**: aditiv — se șterge tabela + funcția + fișierele; nimic existent atins.
 
 ### R3 — Orchestrare (cablare în Continuous Learning)
+- **Invariant obligatoriu (documentat, respectat — fără modificarea FSM-ului)**: **un `training_run` deja retras prin rollback NU trebuie niciodată re-promovat.** Motiv verificat în cod: după rollback, rândul lui din `challengers` rămâne în starea terminală `PROMOTED`, iar `promote_challenger` (RPC, migrarea 005) are deja garda necesară — un re-apel pe acel `training_run_id` întâlnește `state='PROMOTED'` dar „nu mai e campionul activ" și ridică `RAISE 'stare neasteptata'`. Orchestrarea NU trebuie să se bazeze pe această excepție ca mecanism — trebuie să nu propună niciodată re-promovarea unui `training_run` retras (un challenger nou primește oricum un `training_run_id` nou). Nu se modifică FSM-ul, nu se modifică `promote_challenger` — doar se respectă invariantul.
 - **Scope**: o fază nouă în `continuous_learning.py` care cheamă Guardian → propune T3a; extinderea Fazei C existente pentru a executa rollback-urile aprobate; motivele `regression` (guvernat), `operator`/`emergency` (direct).
 - **Fișiere**: `learning_core/continuous_learning.py` (extindere); teste extinse `tests/test_continuous_learning.py`.
 - **Teste**: o degradare susținută → decizie T3a surfaced; decizie aprobată → execuție prin Rollback Service; decizie neaprobată → nicio acțiune; `learning_core_enabled=False` → faza sărită complet.
