@@ -599,6 +599,56 @@ def get_active_champion(algorithm_family: str, league_scope: str) -> dict | None
         return None
 
 
+def get_champion_predecessor(algorithm_family: str, league_scope: str) -> str | None:
+    """training_run_id-ul predecesorului campionului activ pentru
+    (algorithm_family, league_scope) — rândul pe care campionul activ l-a
+    supersedat (superseded_by = training_run-ul campionului activ). None dacă
+    nu există campion activ, sau dacă acesta nu are predecesor (a fost primul
+    campion) — stare legitimă, nu eroare (Regula #8, nu se aproximează).
+
+    Folosit de learning_core/rollback_service.py DOAR ca precondiție Python
+    (fail-fast + validarea artefactului predecesorului + sămânța
+    compare-and-swap). Sursa autoritară de derivare rămâne funcția Postgres
+    rollback_champion (migrarea 014), care re-derivă predecesorul server-side
+    sub lock; de aceea această citire nu trebuie să fie fără-cursă — CAS-ul din
+    RPC prinde orice stare învechită. Derivarea de aici oglindește exact
+    ORDER BY superseded_at DESC LIMIT 1 din RPC (predecesorul IMEDIAT), ca
+    valoarea trimisă ca expected_predecessor să coincidă cu ce verifică RPC-ul."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        active_res = (
+            client.table("model_champions")
+            .select("training_run_id")
+            .eq("algorithm_family", algorithm_family)
+            .eq("league_scope", league_scope)
+            .is_("superseded_at", "null")
+            .execute()
+        )
+        active_rows = active_res.data or []
+        if not active_rows:
+            return None
+        active_training_run_id = active_rows[0]["training_run_id"]
+
+        pred_res = (
+            client.table("model_champions")
+            .select("training_run_id")
+            .eq("algorithm_family", algorithm_family)
+            .eq("league_scope", league_scope)
+            .eq("superseded_by", active_training_run_id)
+            .order("superseded_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        pred_rows = pred_res.data or []
+        return pred_rows[0]["training_run_id"] if pred_rows else None
+    except Exception as exc:
+        logger.warning("[Supabase] get_champion_predecessor failed pentru %s/%s: %s",
+                        algorithm_family, league_scope, exc)
+        return None
+
+
 def create_challenger(training_run_id: str, algorithm_family: str, league_scope: str) -> dict | None:
     """Creează un Challenger nou, în starea CREATED. None la orice eșec —
     fie Supabase indisponibil, fie constrângerea de invariant (cel mult un
@@ -787,6 +837,122 @@ def get_latest_challenger_evaluation(training_run_id: str) -> dict | None:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# CHAMPION HEALTH (ADR-037, R2) — citire predicții servite scorabile + scriere/
+# citire evaluări de sănătate. Champion Guardian (R2.4) e SINGURUL scriitor al
+# champion_health_evaluations; e READ-ONLY față de model_champions.
+# ════════════════════════════════════════════════════════════════════════════
+
+def get_champion_served_outcomes(
+    algorithm_family: str, league_scope: str, since_date: str | None = None,
+) -> list[dict]:
+    """Predicțiile SERVITE ale campionului, deja rezolvate (scorabile) — rânduri
+    din match_history cu prob_*_pred ȘI actual_result prezente, ordonate
+    cronologic DETERMINIST după (kickoff_date, fixture_id). Substratul evaluării
+    de sănătate (R2.4).
+
+    Adaptor NEUTRU (F-A/F-B audit): filtrează + sortează determinist + întoarce
+    TOATE rezultatele. Dimensionarea ferestrei (ex. „ultimele 200") aparține
+    Champion Guardian (R2.4), nu acestui strat de date — aceeași separare de
+    responsabilități ca în R1. Ordine TOTALĂ prin cheia secundară fixture_id:
+    kickoff_date e TEXT dată-only → mai multe meciuri/zi; fără cheie secundară
+    ordinea n-ar fi reproductibilă la trend.
+
+    Atribuire temporală (ADR-037 §9, acceptată Stage 1): `since_date` =
+    promoted_at-ul campionului ca dată-only `YYYY-MM-DD` (kickoff_date >=
+    since_date), fiindcă prob_*_pred nu poartă identitatea modelului servitor.
+    `league_scope="all"` e SENTINEL (nu filtrează liga, ca în
+    continuous_learning._count_finished_matches); altfel filtrează
+    match_history.league. Listă goală = stare legitimă (ex. 0 scorabile,
+    ADR-037 Risk R-A), nu eroare (Regula #8). READ-ONLY."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        q = (
+            client.table("match_history")
+            .select("fixture_id,home_team,away_team,league,kickoff_date,"
+                    "prob_home_pred,prob_draw_pred,prob_away_pred,actual_result")
+            .not_.is_("prob_home_pred", "null")
+            .not_.is_("actual_result", "null")
+        )
+        if league_scope != "all":
+            q = q.eq("league", league_scope)
+        if since_date:
+            q = q.gte("kickoff_date", since_date)
+        res = q.order("kickoff_date", desc=False).order("fixture_id", desc=False).execute()
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Supabase] get_champion_served_outcomes failed pentru %s/%s: %s",
+                        algorithm_family, league_scope, exc)
+        return []
+
+
+def record_champion_health_evaluation(
+    training_run_id: str, algorithm_family: str, league_scope: str,
+    window_end: str, n_matches_evaluated: int,
+    health_state: str, baseline_source: str,
+    brier_live: float | None = None, logloss_live: float | None = None,
+    accuracy_live: float | None = None,
+    brier_baseline: float | None = None, logloss_baseline: float | None = None,
+    accuracy_baseline: float | None = None,
+    stability_indicator: float | None = None,
+    baseline_deviation_flag: bool | None = None, trend_flag: bool | None = None,
+    structural_flag: bool | None = None, stability_flag: bool | None = None,
+) -> bool:
+    """Persistă o evaluare de sănătate ca fapt IMUABIL (ADR-037/R2). `upsert`
+    cu on_conflict pe UNIQUE (training_run_id, n_matches_evaluated) +
+    ignore_duplicates=True => ON CONFLICT DO NOTHING: aceeași fereastră (același
+    n_matches_evaluated) nu poate scrie un rând nou sau modifica unul existent —
+    niciodată UPDATE, niciodată check-then-act. Tipar identic cu
+    record_challenger_evaluation. True dacă rândul e scris SAU exista deja."""
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("champion_health_evaluations").upsert({
+            "training_run_id": training_run_id,
+            "algorithm_family": algorithm_family, "league_scope": league_scope,
+            "window_end": window_end, "n_matches_evaluated": n_matches_evaluated,
+            "health_state": health_state, "baseline_source": baseline_source,
+            "brier_live": brier_live, "logloss_live": logloss_live, "accuracy_live": accuracy_live,
+            "brier_baseline": brier_baseline, "logloss_baseline": logloss_baseline,
+            "accuracy_baseline": accuracy_baseline,
+            "stability_indicator": stability_indicator,
+            "baseline_deviation_flag": baseline_deviation_flag, "trend_flag": trend_flag,
+            "structural_flag": structural_flag, "stability_flag": stability_flag,
+        }, on_conflict="training_run_id,n_matches_evaluated", ignore_duplicates=True).execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Supabase] record_champion_health_evaluation failed pentru %s (n=%s): %s",
+                        training_run_id, n_matches_evaluated, exc)
+        return False
+
+
+def get_recent_champion_health_evaluations(training_run_id: str, limit: int = 5) -> list[dict]:
+    """Cele mai recente evaluări de sănătate pentru un training_run_id, ordonate
+    descrescător după n_matches_evaluated (ferestre tot mai mari = tot mai
+    recente). Folosit de Champion Guardian pentru regula ferestrelor
+    consecutive. Listă goală = fără istoric încă (legitim, Regula #8)."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("champion_health_evaluations")
+            .select("*")
+            .eq("training_run_id", training_run_id)
+            .order("n_matches_evaluated", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Supabase] get_recent_champion_health_evaluations failed pentru %s: %s",
+                        training_run_id, exc)
+        return []
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # CONSENSUS VALIDATION (ADR-033) — strict append-only, independent de
 # shadow_predictions/challenger_evaluations (infrastructură proprie, per
 # decizia explicită din ADR-033).
@@ -908,6 +1074,37 @@ def rpc_promote_challenger(training_run_id: str, promoted_by: str) -> str:
     res = client.rpc("promote_challenger", {
         "p_training_run_id": training_run_id,
         "p_promoted_by": promoted_by,
+    }).execute()
+    return res.data
+
+
+def rpc_rollback_champion(
+    algorithm_family: str, league_scope: str,
+    expected_predecessor_training_run_id: str, reason: str, rolled_back_by: str,
+) -> str:
+    """Apelează funcția Postgres `rollback_champion` (migrarea 014) —
+    ADR-037/Contract de Atomicitate: o singură tranzacție, ambele efecte pe
+    model_champions (supersedare campion activ + reactivare predecesor prin
+    rând nou) aplicate atomic sau deloc. Întoarce 'rolled_back' | 'already_active'.
+
+    EXCEPȚIE deliberată de la convenția restului fișierului (return None/False
+    la eșec), simetrică cu `rpc_promote_challenger`: aici excepția e lăsată să
+    urce necontrolat — mesajul exact al unui RAISE EXCEPTION server-side
+    (precondiție structurală nesatisfăcută, `no_predecessor`,
+    `predecessor_mismatch` de la garda compare-and-swap, sau cursă concurentă)
+    e informație pe care apelantul trebuie s-o vadă exact. `learning_core/
+    rollback_service.py` prinde această excepție la propriul nivel și o mapează
+    la `RollbackResult(status="rejected", reason=str(exc))` — el rămâne punctul
+    unde nicio excepție nu mai scapă necontrolat mai departe."""
+    client = get_client()
+    if client is None:
+        raise RuntimeError("Supabase indisponibil — imposibil de apelat rollback_champion")
+    res = client.rpc("rollback_champion", {
+        "p_algorithm_family": algorithm_family,
+        "p_league_scope": league_scope,
+        "p_expected_predecessor_training_run_id": expected_predecessor_training_run_id,
+        "p_reason": reason,
+        "p_rolled_back_by": rolled_back_by,
     }).execute()
     return res.data
 

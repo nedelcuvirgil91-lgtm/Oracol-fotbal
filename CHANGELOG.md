@@ -2,6 +2,204 @@
 
 Toate schimbările notabile ale proiectului sunt documentate aici.
 
+## [Nelansat] — Learning Core: Orchestrare (ADR-037, Stage R3) — cod complet, NEMERGE-UIT pe `main`
+
+Cablarea Champion Guardian (R2) + Rollback Engine (R1) în bucla `continuous_learning`
+(ADR-030): Faza D nouă (evaluează sănătatea campionului activ, propune rollback dacă
+recomandat) + extinderea Fazei C (execută rollback-ul aprobat). Pură orchestrare —
+niciun prag/metrică recalculat, Guardian și Rollback Service rămân owneri unici ai
+logicii lor. **Merge pe `main` amânat deliberat** — vezi §„Descoperire critică" mai jos.
+
+### Adăugat
+- **R3.1 — Faza D (read-only)**: `_phase_d_champion_health` — evaluează campionul
+  activ prin `champion_guardian.evaluate_champion_health()`, jurnalizează rezultatul
+  într-un `automation_run` (`champion_health_check`, T2). Zero efect de decizie.
+- **R3.2A — Propunere T3a de rollback**: dacă Guardian recomandă rollback, Faza D
+  propune o decizie T3a (`rollback_candidate`), cu două gărzi obligatorii:
+  - **gardă anti-ping-pong** — un campion deja reactivat printr-un rollback anterior
+    (`rollback_service.is_rollback_promoted()`, singurul loc care interpretează
+    formatul `promoted_by`) nu declanșează automat un al doilea rollback — lanțul
+    automat plafonat la un singur pas (ADR-037 §14);
+  - **gardă R3-Risk-1** — `propose_decision()` suprascrie evidence-ul oricărei
+    decizii deschise pe același target; Faza D sare peste propunere dacă există deja
+    o decizie deschisă, ca să nu stivuiască peste ea.
+- **R3.2A.1 — Execution Contract: ținta rollback-ului înghețată la propunere**
+  (descoperire dintr-un Execution Readiness Review, cerut explicit înainte de a
+  scrie codul de execuție): `evidence` capătă `current_training_run_id` +
+  `predecessor_training_run_id`, fixate la momentul propunerii — simetric cu
+  `promote_challenger` (target fix, nu recalculat). Motiv: `get_champion_predecessor()`
+  derivă predecesorul DINAMIC din campionul activ curent — fără înghețare, un retry
+  peste timp (proces mort între RPC și `commit_decision`) ar recalcula un predecesor
+  diferit, producând un rollback în lanț neintenționat.
+- **R3.2B — Execuția rollback-ului aprobat, cu țintă fixă (CAS pinned)**: Faza C
+  extinsă (`_phase_c_execute_rollback`) citește **exclusiv** ținta înghețată din
+  evidence, niciodată recalculată. `rollback_service.rollback_champion()` primește
+  un parametru opțional nou, `expected_predecessor_training_run_id` — transmis
+  explicit, folosit direct ca sămânța CAS; omis (`None`), comportamentul R1 (cale
+  manuală) rămâne neschimbat. RPC 014 **neatins** — CAS-ul deja existent din R1 e
+  singura sursă de adevăr pentru validare. Testat explicit: retry după crash (nimic
+  altceva schimbat) → `already_active`; retry după schimbare externă de stare →
+  `predecessor_mismatch` → `rejected`, niciodată un rollback peste o stare învechită.
+- **R3.5 — Verificare live, read-only (Production Topology Audit)**: confirmă zero
+  mutație/efect secundar din codul R3 pe Supabase `Prediction` — dar cu o descoperire
+  semnificativă (vezi mai jos).
+- **R3.7 — Flag-uri de deployment dedicate**: `champion_guardian_enabled` (gatează
+  exclusiv Faza D) + `champion_guardian_proposals_enabled` (gate separat, doar pentru
+  propunerea T3a) — ambele implicit `False`, independente de `learning_core_enabled`
+  (rămas exclusiv al Fazelor A/B/C, neschimbat). Oglindește tiparul deja stabilit de
+  ADR-033 (`consensus_capture_enabled`/`consensus_validation_enabled`).
+- **26 de teste noi** (`tests/test_continuous_learning_rollback.py`) + **9 teste noi**
+  (`tests/test_rollback_service.py`, helper `is_rollback_promoted` + parametrul
+  `expected_predecessor_training_run_id`) + gărzi AST actualizate.
+
+### Descoperire critică — merge pe `main` amânat deliberat
+Auditul R3.5 a găsit `model_config.learning_core_enabled = true` deja activ în
+producție (pre-existent, susține bucla ADR-030/Fazele A/B/C, neînrudit cu R3) — și
+`.github/workflows/continuous_learning.yml` rulează pe `main`, care nu conține deloc
+codul R3. Consecință: un merge simplu, fără flag dedicat, ar fi activat Faza D
+automat la prima rulare programată de după merge, fără niciun pas de activare
+deliberat — încălcând separarea intenționată „R3 (cod gata) ≠ R4 (activare
+deliberată)". R3.7 (flag-urile dedicate) închide acest gol înainte de orice merge.
+Detalii complete: `docs/DEPLOYMENT/ADR037_DEPLOYMENT_PLAN.md`.
+
+### Documentație
+- `docs/04_LEARNING_CORE/R3_IMPLEMENTATION_CHECKLIST.md` — reconciliat cu execuția
+  reală (R3.2A/R3.2A.1/R3.2B, nu planul inițial R3.2/R3.3).
+- `docs/04_LEARNING_CORE/CHAMPION_GUARDIAN_IMPLEMENTATION.md` §17 — stare de
+  implementare R3 completă.
+- `docs/DEPLOYMENT/ADR037_DEPLOYMENT_PLAN.md` (nou) — manual de lansare.
+- `docs/00_GOVERNANCE/ARCHITECTURE_STATE.md` (nou) — sursă unică de adevăr pentru
+  starea proiectului (ADR-uri implementate, branch, ce e pe `main`, ce rulează live,
+  ce e activat prin flag-uri).
+
+## [Nelansat] — Learning Core: Champion Guardian (ADR-037, Stage R2)
+
+Evaluator **read-only** al sănătății campionului activ: clasifică starea în cinci
+valori și persistă fapte imuabile în `champion_health_evaluations`. NU promovează,
+NU face rollback, NU orchestrează, NU atinge servirea — doar citește, clasifică,
+persistă. Fără cablare în Continuous Learning (R3), fără activare (R4).
+
+### Adăugat
+- **R2.1 — migrarea 015 (`database/migrations/015_champion_health.sql`)**: tabela
+  `champion_health_evaluations`, aditivă, **append-only**, RLS activ,
+  `UNIQUE(training_run_id, n_matches_evaluated)` (aceeași fereastră → un singur
+  rând, pentru totdeauna), `CHECK health_state IN` (5 valori),
+  `CHECK baseline_source IN` (`promotion_evaluation`/`trend_only`/`manual_override`),
+  FK către `training_runs`, două indexuri. Imuabilitatea e garantată de
+  `UNIQUE + ON CONFLICT DO NOTHING` (precedent `challenger_evaluations`, ADR-018),
+  **fără trigger**.
+- **R2.3 — `supabase_client`**: `get_champion_served_outcomes()` (doar rânduri
+  scorabile — `prob_home_pred` ȘI `actual_result` prezente, `kickoff_date ≥
+  since_date`, ordine totală `(kickoff_date, fixture_id)`),
+  `record_champion_health_evaluation()` (INSERT idempotent, `on_conflict=
+  "training_run_id,n_matches_evaluated"`, `ignore_duplicates=True`),
+  `get_recent_champion_health_evaluations()` (istoric DESC după
+  `n_matches_evaluated`).
+- **R2.4 — `learning_core/champion_guardian.py`**: punct unic de intrare public
+  `evaluate_champion_health(algorithm_family, league_scope)`; patru dimensiuni de
+  sănătate (structural, deviație de la baseline, trend 50/50, stabilitate
+  informativă) reduse la o singură clasificare într-un punct unic de decizie
+  (`_classify_champion_health`). Reutilizează `shadow_testing._brier`. Constante
+  stabilite: `MIN_MATCHES_FOR_HEALTH=30`, `BASELINE_DEGRADATION_MARGIN=0.10`,
+  `TREND_DEGRADATION_MARGIN=0.10`, `CONSECUTIVE_DEGRADED_WINDOWS=2`,
+  `STABILITY_DISPERSION_THRESHOLD=0.20`. Prioritatea clasificării: **Critical
+  (structural) > InsufficientData (n<MIN) > Degrading (consecutiv) > Watch >
+  Healthy**.
+  - **Politica de persistare**: `n==0` → return-only (Critical structural e
+    returnat, dar NU persistat — F3); `n≥1` → persistă exact o dată per fereastră,
+    idempotent.
+  - **Regula ferestrelor consecutive (F1)**: `_count_consecutive_degraded` exclude
+    rândurile cu `n_matches_evaluated >= current_n` — o rerulare pe aceeași
+    fereastră nu mai dublează numărătoarea, nu mai escaladează fals Watch →
+    Degrading.
+- **R2.5–R2.7 — teste** (35 total, fără rețea): `test_champion_guardian.py` (21 —
+  toate cele 5 stări, prioritatea clasificatorului, regresie F1 unit +
+  end-to-end, persistență, best-effort); `test_supabase_client_champion_health.py`
+  + `test_champion_guardian_ownership.py` (14 — wrappere pe client fabricat +
+  gărzi AST de ownership).
+- **R2.7 — gărzi AST de ownership**: `champion_guardian` NU importă
+  `promotion_service`/`rollback_service`/`oracle_engine`/`continuous_learning`, NU
+  referențiază promovare/rollback/`automation_runs`; `record_champion_health_
+  evaluation` are un singur apelant de producție (Guardian). Impune mecanic
+  granița R2 vs. R3: Guardian scrie DOAR `champion_health_evaluations`.
+- **R2.8 — verificare de integrare `validated without state mutation`**: pe DB
+  live, `champion_health_evaluations` = 0 rânduri, 3 campioni activi neatinși.
+  Calea statistică live nu a putut fi exercitată pe date reale fiindcă
+  **`scoreable = 0`** (zero rânduri `match_history` cu `prob_home_pred` ȘI
+  `actual_result`); corectitudinea e acoperită integral de cele 35 de teste
+  sintetice.
+
+### Limitare operațională
+Champion Guardian este complet implementat și testat, însă validarea live a căii
+statistice (Healthy/Watch/Degrading bazate pe meciuri scorabile) este amânată
+până când `match_history` conține predicții servite care au și rezultat
+(`scoreable > 0`). În starea actuală (`scoreable = 0`), Guardian intră în
+`insufficient_data` și nu produce mutații de stare.
+
+### Notă operațională (disciplină de deployment)
+- Migrarea 015 a fost aplicată prin **Supabase SQL Editor**, nu prin
+  `apply_migration` (conexiunea MCP în mod read-only la momentul aplicării) —
+  identic cu 014. Consecință: tabela NU apare în tracker-ul „Database Migrations"
+  al Supabase (oprit la `013`). **Sursa canonică rămâne fișierul comitat**
+  `database/migrations/015_champion_health.sql`.
+
+## [Nelansat] — Learning Core: Rollback Engine (ADR-037, Stage R1)
+
+Închiderea ciclului de viață al campionului — mecanism de rollback append-only,
+simetric (dar separat) de Promotion, care reactivează predecesorul unui campion
+degradat. Doar fundația SQL + serviciul Python; fără Champion Guardian (R2),
+fără orchestrare/apelanți automați (R3), fără activare (R4).
+
+### Adăugat
+- **R1.1 — migrarea 014 (`database/migrations/014_rollback.sql`)**: funcția
+  Postgres `rollback_champion(algorithm_family, league_scope,
+  expected_predecessor_training_run_id, reason, by)` — eveniment de domeniu
+  „Rollback Champion", **append-only** (retrage campionul activ, reactivează
+  predecesorul printr-un rând nou), o singură tranzacție atomică pe
+  `model_champions`, cu **gardă compare-and-swap** (predecesor derivat
+  server-side sub lock, comparat cu cel așteptat → `predecessor_mismatch` la
+  neconcordanță). Oglindește `promote_challenger` (005); nu atinge
+  `challengers`, triggerul de imuabilitate (005), sau alte tabele.
+  - Modificări din auditul pre-R1: gardă `NULL` explicită pe
+    `expected_predecessor` (previne ocolirea CAS prin logică trivalentă SQL);
+    derivare deterministă a predecesorului (`ORDER BY superseded_at DESC
+    LIMIT 1` — predecesorul imediat, ADR-037 §3).
+- **R1.2 — deploy + verificare** pe proiectul `Prediction`: funcția aplicată și
+  verificată read-only — semnătură corectă (5×`text` → `text`), owner/privilegii
+  **identice cu `promote_challenger`** (`service_role` are `EXECUTE`), **zero
+  rânduri modificate** (conturi `model_champions`/`challengers`/`training_runs`/
+  `challenger_evaluations` = baseline), trigger 005 + `promote_challenger`
+  intacte, invariantul „un singur campion activ" respectat.
+- **R1.3 — `learning_core/rollback_service.py`**: owner exclusiv al evenimentului
+  „Rollback Champion", simetric cu `promotion_service.py`. Precondiții în Python
+  ÎNAINTE de RPC (motiv ∈ set de 6 → citire predecesor → validare artefact
+  predecesor), CAS (predecesorul validat trimis ca `expected_predecessor`),
+  niciodată nu propagă excepții (`RollbackResult`), izolat, declanșare manuală.
+- **R1.4 — `supabase_client`**: `get_champion_predecessor()` (derivă predecesorul
+  imediat, `ORDER BY superseded_at DESC LIMIT 1`, oglindind RPC-ul) și
+  `rpc_rollback_champion()` (wrapper simetric cu `rpc_promote_challenger`).
+- **R1.5–R1.7 — teste** (29 total, fără rețea): comportament serviciu (16,
+  fail-fast + CAS + idempotență + excepții), wrapper-e `supabase_client` (client
+  fabricat), gărzi AST de ownership (`rpc_rollback_champion` un singur apelant;
+  `rollback_service` izolat; nu importă `shadow_testing`).
+- **R1.8 — verificare de integrare `validated without state mutation`**: pe DB
+  live, cele 3 gărzi ale RPC-ului confirmate prin căi negative (motiv invalid,
+  `expected_predecessor` NULL, fără campion activ) — toate ridică excepție înainte
+  de orice scriere; `model_champions` neschimbat (4 rânduri, 3 activi, 0 rollback).
+  **Happy-path (swap-ul atomic real) e DEFERAT** deliberat: presupune modificarea
+  campionului activ din producție și se va executa doar într-o operație controlată
+  (prima utilizare reală guvernată, R2/R3, sau un mediu dedicat).
+
+### Notă operațională (disciplină de deployment)
+- Migrarea 014 a fost aplicată prin **Supabase SQL Editor**, nu prin
+  `apply_migration` (conexiunea MCP era în mod read-only în momentul aplicării).
+  Consecință: funcția NU apare în tracker-ul „Database Migrations" al Supabase
+  (care se oprește la `013`). **Sursa canonică rămâne fișierul comitat**
+  `database/migrations/014_rollback.sql`. Pe viitor, la folosirea migrării
+  automate (CLI / Supabase migrations), trebuie evitată reaplicarea aceleiași
+  funcții sau sincronizat istoricul migrărilor. Nu e un blocker pentru R1 —
+  doar disciplină operațională de consemnat.
+
 ## [Nelansat] — Database-First Prediction Engine (ADR-035)
 
 Seria D1–D4 mută Prediction Engine-ul pe sursa canonică internă (Supabase
