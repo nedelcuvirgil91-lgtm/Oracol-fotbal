@@ -292,7 +292,7 @@ Fiecare etapă e independent revizuibilă, în disciplina ADR-035 (fail-before/p
 
 ### R2 — Champion Guardian (evaluare read-only)
 - **Scope**: Guardian-ul + cele patru dimensiuni + Health States + `champion_health_evaluations`. Doar evaluare + persistare fapte + propunere; fără execuție.
-- **Fișiere**: `learning_core/champion_guardian.py` (nou); `database/migrations/015_champion_health.sql` (nou, tabela); funcții noi de acces în `supabase_client.py` (scriere/citire health evaluations); teste noi `tests/test_champion_guardian.py`, `tests/test_champion_health_evaluations.py`.
+- **Fișiere**: `learning_core/champion_guardian.py` (nou); `database/migrations/015_champion_health.sql` (nou, tabela); funcții noi de acces în `supabase_client.py` (scriere/citire health evaluations); teste noi `tests/test_champion_guardian.py`, `tests/test_supabase_client_champion_health.py` (numele real livrat — vezi §16.1).
 - **Teste**: clasificare corectă a stării pe ferestre sintetice; regula ferestrelor consecutive (spike izolat → Watch, susținut → Degrading); structural → Critical imediat; `baseline_source` corect (`promotion_evaluation` vs. `trend_only`); imuabilitate/UNIQUE pe rerulare; stabilitatea = doar Watch; gardă AST — Guardian nu scrie `model_champions`.
 - **Criterii de finalizare**: o degradare simulată produce recomandarea corectă; un baseline absent → `trend_only`; suita verde.
 - **Rollback plan**: aditiv — se șterge tabela + funcția + fișierele; nimic existent atins.
@@ -377,7 +377,7 @@ Consemnare a realității livrate (cod + teste), R3.1-R3.7. Normativ față de c
 - **`rollback_service.rollback_champion()`** — extindere aditivă, parametru opțional `expected_predecessor_training_run_id`: transmis explicit din Faza C (ținta fixă, CAS pinned); omis (`None`) pe calea manuală R1, comportament neschimbat.
 - **`rollback_service.is_rollback_promoted()`** — singurul loc din proiect care interpretează formatul `promoted_by`; consumat de Faza D ca gardă anti-ping-pong.
 - **Două flag-uri de deployment dedicate** (`continuous_learning.is_champion_guardian_enabled()` / `is_champion_guardian_proposals_enabled()`) — independente de `learning_core_enabled`, implicit `False` — vezi §17.4.
-- **Teste**: 35 în `tests/test_continuous_learning_rollback.py` (Faza D/C, gărzi, flag-uri) + 9 noi în `tests/test_rollback_service.py` (helper + `expected_predecessor_training_run_id`) + gărzi AST actualizate.
+- **Teste**: 26 în `tests/test_continuous_learning_rollback.py` (Faza D/C, gărzi, flag-uri) + 9 noi în `tests/test_rollback_service.py` (helper + `expected_predecessor_training_run_id`) + gărzi AST actualizate.
 
 ### 17.2 Execution Contract — de ce execuția e idempotentă peste timp
 Descoperire dintr-un Execution Readiness Review (cerut explicit înainte de a scrie codul de execuție): `get_champion_predecessor()` derivă predecesorul **dinamic**, din campionul activ **curent** — un retry peste timp (proces mort între RPC și `commit_decision`) ar recalcula un predecesor diferit (al campionului deja reactivat), producând un rollback în lanț neintenționat. Promotion nu are acest risc (`training_run_id` fix, capturat la propunere).

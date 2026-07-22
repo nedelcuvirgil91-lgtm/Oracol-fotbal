@@ -89,7 +89,7 @@ Nu există ca task separat — execuția Fazei C a fost proiectată de la încep
 
 ### R3.4 — Teste dedicate + gărzi AST de ownership
 *(distribuit incremental în R3.1/R3.2A/R3.2A.1/R3.2B, nu ca task separat — dar acoperirea intenționată există)*
-- **Status real**: ✅ DONE, incremental. Total teste dedicate R3 (R3.1-R3.2B): **35** în `tests/test_continuous_learning_rollback.py` + **9** noi în `tests/test_rollback_service.py` (helper `is_rollback_promoted` + `expected_predecessor_training_run_id`, inclusiv testul de convergență idempotentă și cel de `predecessor_mismatch`) + gărzi AST actualizate în `tests/test_rollback_ownership.py` / `tests/test_champion_guardian_ownership.py` (whitelist `continuous_learning.py` ca importator legitim). Gărzi mecanice pe sursă (nu doar comportamentale): `test_phase_d_never_executes_rollback`, `test_phase_c_execute_rollback_uses_frozen_target_explicitly`, `test_is_rollback_promoted_not_reimplemented_locally`.
+- **Status real**: ✅ DONE, incremental. Total teste dedicate R3 (R3.1-R3.2B): **26** în `tests/test_continuous_learning_rollback.py` + **9** noi în `tests/test_rollback_service.py` (helper `is_rollback_promoted` + `expected_predecessor_training_run_id`, inclusiv testul de convergență idempotentă și cel de `predecessor_mismatch`) + gărzi AST actualizate în `tests/test_rollback_ownership.py` / `tests/test_champion_guardian_ownership.py` (whitelist `continuous_learning.py` ca importator legitim). Gărzi mecanice pe sursă (nu doar comportamentale): `test_phase_d_never_executes_rollback`, `test_phase_c_execute_rollback_uses_frozen_target_explicitly`, `test_is_rollback_promoted_not_reimplemented_locally`.
 
 ### R3.5 — Verificare de integrare live, read-only
 - **Descriere**: pe DB live (`Prediction`), read-only.
@@ -108,7 +108,7 @@ Nu există ca task separat — execuția Fazei C a fost proiectată de la încep
 - **Descriere**: `CHANGELOG.md` (secțiune R3 completă R3.1-R3.7); actualizare `CHAMPION_GUARDIAN_IMPLEMENTATION.md`; **acest fișier**, reconciliat cu execuția reală; document nou `docs/DEPLOYMENT/ADR037_DEPLOYMENT_PLAN.md` (manual de lansare: ce se merge-uiește, ce flag-uri există, ordinea de activare, verificări post-activare, criterii de rollback); document nou `docs/00_GOVERNANCE/ARCHITECTURE_STATE.md` (sursă unică de adevăr, actualizată permanent). NU se ating ADR-037, documente Frozen.
 - **Fișiere**: `CHANGELOG.md`, `docs/04_LEARNING_CORE/CHAMPION_GUARDIAN_IMPLEMENTATION.md`, `docs/04_LEARNING_CORE/R3_IMPLEMENTATION_CHECKLIST.md` (acest fișier), `docs/DEPLOYMENT/ADR037_DEPLOYMENT_PLAN.md` (nou), `docs/00_GOVERNANCE/ARCHITECTURE_STATE.md` (nou).
 - **Dependențe**: R3.5, R3.7.
-- **Status real**: ÎN CURS (acest commit).
+- **Status real**: ✅ DONE — commit `7e0d380`.
 
 ---
 

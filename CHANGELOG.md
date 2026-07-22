@@ -48,7 +48,7 @@ logicii lor. **Merge pe `main` amânat deliberat** — vezi §„Descoperire cri
   propunerea T3a) — ambele implicit `False`, independente de `learning_core_enabled`
   (rămas exclusiv al Fazelor A/B/C, neschimbat). Oglindește tiparul deja stabilit de
   ADR-033 (`consensus_capture_enabled`/`consensus_validation_enabled`).
-- **35 de teste noi** (`tests/test_continuous_learning_rollback.py`) + **9 teste noi**
+- **26 de teste noi** (`tests/test_continuous_learning_rollback.py`) + **9 teste noi**
   (`tests/test_rollback_service.py`, helper `is_rollback_promoted` + parametrul
   `expected_predecessor_training_run_id`) + gărzi AST actualizate.
 

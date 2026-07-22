@@ -14,8 +14,8 @@
 |---|---|
 | Branch default (GitHub Actions rulează pe el) | `main` (verificat: `git remote show origin` → `HEAD branch: main`) |
 | Branch de lucru curent | `claude/continua-faza-1-adr5-o52jat` |
-| Commit-uri branch înaintea lui `main` | 21 (tot lanțul ADR-037 R1-R3) |
-| Commit-uri `main` înaintea branch-ului | 0 (branch-ul e la zi cu `main` pe rest) |
+| Commit-uri branch înaintea lui `main` | 22 (tot lanțul ADR-037 R1-R3, inclusiv R3.6/R3.7) |
+| Commit-uri `main` înaintea branch-ului | 2 (`b1baff0` — închiderea ADR-035 D4, `e17633d` — fix UI #39; ambele neînrudite cu ADR-037; merge verificat curat, fără conflict — `git merge-tree`) |
 | Ultima migrare pe `main` | `013_shadow_provider_recommendations.sql` |
 | Ultima migrare pe branch | `015_champion_health.sql` (014 + 015, doar pe branch) |
 
