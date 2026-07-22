@@ -43,10 +43,14 @@ from mappings import (
 )
 
 # ── Chei API ──────────────────────────────────────────────────────────────────
-ODDS_API_KEY       = "b0e2ab9bcda1d9f4c5ddfe1063c81cd7"
 # [ELIMINAT] FOOTBALL_DATA_KEY hardcodat - migrat in key_manager.py (provider "footballdata")
-WEATHER_API_KEY    = "48a5b54b8ced45cc924153231263005"
-RAPIDAPI_KEY       = "2ff60d8248msh65d53a6d077e4abp145f79jsn980ab63d585f"
+# [ELIMINAT R4.1] ODDS_API_KEY / WEATHER_API_KEY / RAPIDAPI_KEY hardcodate direct
+# aici, duplicate ale valorilor deja existente in key_manager.py (provideri
+# "oddsapi"/"weatherapi"/"freelivefootball") - gasite si documentate in audit
+# (docs/03_ENGINE/API_FOOTBALL_SYNC_V2_AUDIT_2026-07-22.md §13). Migrate acum
+# la self._key_manager.get_api_key_param(...)/get_headers(...), acelasi tipar
+# deja folosit pentru "footballdata" in acest fisier (linia 666/703) - nicio
+# unealta noua, doar extinderea unui tipar deja functional la restul cheilor.
 
 # ── URL-uri ───────────────────────────────────────────────────────────────────
 FOOTBALL_DATA_URL  = "https://api.football-data.org/v4"
@@ -262,14 +266,14 @@ class FootballOracleAPI:
         """Wrapper pentru Free Live Football API (RapidAPI)."""
         return self._get(
             f"{FREE_LF_URL}/{path}",
-            headers={"x-rapidapi-key": RAPIDAPI_KEY, "x-rapidapi-host": FREE_LF_HOST},
+            headers=self._key_manager.get_headers("freelivefootball") or {},
             params=params or {},
         )
 
     # ── Startup validation ────────────────────────────────────────────────
     def _validate_api_keys(self) -> None:
         data = self._get(f"{ODDS_API_URL}/sports",
-                         params={"apiKey": ODDS_API_KEY, "all": "true"})
+                         params={"apiKey": self._key_manager.get_api_key_param("oddsapi"), "all": "true"})
         if not isinstance(data, list):
             logger.warning("[Validate] Could not fetch sport keys."); return
         active = {s["key"] for s in data if not s.get("has_outrights", False)}
@@ -575,7 +579,7 @@ class FootballOracleAPI:
         now = datetime.now(timezone.utc)
         data = self._get(
             f"{ODDS_API_URL}/sports/{sport_key}/events",
-            params={"apiKey": ODDS_API_KEY,
+            params={"apiKey": self._key_manager.get_api_key_param("oddsapi"),
                     "commenceTimeFrom": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "commenceTo": (now + timedelta(days=days_ahead)).strftime("%Y-%m-%dT%H:%M:%SZ")},
         )
@@ -614,7 +618,7 @@ class FootballOracleAPI:
         if cached is not None: return cached
         data = self._get(
             f"{ODDS_API_URL}/sports/{sport_key}/scores",
-            params={"apiKey": ODDS_API_KEY, "daysFrom": days_back},
+            params={"apiKey": self._key_manager.get_api_key_param("oddsapi"), "daysFrom": days_back},
         )
         if not isinstance(data, list): return []
         results: list[dict] = []
@@ -984,7 +988,7 @@ class FootballOracleAPI:
         curent) nu poate afecta niciodată h2h, deja funcțional."""
         return self._get(
             f"{ODDS_API_URL}/sports/{sport_key}/odds",
-            params={"apiKey": ODDS_API_KEY, "regions": "eu",
+            params={"apiKey": self._key_manager.get_api_key_param("oddsapi"), "regions": "eu",
                     "markets": markets, "oddsFormat": "decimal"},
         )
 
@@ -1111,10 +1115,10 @@ class FootballOracleAPI:
         try:
             if target <= today:
                 url    = f"{WEATHER_URL}/current.json"
-                params = {"key": WEATHER_API_KEY, "q": city, "aqi": "no"}
+                params = {"key": self._key_manager.get_api_key_param("weatherapi"), "q": city, "aqi": "no"}
             else:
                 url    = f"{WEATHER_URL}/forecast.json"
-                params = {"key": WEATHER_API_KEY, "q": city, "dt": target, "aqi": "no"}
+                params = {"key": self._key_manager.get_api_key_param("weatherapi"), "q": city, "dt": target, "aqi": "no"}
             # [REPARAT] Ruta prin _get() în loc de self._s.get() direct —
             # singurul apel din get_weather() care ocolea instrumentarea
             # provider_metrics (era numărat doar Odds/Injuries, niciodată

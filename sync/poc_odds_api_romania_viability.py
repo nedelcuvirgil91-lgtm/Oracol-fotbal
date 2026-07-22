@@ -43,8 +43,13 @@ root = Path(__file__).parent.parent
 if str(root) not in sys.path:
     sys.path.insert(0, str(root))
 
+from key_manager import get_key_manager  # noqa: E402
+
 ODDS_API_URL = "https://api.the-odds-api.com/v4"
-ODDS_API_KEY = "b0e2ab9bcda1d9f4c5ddfe1063c81cd7"
+# [ELIMINAT R4.1] valoare hardcodata, duplicat al key_manager.py (provider
+# "oddsapi") - gasit in audit (§13). Rezolvata acum la import, o singura
+# data, pastrand toate cele 5 site-uri de folosire de mai jos neschimbate.
+ODDS_API_KEY = get_key_manager().get_api_key_param("oddsapi")
 
 OFFICIAL_ETAPA_1 = [
     ("FC Voluntari", "FC Botoșani"),

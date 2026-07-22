@@ -35,6 +35,7 @@ from dataclasses import dataclass
 
 from cache_manager import get_cache
 from key_manager import get_key_manager
+from request_manager import get_request_manager  # [ADAUGAT R4.1]
 
 logger = logging.getLogger("FootballOracle.Providers")
 
@@ -77,7 +78,7 @@ class FootballDataProvider(ABC):
         ...
 
     @abstractmethod
-    def get_coaches(self, team_name: str, team_id: int | str) -> list[CoachInfo]:
+    def get_coaches(self, team_name: str, team_id: int | str, league: str) -> list[CoachInfo]:
         ...
 
     def get_player_stats(self, *args, **kwargs):
@@ -112,10 +113,15 @@ class ApiFootballProvider(FootballDataProvider):
     PROVIDER_ID = "apifootball"
     BASE_URL = "https://v3.football.api-sports.io"
 
-    def __init__(self, key_manager=None, cache=None):
+    def __init__(self, key_manager=None, cache=None, request_manager=None):
         self._key_manager = key_manager or get_key_manager()
         self._cache = cache or get_cache()
         self._session = None  # lazy — nu deschidem conexiuni la import
+        # [ADAUGAT R4.1] Request Manager — RAM cache (L0) + dedup in-flight +
+        # gating de buget real (header-e), infasoara _get() fara sa-i schimbe
+        # comportamentul existent (L1/L2, coverage, retry HTTP) — vezi
+        # request_manager.py.
+        self._request_manager = request_manager or get_request_manager()
 
     def _get_session(self):
         if self._session is None:
@@ -161,45 +167,79 @@ class ApiFootballProvider(FootballDataProvider):
         # 2. coverage check — facut de apelant (get_injuries/get_coaches),
         # ca sa poata folosi liga corecta din context; _get ramane generic.
 
-        # 3+4. L1 + L2 cache (ambele deja gestionate de CacheManager.get())
+        # [ADAUGAT R4.1] 3a. L0 — RAM cache (Request Manager), inaintea
+        # oricarei citiri de disk/Supabase - deduplica cererile identice din
+        # acelasi ciclu de evaluare/batch (audit §4/§7, gol confirmat: "Nu
+        # exista azi — cache_manager.py are doar disk (L1) + Supabase (L2)").
+        ram_hit = self._request_manager.get_ram(self.PROVIDER_ID, cache_category, cache_key)
+        if ram_hit is not None:
+            return ram_hit
+
+        # 3b+4. L1 + L2 cache (ambele deja gestionate de CacheManager.get())
         cached = self._cache.get_raw(cache_category, cache_key)
         if cached is not None:
+            self._request_manager.set_ram(self.PROVIDER_ID, cache_category, cache_key, cached)
             return cached
 
-        # 5. HTTP request — abia acum, dupa TOATE verificarile de mai sus
-        headers = self._key_manager.get_headers(self.PROVIDER_ID)
-        if headers is None:
+        # [ADAUGAT R4.1] Gating de buget real (header-e de raspuns anterioare,
+        # daca exista) — "ar trebui sa existe cererea?" (audit §4/§16).
+        # Fail-open pana la primul raspuns real cu header-e citite.
+        if not self._request_manager.should_request(self.PROVIDER_ID):
             return None
 
-        start = time.monotonic()
-        success = False
-        data = None
+        # [ADAUGAT R4.1] Dedup in-flight — daca alt apelant e deja in curs
+        # pentru exact aceeasi cheie, nu duplicam cererea HTTP. Defensiv
+        # (executia curenta e single-threaded), dar corect si ieftin.
+        acquired = self._request_manager.try_acquire_inflight(self.PROVIDER_ID, cache_category, cache_key)
+        if not acquired:
+            logger.debug("[ApiFootball] cerere deja in curs pentru %s/%s — sar peste duplicat", cache_category, cache_key)
+            return None
+
         try:
-            session = self._get_session()
-            r = session.get(f"{self.BASE_URL}/{path}", headers=headers, params=params, timeout=12)
-            success = r.ok
-            if success:
-                data = r.json()
-            else:
-                logger.warning("[ApiFootball] HTTP %s pentru %s", r.status_code, path)
-        except Exception as exc:
-            logger.error("[ApiFootball] Eroare request %s: %s", path, exc)
-        latency_ms = (time.monotonic() - start) * 1000
+            # 5. HTTP request — abia acum, dupa TOATE verificarile de mai sus
+            headers = self._key_manager.get_headers(self.PROVIDER_ID)
+            if headers is None:
+                return None
 
-        self._key_manager.record_request(self.PROVIDER_ID)
+            start = time.monotonic()
+            success = False
+            data = None
+            response_headers = None
+            try:
+                session = self._get_session()
+                r = session.get(f"{self.BASE_URL}/{path}", headers=headers, params=params, timeout=12)
+                success = r.ok
+                response_headers = r.headers
+                if success:
+                    data = r.json()
+                else:
+                    logger.warning("[ApiFootball] HTTP %s pentru %s", r.status_code, path)
+            except Exception as exc:
+                logger.error("[ApiFootball] Eroare request %s: %s", path, exc)
+            latency_ms = (time.monotonic() - start) * 1000
 
-        # 7. actualizare provider_metrics
-        try:
-            import supabase_client as _sb
-            _sb.record_provider_call(self.PROVIDER_ID, path, success, latency_ms)
-        except Exception:
-            pass
+            self._key_manager.record_request(self.PROVIDER_ID)
+            # [ADAUGAT R4.1] Buget real din header-ele oficiale de raspuns
+            # (audit §5/§7) — sursa de adevar mai precisa decat aproximarea
+            # lunara existenta in key_manager.py, neatinsa.
+            if response_headers is not None:
+                self._request_manager.record_response_headers(self.PROVIDER_ID, response_headers)
 
-        # 6. actualizare cache (doar la succes real)
-        if success and data is not None:
-            self._cache.set(cache_category, cache_key, data, provider=self.PROVIDER_ID)
+            # 7. actualizare provider_metrics
+            try:
+                import supabase_client as _sb
+                _sb.record_provider_call(self.PROVIDER_ID, path, success, latency_ms)
+            except Exception:
+                pass
 
-        return data
+            # 6. actualizare cache (doar la succes real)
+            if success and data is not None:
+                self._cache.set(cache_category, cache_key, data, provider=self.PROVIDER_ID)
+                self._request_manager.set_ram(self.PROVIDER_ID, cache_category, cache_key, data)
+
+            return data
+        finally:
+            self._request_manager.release_inflight(self.PROVIDER_ID, cache_category, cache_key)
 
     # ── Rezolvare ID echipă (necesar pentru get_injuries/get_coaches) ────
     def resolve_team_id(self, team_name: str) -> int | None:
@@ -360,7 +400,14 @@ class ApiFootballProvider(FootballDataProvider):
         }
 
     # ── Coaches — structură confirmată exact din documentație ────────────
-    def get_coaches(self, team_name: str, team_id: int | str) -> list[CoachInfo]:
+    def get_coaches(self, team_name: str, team_id: int | str, league: str) -> list[CoachInfo]:
+        # [REPARAT R4.1] Defect real confirmat prin audit (§16, §4): singurul
+        # apel din get_injuries()/get_fixtures() care NU verifica _covered()
+        # inainte de HTTP - o cerere se putea declansa pentru o liga marcata
+        # explicit nesuportata, consumand cota zilnica fara rost. Aliniat
+        # acum la exact acelasi tipar deja folosit de get_injuries().
+        if not self._covered(league, "api_football"):
+            return []
         cache_key = f"team:{team_id}:coaches"
         raw = self._get("coachs", {"team": team_id}, "coaches", cache_key)
         if not raw or "response" not in raw:

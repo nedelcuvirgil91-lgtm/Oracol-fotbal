@@ -38,6 +38,11 @@ def _api(session: _FakeSession) -> oracle_api.FootballOracleAPI:
     api._ttl = 30
     api._cache_mgr = None
     api._dead_keys = set()
+    # [ADAUGAT R4.1] _fetch_market() citește acum cheia Odds API prin
+    # self._key_manager (nu mai există constanta hardcodată ODDS_API_KEY,
+    # migrată la key_manager.py — vezi audit §13, Step 1).
+    from key_manager import get_key_manager
+    api._key_manager = get_key_manager()
     return api
 
 

@@ -1344,8 +1344,8 @@ class FootballOracleEngine:
                     season_year = date.today().year
                 af_home_injuries = self.apifootball.get_injuries(home_name, home_id, league, season_year) if home_id else []
                 af_away_injuries = self.apifootball.get_injuries(away_name, away_id, league, season_year) if away_id else []
-                af_home_coaches  = self.apifootball.get_coaches(home_name, home_id) if home_id else []
-                af_away_coaches  = self.apifootball.get_coaches(away_name, away_id) if away_id else []
+                af_home_coaches  = self.apifootball.get_coaches(home_name, home_id, league) if home_id else []
+                af_away_coaches  = self.apifootball.get_coaches(away_name, away_id, league) if away_id else []
                 apifootball_metadata = {
                     "home_team_id": home_id, "away_team_id": away_id,
                     "home_injuries": [vars(i) for i in af_home_injuries],
