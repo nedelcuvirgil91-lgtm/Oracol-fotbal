@@ -117,18 +117,29 @@ Tabele noi necesare (design, nicio migrare pregătită încă — se face per pa
 
 ## 6. Strategie de migrare provider cu provider
 
-Secvențiere pe risc crescător, exact disciplina deja aplicată la D1-D4 din ADR-035 (un pas mic, testat, verificat live, ÎNAINTE de următorul):
+Secvențiere pe risc crescător, exact disciplina deja aplicată la D1-D4 din ADR-035 (un pas mic, testat, verificat live, ÎNAINTE de următorul). **Corectată post-R-Sync-2 — vezi §6b pentru dovada exactă a corecției, nu doar concluzia.**
 
-1. **API-Football** (injuries/coaches) — deja proiectat (turul anterior), cel mai avansat, cel mai bine înțeles. Prim pas real.
-2. **football-data.org** (formă/standings fallback) — cel mai curat azi, risc minim, fallback rar folosit.
-3. **ESPN** (descoperire fallback) — fallback pur, risc mic.
-4. **TheSportsDB** (stats + ELO naționale) — atenție suplimentară la ELO (singura sursă reală pentru naționale — o eroare aici ar lăsa naționale fără ELO deloc, nu doar „date vechi").
-5. **Weather** — nou tip de tabelă (cache prognoză), independent de restul.
-6. **FreeLF** (formă/standings fallback, NU descoperirea) — separat de rolul de descoperire, migrat întâi ca fallback simplu.
-7. **Odds API** (fallback H2H/formă, NU cotele) — ultimul dintre fallback-uri, cel mai rar folosit real.
-8. **Descoperirea meciurilor** (FreeLF+Odds+football-data+ESPN împreună, `get_matches_for_week`) — **etapă separată, cea mai mare**, după ce toate fallback-urile individuale sunt deja migrate — schimbă o cale folosită de UI, nu doar de predicție.
+1. **API-Football** (injuries/coaches) — ✅ **FINALIZAT, R-Sync-2** (`team_health_snapshot`, migrare 017, commit `0eb0469`).
+2. **football-data.org** — **DOAR** `get_standings_form()`/`get_team_form_fd()` (formă/standings). **Exclus explicit**: `_fetch_matches_fd()` (fixtures) — mutat la pasul 7 (Universal Match Discovery Layer).
+3. **TheSportsDB** (stats + ELO naționale) — atenție suplimentară la ELO (singura sursă reală pentru naționale). **Exclus explicit**: `_fetch_matches_tsdb()` (fixtures) — mutat la pasul 7 (era deja corect scopat așa, confirmat acum consecvent cu §6b).
+4. **Weather** — nou tip de tabelă (cache prognoză), independent de restul.
+5. **FreeLF** (formă/standings fallback) + **Odds API** (fallback H2H/formă). **Exclus explicit, pentru amândoi**: orice rol de descoperire — `_fetch_freelf_matches()` (FreeLF) și `_fetch_events_odds_api()` (Odds API, pasul 1 din `get_matches_for_week` — distinct de `_fetch_market()`/`_fetch_odds()`, calea Frozen de persistare a cotelor, ADR-005/006, neatinsă) — mutate la pasul 7.
+6. **Universal Match Discovery Layer** (redefinit, §6b) — **TOȚI** providerii de fixtures, într-un singur pas: FreeLF, Odds API (events/discovery), football-data.org (fixtures), ESPN, TheSportsDB (fixtures), **și API-Football (fixtures)** — niciun provider tratat separat sau privilegiat. Etapă proprie, ultima înaintea curățării finale — schimbă o cale folosită și de UI, nu doar de predicție.
+7. Doar după pasul 6: eliminarea finală a `self.api` din `oracle_engine.py` — Oracle Engine citește exclusiv Supabase, pentru orice tip de date, de la orice provider.
 
 Fiecare pas: criteriu de succes verificabil (date complete în Supabase pentru un eșantion cunoscut), fail-before/pass-after, aprobare explicită înainte de commit — identic tiparului deja stabilit.
+
+---
+
+## 6b. Corecție de roadmap, post-R-Sync-2 (evidență, nu doar concluzie)
+
+Două constatări, ambele verificate direct în cod, nu presupuse, în urma unui audit scurt cerut explicit înainte de a începe pasul 2 (football-data.org + ESPN):
+
+**1. ESPN nu are nicio responsabilitate în afara descoperirii de meciuri.** Verificat exhaustiv (`grep` pe tot `oracle_api.py`): o singură funcție, `_fetch_matches_espn()` (`oracle_api.py:732`), niciun rol de formă/stats/standings. Migrarea lui izolat, înaintea Universal Match Discovery Layer, ar fi însemnat fie reconstruirea acelei bucăți la pasul 6 (muncă dublată), fie o migrare incompletă (Oracle Engine tot ar depinde de restul cascadei). **Concluzie**: ESPN elimin din pasul „football-data.org + ESPN" — mutat integral la pasul 6.
+
+**2. API-Football fixtures NU e un caz separat — e pasul 6 din exact aceeași funcție** (`get_matches_for_week()`, `oracle_api.py:1239-1253`) pe care Universal Match Discovery Layer o țintește deja pentru FreeLF/Odds/football-data/ESPN/TheSportsDB (pașii 1-5 din aceeași funcție). R-Sync-2 a eliminat DOAR calea de injuries/coaches (`self.apifootball` din `oracle_engine.py`) — calea de fixtures a lui API-Football (`_fetch_matches_api_football()`, via `self.api`) a rămas complet neatinsă, exact ca toate celelalte fallback-uri de descoperire. Tratarea ei ca „deja rezolvată" ar fi lăsat o excepție reală față de principiul 1 din ADR-039 („niciun alt modul... nu apelează direct sau indirect vreun adaptor de provider") — API-Football ar fi rămas singurul provider cu o cale de bypass, doar pentru că o altă parte a lui (injuries/coaches) migrase deja. **Concluzie**: API-Football (fixtures) intră explicit în Universal Match Discovery Layer, ca oricare alt provider — „încă un provider din ecosistem, nu unul privilegiat".
+
+**Notă legată de Coverage Cache** (`api_football_league_coverage`, migrare 016, 0 rânduri azi): coverage per ligă+sezon pentru fixtures e exact cazul de utilizare pentru care schema aceea a fost proiectată. Universal Match Discovery Layer (pasul 6) e locul natural unde ar putea începe, în sfârșit, să fie populată — semnalat aici ca observație pentru decizia de la momentul acelui pas, nu decis acum.
 
 ---
 
@@ -138,16 +149,16 @@ Fiecare pas: criteriu de succes verificabil (date complete în Supabase pentru u
 
 ---
 
-## 8. Roadmap de implementare (propus, neaprobat, fără cod)
+## 8. Roadmap de implementare (actualizat post-R-Sync-2, §6b)
 
-1. Formalizare `SyncAdapter` (interfață) — generalizare a `FootballDataProvider`, cu `validate()` ca pas nou explicit.
-2. Migrare API-Football (§6, pasul 1) — primul adaptor real, folosind infrastructura deja construită în R4.1.
-3. Migrare football-data.org + ESPN (§6, pașii 2-3) — risc minim, validează tiparul pe cazuri simple.
-4. Migrare TheSportsDB (§6, pasul 4) — cu verificare specială pentru ELO naționale.
-5. `weather_forecast_cache` + adaptor Weather (§6, pasul 5).
-6. Migrare FreeLF formă/standings + Odds API fallback (§6, pașii 6-7).
-7. **Descoperirea meciurilor** (§6, pasul 8) — etapă proprie, plan separat, aprobare separată.
-8. Doar după toate cele de mai sus: eliminarea completă a `self.api`/`self.apifootball` din `oracle_engine.py` — Oracle Engine citește exclusiv Supabase.
+1. ✅ Formalizare `SyncAdapter` (interfață) — **FINALIZAT, R-Sync-1**.
+2. ✅ Migrare API-Football injuries/coaches (§6, pasul 1) — **FINALIZAT, R-Sync-2**.
+3. Migrare football-data.org — **DOAR** formă/standings (§6, pasul 2) — scope corectat, ESPN exclus.
+4. Migrare TheSportsDB — stats + ELO naționale (§6, pasul 3), fixtures exclus.
+5. `weather_forecast_cache` + adaptor Weather (§6, pasul 4).
+6. Migrare FreeLF formă/standings + Odds API fallback H2H/formă (§6, pasul 5) — orice rol de descoperire exclus explicit, pentru amândoi.
+7. **Universal Match Discovery Layer** (§6, pasul 6; §6b) — etapă proprie, cea mai mare: FreeLF + Odds API + football-data.org + ESPN + TheSportsDB + **API-Football**, toți ca fixtures-adaptori `SyncAdapter`, scriind în `scheduled_fixtures`. Plan separat, aprobare separată.
+8. Doar după toate cele de mai sus: eliminarea completă a `self.api` din `oracle_engine.py` — Oracle Engine citește exclusiv Supabase, pentru orice tip de date, de la orice provider, fără excepție.
 
 Fiecare pas urmează disciplina deja stabilită: design → implementare → teste → audit → aprobare explicită → commit → confirmare punct de restaurare.
 
