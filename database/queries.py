@@ -489,6 +489,74 @@ def get_h2h_from_history(home: str, away: str, last_n: int = 10) -> list[dict]:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# TEAM HEALTH — Injuries + Coaches Database-First (ADR-039, R-Sync-2)
+# ════════════════════════════════════════════════════════════════════════════
+
+def get_team_health(team: str) -> dict | None:
+    """
+    Sursa canonică pentru starea de sănătate a unei echipe (injuries+coaches)
+    folosită de servirea live (oracle_engine.evaluate_match()) — ADR-039,
+    R-Sync-2. Înlocuiește apelul live către ApiFootballProvider din Oracle
+    Engine — citire STRICT din Supabase, populată separat de Sync Layer
+    (sync/sync_team_health.py), niciodată direct de aici.
+
+    Identitate canonică prin nume normalizat (ADR-039 Principiul 7) — NU
+    prin ID-ul numeric de provider; `team` trebuie să fie deja trecut prin
+    `normalize_team_name()` de apelant, exact ca la `get_latest_team_elo()`/
+    `get_h2h_from_history()`.
+
+    Întoarce None dacă echipa nu a fost încă sincronizată — Regula #8,
+    tratat de apelant ca „necunoscut", NICIODATĂ ca motiv de fallback live
+    către provider (spre deosebire de `get_latest_team_elo()`/
+    `get_h2h_from_history()`, care au voie să cadă pe cascada de provideri
+    sub ADR-035 — ADR-039 elimină explicit acea excepție pentru providerii
+    deja migrați la Sync Layer).
+    """
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("team_health_snapshot")
+            .select("*")
+            .eq("team_name_canonical", team)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Queries] get_team_health failed pentru %s: %s", team, exc)
+        return None
+
+
+def upsert_team_health(
+    team: str, injuries: list[dict], coaches: list[dict],
+    source_provider: str = "apifootball",
+) -> bool:
+    """
+    Owner unic de scriere pentru `team_health_snapshot` (disciplina
+    ADR-036) — exclusiv Sync Layer (`sync/sync_team_health.py`), niciodată
+    Oracle Engine.
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("team_health_snapshot").upsert({
+            "team_name_canonical": team,
+            "injuries": injuries,
+            "coaches": coaches,
+            "source_provider": source_provider,
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="team_name_canonical").execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Queries] upsert_team_health failed pentru %s: %s", team, exc)
+        return False
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # ML STATUS
 # ════════════════════════════════════════════════════════════════════════════
 

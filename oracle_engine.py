@@ -66,12 +66,6 @@ except ModuleNotFoundError:
     INJURY_MANAGER_AVAILABLE = False
 
 try:
-    from football_providers import ApiFootballProvider
-    API_FOOTBALL_AVAILABLE = True
-except ModuleNotFoundError:
-    API_FOOTBALL_AVAILABLE = False
-
-try:
     from cache_manager import get_cache
     CACHE_MANAGER_AVAILABLE = True
 except ModuleNotFoundError:
@@ -90,7 +84,7 @@ except ModuleNotFoundError:
     SUPABASE_MODULE_AVAILABLE = False
 
 try:
-    from database.queries import get_latest_team_elo, get_h2h_from_history
+    from database.queries import get_latest_team_elo, get_h2h_from_history, get_team_health
     DB_QUERIES_MODULE_AVAILABLE = True
 except ModuleNotFoundError:
     DB_QUERIES_MODULE_AVAILABLE = False
@@ -413,9 +407,11 @@ class FootballOracleEngine:
             InjuryManager(api=self.api, cache=self.cache)
             if INJURY_MANAGER_AVAILABLE else None
         )
-        # [ADAUGAT] API-Football (injuries + coaches) - vezi ADR-002/ADR-003.
-        # Foloseste aceleasi key_manager/cache singleton-uri deja existente.
-        self.apifootball = ApiFootballProvider() if API_FOOTBALL_AVAILABLE else None
+        # [ELIMINAT R-Sync-2, ADR-039] self.apifootball (ApiFootballProvider)
+        # eliminat — Oracle Engine nu mai apeleaza niciun provider extern
+        # pentru injuries/coaches, citeste exclusiv Supabase (team_health_snapshot,
+        # database.queries.get_team_health()). Sincronizarea reala ruleaza acum
+        # separat, in Sync Layer (sync/sync_team_health.py, apifootball_health_adapter.py).
 
         self._initialize_ml()
 
@@ -1325,36 +1321,29 @@ class FootballOracleEngine:
             home_xg, home_xg_pre, away_xg, away_xg_pre,
         )
 
-        # ── API-Football: injuries + coaches (colectare automată) ──────────
-        # [ADAUGAT] Foloseste automat providerul cand e nevoie de injuries/
-        # coaches - conform integrarii cerute. NU modifica home_xg/away_xg
-        # (productia ramane neschimbata) - datele merg doar in shadow log
-        # (gated de shadow_mode_enabled), consistent cu ADR-002.
+        # ── Team Health (injuries + coaches) — Database-First (R-Sync-2, ADR-039) ──
+        # [ACTUALIZAT R-Sync-2] Nu mai apeleaza niciun provider extern — citeste
+        # exclusiv Supabase (team_health_snapshot), populata separat de Sync Layer
+        # (sync/sync_team_health.py, apifootball_health_adapter.py), niciodata aici.
+        # Lipsa unei intrari (echipa inca nesincronizata) inseamna "necunoscut"
+        # (Regula #8) — NICIODATA fallback live catre provider (ADR-039 elimina
+        # explicit acea exceptie, spre deosebire de ELO/H2H sub ADR-035).
+        # NU modifica home_xg/away_xg (productia ramane neschimbata) - datele merg
+        # doar in shadow log (gated de shadow_mode_enabled), consistent cu ADR-002.
         apifootball_metadata: dict = {}
-        if self.apifootball:
+        if DB_QUERIES_MODULE_AVAILABLE:
             try:
-                home_id = self.apifootball.resolve_team_id(home_name)
-                away_id = self.apifootball.resolve_team_id(away_name)
-                kickoff = match.get("kickoff_date") or ""
-                try:
-                    ko_year = int(kickoff[:4]) if kickoff else date.today().year
-                    ko_month = int(kickoff[5:7]) if len(kickoff) >= 7 else 7
-                    season_year = ko_year if ko_month >= 7 else ko_year - 1
-                except (ValueError, TypeError):
-                    season_year = date.today().year
-                af_home_injuries = self.apifootball.get_injuries(home_name, home_id, league, season_year) if home_id else []
-                af_away_injuries = self.apifootball.get_injuries(away_name, away_id, league, season_year) if away_id else []
-                af_home_coaches  = self.apifootball.get_coaches(home_name, home_id, league) if home_id else []
-                af_away_coaches  = self.apifootball.get_coaches(away_name, away_id, league) if away_id else []
-                apifootball_metadata = {
-                    "home_team_id": home_id, "away_team_id": away_id,
-                    "home_injuries": [vars(i) for i in af_home_injuries],
-                    "away_injuries": [vars(i) for i in af_away_injuries],
-                    "home_coaches": [vars(c) for c in af_home_coaches],
-                    "away_coaches": [vars(c) for c in af_away_coaches],
-                }
+                home_health = get_team_health(normalize_team_name(home_name))
+                away_health = get_team_health(normalize_team_name(away_name))
+                if home_health or away_health:
+                    apifootball_metadata = {
+                        "home_injuries": (home_health or {}).get("injuries", []),
+                        "away_injuries": (away_health or {}).get("injuries", []),
+                        "home_coaches":  (home_health or {}).get("coaches", []),
+                        "away_coaches":  (away_health or {}).get("coaches", []),
+                    }
             except Exception as exc:
-                logger.warning("[ApiFootball] Colectare eșuată pentru %s vs %s: %s", home_name, away_name, exc)
+                logger.warning("[TeamHealth] Citire eșuată pentru %s vs %s: %s", home_name, away_name, exc)
 
         ph, pd, pa, top_scores = self._poisson_model(home_xg, away_xg)
         # [ADAUGAT — ADR-031] Instantaneu al ieșirii brute a motorului
@@ -1490,7 +1479,7 @@ class FootballOracleEngine:
         # productia ramane 100% neschimbata. Foloseste predictia FINALA
         # (ph/pd/pa) - acest experiment inca nu propune o varianta
         # alternativa de xG, doar capteaza contextul pt analiza viitoare.
-        if self.apifootball and apifootball_metadata:
+        if apifootball_metadata:
             self.log_shadow_experiment(
                 pred=pred, experiment_name="apifootball_injuries_coaches", experiment_version="v1",
                 home_xg=home_xg, away_xg=away_xg, prob_home=ph, prob_draw=pd, prob_away=pa,
