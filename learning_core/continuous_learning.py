@@ -19,11 +19,12 @@ Patru faze, independente, idempotente, sigure la rerulare — pentru fiecare
      de evaluare (shadow logging acumulat din trafic live, nu sintetic).
   B. Antrenare — nu există Challenger activ? -> verifică pragul de volum,
      antrenează unul nou dacă e atins.
-  D. Sănătatea campionului (ADR-037, Stage R3.1) — evaluează campionul ACTIV
-     prin Champion Guardian și jurnalizează rezultatul. STRICT READ-ONLY în
-     R3.1: nu propune nicio decizie T3a, nu apelează serviciul de rollback —
-     doar demonstrează integrarea Guardian în buclă, fără efect de decizie.
-     Propunerea de rollback e R3.2, neimplementată încă.
+  D. Sănătatea campionului (ADR-037) — evaluează campionul ACTIV prin
+     Champion Guardian și jurnalizează rezultatul (Stage R3.1). Dacă
+     Guardian recomandă rollback, propune o decizie T3a în decision feed —
+     NICIODATĂ automat, doar propunere (Stage R3.2A). Execuția rollback-ului
+     aprobat e Stage R3.2B, separată, neimplementată încă — Faza C rămâne
+     neschimbată până atunci.
   C. Execuție — există decizii T3a aprobate de om, neexecutate încă? ->
      finalizează promovarea (fără coadă/scheduler nou — aceeași rulare
      periodică acoperă și acest caz).
@@ -47,7 +48,7 @@ import logging
 import automation_runs as ar
 import supabase_client as sb
 from database.queries import get_client
-from learning_core import challenger_evaluation, challenger_manager, champion_guardian, model_registry
+from learning_core import challenger_evaluation, challenger_manager, champion_guardian, model_registry, rollback_service
 from learning_core.promotion_service import promote_challenger
 from learning_core.training_runner import run_training
 from ml_predictor import MIN_SAMPLES_TO_TRAIN
@@ -58,9 +59,10 @@ PRODUCER = "ADR-030"
 MIN_MATCHES_FOR_EVALUATION = 200
 _DEFAULT_CONFIG = {"learning_core_enabled": False}
 
-# TTL provizoriu pentru deciziile T3a de promovare — valoare de implementare,
-# nu decizie de arhitectură (per Open Question ADR-030, netratată ca blocantă).
-_PROMOTION_DECISION_TTL_HOURS = 168.0  # 7 zile
+# TTL provizoriu pentru deciziile T3a (promovare SAU rollback) — valoare de
+# implementare, nu decizie de arhitectură (per Open Question ADR-030,
+# netratată ca blocantă).
+_T3A_DECISION_TTL_HOURS = 168.0  # 7 zile
 
 
 def is_enabled() -> bool:
@@ -89,7 +91,7 @@ def run_cycle() -> dict:
     summary = {
         "enabled": True, "checked": 0, "trained": 0, "evaluated": 0,
         "proposed": 0, "committed": 0, "guard_failures": 0,
-        "health_checked": 0,
+        "health_checked": 0, "rollback_proposed": 0,
     }
 
     for name, version in model_registry.list_available():
@@ -202,7 +204,7 @@ def _handle_candidate_for_promotion(
         rollback_plan="revert la campionul anterior din model_champions (supersede automat de promote_challenger)",
         evidence=evidence,
         correction_method="none — pre-ADR-034",
-        ttl_hours=_PROMOTION_DECISION_TTL_HOURS,
+        ttl_hours=_T3A_DECISION_TTL_HOURS,
     )
     if decision_id:
         ar.surface_decision(decision_id)
@@ -306,17 +308,16 @@ def _count_finished_matches(league: str, since: str | None = None) -> int:
 
 
 # ════════════════════════════════════════════════════════════════════════
-# Faza D — sănătatea campionului activ (Champion Guardian, ADR-037 R3.1)
+# Faza D — sănătatea campionului activ (Champion Guardian, ADR-037)
 # ════════════════════════════════════════════════════════════════════════
 
 def _phase_d_champion_health(family: str, league: str, target_key: str, summary: dict) -> None:
-    """R3.1 — integrare STRICT READ-ONLY a Champion Guardian în buclă:
-    evaluează sănătatea campionului activ (evaluate_champion_health, care
-    persistă intern faptul de sănătate, neatins aici) și jurnalizează
-    rezultatul într-un automation_run. NU propune nicio decizie T3a, NU
-    apelează serviciul de rollback — scope strict, impus și mecanic (vezi
-    tests/test_continuous_learning_rollback.py). Propunerea de rollback
-    e Stage R3.2, neimplementată încă."""
+    """R3.1 (read-only) + R3.2A (propunere T3a de rollback) — evaluează
+    sănătatea campionului activ prin Champion Guardian, jurnalizează, și —
+    doar dacă Guardian recomandă rollback — propune o decizie T3a în decision
+    feed (aprobare umană obligatorie, ADR-002 / North Star P2-P3). NU execută
+    NICIODATĂ rollback-ul aici — execuția e Stage R3.2B, separată, aprobată
+    distinct; Faza C rămâne complet neschimbată până atunci."""
     run_id = ar.write_run(PRODUCER, "champion_health_check", "T2", target_key=target_key)
     if run_id is None:
         return
@@ -328,11 +329,121 @@ def _phase_d_champion_health(family: str, league: str, target_key: str, summary:
         return
 
     summary["health_checked"] += 1
+
+    if not result.recommends_rollback:
+        ar.complete_run(run_id, summary={
+            "health_state": result.health_state,
+            "recommends_rollback": False,
+            "reason": result.reason,
+        })
+        return
+
+    # Gardă anti-ping-pong (Stratul 3, ADR-037 §14): un campion deja reactivat
+    # printr-un rollback nu declanșează automat un al doilea — lanțul automat
+    # e plafonat la un singur pas; pasul doi necesită operator uman.
+    # Interpretarea `promoted_by` e complet DECUPLATĂ de acest modul — trece
+    # exclusiv prin rollback_service.is_rollback_promoted().
+    champion = sb.get_active_champion(family, league)
+    if rollback_service.is_rollback_promoted(champion):
+        ar.complete_run(run_id, summary={
+            "health_state": result.health_state,
+            "recommends_rollback": True,
+            "reason": result.reason,
+            "chain_rollback_suppressed": True,
+        })
+        logger.warning(
+            "[ContinuousLearning] rollback in lant suprimat pentru %s — campionul activ a fost "
+            "el insusi reactivat printr-un rollback anterior; necesita interventie manuala.",
+            target_key,
+        )
+        return
+
+    # Gardă R3-Risk-1: propose_decision() reutilizează ȘI suprascrie
+    # evidence-ul oricărei decizii deschise pe același target_key
+    # (automation_runs.py, regula de idempotency) — o propunere de rollback
+    # peste o decizie de alt fel (ex. o promovare pending) i-ar coruperea
+    # evidence-ul. Nu se stivuiește niciodată.
+    if _has_open_decision_for_target(target_key):
+        ar.skip_run(run_id, "decizie deschisa deja pentru target — nu se stivuieste peste ea")
+        return
+
+    reason = _rollback_reason_from_health(result)
     ar.complete_run(run_id, summary={
         "health_state": result.health_state,
-        "recommends_rollback": result.recommends_rollback,
+        "recommends_rollback": True,
         "reason": result.reason,
+        "rollback_reason_mapped": reason,
     })
+
+    decision_run_id = ar.write_run(PRODUCER, "rollback_candidate", "T3a", target_key=target_key)
+    if decision_run_id is None:
+        return
+    ar.start_run(decision_run_id)
+    ar.complete_run(decision_run_id)
+
+    evidence = {
+        "decision_kind": "rollback",
+        "reason": reason,
+        "health_state": result.health_state,
+        "brier_live": result.brier_live,
+        "window_end": result.window_end,
+        "n_matches_evaluated": result.n_matches_evaluated,
+    }
+
+    decision_id = ar.propose_decision(
+        decision_run_id, tier="T3a",
+        rollback_plan="reactiveaza predecesorul campionului activ (rollback_champion, RPC 014, append-only, CAS)",
+        evidence=evidence,
+        correction_method="none — pre-ADR-034",
+        ttl_hours=_T3A_DECISION_TTL_HOURS,
+    )
+    if decision_id:
+        ar.surface_decision(decision_id)
+        summary["rollback_proposed"] += 1
+
+
+def _rollback_reason_from_health(result) -> str:
+    """Opțiunea A (aprobată, §5-DP din pachetul de design R3): derivă motivul
+    de rollback din health_state + codul structural expus în prefixul
+    result.reason ('artifact_missing: ...' / 'model_error: ...'). Champion
+    Guardian (R2) rămâne complet neatins — se consumă doar rezultatul lui
+    public (health_state, reason), fără nicio recalculare și fără atingerea
+    contractului lui."""
+    if result.health_state == "critical" and result.reason:
+        code = result.reason.split(":", 1)[0].strip()
+        if code in rollback_service.VALID_ROLLBACK_REASONS:
+            return code
+    return "regression"
+
+
+def _has_open_decision_for_target(target_key: str) -> bool:
+    """Read-only, citire directă (fără facade automation_runs — același
+    tipar ca _count_finished_matches): există vreo decizie T3a/T3b DESCHISĂ
+    (proposed/pending/approved — statusurile „deschise" per ADR-026) pentru
+    target_key? Precondiție pentru garda R3-Risk-1 (vezi apelantul). Nu
+    modifică nimic — best-effort: la orice eroare/indisponibilitate întoarce
+    False (nu blochează) — propose_decision() are oricum propria gardă de
+    idempotency internă ca ultim nivel de siguranță."""
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        runs = client.table("automation_runs").select("id").eq("target_key", target_key).execute()
+        run_ids = [r["id"] for r in (runs.data or [])]
+        if not run_ids:
+            return False
+        res = (
+            client.table("decision_feed")
+            .select("id")
+            .in_("run_id", run_ids)
+            .in_("status", ["proposed", "pending", "approved"])
+            .limit(1)
+            .execute()
+        )
+        return bool(res.data)
+    except Exception as exc:
+        logger.error("[ContinuousLearning] _has_open_decision_for_target esuat pentru %s: %s", target_key, exc)
+        return False
 
 
 # ════════════════════════════════════════════════════════════════════════

@@ -62,10 +62,16 @@ def test_rpc_rollback_champion_has_single_production_caller():
 
 
 def test_rollback_service_has_only_known_importers():
-    """Azi, `rollback_service` are ZERO importatori de producție (izolat,
-    declanșare manuală). Continuous Learning (R3) va deveni primul apelant
-    legitim — atunci se adaugă în whitelist, explicit."""
-    SKIP = {"rollback_service.py", "test_rollback_service.py", "test_rollback_ownership.py"}
+    """Whitelist explicit al importatorilor de producție ai rollback_service.
+    De la Stage R3.2A (ADR-037), continuous_learning.py e importatorul
+    legitim — DOAR pentru is_rollback_promoted() (gardă anti-ping-pong) și
+    VALID_ROLLBACK_REASONS (validarea motivului mapat); rollback_champion()
+    (execuția) rămâne fără apelanți reali până la R3.2B, aprobată separat —
+    vezi test_rpc_rollback_champion_has_single_production_caller (neschimbat)."""
+    SKIP = {
+        "rollback_service.py", "test_rollback_service.py", "test_rollback_ownership.py",
+        "continuous_learning.py", "test_continuous_learning_rollback.py",
+    }
     offenders = []
     for path in _iter_py_files():
         if path.name in SKIP:

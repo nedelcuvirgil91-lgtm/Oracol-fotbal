@@ -42,11 +42,13 @@ garanția tare e SIGURANȚA (lock + index parțial unic → un singur câștigă
 zero dublă-scriere); pierzătorul poate primi `rejected` și trebuie să reia —
 vezi CHAMPION_GUARDIAN_IMPLEMENTATION.md §11.
 
-Complet izolat: niciun alt fișier din proiect nu importă acest modul — zero
-apelanți reali (ca `promotion_service.py` la creare). Nu e wired în
-`sync/run_daily.py`, `oracle_engine.py`, sau `continuous_learning.py` —
-declanșare exclusiv manuală (CLI/UI viitoare, nescrise încă). Champion Guardian
-și orchestrarea sunt R2/R3, neatinse aici.
+De la Stage R3.2A (ADR-037), `continuous_learning.py` importă acest modul —
+EXCLUSIV pentru `is_rollback_promoted()` (citire de clasificare, gardă
+anti-ping-pong) și `VALID_ROLLBACK_REASONS` (validarea motivului mapat din
+sănătate). `rollback_champion()` (execuția efectivă) NU e apelată încă de
+nimeni — execuția e Stage R3.2B, separată, aprobată distinct; până atunci
+`rollback_champion()` rămâne fără apelanți reali, ca la creare. Nu e wired
+în `sync/run_daily.py` sau `oracle_engine.py`.
 
 Depinde de două funcții de acces din `supabase_client` livrate la R1.4
 (`get_champion_predecessor`, `rpc_rollback_champion`) — importate lazy, în
@@ -154,6 +156,28 @@ def rollback_champion(
         logger.warning("[RollbackService] rollback_champion eșuat pentru %s/%s: %s",
                         algorithm_family, league_scope, exc)
         return RollbackResult(status="rejected", reason=str(exc))
+
+
+def is_rollback_promoted(champion: dict | None) -> bool:
+    """Singurul loc din proiect care interpretează formatul `promoted_by`
+    pentru a decide dacă un campion a fost activat printr-un rollback (nu
+    printr-o promovare normală). Owner semantic: acest modul produce
+    evenimentul de rollback (RPC 014 setează `promoted_by =
+    'rollback:'||reason||':'||by`) — deci tot el deține interpretarea
+    formatului. Niciun alt fișier (ex. `continuous_learning.py`) nu are voie
+    să parseze/verifice `promoted_by` direct — dacă formatul se schimbă
+    vreodată, se modifică o singură funcție, aici.
+
+    Folosit de orchestrarea Champion Guardian (R3.2, gardă anti-ping-pong):
+    un campion deja reactivat prin rollback care s-ar degrada din nou NU
+    trebuie să declanșeze automat un al doilea rollback (ar reveni la
+    predecesorul deja abandonat ca degradat — ping-pong). Lanțul automat e
+    plafonat la un singur pas (ADR-037 §14 — rollback în lanț = Future Work);
+    pasul doi necesită intervenție manuală de operator."""
+    if not champion:
+        return False
+    promoted_by = champion.get("promoted_by")
+    return isinstance(promoted_by, str) and promoted_by.startswith("rollback:")
 
 
 def _validate_artifact(training_run_id: str) -> str | None:

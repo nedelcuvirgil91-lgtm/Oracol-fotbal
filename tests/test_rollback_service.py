@@ -148,3 +148,32 @@ def test_unexpected_top_level_exception_never_propagates(monkeypatch):
     result = rs.rollback_champion("xgboost_v1", "all", reason="operator", rolled_back_by="x")
     assert result.status == "rejected"
     assert "eroare complet neasteptata" in result.reason
+
+
+# ── is_rollback_promoted (Stage R3.2A — singurul loc care interpretează
+# formatul promoted_by; consumat de continuous_learning ca gardă anti-ping-pong) ──
+
+def test_is_rollback_promoted_true_on_rollback_format():
+    champion = {"training_run_id": "tr_1", "promoted_by": "rollback:regression:ADR-037-continuous-learning"}
+    assert rs.is_rollback_promoted(champion) is True
+
+
+def test_is_rollback_promoted_false_on_normal_promotion():
+    champion = {"training_run_id": "tr_1", "promoted_by": "ADR-030-continuous-learning"}
+    assert rs.is_rollback_promoted(champion) is False
+
+
+def test_is_rollback_promoted_false_on_none_champion():
+    assert rs.is_rollback_promoted(None) is False
+
+
+def test_is_rollback_promoted_false_on_missing_promoted_by():
+    assert rs.is_rollback_promoted({"training_run_id": "tr_1"}) is False
+
+
+def test_is_rollback_promoted_false_on_non_string_promoted_by():
+    """Regula 'nu se aproximează' — un tip neașteptat (ex. None explicit
+    stocat, sau o valoare non-text corupta) nu trebuie să crape, nici să fie
+    interpretat implicit ca rollback."""
+    assert rs.is_rollback_promoted({"promoted_by": None}) is False
+    assert rs.is_rollback_promoted({"promoted_by": 12345}) is False
