@@ -111,9 +111,15 @@ def test_record_champion_health_has_single_production_caller():
 
 
 def test_guardian_has_only_known_importers():
-    """Azi champion_guardian are ZERO importatori de producție (izolat;
-    continuous_learning îl va adăuga la R3). Whitelist explicit."""
-    SKIP = {"champion_guardian.py", "test_champion_guardian.py", "test_champion_guardian_ownership.py"}
+    """Whitelist explicit al importatorilor de producție ai champion_guardian.
+    De la Stage R3.1 (ADR-037), continuous_learning.py e importatorul legitim
+    (Faza D, read-only — vezi tests/test_continuous_learning_rollback.py
+    pentru garda mecanică ce impune scope-ul strict read-only al integrării).
+    Orice alt importator neanticipat trebuie să apară aici, explicit."""
+    SKIP = {
+        "champion_guardian.py", "test_champion_guardian.py", "test_champion_guardian_ownership.py",
+        "continuous_learning.py", "test_continuous_learning_rollback.py",
+    }
     offenders = []
     for path in _iter_py_files():
         if path.name in SKIP:

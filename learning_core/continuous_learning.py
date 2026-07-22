@@ -12,13 +12,18 @@ nou. Nu reimplementează nimic din mecanica deja existentă (Model Registry,
 Training Runner, Challenger FSM, Statistics Engine, Promotion Service) —
 decide exclusiv CÂND se apelează fiecare bucată deja construită.
 
-Trei faze, independente, idempotente, sigure la rerulare — pentru fiecare
+Patru faze, independente, idempotente, sigure la rerulare — pentru fiecare
 (algorithm_family, league_scope) din Model Registry, la fiecare invocare:
 
   A. Monitorizare — există deja un Challenger activ? -> verifică verdictul
      de evaluare (shadow logging acumulat din trafic live, nu sintetic).
   B. Antrenare — nu există Challenger activ? -> verifică pragul de volum,
      antrenează unul nou dacă e atins.
+  D. Sănătatea campionului (ADR-037, Stage R3.1) — evaluează campionul ACTIV
+     prin Champion Guardian și jurnalizează rezultatul. STRICT READ-ONLY în
+     R3.1: nu propune nicio decizie T3a, nu apelează serviciul de rollback —
+     doar demonstrează integrarea Guardian în buclă, fără efect de decizie.
+     Propunerea de rollback e R3.2, neimplementată încă.
   C. Execuție — există decizii T3a aprobate de om, neexecutate încă? ->
      finalizează promovarea (fără coadă/scheduler nou — aceeași rulare
      periodică acoperă și acest caz).
@@ -42,7 +47,7 @@ import logging
 import automation_runs as ar
 import supabase_client as sb
 from database.queries import get_client
-from learning_core import challenger_evaluation, challenger_manager, model_registry
+from learning_core import challenger_evaluation, challenger_manager, champion_guardian, model_registry
 from learning_core.promotion_service import promote_challenger
 from learning_core.training_runner import run_training
 from ml_predictor import MIN_SAMPLES_TO_TRAIN
@@ -84,6 +89,7 @@ def run_cycle() -> dict:
     summary = {
         "enabled": True, "checked": 0, "trained": 0, "evaluated": 0,
         "proposed": 0, "committed": 0, "guard_failures": 0,
+        "health_checked": 0,
     }
 
     for name, version in model_registry.list_available():
@@ -136,6 +142,7 @@ def _process_pair(family: str, league: str, algorithm, version: str, summary: di
     else:
         _phase_b_train_new(family, league, algorithm, version, target_key, summary)
 
+    _phase_d_champion_health(family, league, target_key, summary)
     _phase_c_execute_approved(target_key, summary)
 
 
@@ -296,6 +303,36 @@ def _count_finished_matches(league: str, since: str | None = None) -> int:
     except Exception as exc:
         logger.error("[ContinuousLearning] _count_finished_matches esuat pentru %s: %s", league, exc)
         return 0
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Faza D — sănătatea campionului activ (Champion Guardian, ADR-037 R3.1)
+# ════════════════════════════════════════════════════════════════════════
+
+def _phase_d_champion_health(family: str, league: str, target_key: str, summary: dict) -> None:
+    """R3.1 — integrare STRICT READ-ONLY a Champion Guardian în buclă:
+    evaluează sănătatea campionului activ (evaluate_champion_health, care
+    persistă intern faptul de sănătate, neatins aici) și jurnalizează
+    rezultatul într-un automation_run. NU propune nicio decizie T3a, NU
+    apelează serviciul de rollback — scope strict, impus și mecanic (vezi
+    tests/test_continuous_learning_rollback.py). Propunerea de rollback
+    e Stage R3.2, neimplementată încă."""
+    run_id = ar.write_run(PRODUCER, "champion_health_check", "T2", target_key=target_key)
+    if run_id is None:
+        return
+    ar.start_run(run_id)
+
+    result = champion_guardian.evaluate_champion_health(family, league)
+    if result is None:
+        ar.skip_run(run_id, "niciun campion activ pentru evaluarea de sanatate")
+        return
+
+    summary["health_checked"] += 1
+    ar.complete_run(run_id, summary={
+        "health_state": result.health_state,
+        "recommends_rollback": result.recommends_rollback,
+        "reason": result.reason,
+    })
 
 
 # ════════════════════════════════════════════════════════════════════════
