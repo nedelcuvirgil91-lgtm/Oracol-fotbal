@@ -125,7 +125,15 @@ class _FakeHealthResult:
 def recorder(monkeypatch):
     rec = _CallRecorder()
     monkeypatch.setattr(cl, "ar", rec)
-    monkeypatch.setattr(cl.sb, "load_config", lambda default: {"learning_core_enabled": True})
+    # Implicit: toate cele trei flag-uri active — testele deja aprobate ale
+    # Fazei D (scrise înainte de deployment gating) continuă să exercite
+    # Faza D normal. Testele de gating de mai jos suprascriu explicit
+    # is_champion_guardian_enabled/is_champion_guardian_proposals_enabled.
+    monkeypatch.setattr(cl.sb, "load_config", lambda default: {
+        "learning_core_enabled": True,
+        "champion_guardian_enabled": True,
+        "champion_guardian_proposals_enabled": True,
+    })
     # Izolează Faza D de Faza A/B — fără challenger activ, sub prag de antrenare
     # — ca fiecare test să vadă doar activitatea Fazei D (+ Faza C, goală).
     monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
@@ -641,3 +649,101 @@ def test_phase_c_decision_without_decision_kind_uses_promotion_path(recorder, fa
     assert result["committed"] == 1
     assert result["rollback_committed"] == 0
     assert rollback_called["n"] == 0
+
+
+# ── Deployment gating (ADR-037) — champion_guardian_enabled /
+# champion_guardian_proposals_enabled: două gate-uri SEPARATE, exact tiparul
+# ADR-033 (consensus_capture_enabled vs consensus_validation_enabled). Un
+# merge pe main NU activează Faza D automat (Etapa 1); champion_guardian_
+# enabled=True înseamnă DOAR monitorizare (Etapa 2/3); propunerile reale
+# necesită și champion_guardian_proposals_enabled=True (Etapa 4). ─────────
+
+def test_champion_guardian_enabled_defaults_false(monkeypatch):
+    monkeypatch.setattr(cl.sb, "load_config", lambda default: dict(default))
+    assert cl.is_champion_guardian_enabled() is False
+
+
+def test_champion_guardian_proposals_enabled_defaults_false(monkeypatch):
+    monkeypatch.setattr(cl.sb, "load_config", lambda default: dict(default))
+    assert cl.is_champion_guardian_proposals_enabled() is False
+
+
+def test_phase_d_produces_zero_activity_when_champion_guardian_disabled(recorder, fake_algorithm, monkeypatch):
+    """Etapa 1 (merge, fără activare): champion_guardian_enabled=False ->
+    Faza D nu rulează deloc — Guardian nici măcar nu e apelat, zero
+    automation_run creat pentru ea — indiferent de learning_core_enabled
+    (deja True în producție, pentru Fazele A/B/C, ADR-030, neînrudit)."""
+    monkeypatch.setattr(cl, "is_champion_guardian_enabled", lambda: False)
+    called = {"n": 0}
+    monkeypatch.setattr(cl.champion_guardian, "evaluate_champion_health",
+                         lambda family, league: called.__setitem__("n", called["n"] + 1))
+
+    result = cl.run_cycle()
+
+    assert result["health_checked"] == 0
+    assert called["n"] == 0
+    health_writes = [c for c in recorder.calls if c[0] == "write_run" and c[2] == "champion_health_check"]
+    assert health_writes == []
+
+
+def test_phase_d_monitors_only_when_proposals_disabled(recorder, fake_algorithm, monkeypatch):
+    """Etapa 2/3 (monitorizare): champion_guardian_enabled=True dar
+    champion_guardian_proposals_enabled=False -> Guardian evaluează și
+    jurnalizează, dar NU propune nimic, chiar dacă recomandă rollback."""
+    monkeypatch.setattr(cl, "is_champion_guardian_enabled", lambda: True)
+    monkeypatch.setattr(cl, "is_champion_guardian_proposals_enabled", lambda: False)
+    monkeypatch.setattr(
+        cl.champion_guardian, "evaluate_champion_health",
+        lambda family, league: _FakeHealthResult(
+            health_state="critical", recommends_rollback=True, reason="model_error: x",
+        ),
+    )
+
+    result = cl.run_cycle()
+
+    assert result["health_checked"] == 1
+    assert result["rollback_proposed"] == 0
+    assert [c for c in recorder.calls if c[0] == "propose_decision"] == []
+
+    health_completes = _health_completes(recorder.calls)
+    assert health_completes[0][2]["proposals_disabled"] is True
+
+
+def test_phase_d_proposes_when_both_flags_enabled(recorder, fake_algorithm, monkeypatch):
+    """Etapa 4 (propuneri reale): ambele flag-uri active -> propunerea T3a
+    funcționează normal (regression test peste comportamentul deja aprobat,
+    R3.2A/R3.2A.1)."""
+    monkeypatch.setattr(cl, "is_champion_guardian_enabled", lambda: True)
+    monkeypatch.setattr(cl, "is_champion_guardian_proposals_enabled", lambda: True)
+    monkeypatch.setattr(
+        cl.champion_guardian, "evaluate_champion_health",
+        lambda family, league: _FakeHealthResult(health_state="degrading", recommends_rollback=True, reason="x"),
+    )
+
+    result = cl.run_cycle()
+
+    assert result["rollback_proposed"] == 1
+    assert len([c for c in recorder.calls if c[0] == "propose_decision"]) == 1
+
+
+def test_phase_a_b_c_promotion_unaffected_by_champion_guardian_flags(recorder, fake_algorithm, monkeypatch):
+    """Fazele A/B/C (promovare) rămân controlate EXCLUSIV de
+    learning_core_enabled, exact ca azi — champion_guardian_enabled=False
+    nu le blochează în niciun fel."""
+    monkeypatch.setattr(cl, "is_champion_guardian_enabled", lambda: False)
+    target_key = "fake_algo|Premier League"
+    recorder.approved_for_target[target_key] = [{"id": 301, "evidence": {"training_run_id": "tr_challenger_Y"}}]
+
+    @dataclass
+    class _FakePromotionResult:
+        status: str
+        training_run_id: str
+        reason: str | None = None
+
+    monkeypatch.setattr(cl, "promote_challenger",
+                         lambda training_run_id, algorithm_family, league_scope, promoted_by:
+                             _FakePromotionResult(status="promoted", training_run_id=training_run_id))
+
+    result = cl.run_cycle()
+
+    assert result["committed"] == 1

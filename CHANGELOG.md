@@ -2,6 +2,76 @@
 
 Toate schimbările notabile ale proiectului sunt documentate aici.
 
+## [Nelansat] — Learning Core: Orchestrare (ADR-037, Stage R3) — cod complet, NEMERGE-UIT pe `main`
+
+Cablarea Champion Guardian (R2) + Rollback Engine (R1) în bucla `continuous_learning`
+(ADR-030): Faza D nouă (evaluează sănătatea campionului activ, propune rollback dacă
+recomandat) + extinderea Fazei C (execută rollback-ul aprobat). Pură orchestrare —
+niciun prag/metrică recalculat, Guardian și Rollback Service rămân owneri unici ai
+logicii lor. **Merge pe `main` amânat deliberat** — vezi §„Descoperire critică" mai jos.
+
+### Adăugat
+- **R3.1 — Faza D (read-only)**: `_phase_d_champion_health` — evaluează campionul
+  activ prin `champion_guardian.evaluate_champion_health()`, jurnalizează rezultatul
+  într-un `automation_run` (`champion_health_check`, T2). Zero efect de decizie.
+- **R3.2A — Propunere T3a de rollback**: dacă Guardian recomandă rollback, Faza D
+  propune o decizie T3a (`rollback_candidate`), cu două gărzi obligatorii:
+  - **gardă anti-ping-pong** — un campion deja reactivat printr-un rollback anterior
+    (`rollback_service.is_rollback_promoted()`, singurul loc care interpretează
+    formatul `promoted_by`) nu declanșează automat un al doilea rollback — lanțul
+    automat plafonat la un singur pas (ADR-037 §14);
+  - **gardă R3-Risk-1** — `propose_decision()` suprascrie evidence-ul oricărei
+    decizii deschise pe același target; Faza D sare peste propunere dacă există deja
+    o decizie deschisă, ca să nu stivuiască peste ea.
+- **R3.2A.1 — Execution Contract: ținta rollback-ului înghețată la propunere**
+  (descoperire dintr-un Execution Readiness Review, cerut explicit înainte de a
+  scrie codul de execuție): `evidence` capătă `current_training_run_id` +
+  `predecessor_training_run_id`, fixate la momentul propunerii — simetric cu
+  `promote_challenger` (target fix, nu recalculat). Motiv: `get_champion_predecessor()`
+  derivă predecesorul DINAMIC din campionul activ curent — fără înghețare, un retry
+  peste timp (proces mort între RPC și `commit_decision`) ar recalcula un predecesor
+  diferit, producând un rollback în lanț neintenționat.
+- **R3.2B — Execuția rollback-ului aprobat, cu țintă fixă (CAS pinned)**: Faza C
+  extinsă (`_phase_c_execute_rollback`) citește **exclusiv** ținta înghețată din
+  evidence, niciodată recalculată. `rollback_service.rollback_champion()` primește
+  un parametru opțional nou, `expected_predecessor_training_run_id` — transmis
+  explicit, folosit direct ca sămânța CAS; omis (`None`), comportamentul R1 (cale
+  manuală) rămâne neschimbat. RPC 014 **neatins** — CAS-ul deja existent din R1 e
+  singura sursă de adevăr pentru validare. Testat explicit: retry după crash (nimic
+  altceva schimbat) → `already_active`; retry după schimbare externă de stare →
+  `predecessor_mismatch` → `rejected`, niciodată un rollback peste o stare învechită.
+- **R3.5 — Verificare live, read-only (Production Topology Audit)**: confirmă zero
+  mutație/efect secundar din codul R3 pe Supabase `Prediction` — dar cu o descoperire
+  semnificativă (vezi mai jos).
+- **R3.7 — Flag-uri de deployment dedicate**: `champion_guardian_enabled` (gatează
+  exclusiv Faza D) + `champion_guardian_proposals_enabled` (gate separat, doar pentru
+  propunerea T3a) — ambele implicit `False`, independente de `learning_core_enabled`
+  (rămas exclusiv al Fazelor A/B/C, neschimbat). Oglindește tiparul deja stabilit de
+  ADR-033 (`consensus_capture_enabled`/`consensus_validation_enabled`).
+- **35 de teste noi** (`tests/test_continuous_learning_rollback.py`) + **9 teste noi**
+  (`tests/test_rollback_service.py`, helper `is_rollback_promoted` + parametrul
+  `expected_predecessor_training_run_id`) + gărzi AST actualizate.
+
+### Descoperire critică — merge pe `main` amânat deliberat
+Auditul R3.5 a găsit `model_config.learning_core_enabled = true` deja activ în
+producție (pre-existent, susține bucla ADR-030/Fazele A/B/C, neînrudit cu R3) — și
+`.github/workflows/continuous_learning.yml` rulează pe `main`, care nu conține deloc
+codul R3. Consecință: un merge simplu, fără flag dedicat, ar fi activat Faza D
+automat la prima rulare programată de după merge, fără niciun pas de activare
+deliberat — încălcând separarea intenționată „R3 (cod gata) ≠ R4 (activare
+deliberată)". R3.7 (flag-urile dedicate) închide acest gol înainte de orice merge.
+Detalii complete: `docs/DEPLOYMENT/ADR037_DEPLOYMENT_PLAN.md`.
+
+### Documentație
+- `docs/04_LEARNING_CORE/R3_IMPLEMENTATION_CHECKLIST.md` — reconciliat cu execuția
+  reală (R3.2A/R3.2A.1/R3.2B, nu planul inițial R3.2/R3.3).
+- `docs/04_LEARNING_CORE/CHAMPION_GUARDIAN_IMPLEMENTATION.md` §17 — stare de
+  implementare R3 completă.
+- `docs/DEPLOYMENT/ADR037_DEPLOYMENT_PLAN.md` (nou) — manual de lansare.
+- `docs/00_GOVERNANCE/ARCHITECTURE_STATE.md` (nou) — sursă unică de adevăr pentru
+  starea proiectului (ADR-uri implementate, branch, ce e pe `main`, ce rulează live,
+  ce e activat prin flag-uri).
+
 ## [Nelansat] — Learning Core: Champion Guardian (ADR-037, Stage R2)
 
 Evaluator **read-only** al sănătății campionului activ: clasifică starea în cinci

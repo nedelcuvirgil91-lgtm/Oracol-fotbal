@@ -71,16 +71,48 @@ def is_enabled() -> bool:
     """learning_core_enabled — nume păstrat din documentul de proiectare
     vechi, SENS COMPLET REDEFINIT (ADR-030): activează exclusiv verificarea
     de prag decuplată, independentă de run_daily.py — nu un pas al lui.
-    Implicit False (P1 — nimic nou pornește implicit activ)."""
+    Implicit False (P1 — nimic nou pornește implicit activ). Gatează
+    Fazele A/B/C (training, challenger, promovare) — NESCHIMBAT de ADR-037.
+    Champion Guardian (Faza D) are flag-uri PROPRII, dedicate, mai jos —
+    exact tiparul deja stabilit de ADR-033 (consensus_capture_enabled /
+    consensus_validation_enabled, ambele independente de acest flag)."""
     cfg = sb.load_config(_DEFAULT_CONFIG)
     return bool(cfg.get("learning_core_enabled", False))
 
 
+def is_champion_guardian_enabled() -> bool:
+    """champion_guardian_enabled (ADR-037) — flag DEDICAT, independent de
+    learning_core_enabled. Gatează EXCLUSIV Faza D — Champion Guardian
+    evaluează campionul activ și persistă fapte de sănătate
+    (champion_health_evaluations). Etapa 2 din planul de activare controlată
+    (docs/DEPLOYMENT/ADR037_DEPLOYMENT_PLAN.md): DOAR monitorizare — nu
+    implică propuneri de rollback, vezi is_champion_guardian_proposals_enabled()
+    mai jos (gate separat, Etapa 4). Implicit False (P1) — un merge pe
+    `main` NU activează Faza D automat, indiferent de starea
+    learning_core_enabled (deja True în producție pentru Fazele A/B/C,
+    ADR-030, neînrudit)."""
+    cfg = sb.load_config({"champion_guardian_enabled": False})
+    return bool(cfg.get("champion_guardian_enabled", False))
+
+
+def is_champion_guardian_proposals_enabled() -> bool:
+    """champion_guardian_proposals_enabled (ADR-037) — flag DEDICAT,
+    SEPARAT de is_champion_guardian_enabled(). Etapa 4 din planul de
+    activare controlată: permite Champion Guardian să și PROPUNĂ decizii
+    T3a de rollback (nu doar să evalueze/persiste sănătatea). Necesită
+    AMBELE flag-uri active pentru ca o propunere reală să apară în decision
+    feed — un operator poate lăsa Guardian-ul să monitorizeze zile întregi
+    (Etapa 2/3) înainte de a permite prima propunere reală (Etapa 4), fără
+    să reactiveze cod, doar prin config. Implicit False (P1)."""
+    cfg = sb.load_config({"champion_guardian_proposals_enabled": False})
+    return bool(cfg.get("champion_guardian_proposals_enabled", False))
+
+
 def run_cycle() -> dict:
     """Punctul de intrare public — un ciclu complet peste tot Model
-    Registry-ul. Sigur de rerulat oricând (idempotent pe toate cele trei
-    faze) — declanșatorul extern (ex. GitHub Actions, programat, decuplat
-    de daily.yml) nu are nevoie de nicio garanție suplimentară.
+    Registry-ul. Sigur de rerulat oricând (idempotent pe toate fazele) —
+    declanșatorul extern (ex. GitHub Actions, programat, decuplat de
+    daily.yml) nu are nevoie de nicio garanție suplimentară.
 
     Nu apelează register_default_algorithms() — exact tiparul deja folosit
     de learning_core/train.py: populate registry-ul e responsabilitatea
@@ -146,7 +178,12 @@ def _process_pair(family: str, league: str, algorithm, version: str, summary: di
     else:
         _phase_b_train_new(family, league, algorithm, version, target_key, summary)
 
-    _phase_d_champion_health(family, league, target_key, summary)
+    # Faza D e gatată de champion_guardian_enabled, DISTINCT de
+    # learning_core_enabled — un merge pe main nu o activează automat
+    # (vezi is_champion_guardian_enabled()). Fals -> zero automation_run
+    # creat, zero efect — comportament identic cu "Faza D nu există".
+    if is_champion_guardian_enabled():
+        _phase_d_champion_health(family, league, target_key, summary)
     _phase_c_execute_approved(target_key, summary)
 
 
@@ -341,6 +378,19 @@ def _phase_d_champion_health(family: str, league: str, target_key: str, summary:
             "health_state": result.health_state,
             "recommends_rollback": False,
             "reason": result.reason,
+        })
+        return
+
+    # Gardă champion_guardian_proposals_enabled (Etapa 4, planul de activare
+    # controlată): chiar dacă Guardian recomandă rollback, propunerea T3a
+    # rămâne oprită până la activarea explicită, SEPARATĂ, a acestui gate —
+    # Etapa 2/3 (monitorizare) nu implică Etapa 4 (propuneri) automat.
+    if not is_champion_guardian_proposals_enabled():
+        ar.complete_run(run_id, summary={
+            "health_state": result.health_state,
+            "recommends_rollback": True,
+            "reason": result.reason,
+            "proposals_disabled": True,
         })
         return
 

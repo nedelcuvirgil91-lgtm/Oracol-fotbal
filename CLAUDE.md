@@ -10,21 +10,17 @@ Disclaimer de proiect (nu al acestui document): instrument de analiză statistic
 
 ## Current Implementation Status — Learning Core
 
-✔ Model Registry
-✔ LearningAlgorithm interface
-✔ XGBoost Adapter
-✔ ProductionChampion Adapter
-✔ Training Runner (manual)
-✔ CLI train.py
+**Sursa de adevăr actualizată e `docs/00_GOVERNANCE/ARCHITECTURE_STATE.md`** (branch vs. `main`, ce rulează live, ce e activat prin flag-uri) — secțiunea de mai jos e un rezumat, nu duplică detaliile.
 
-In Progress
-- Challenger Runner
+✔ Model Registry · LearningAlgorithm interface · XGBoost Adapter · ProductionChampion Adapter · Training Runner · CLI `train.py`
+✔ Challenger Runner + Challenger FSM (ADR-016) · Promotion Engine (`promotion_service.py`) · Champion Manager (`model_champions`, doi scriitori: Promotion + Rollback) · Continuous Learning / Daily Scheduler integration (ADR-030, `continuous_learning.yml`)
+✔ **Rollback Engine** (ADR-037, R1) — append-only, CAS-guarded
+✔ **Champion Guardian** (ADR-037, R2) — evaluator read-only al sănătății campionului activ
+✔ **Orchestrare Learning Core** (ADR-037, R3, R3.0-R3.7) — Faza D + execuție rollback cu țintă înghețată (Execution Contract) — **cod complet, testat, NEMERGE-UIT pe `main`** (vezi `docs/DEPLOYMENT/ADR037_DEPLOYMENT_PLAN.md` pentru planul de activare)
 
 Not Implemented
-- Promotion Engine
-- Champion Manager
-- Automatic Promotion
-- Daily Scheduler integration
+- Auto-promovare/auto-rollback fără om în buclă (contrazice ADR-002; cere ADR dedicat de risc)
+- Activarea ADR-037 în producție (R4 — separată deliberat de merge, vezi planul de deployment)
 
 ## Filosofia proiectului
 
