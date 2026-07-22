@@ -84,7 +84,10 @@ except ModuleNotFoundError:
     SUPABASE_MODULE_AVAILABLE = False
 
 try:
-    from database.queries import get_latest_team_elo, get_h2h_from_history, get_team_health
+    from database.queries import (
+        get_latest_team_elo, get_h2h_from_history, get_team_health,
+        get_team_form_footballdata,
+    )
     DB_QUERIES_MODULE_AVAILABLE = True
 except ModuleNotFoundError:
     DB_QUERIES_MODULE_AVAILABLE = False
@@ -768,7 +771,7 @@ class FootballOracleEngine:
            0. Free Live Football standings (get_freelf_standings)    — fallback, doar dacă Level DB nu are date
            1. Free Live Football form      (get_team_form_freelf)    — fallback
            2. Odds API /scores             (get_team_recent_form)    — fallback
-           3. fd.org standings             (get_standings_form)      — fallback
+           3. fd.org standings (Supabase)  (get_team_form_footballdata) — fallback, ADR-039 R-Sync-3
            4. TheSportsDB events           (get_team_stats)          — fallback
            5. ELO sigmoid                  (întotdeauna blended)
            6. Neutral defaults
@@ -915,10 +918,17 @@ class FootballOracleEngine:
             except Exception:
                 pass
 
-        # ── Level 3: fd.org standings ─────────────────────────────────────
-        if not stats and team_id and team_id.startswith("fd_"):
+        # ── Level 3: football-data.org standings (ADR-039, R-Sync-3) ───────
+        # Sync Layer only, dupa migrare — citire STRICT din Supabase
+        # (footballdata_team_form_snapshot, populata de
+        # sync/sync_team_form_footballdata.py), niciodata apel live catre
+        # provider. Identitate prin nume canonic normalizat, nu prin
+        # team_id prefixat "fd_" (gate-ul vechi, eliminat — depindea de
+        # machinery de descoperire a meciurilor, in afara scope-ului
+        # acestei migrari).
+        if not stats and DB_QUERIES_MODULE_AVAILABLE:
             try:
-                fd_standings = self.api.get_standings_form(team_id, league)
+                fd_standings = get_team_form_footballdata(canonical)
                 if fd_standings:
                     played   = fd_standings.get("played") or 1
                     gf_avg   = (fd_standings.get("goals_for",     0) or 0) / played
@@ -931,8 +941,8 @@ class FootballOracleEngine:
                         for r in results
                     ]
                     data_source  = "standings-fd"
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("[Profile] footballdata form read failed for %s: %s", canonical, exc)
 
         # ── Level 4: TheSportsDB ──────────────────────────────────────────
         if not stats and team_id and team_id.startswith("tsdb_"):

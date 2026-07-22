@@ -556,6 +556,68 @@ def upsert_team_health(
         return False
 
 
+def get_team_form_footballdata(team: str) -> dict | None:
+    """
+    Sursa canonică pentru forma/standings unei echipe (football-data.org)
+    folosită de servirea live (oracle_engine._build_profile(), Level 3) —
+    ADR-039, R-Sync-3. Înlocuiește apelul live către
+    `oracle_api.get_standings_form()` din Oracle Engine — citire STRICT
+    din Supabase, populată separat de Sync Layer
+    (sync/sync_team_form_footballdata.py), niciodată direct de aici.
+
+    Identitate canonică prin nume normalizat (ADR-039 Principiul 7) — NU
+    prin ID-ul numeric de provider; `team` trebuie să fie deja trecut prin
+    `normalize_team_name()` de apelant, exact ca la `get_team_health()`.
+
+    Întoarce None dacă echipa nu a fost încă sincronizată — Regula #8,
+    tratat de apelant ca „necunoscut", niciodată motiv de fallback live
+    către provider.
+    """
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("footballdata_team_form_snapshot")
+            .select("*")
+            .eq("team_name_canonical", team)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Queries] get_team_form_footballdata failed pentru %s: %s", team, exc)
+        return None
+
+
+def upsert_team_form_footballdata(
+    team: str, played: int, goals_for: int, goals_against: int, form: str,
+) -> bool:
+    """
+    Owner unic de scriere pentru `footballdata_team_form_snapshot`
+    (disciplina ADR-036) — exclusiv Sync Layer
+    (`sync/sync_team_form_footballdata.py`), niciodată Oracle Engine.
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("footballdata_team_form_snapshot").upsert({
+            "team_name_canonical": team,
+            "played": played,
+            "goals_for": goals_for,
+            "goals_against": goals_against,
+            "form": form,
+            "source_provider": "footballdata",
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="team_name_canonical").execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Queries] upsert_team_form_footballdata failed pentru %s: %s", team, exc)
+        return False
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # ML STATUS
 # ════════════════════════════════════════════════════════════════════════════

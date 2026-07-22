@@ -728,6 +728,30 @@ class FootballOracleAPI:
             return self.get_team_form_fd(team_id, comp_code)
         return None
 
+    def get_competition_standings_raw(self, comp_code: str) -> dict | None:
+        """[Sync Layer only — ADR-039, R-Sync-3] Tabelul de clasament
+        COMPLET al unei competiții football-data.org, brut, nefiltrat pe
+        echipă — spre deosebire de `get_team_form_fd()`, care cere un
+        `team_id` deja cunoscut (nedisponibil în Sync Layer fără a trage
+        machinery de descoperire a meciurilor, în afara scope-ului
+        R-Sync-3, rezervat R-Sync-7).
+
+        Extrasă din `get_team_form_fd()` (fetch + cache, `cache_key`
+        identic `"standings_{comp_code}"`) ca adăugire pură — nu modifică
+        `get_team_form_fd()`, care rămâne intactă (ADR-039 Principiul 4:
+        niciun cod funcțional nu se rescrie fără migrare testată per pas).
+        """
+        cache_key = f"standings_{comp_code}"
+        cached = self._cget(cache_key)
+        if cached is None:
+            cached = self._get(
+                f"{FOOTBALL_DATA_URL}/competitions/{comp_code}/standings",
+                headers=self._key_manager.get_headers("footballdata") or {},
+            )
+            if cached:
+                self._cset(cache_key, cached)
+        return cached
+
     # ── ESPN ──────────────────────────────────────────────────────────────
     def _fetch_matches_espn(self, league: str, target_date: str) -> list[dict]:
         slug = ESPN_LEAGUE_SLUGS.get(league)
