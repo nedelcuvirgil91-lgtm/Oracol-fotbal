@@ -177,3 +177,130 @@ def test_is_rollback_promoted_false_on_non_string_promoted_by():
     interpretat implicit ca rollback."""
     assert rs.is_rollback_promoted({"promoted_by": None}) is False
     assert rs.is_rollback_promoted({"promoted_by": 12345}) is False
+
+
+# ── expected_predecessor_training_run_id (Stage R3.2B — Execution Contract,
+# ADR-037): ținta CAS ÎNGHEȚATĂ la propunere, transmisă explicit, niciodată
+# re-derivată la execuție. Simulăm fidel semantica RPC-ului 014 printr-un
+# fake cu stare (nu un stub orb), ca testele să demonstreze exact garanțiile
+# reale ale bazei de date (stare-țintă + CAS), nu doar apeluri mockuite. ──
+
+class _FakeModelChampionsRPC:
+    """Fake fidel al RPC rollback_champion (migrarea 014): idempotență
+    stare-țintă (already_active), derivarea predecesorului SERVER-SIDE din
+    campionul ACTIV curent, gardă CAS (predecessor_mismatch). Fără efecte
+    laterale reale — doar starea in-memory necesară să demonstreze
+    scenariul din Execution Contract."""
+
+    def __init__(self, active_training_run_id: str, predecessor_map: dict):
+        self.active = active_training_run_id
+        self.predecessor_map = dict(predecessor_map)  # {training_run_id: predecesorul lui, sau None}
+        self.calls = []
+
+    def __call__(self, family, scope, expected_predecessor, reason, by):
+        self.calls.append((family, scope, expected_predecessor, reason, by))
+        if self.active == expected_predecessor:
+            return "already_active"
+        derived_predecessor = self.predecessor_map.get(self.active)
+        if derived_predecessor != expected_predecessor:
+            raise Exception(
+                f"predecessor_mismatch: asteptat {expected_predecessor}, gasit {derived_predecessor}"
+            )
+        self.active = expected_predecessor
+        return "rolled_back"
+
+    def externally_change_active(self, new_active_training_run_id: str, its_predecessor):
+        """Simulează un eveniment CONCURENT, independent de decizia testată
+        (ex. un alt rollback manual, sau o promovare) — schimbă campionul
+        activ fără să treacă prin fluxul aflat sub test."""
+        self.active = new_active_training_run_id
+        self.predecessor_map[new_active_training_run_id] = its_predecessor
+
+
+def test_pinned_target_converges_to_already_active_on_retry_without_external_change(monkeypatch):
+    """Execution Contract §6 — convergența de bază: primul apel execută,
+    retry-ul CU ACEEAȘI ținta înghețată (nimic altceva nu s-a schimbat)
+    converge la already_active, niciodată o a doua mutație."""
+    fake_rpc = _FakeModelChampionsRPC(active_training_run_id="tr_C", predecessor_map={"tr_C": "tr_P"})
+    monkeypatch.setattr("learning_core.model_artifact_storage.load_model_artifact", lambda tid: _FakeModel())
+    monkeypatch.setattr("supabase_client.rpc_rollback_champion", fake_rpc)
+    monkeypatch.setattr("supabase_client.get_champion_predecessor", _fail_if_called)  # nu trebuie apelat — tinta e pinned
+
+    first = rs.rollback_champion(
+        "xgboost_v1", "all", reason="regression", rolled_back_by="orchestrator",
+        expected_predecessor_training_run_id="tr_P",
+    )
+    assert first.status == "rolled_back"
+
+    second = rs.rollback_champion(
+        "xgboost_v1", "all", reason="regression", rolled_back_by="orchestrator",
+        expected_predecessor_training_run_id="tr_P",
+    )
+    assert second.status == "already_active"
+    assert fake_rpc.active == "tr_P"
+
+
+def test_retry_after_external_state_change_yields_predecessor_mismatch_not_wrong_rollback(monkeypatch):
+    """Scenariul cerut explicit (Execution Contract, ADR-037):
+      1. rollback executat cu ținta înghețată P (reușește);
+      2. decizia rămâne 'approved' (simulează crash — commit_decision nu s-a
+         mai apelat);
+      3. între timp APARE alt campion activ X (eveniment extern, independent
+         — ex. un alt rollback/promovare manuală);
+      4. retry, cu ACEEAȘI țintă înghețată P (decizia D, neschimbată);
+      5. rezultatul TREBUIE să fie predecessor_mismatch -> rejected,
+         NICIODATĂ un rollback peste noua stare (X -> ceva).
+    Demonstrează mecanic că o intenție învechită nu poate modifica istoria."""
+    fake_rpc = _FakeModelChampionsRPC(active_training_run_id="tr_C", predecessor_map={"tr_C": "tr_P"})
+    monkeypatch.setattr("learning_core.model_artifact_storage.load_model_artifact", lambda tid: _FakeModel())
+    monkeypatch.setattr("supabase_client.rpc_rollback_champion", fake_rpc)
+    monkeypatch.setattr("supabase_client.get_champion_predecessor", _fail_if_called)
+
+    first = rs.rollback_champion(
+        "xgboost_v1", "all", reason="regression", rolled_back_by="orchestrator",
+        expected_predecessor_training_run_id="tr_P",
+    )
+    assert first.status == "rolled_back"
+    assert fake_rpc.active == "tr_P"
+
+    # Eveniment extern, independent de decizia D (care a rămas 'approved' —
+    # simulează crash-ul înainte de commit_decision din scenariul original).
+    fake_rpc.externally_change_active("tr_X", its_predecessor="tr_Q")
+
+    # Retry pe decizia D — EXACT aceeași țintă înghețată P, neschimbată.
+    second = rs.rollback_champion(
+        "xgboost_v1", "all", reason="regression", rolled_back_by="orchestrator",
+        expected_predecessor_training_run_id="tr_P",
+    )
+
+    assert second.status == "rejected"
+    assert "predecessor_mismatch" in second.reason
+    # Starea NU s-a schimbat suplimentar — niciun rollback greșit peste X.
+    assert fake_rpc.active == "tr_X"
+
+
+def test_pinned_target_still_validates_artifact_freshness(monkeypatch):
+    """Ținta poate fi înghețată, dar artefactul predecesorului tot trebuie
+    re-validat la execuție (poate s-a stricat între propunere și execuție,
+    ore/zile mai târziu, TTL=7 zile) — validarea artefactului rămâne
+    NESCHIMBATĂ, indiferent de sursa țintei."""
+    monkeypatch.setattr("learning_core.model_artifact_storage.load_model_artifact", lambda tid: None)
+    monkeypatch.setattr("supabase_client.rpc_rollback_champion", _fail_if_called)
+    monkeypatch.setattr("supabase_client.get_champion_predecessor", _fail_if_called)
+
+    result = rs.rollback_champion(
+        "xgboost_v1", "all", reason="regression", rolled_back_by="orchestrator",
+        expected_predecessor_training_run_id="tr_P",
+    )
+    assert result.status == "rejected"
+    assert "nu a putut fi încărcat" in result.reason
+
+
+def test_expected_predecessor_none_preserves_r1_dynamic_behavior(happy_path):
+    """Compatibilitate retroactivă explicită: fără expected_predecessor_
+    training_run_id (omis, None implicit), comportamentul R1 (derivare
+    dinamică din campionul activ curent, cale manuală/CLI) rămâne
+    neschimbat."""
+    result = rs.rollback_champion("xgboost_v1", "all", reason="operator", rolled_back_by="chief")
+    assert result.status == "rolled_back"
+    assert result.predecessor_training_run_id == "pred-1"  # din happy_path: get_champion_predecessor

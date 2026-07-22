@@ -135,6 +135,10 @@ def recorder(monkeypatch):
     # gardă anti-ping-pong de restul, dacă nu suprascrise explicit).
     monkeypatch.setattr(cl.sb, "get_active_champion",
                          lambda family, league: {"training_run_id": "tr_champion", "promoted_by": "ADR-030-continuous-learning"})
+    # R3.2A.1: predecesor implicit disponibil (izolează testele de propunere
+    # de garda "niciun predecesor de înghețat", dacă nu suprascris explicit).
+    monkeypatch.setattr(cl.sb, "get_champion_predecessor",
+                         lambda family, league: "tr_predecessor_default")
     return rec
 
 
@@ -191,24 +195,26 @@ def _health_completes(recorder_calls):
     return [c for c in complete_calls if c[2] and "health_state" in c[2]]
 
 
-# ── R3.2A/R3.2B — gardă mecanică de graniță (sursă, nu doar comportament) ──
+# ── R3.2A/R3.2B — gărzi mecanice de graniță (sursă, nu doar comportament) ──
 
-def test_module_does_not_yet_execute_rollback():
-    """Graniță R3.2A/R3.2B: propunerea (R3.2A, aprobată) nu trebuie
-    NICIODATĂ să execute rollback-ul. Verificare mecanică pe sursa întregului
-    modul — rollback_champion() nu trebuie apelat de nicăieri până la
-    aprobarea explicită a R3.2B."""
-    src = inspect.getsource(cl)
+def test_phase_d_never_executes_rollback():
+    """Faza D (propunere) nu trebuie NICIODATĂ să execute rollback-ul — doar
+    Faza C, după aprobare umană. Verificare mecanică pe sursa funcției de
+    propunere (nu pe tot modulul — de la R3.2B, execuția EXISTĂ, dar exclusiv
+    în Faza C)."""
+    src = inspect.getsource(cl._phase_d_champion_health)
     assert "rollback_service.rollback_champion(" not in src
-    assert ".rollback_champion(" not in src
 
 
-def test_phase_c_source_unchanged_no_decision_kind_branch():
-    """R3.2A nu modifică Faza C — nicio ramificare pe decision_kind acolo
-    încă (vine în R3.3, aprobată separat)."""
-    src = inspect.getsource(cl._phase_c_execute_approved)
-    assert "decision_kind" not in src
-    assert "rollback" not in src.lower()
+def test_phase_c_execute_rollback_uses_frozen_target_explicitly():
+    """R3.2B — garanția centrală a Execution Contract (ADR-037): execuția
+    trebuie să transmită expected_predecessor_training_run_id EXPLICIT către
+    rollback_service (ținta înghețată la propunere), niciodată să se bazeze
+    pe derivarea implicită (parametrul opțional None -> derivare dinamică,
+    doar pentru calea manuală). Verificare mecanică pe sursă."""
+    src = inspect.getsource(cl._phase_c_execute_rollback)
+    assert "expected_predecessor_training_run_id=predecessor_training_run_id" in src
+    assert "get_champion_predecessor" not in src
 
 
 def test_is_rollback_promoted_not_reimplemented_locally():
@@ -327,7 +333,54 @@ def test_phase_d_proposes_t3a_rollback_when_recommended(recorder, fake_algorithm
     assert evidence["n_matches_evaluated"] == 42
     assert correction_method == "none — pre-ADR-034"
 
+    # R3.2A.1 — ținta rollback-ului trebuie înghețată în evidence la
+    # momentul propunerii (nu recalculată dinamic la execuție).
+    assert evidence["current_training_run_id"] == "tr_champion"
+    assert evidence["predecessor_training_run_id"] == "tr_predecessor_default"
+
     assert [c for c in recorder.calls if c[0] == "surface_decision"] == [("surface_decision", 1)]
+
+
+# ── R3.2A.1 — îngheață ținta rollback-ului la momentul propunerii ─────────
+
+def test_phase_d_skips_proposal_when_no_predecessor_to_freeze(recorder, fake_algorithm, monkeypatch):
+    """Fără predecesor de înghețat (ex. campionul activ e primul campion
+    vreodată, degradat), nu are sens să propunem o decizie care nu poate fi
+    executată — Faza D sare peste propunere, motivat explicit."""
+    monkeypatch.setattr(
+        cl.champion_guardian, "evaluate_champion_health",
+        lambda family, league: _FakeHealthResult(health_state="critical", recommends_rollback=True, reason="model_error: x"),
+    )
+    monkeypatch.setattr(cl.sb, "get_champion_predecessor", lambda family, league: None)
+
+    result = cl.run_cycle()
+
+    assert result["health_checked"] == 1
+    assert result["rollback_proposed"] == 0
+    assert [c for c in recorder.calls if c[0] == "propose_decision"] == []
+
+    skip_calls = [c for c in recorder.calls if c[0] == "skip_run"]
+    assert any("predecesor" in c[2] for c in skip_calls)
+
+
+def test_phase_d_freezes_target_from_champion_and_predecessor_reads(recorder, fake_algorithm, monkeypatch):
+    """Ținta înghețată vine EXACT din get_active_champion (current) și
+    get_champion_predecessor (predecessor) — citite la momentul propunerii,
+    nu inventate/derivate altfel."""
+    monkeypatch.setattr(
+        cl.champion_guardian, "evaluate_champion_health",
+        lambda family, league: _FakeHealthResult(health_state="degrading", recommends_rollback=True, reason="x"),
+    )
+    monkeypatch.setattr(cl.sb, "get_active_champion",
+                         lambda family, league: {"training_run_id": "tr_current_XYZ", "promoted_by": "ADR-030-continuous-learning"})
+    monkeypatch.setattr(cl.sb, "get_champion_predecessor", lambda family, league: "tr_predecessor_ABC")
+
+    cl.run_cycle()
+
+    propose_calls = [c for c in recorder.calls if c[0] == "propose_decision"]
+    evidence = propose_calls[0][4]
+    assert evidence["current_training_run_id"] == "tr_current_XYZ"
+    assert evidence["predecessor_training_run_id"] == "tr_predecessor_ABC"
 
     write_calls = [c for c in recorder.calls if c[0] == "write_run"]
     assert any(c[2] == "rollback_candidate" and c[3] == "T3a" for c in write_calls)
@@ -451,3 +504,140 @@ def test_phase_d_proposes_when_no_open_decision_exists_for_target(recorder, fake
 
     assert result["rollback_proposed"] == 1
     assert len([c for c in recorder.calls if c[0] == "propose_decision"]) == 1
+
+
+# ── R3.2B — Faza C: execuția rollback-ului aprobat, cu ținta înghețată ─────
+
+@dataclass
+class _FakeRollbackResult:
+    status: str
+    reason: str | None = None
+    predecessor_training_run_id: str | None = None
+
+
+def _isolate_phase_d(monkeypatch):
+    """Faza D nu e obiectul acestor teste — o izolează explicit, ca
+    asserțiile pe recorder.calls să privească exclusiv Faza C."""
+    monkeypatch.setattr(cl.champion_guardian, "evaluate_champion_health", lambda family, league: None)
+
+
+def test_phase_c_commits_rollback_when_service_returns_rolled_back(recorder, fake_algorithm, monkeypatch):
+    _isolate_phase_d(monkeypatch)
+    target_key = "fake_algo|Premier League"
+    recorder.approved_for_target[target_key] = [{
+        "id": 201,
+        "evidence": {
+            "decision_kind": "rollback", "reason": "regression",
+            "current_training_run_id": "tr_C", "predecessor_training_run_id": "tr_P",
+        },
+    }]
+    captured = {}
+
+    def _fake_rollback(**kwargs):
+        captured.update(kwargs)
+        return _FakeRollbackResult(status="rolled_back", predecessor_training_run_id="tr_P")
+
+    monkeypatch.setattr(cl.rollback_service, "rollback_champion", _fake_rollback)
+
+    result = cl.run_cycle()
+
+    assert result["rollback_committed"] == 1
+    # Ținta e transmisă EXPLICIT — niciodată re-derivată la execuție.
+    assert captured["expected_predecessor_training_run_id"] == "tr_P"
+    assert captured["reason"] == "regression"
+    assert captured["algorithm_family"] == "fake_algo"
+    assert captured["league_scope"] == "Premier League"
+    assert captured["rolled_back_by"] == "ADR-037-continuous-learning"
+    assert [c for c in recorder.calls if c[0] == "commit_decision"] == [("commit_decision", 201)]
+
+
+def test_phase_c_commits_rollback_when_service_returns_already_active(recorder, fake_algorithm, monkeypatch):
+    """Convergența idempotenței (Execution Contract §6): already_active se
+    tratează identic cu rolled_back — succes, commit_decision."""
+    _isolate_phase_d(monkeypatch)
+    target_key = "fake_algo|Premier League"
+    recorder.approved_for_target[target_key] = [{
+        "id": 202,
+        "evidence": {"decision_kind": "rollback", "reason": "regression", "predecessor_training_run_id": "tr_P"},
+    }]
+    monkeypatch.setattr(cl.rollback_service, "rollback_champion",
+                         lambda **kw: _FakeRollbackResult(status="already_active"))
+
+    result = cl.run_cycle()
+
+    assert result["rollback_committed"] == 1
+    assert [c for c in recorder.calls if c[0] == "commit_decision"] == [("commit_decision", 202)]
+
+
+def test_phase_c_fails_commit_when_rollback_rejected(recorder, fake_algorithm, monkeypatch):
+    """Cazul central al Execution Contract: predecessor_mismatch (starea a
+    divergat) -> rejected -> fail_decision_commit, NICIODATĂ commit_decision.
+    Decizia devine vizibilă (commit_failed), nu se pierde tăcut."""
+    _isolate_phase_d(monkeypatch)
+    target_key = "fake_algo|Premier League"
+    recorder.approved_for_target[target_key] = [{
+        "id": 203,
+        "evidence": {"decision_kind": "rollback", "reason": "regression", "predecessor_training_run_id": "tr_P"},
+    }]
+    monkeypatch.setattr(
+        cl.rollback_service, "rollback_champion",
+        lambda **kw: _FakeRollbackResult(status="rejected", reason="predecessor_mismatch: asteptat tr_P, gasit tr_Q"),
+    )
+
+    result = cl.run_cycle()
+
+    assert result["rollback_committed"] == 0
+    assert [c for c in recorder.calls if c[0] == "commit_decision"] == []
+    fail_calls = [c for c in recorder.calls if c[0] == "fail_decision_commit"]
+    assert len(fail_calls) == 1 and fail_calls[0][1] == 203
+    assert "predecessor_mismatch" in fail_calls[0][2]
+
+
+def test_phase_c_fails_commit_when_evidence_missing_frozen_target(recorder, fake_algorithm, monkeypatch):
+    """Apărare defensivă: fără predecessor_training_run_id/reason în
+    evidence (nu ar trebui să se întâmple, R3.2A.1 le garantează la
+    propunere), Faza C NU apelează deloc rollback_service — eșuează curat."""
+    _isolate_phase_d(monkeypatch)
+    target_key = "fake_algo|Premier League"
+    recorder.approved_for_target[target_key] = [{
+        "id": 204,
+        "evidence": {"decision_kind": "rollback", "reason": "regression"},  # fără predecessor_training_run_id
+    }]
+    called = {"n": 0}
+    monkeypatch.setattr(cl.rollback_service, "rollback_champion",
+                         lambda **kw: called.__setitem__("n", called["n"] + 1))
+
+    result = cl.run_cycle()
+
+    assert result["rollback_committed"] == 0
+    assert called["n"] == 0
+    fail_calls = [c for c in recorder.calls if c[0] == "fail_decision_commit"]
+    assert len(fail_calls) == 1 and fail_calls[0][1] == 204
+
+
+def test_phase_c_decision_without_decision_kind_uses_promotion_path(recorder, fake_algorithm, monkeypatch):
+    """Backward compat / graniță mutual-exclusivă: o decizie fără
+    decision_kind (deciziile de promovare existente, dinainte de R3.2A)
+    rămâne pe calea veche, complet neatinsă — rollback_service nu e apelat."""
+    _isolate_phase_d(monkeypatch)
+    target_key = "fake_algo|Premier League"
+    recorder.approved_for_target[target_key] = [{"id": 205, "evidence": {"training_run_id": "tr_challenger_X"}}]
+    rollback_called = {"n": 0}
+    monkeypatch.setattr(cl.rollback_service, "rollback_champion",
+                         lambda **kw: rollback_called.__setitem__("n", rollback_called["n"] + 1))
+
+    @dataclass
+    class _FakePromotionResult:
+        status: str
+        training_run_id: str
+        reason: str | None = None
+
+    monkeypatch.setattr(cl, "promote_challenger",
+                         lambda training_run_id, algorithm_family, league_scope, promoted_by:
+                             _FakePromotionResult(status="promoted", training_run_id=training_run_id))
+
+    result = cl.run_cycle()
+
+    assert result["committed"] == 1
+    assert result["rollback_committed"] == 0
+    assert rollback_called["n"] == 0

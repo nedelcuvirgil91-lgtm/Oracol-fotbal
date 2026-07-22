@@ -22,12 +22,14 @@ Patru faze, independente, idempotente, sigure la rerulare — pentru fiecare
   D. Sănătatea campionului (ADR-037) — evaluează campionul ACTIV prin
      Champion Guardian și jurnalizează rezultatul (Stage R3.1). Dacă
      Guardian recomandă rollback, propune o decizie T3a în decision feed —
-     NICIODATĂ automat, doar propunere (Stage R3.2A). Execuția rollback-ului
-     aprobat e Stage R3.2B, separată, neimplementată încă — Faza C rămâne
-     neschimbată până atunci.
+     NICIODATĂ automat, doar propunere (Stage R3.2A), cu ținta (predecesor)
+     ÎNGHEȚATĂ în evidence la momentul propunerii (Stage R3.2A.1 — Execution
+     Contract, ADR-037).
   C. Execuție — există decizii T3a aprobate de om, neexecutate încă? ->
-     finalizează promovarea (fără coadă/scheduler nou — aceeași rulare
-     periodică acoperă și acest caz).
+     finalizează promovarea, SAU execută rollback-ul folosind EXCLUSIV
+     ținta înghețată de Faza D (Stage R3.2B) — niciodată recalculată la
+     execuție (fără coadă/scheduler nou — aceeași rulare periodică acoperă
+     și acest caz).
 
 Gardă de consistență (cerută explicit, precondiție pentru A/B): NU se
 reutilizează supabase_client.get_active_challenger() (care ia tăcut
@@ -91,7 +93,7 @@ def run_cycle() -> dict:
     summary = {
         "enabled": True, "checked": 0, "trained": 0, "evaluated": 0,
         "proposed": 0, "committed": 0, "guard_failures": 0,
-        "health_checked": 0, "rollback_proposed": 0,
+        "health_checked": 0, "rollback_proposed": 0, "rollback_committed": 0,
     }
 
     for name, version in model_registry.list_available():
@@ -312,12 +314,16 @@ def _count_finished_matches(league: str, since: str | None = None) -> int:
 # ════════════════════════════════════════════════════════════════════════
 
 def _phase_d_champion_health(family: str, league: str, target_key: str, summary: dict) -> None:
-    """R3.1 (read-only) + R3.2A (propunere T3a de rollback) — evaluează
-    sănătatea campionului activ prin Champion Guardian, jurnalizează, și —
-    doar dacă Guardian recomandă rollback — propune o decizie T3a în decision
-    feed (aprobare umană obligatorie, ADR-002 / North Star P2-P3). NU execută
-    NICIODATĂ rollback-ul aici — execuția e Stage R3.2B, separată, aprobată
-    distinct; Faza C rămâne complet neschimbată până atunci."""
+    """R3.1 (read-only) + R3.2A (propunere T3a de rollback) + R3.2A.1
+    (ținta rollback-ului înghețată în evidence la momentul propunerii) —
+    evaluează sănătatea campionului activ prin Champion Guardian,
+    jurnalizează, și — doar dacă Guardian recomandă rollback — propune o
+    decizie T3a în decision feed (aprobare umană obligatorie, ADR-002 /
+    North Star P2-P3), cu evidence care fixează `current_training_run_id`/
+    `predecessor_training_run_id` — execuția (R3.2B, `_phase_c_execute_rollback`)
+    folosește EXACT aceste valori, niciodată recalculate dinamic. NU execută
+    NICIODATĂ rollback-ul aici — execuția rulează exclusiv în Faza C, după
+    aprobare umană."""
     run_id = ar.write_run(PRODUCER, "champion_health_check", "T2", target_key=target_key)
     if run_id is None:
         return
@@ -367,6 +373,22 @@ def _phase_d_champion_health(family: str, league: str, target_key: str, summary:
         ar.skip_run(run_id, "decizie deschisa deja pentru target — nu se stivuieste peste ea")
         return
 
+    # R3.2A.1 — îngheață ȚINTA rollback-ului la momentul PROPUNERII, simetric
+    # cu promote_challenger (care operează pe un training_run_id fix, nu pe
+    # "challengerul care e acum primul"). Execuția (R3.2B, Faza C de mai jos)
+    # nu re-întreabă "cine e acum predecesorul?" — execută rollback către
+    # EXACT training_run_id-ul înghețat aici.
+    # Motiv (Execution Readiness Review, ADR-037): get_champion_predecessor()
+    # citește DINAMIC predecesorul campionului activ CURENT — un retry peste
+    # timp (ex. proces mort între RPC și commit_decision) ar recalcula
+    # predecesorul unui campion DIFERIT (cel deja reactivat), declanșând un
+    # al doilea rollback neintenționat, în lanț. Fără target înghețat aici,
+    # execuția n-are cum să fie idempotentă peste timp — doar peste concurență.
+    predecessor_training_run_id = sb.get_champion_predecessor(family, league)
+    if predecessor_training_run_id is None:
+        ar.skip_run(run_id, "niciun predecesor de inghetat pentru rollback — nimic de propus")
+        return
+
     reason = _rollback_reason_from_health(result)
     ar.complete_run(run_id, summary={
         "health_state": result.health_state,
@@ -388,11 +410,18 @@ def _phase_d_champion_health(family: str, league: str, target_key: str, summary:
         "brier_live": result.brier_live,
         "window_end": result.window_end,
         "n_matches_evaluated": result.n_matches_evaluated,
+        # Ținta înghețată (R3.2A.1) — execuția (R3.2B) trebuie să folosească
+        # EXACT aceste valori, niciodată re-derivate la momentul execuției.
+        "current_training_run_id": champion.get("training_run_id"),
+        "predecessor_training_run_id": predecessor_training_run_id,
     }
 
     decision_id = ar.propose_decision(
         decision_run_id, tier="T3a",
-        rollback_plan="reactiveaza predecesorul campionului activ (rollback_champion, RPC 014, append-only, CAS)",
+        rollback_plan=(
+            "reactiveaza predecessor_training_run_id (inghetat in evidence la propunere) "
+            "al campionului current_training_run_id — rollback_champion, RPC 014, append-only, CAS"
+        ),
         evidence=evidence,
         correction_method="none — pre-ADR-034",
         ttl_hours=_T3A_DECISION_TTL_HOURS,
@@ -447,12 +476,18 @@ def _has_open_decision_for_target(target_key: str) -> bool:
 
 
 # ════════════════════════════════════════════════════════════════════════
-# Faza C — execuție a promovărilor deja aprobate de om
+# Faza C — execuție a deciziilor T3a deja aprobate de om (promovare/rollback)
 # ════════════════════════════════════════════════════════════════════════
 
 def _phase_c_execute_approved(target_key: str, summary: dict) -> None:
     for decision in ar.list_approved_decisions_for_target(target_key):
         evidence = decision.get("evidence") or {}
+        decision_kind = evidence.get("decision_kind", "promotion")
+
+        if decision_kind == "rollback":
+            _phase_c_execute_rollback(target_key, decision, evidence, summary)
+            continue
+
         training_run_id = evidence.get("training_run_id")
         if not training_run_id:
             ar.fail_decision_commit(decision["id"], "evidence fara training_run_id — nu se poate executa promovarea")
@@ -468,3 +503,32 @@ def _phase_c_execute_approved(target_key: str, summary: dict) -> None:
             summary["committed"] += 1
         else:
             ar.fail_decision_commit(decision["id"], f"promote_challenger: {result.status} — {result.reason}")
+
+
+def _phase_c_execute_rollback(target_key: str, decision: dict, evidence: dict, summary: dict) -> None:
+    """R3.2B — execută un rollback aprobat, folosind EXCLUSIV ținta înghețată
+    în `evidence` la propunere (R3.2A.1: `predecessor_training_run_id`,
+    `reason`) — niciodată recalculată aici. Acesta e mecanismul care
+    garantează idempotența retry-ului peste timp (Execution Contract,
+    ADR-037) — `rollback_service.rollback_champion` primește ținta explicit,
+    RPC-ul (014) validează prin CAS dacă mai e valabilă."""
+    predecessor_training_run_id = evidence.get("predecessor_training_run_id")
+    reason = evidence.get("reason")
+    if not predecessor_training_run_id or not reason:
+        ar.fail_decision_commit(
+            decision["id"],
+            "evidence fara predecessor_training_run_id/reason — nu se poate executa rollback-ul",
+        )
+        return
+
+    family, league = target_key.split("|", 1)
+    result = rollback_service.rollback_champion(
+        algorithm_family=family, league_scope=league, reason=reason,
+        rolled_back_by="ADR-037-continuous-learning",
+        expected_predecessor_training_run_id=predecessor_training_run_id,
+    )
+    if result.status in ("rolled_back", "already_active"):
+        ar.commit_decision(decision["id"])
+        summary["rollback_committed"] += 1
+    else:
+        ar.fail_decision_commit(decision["id"], f"rollback_champion: {result.status} — {result.reason}")
