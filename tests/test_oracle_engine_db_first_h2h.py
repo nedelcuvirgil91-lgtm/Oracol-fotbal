@@ -16,13 +16,12 @@ from types import SimpleNamespace
 import oracle_engine
 
 
-def _engine(freelf_h2h=None, odds_scores=None):
+def _engine(freelf_h2h=None):
     eng = oracle_engine.FootballOracleEngine.__new__(oracle_engine.FootballOracleEngine)
     eng.weights = {}
     eng.config = {}
     eng.api = SimpleNamespace(
         get_h2h=lambda eid, h, a: freelf_h2h,
-        _fetch_scores_odds_api=lambda sk, days_back=3: list(odds_scores or []),
     )
     return eng
 

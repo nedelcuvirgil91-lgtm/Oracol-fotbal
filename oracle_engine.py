@@ -66,12 +66,6 @@ except ModuleNotFoundError:
     INJURY_MANAGER_AVAILABLE = False
 
 try:
-    from football_providers import ApiFootballProvider
-    API_FOOTBALL_AVAILABLE = True
-except ModuleNotFoundError:
-    API_FOOTBALL_AVAILABLE = False
-
-try:
     from cache_manager import get_cache
     CACHE_MANAGER_AVAILABLE = True
 except ModuleNotFoundError:
@@ -90,7 +84,11 @@ except ModuleNotFoundError:
     SUPABASE_MODULE_AVAILABLE = False
 
 try:
-    from database.queries import get_latest_team_elo, get_h2h_from_history
+    from database.queries import (
+        get_latest_team_elo, get_h2h_from_history, get_team_health,
+        get_team_form_footballdata, get_national_team_elo, get_weather_forecast,
+        get_team_form_freelf_snapshot, get_team_recent_form_oddsapi, get_h2h_from_odds_recent,
+    )
     DB_QUERIES_MODULE_AVAILABLE = True
 except ModuleNotFoundError:
     DB_QUERIES_MODULE_AVAILABLE = False
@@ -413,9 +411,11 @@ class FootballOracleEngine:
             InjuryManager(api=self.api, cache=self.cache)
             if INJURY_MANAGER_AVAILABLE else None
         )
-        # [ADAUGAT] API-Football (injuries + coaches) - vezi ADR-002/ADR-003.
-        # Foloseste aceleasi key_manager/cache singleton-uri deja existente.
-        self.apifootball = ApiFootballProvider() if API_FOOTBALL_AVAILABLE else None
+        # [ELIMINAT R-Sync-2, ADR-039] self.apifootball (ApiFootballProvider)
+        # eliminat — Oracle Engine nu mai apeleaza niciun provider extern
+        # pentru injuries/coaches, citeste exclusiv Supabase (team_health_snapshot,
+        # database.queries.get_team_health()). Sincronizarea reala ruleaza acum
+        # separat, in Sync Layer (sync/sync_team_health.py, apifootball_health_adapter.py).
 
         self._initialize_ml()
 
@@ -639,31 +639,37 @@ class FootballOracleEngine:
             except Exception as exc:
                 logger.warning("[H2H] FreeLF failed for event %s: %s", event_id, exc)
 
-        league    = match.get("league", "")
-        from mappings import ODDS_SPORT_KEYS
-        sport_key = ODDS_SPORT_KEYS.get(league)
-        if not sport_key:
+        # ── Odds API meciuri recente (ADR-039, R-Sync-6) ───────────────────
+        # Sync Layer only — citire STRICT din Supabase
+        # (odds_api_recent_results, populată de
+        # sync/sync_odds_recent_results.py), niciodată apel live. Aceeași
+        # tabelă citită și de _build_profile() Level 2 (formă) — o singură
+        # sursă canonică, două derivări la citire (audit R-Sync-6,
+        # opțiunea A). Nu mai are nevoie de `sport_key`/`ODDS_SPORT_KEYS`
+        # la citire — cheia e direct perechea de nume canonice, valabilă
+        # indiferent de ligă (simplificare permisă de migrare, la fel ca
+        # eliminarea gate-ului `team_id.startswith("fd_")` la R-Sync-3).
+        if not DB_QUERIES_MODULE_AVAILABLE:
             return H2HRecord.empty(home_name, away_name)
 
-        scores = self.api._fetch_scores_odds_api(sport_key, days_back=3)
         home_c = normalize_team_name(home_name)
         away_c = normalize_team_name(away_name)
-        meetings: list[dict] = []
-        for s in scores:
-            h = normalize_team_name(s.get("home_team", ""))
-            a = normalize_team_name(s.get("away_team", ""))
-            if (h == home_c and a == away_c) or (h == away_c and a == home_c):
-                meetings.append(s)
+        try:
+            odds_rows = get_h2h_from_odds_recent(home_c, away_c)
+        except Exception as exc:
+            odds_rows = []
+            logger.warning("[H2H] Odds API Supabase read failed for %s vs %s: %s", home_c, away_c, exc)
 
-        if not meetings:
+        if not odds_rows:
             return H2HRecord.empty(home_name, away_name)
 
         home_wins = draws = away_wins = 0
         home_g = away_g = 0
         last_5: list[str] = []
-        for m in meetings[:5]:
-            is_home_first = normalize_team_name(m["home_team"]) == home_c
-            hs  = m.get("home_score", 0); as_ = m.get("away_score", 0)
+        for row in odds_rows[:5]:
+            is_home_first = row.get("home_team_canonical") == home_c
+            hs  = row.get("home_score", 0) or 0
+            as_ = row.get("away_score", 0) or 0
             gf  = hs if is_home_first else as_
             ga  = as_ if is_home_first else hs
             home_g += gf; away_g += ga
@@ -674,7 +680,7 @@ class FootballOracleEngine:
             else:
                 draws += 1; last_5.append("D")
 
-        n = len(meetings[:5])
+        n = len(odds_rows[:5])
         h2h_modifier = compute_h2h_modifier(
             home_wins, away_wins, n, weight=float(self.config.get("h2h_weight", 0.15))
         )
@@ -769,10 +775,9 @@ class FootballOracleEngine:
         Cascade:
            DB. Supabase match_history (get_team_recent_results)      ← PRIMAR, ADR-035/D1
           -1. Date naționale hardcodate (World Cup + naționale)      — fallback, doar dacă Level DB nu are date
-           0. Free Live Football standings (get_freelf_standings)    — fallback, doar dacă Level DB nu are date
-           1. Free Live Football form      (get_team_form_freelf)    — fallback
-           2. Odds API /scores             (get_team_recent_form)    — fallback
-           3. fd.org standings             (get_standings_form)      — fallback
+           0+1. FreeLF standings+formă (Supabase) (get_team_form_freelf_snapshot) — fallback, ADR-039 R-Sync-6
+           2. Odds API meciuri recente (Supabase) (get_team_recent_form_oddsapi) — fallback, ADR-039 R-Sync-6
+           3. fd.org standings (Supabase)  (get_team_form_footballdata) — fallback, ADR-039 R-Sync-3
            4. TheSportsDB events           (get_team_stats)          — fallback
            5. ELO sigmoid                  (întotdeauna blended)
            6. Neutral defaults
@@ -780,8 +785,10 @@ class FootballOracleEngine:
         ELO de club (separat de cascada de mai sus, rulează în paralel):
         match_history.home_elo_after/away_elo_after (get_latest_team_elo,
         ADR-023/ADR-035 D2) — PRIMAR, global per club, indiferent de ligă;
-        fallback pe get_elo_rating() (eloratings.net + hardcodat) doar dacă
-        echipa n-are meciuri de club sincronizate (tipic: naționale).
+        fallback pe get_national_team_elo() (Supabase, national_team_elo_
+        snapshot, ADR-039 R-Sync-4 — populat de Sync Layer din
+        eloratings.net, niciodată citit live) doar dacă echipa n-are
+        meciuri de club sincronizate (tipic: naționale).
 
         Principiul de proiectare (ADR-035): niciun provider extern nu poate
         avea prioritate asupra unei informații deja sincronizate și
@@ -799,9 +806,11 @@ class FootballOracleEngine:
         # PRIMUL ──────────────────────────────────────────────────────────
         # Principiul de proiectare (ADR-035): niciun provider extern nu
         # poate avea prioritate asupra unei informații deja sincronizate în
-        # baza canonică. get_elo_rating() (eloratings.net + fallback
-        # hardcodat) rămâne fallback — singura sursă reală pentru echipele
-        # naționale, care nu au meciuri de club în match_history.
+        # baza canonică. Fallback pentru echipele naționale (fără meciuri
+        # de club în match_history) — ADR-039, R-Sync-4: citire STRICT din
+        # Supabase (national_team_elo_snapshot, populată de Sync Layer,
+        # sync/sync_national_team_elo.py), niciodată apel live către
+        # eloratings.net (self.api.get_elo_rating(), eliminat de aici).
         elo_raw = None
         if DB_QUERIES_MODULE_AVAILABLE:
             try:
@@ -809,8 +818,13 @@ class FootballOracleEngine:
             except Exception as exc:
                 elo_raw = None
                 logger.warning("[Profile] DB-first ELO read failed for %s: %s", canonical, exc)
-        if elo_raw is None:
-            elo_raw = self.api.get_elo_rating(canonical)
+            if elo_raw is None:
+                try:
+                    national_elo = get_national_team_elo(canonical)
+                    if national_elo:
+                        elo_raw = national_elo.get("elo_rating")
+                except Exception as exc:
+                    logger.warning("[Profile] national ELO Supabase read failed for %s: %s", canonical, exc)
         elo_off   = self._elo_to_multiplier(elo_raw)           if elo_raw else None
         elo_def   = self._elo_to_defensive_multiplier(elo_raw) if elo_raw else None
         elo_blend = float(self.config.get("elo_blend_weight", 0.35))
@@ -877,52 +891,84 @@ class FootballOracleEngine:
             data_source  = "national-stats-hardcoded"
             logger.info("[Profile] %s — national stats hardcoded (gf=%.2f ga=%.2f)", canonical, gf, ga)
 
-        # ── Level 0: Free Live Football standings ─────────────────────────
-        # (subordonat Level DB — ADR-035: providerii nu pot avea prioritate
-        # asupra datelor deja sincronizate în baza canonică)
-        try:
-            standings_list = self.api.get_freelf_standings(league) if not stats else []
-            for entry in standings_list:
-                if entry.get("team", "").lower() == canonical.lower():
-                    season_entry = entry
-                    break
-            if season_entry:
-                gf     = season_entry.get("avg_gf", 1.25)
-                ga     = season_entry.get("avg_ga", 1.25)
+        # ── Level 0+1: Free Live Football standings + formă (ADR-039, R-Sync-6) ─
+        # Sync Layer only — citire STRICT din Supabase
+        # (freelf_team_form_snapshot, populată de
+        # sync/sync_team_form_freelf.py), niciodată apel live. Fuzionează
+        # foștii Level 0 (standings) + Level 1 (formă) — ambii citeau
+        # ACELAȘI răspuns FreeLF standings (team_id-ul folosit de fostul
+        # Level 1 venea din fostul Level 0, nicio dependență de discovery,
+        # verificat la audit) — un singur rând persistat servește ambele
+        # semnale acum.
+        #
+        # [GĂSIT LA AUDIT, nu ascuns] `form` va fi aproape mereu goală —
+        # reproduce fidel un bug preexistent din calea live (vezi migrarea
+        # 021, freelf_form_adapter.py) — NU e o regresie introdusă aici.
+        recent_form: list[dict] = []
+        if not stats and DB_QUERIES_MODULE_AVAILABLE:
+            try:
+                freelf_row = get_team_form_freelf_snapshot(canonical)
+            except Exception as exc:
+                freelf_row = None
+                logger.warning("[Profile] FreeLF Supabase read failed for %s: %s", canonical, exc)
+            if freelf_row:
+                played = freelf_row.get("played") or 5
+                gf     = (freelf_row.get("goals_for", 0) or 0) / max(played, 1)
+                ga     = (freelf_row.get("goals_against", 0) or 0) / max(played, 1)
                 sot    = real_sot if real_sot is not None else gf * 0.45
                 pos    = 50.0
-                played = season_entry.get("played", 5)
                 stats  = [
                     {"result": "W", "goals_for": gf, "goals_against": ga,
                      "shots_on_goal": sot, "possession": pos}
                 ] * min(played, 5)
                 data_source  = "freelf-standings"
-        except Exception as exc:
-            logger.warning("[Profile] FreeLF standings error for %s: %s", team_name, exc)
+                season_entry = {"avg_gf": gf, "avg_ga": ga}
+                form_str = freelf_row.get("form", "") or ""
+                recent_form = [
+                    {"result": ch.upper(), "goals_for": 0, "goals_against": 0, "date": ""}
+                    for ch in form_str[-last_n:]
+                ]
 
-        # ── Level 1: Free Live Football form ──────────────────────────────
-        recent_form: list[dict] = []
-        try:
-            freelf_id = season_entry.get("team_id") if season_entry else None
-            if freelf_id:
-                recent_form = self.api.get_team_form_freelf(int(freelf_id), league, last_n)
-        except Exception as exc:
-            logger.warning("[Profile] FreeLF form error for %s: %s", team_name, exc)
-
-        # ── Level 2: Odds API /scores ─────────────────────────────────────
-        if not stats:
+        # ── Level 2: Odds API meciuri recente (ADR-039, R-Sync-6) ─────────
+        # Sync Layer only — citire STRICT din Supabase
+        # (odds_api_recent_results, populată de
+        # sync/sync_odds_recent_results.py), niciodată apel live. Aceeași
+        # tabelă e citită și de _build_h2h() (fallback H2H) — o singură
+        # sursă canonică, două derivări la citire (audit R-Sync-6,
+        # opțiunea A).
+        if not stats and DB_QUERIES_MODULE_AVAILABLE:
             try:
-                scores_form = self.api.get_team_recent_form(canonical, league, days_back=14)
+                odds_rows = get_team_recent_form_oddsapi(canonical)
+                scores_form: list[dict] = []
+                for row in odds_rows:
+                    is_home = row.get("home_team_canonical") == canonical
+                    gf = row.get("home_score") if is_home else row.get("away_score")
+                    ga = row.get("away_score") if is_home else row.get("home_score")
+                    if gf is None or ga is None:
+                        continue
+                    result = "W" if gf > ga else ("L" if gf < ga else "D")
+                    scores_form.append({
+                        "date": row.get("kickoff_date", ""), "result": result,
+                        "goals_for": gf, "goals_against": ga,
+                        "shots_on_goal": round(gf * 3.5, 1), "possession": 50.0,
+                    })
                 if scores_form:
                     stats        = scores_form
                     data_source  = "scores-api"
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("[Profile] Odds API Supabase read failed for %s: %s", canonical, exc)
 
-        # ── Level 3: fd.org standings ─────────────────────────────────────
-        if not stats and team_id and team_id.startswith("fd_"):
+        # ── Level 3: football-data.org standings (ADR-039, R-Sync-3) ───────
+        # Sync Layer only, dupa migrare — citire STRICT din Supabase
+        # (footballdata_team_form_snapshot, populata de
+        # sync/sync_team_form_footballdata.py), niciodata apel live catre
+        # provider. Identitate prin nume canonic normalizat, nu prin
+        # team_id prefixat "fd_" (gate-ul vechi, eliminat — depindea de
+        # machinery de descoperire a meciurilor, in afara scope-ului
+        # acestei migrari).
+        if not stats and DB_QUERIES_MODULE_AVAILABLE:
             try:
-                fd_standings = self.api.get_standings_form(team_id, league)
+                fd_standings = get_team_form_footballdata(canonical)
                 if fd_standings:
                     played   = fd_standings.get("played") or 1
                     gf_avg   = (fd_standings.get("goals_for",     0) or 0) / played
@@ -935,8 +981,8 @@ class FootballOracleEngine:
                         for r in results
                     ]
                     data_source  = "standings-fd"
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("[Profile] footballdata form read failed for %s: %s", canonical, exc)
 
         # ── Level 4: TheSportsDB ──────────────────────────────────────────
         if not stats and team_id and team_id.startswith("tsdb_"):
@@ -1282,10 +1328,25 @@ class FootballOracleEngine:
 
         h2h = self._build_h2h(home_name, away_name, match)
 
-        city    = match.get("venue_city", "") or league
-        weather = self.api.get_weather(city, match.get("kickoff_date"))
-        w_pen   = float(weather.get("xg_penalty", 0.0))
-        w_note  = weather.get("description", "")
+        # [ADR-039, R-Sync-5] Citire STRICT din Supabase
+        # (weather_forecast_cache, populată de Sync Layer,
+        # sync/sync_weather_forecast.py) — niciodată apel live către
+        # WeatherAPI din Oracle Engine (self.api.get_weather(), eliminat
+        # de aici). Cheia (city, kickoff_date) trebuie să fie IDENTICĂ cu
+        # cea folosită la sincronizare — `venue_city` brut, FĂRĂ fallback
+        # pe numele ligii (fallback-ul vechi era chiar bug-ul demonstrat
+        # în audit: trimitea "Premier League" ca oraș). Dacă orașul
+        # lipsește sau perechea nu a fost încă sincronizată, penalizarea
+        # rămâne 0.0 — neutru, nu aproximat (Regula #8).
+        city    = match.get("venue_city", "")
+        weather = None
+        if DB_QUERIES_MODULE_AVAILABLE and city:
+            try:
+                weather = get_weather_forecast(city, match.get("kickoff_date", ""))
+            except Exception as exc:
+                logger.warning("[Weather] Supabase read failed for %s: %s", city, exc)
+        w_pen   = float(weather.get("xg_penalty", 0.0)) if weather else 0.0
+        w_note  = weather.get("description", "") if weather else ""
 
         home_xg, away_xg = self._calibrate_xg(home_p, away_p, league, w_pen, h2h)
 
@@ -1325,36 +1386,29 @@ class FootballOracleEngine:
             home_xg, home_xg_pre, away_xg, away_xg_pre,
         )
 
-        # ── API-Football: injuries + coaches (colectare automată) ──────────
-        # [ADAUGAT] Foloseste automat providerul cand e nevoie de injuries/
-        # coaches - conform integrarii cerute. NU modifica home_xg/away_xg
-        # (productia ramane neschimbata) - datele merg doar in shadow log
-        # (gated de shadow_mode_enabled), consistent cu ADR-002.
+        # ── Team Health (injuries + coaches) — Database-First (R-Sync-2, ADR-039) ──
+        # [ACTUALIZAT R-Sync-2] Nu mai apeleaza niciun provider extern — citeste
+        # exclusiv Supabase (team_health_snapshot), populata separat de Sync Layer
+        # (sync/sync_team_health.py, apifootball_health_adapter.py), niciodata aici.
+        # Lipsa unei intrari (echipa inca nesincronizata) inseamna "necunoscut"
+        # (Regula #8) — NICIODATA fallback live catre provider (ADR-039 elimina
+        # explicit acea exceptie, spre deosebire de ELO/H2H sub ADR-035).
+        # NU modifica home_xg/away_xg (productia ramane neschimbata) - datele merg
+        # doar in shadow log (gated de shadow_mode_enabled), consistent cu ADR-002.
         apifootball_metadata: dict = {}
-        if self.apifootball:
+        if DB_QUERIES_MODULE_AVAILABLE:
             try:
-                home_id = self.apifootball.resolve_team_id(home_name)
-                away_id = self.apifootball.resolve_team_id(away_name)
-                kickoff = match.get("kickoff_date") or ""
-                try:
-                    ko_year = int(kickoff[:4]) if kickoff else date.today().year
-                    ko_month = int(kickoff[5:7]) if len(kickoff) >= 7 else 7
-                    season_year = ko_year if ko_month >= 7 else ko_year - 1
-                except (ValueError, TypeError):
-                    season_year = date.today().year
-                af_home_injuries = self.apifootball.get_injuries(home_name, home_id, league, season_year) if home_id else []
-                af_away_injuries = self.apifootball.get_injuries(away_name, away_id, league, season_year) if away_id else []
-                af_home_coaches  = self.apifootball.get_coaches(home_name, home_id) if home_id else []
-                af_away_coaches  = self.apifootball.get_coaches(away_name, away_id) if away_id else []
-                apifootball_metadata = {
-                    "home_team_id": home_id, "away_team_id": away_id,
-                    "home_injuries": [vars(i) for i in af_home_injuries],
-                    "away_injuries": [vars(i) for i in af_away_injuries],
-                    "home_coaches": [vars(c) for c in af_home_coaches],
-                    "away_coaches": [vars(c) for c in af_away_coaches],
-                }
+                home_health = get_team_health(normalize_team_name(home_name))
+                away_health = get_team_health(normalize_team_name(away_name))
+                if home_health or away_health:
+                    apifootball_metadata = {
+                        "home_injuries": (home_health or {}).get("injuries", []),
+                        "away_injuries": (away_health or {}).get("injuries", []),
+                        "home_coaches":  (home_health or {}).get("coaches", []),
+                        "away_coaches":  (away_health or {}).get("coaches", []),
+                    }
             except Exception as exc:
-                logger.warning("[ApiFootball] Colectare eșuată pentru %s vs %s: %s", home_name, away_name, exc)
+                logger.warning("[TeamHealth] Citire eșuată pentru %s vs %s: %s", home_name, away_name, exc)
 
         ph, pd, pa, top_scores = self._poisson_model(home_xg, away_xg)
         # [ADAUGAT — ADR-031] Instantaneu al ieșirii brute a motorului
@@ -1490,7 +1544,7 @@ class FootballOracleEngine:
         # productia ramane 100% neschimbata. Foloseste predictia FINALA
         # (ph/pd/pa) - acest experiment inca nu propune o varianta
         # alternativa de xG, doar capteaza contextul pt analiza viitoare.
-        if self.apifootball and apifootball_metadata:
+        if apifootball_metadata:
             self.log_shadow_experiment(
                 pred=pred, experiment_name="apifootball_injuries_coaches", experiment_version="v1",
                 home_xg=home_xg, away_xg=away_xg, prob_home=ph, prob_draw=pd, prob_away=pa,

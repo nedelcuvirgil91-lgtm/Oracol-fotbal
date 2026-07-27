@@ -73,9 +73,13 @@ class ProviderCapability:
 _CAPABILITIES: dict[str, ProviderCapability] = {
     "apifootball": ProviderCapability(
         provider_id="apifootball", version=1,
-        data_types=frozenset({DataType.FIXTURES, DataType.ODDS, DataType.INJURIES, DataType.MANAGERS}),
+        # [REPARAT R4.1] DataType.ODDS eliminat - drift real intre declarat
+        # si implementat, confirmat prin audit (§1/§16): nicio cale de cod nu
+        # a apelat vreodata un endpoint de odds pe API-Football; sursa de
+        # odds a proiectului ramane Odds API (Frozen, ADR-005/006).
+        data_types=frozenset({DataType.FIXTURES, DataType.INJURIES, DataType.MANAGERS}),
         cost_class=CostClass.MONTHLY_QUOTA,
-        cache_ttl_hours={DataType.FIXTURES: 1, DataType.ODDS: 4, DataType.INJURIES: 2, DataType.MANAGERS: 72},
+        cache_ttl_hours={DataType.FIXTURES: 1, DataType.INJURIES: 4, DataType.MANAGERS: 72},
     ),
     "sportapi": ProviderCapability(
         provider_id="sportapi", version=1,

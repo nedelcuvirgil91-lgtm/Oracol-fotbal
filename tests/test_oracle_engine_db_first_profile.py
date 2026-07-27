@@ -19,11 +19,6 @@ def _fake_api(tsdb_stats: list[dict] | None = None):
     """Stub minimal pentru FootballOracleAPI — doar metodele atinse de
     _build_profile(), fiecare inertă (fără rețea)."""
     return SimpleNamespace(
-        get_elo_rating=lambda name: None,
-        get_freelf_standings=lambda league: [],
-        get_team_form_freelf=lambda tid, league, n: [],
-        get_team_recent_form=lambda name, league, days_back=14: [],
-        get_standings_form=lambda tid, league: None,
         get_team_stats=lambda tid, league: list(tsdb_stats or []),
     )
 

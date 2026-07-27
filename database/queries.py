@@ -489,6 +489,677 @@ def get_h2h_from_history(home: str, away: str, last_n: int = 10) -> list[dict]:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# TEAM HEALTH — Injuries + Coaches Database-First (ADR-039, R-Sync-2)
+# ════════════════════════════════════════════════════════════════════════════
+
+def get_team_health(team: str) -> dict | None:
+    """
+    Sursa canonică pentru starea de sănătate a unei echipe (injuries+coaches)
+    folosită de servirea live (oracle_engine.evaluate_match()) — ADR-039,
+    R-Sync-2. Înlocuiește apelul live către ApiFootballProvider din Oracle
+    Engine — citire STRICT din Supabase, populată separat de Sync Layer
+    (sync/sync_team_health.py), niciodată direct de aici.
+
+    Identitate canonică prin nume normalizat (ADR-039 Principiul 7) — NU
+    prin ID-ul numeric de provider; `team` trebuie să fie deja trecut prin
+    `normalize_team_name()` de apelant, exact ca la `get_latest_team_elo()`/
+    `get_h2h_from_history()`.
+
+    Întoarce None dacă echipa nu a fost încă sincronizată — Regula #8,
+    tratat de apelant ca „necunoscut", NICIODATĂ ca motiv de fallback live
+    către provider (spre deosebire de `get_latest_team_elo()`/
+    `get_h2h_from_history()`, care au voie să cadă pe cascada de provideri
+    sub ADR-035 — ADR-039 elimină explicit acea excepție pentru providerii
+    deja migrați la Sync Layer).
+    """
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("team_health_snapshot")
+            .select("*")
+            .eq("team_name_canonical", team)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Queries] get_team_health failed pentru %s: %s", team, exc)
+        return None
+
+
+def upsert_team_health(
+    team: str, injuries: list[dict], coaches: list[dict],
+    source_provider: str = "apifootball",
+) -> bool:
+    """
+    Owner unic de scriere pentru `team_health_snapshot` (disciplina
+    ADR-036) — exclusiv Sync Layer (`sync/sync_team_health.py`), niciodată
+    Oracle Engine.
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("team_health_snapshot").upsert({
+            "team_name_canonical": team,
+            "injuries": injuries,
+            "coaches": coaches,
+            "source_provider": source_provider,
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="team_name_canonical").execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Queries] upsert_team_health failed pentru %s: %s", team, exc)
+        return False
+
+
+def get_team_form_footballdata(team: str) -> dict | None:
+    """
+    Sursa canonică pentru forma/standings unei echipe (football-data.org)
+    folosită de servirea live (oracle_engine._build_profile(), Level 3) —
+    ADR-039, R-Sync-3. Înlocuiește apelul live către
+    `oracle_api.get_standings_form()` din Oracle Engine — citire STRICT
+    din Supabase, populată separat de Sync Layer
+    (sync/sync_team_form_footballdata.py), niciodată direct de aici.
+
+    Identitate canonică prin nume normalizat (ADR-039 Principiul 7) — NU
+    prin ID-ul numeric de provider; `team` trebuie să fie deja trecut prin
+    `normalize_team_name()` de apelant, exact ca la `get_team_health()`.
+
+    Întoarce None dacă echipa nu a fost încă sincronizată — Regula #8,
+    tratat de apelant ca „necunoscut", niciodată motiv de fallback live
+    către provider.
+    """
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("footballdata_team_form_snapshot")
+            .select("*")
+            .eq("team_name_canonical", team)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Queries] get_team_form_footballdata failed pentru %s: %s", team, exc)
+        return None
+
+
+def upsert_team_form_footballdata(
+    team: str, played: int, goals_for: int, goals_against: int, form: str,
+) -> bool:
+    """
+    Owner unic de scriere pentru `footballdata_team_form_snapshot`
+    (disciplina ADR-036) — exclusiv Sync Layer
+    (`sync/sync_team_form_footballdata.py`), niciodată Oracle Engine.
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("footballdata_team_form_snapshot").upsert({
+            "team_name_canonical": team,
+            "played": played,
+            "goals_for": goals_for,
+            "goals_against": goals_against,
+            "form": form,
+            "source_provider": "footballdata",
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="team_name_canonical").execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Queries] upsert_team_form_footballdata failed pentru %s: %s", team, exc)
+        return False
+
+
+def get_national_team_elo(team: str) -> dict | None:
+    """
+    Sursa canonică pentru ELO-ul echipelor NAȚIONALE (eloratings.net) —
+    folosită de servirea live (oracle_engine._build_profile(), fallback
+    ELO după Level DB) — ADR-039, R-Sync-4. Înlocuiește apelul live către
+    `oracle_api.get_elo_rating()` — citire STRICT din Supabase, populată
+    separat de Sync Layer (sync/sync_national_team_elo.py), niciodată
+    direct de aici.
+
+    NU se confundă cu `get_latest_team_elo()` (ELO de club, match_history,
+    ADR-023/D2) — acela rămâne sursa primară, neatinsă, pentru orice
+    echipă cu meciuri de club sincronizate. Funcția de față e strict
+    fallback-ul pentru naționale.
+
+    Identitate canonică prin nume normalizat (ADR-039 Principiul 7) — NU
+    prin ID numeric de provider; `team` trebuie să fie deja trecut prin
+    `normalize_team_name()` de apelant, exact ca la `get_team_health()`/
+    `get_team_form_footballdata()`.
+
+    Întoarce None dacă echipa nu a fost încă sincronizată — Regula #8,
+    tratat de apelant ca „necunoscut", niciodată motiv de fallback live
+    către provider.
+    """
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("national_team_elo_snapshot")
+            .select("*")
+            .eq("team_name_canonical", team)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Queries] get_national_team_elo failed pentru %s: %s", team, exc)
+        return None
+
+
+def upsert_national_team_elo(team: str, elo_rating: int) -> bool:
+    """
+    Owner unic de scriere pentru `national_team_elo_snapshot` (disciplina
+    ADR-036) — exclusiv Sync Layer (`sync/sync_national_team_elo.py`),
+    niciodată Oracle Engine.
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("national_team_elo_snapshot").upsert({
+            "team_name_canonical": team,
+            "elo_rating": elo_rating,
+            "source_provider": "eloratings",
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="team_name_canonical").execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Queries] upsert_national_team_elo failed pentru %s: %s", team, exc)
+        return False
+
+
+def get_weather_forecast(city: str, kickoff_date: str) -> dict | None:
+    """
+    Sursa canonică pentru condițiile meteo la o pereche (oraș, dată) —
+    folosită de servirea live (oracle_engine.evaluate_match(), penalizare
+    xG) — ADR-039, R-Sync-5. Înlocuiește apelul live către
+    `oracle_api.get_weather()` — citire STRICT din Supabase, populată
+    separat de Sync Layer (sync/sync_weather_forecast.py), niciodată
+    direct de aici.
+
+    Cheie: (city, kickoff_date) — NU per meci, NU per echipă. `city`
+    trebuie să fie EXACT stringul folosit la sincronizare (fără
+    normalizare — nu există încă un mecanism de identitate canonică
+    pentru orașe, decizie explicită, proprietar produs, R-Sync-5).
+
+    Întoarce None dacă perechea nu a fost încă sincronizată — Regula #8,
+    tratat de apelant ca „necunoscut", niciodată motiv de fallback live
+    către provider.
+    """
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("weather_forecast_cache")
+            .select("*")
+            .eq("city", city)
+            .eq("kickoff_date", kickoff_date)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Queries] get_weather_forecast failed pentru %s/%s: %s", city, kickoff_date, exc)
+        return None
+
+
+def upsert_weather_forecast(
+    city: str, kickoff_date: str,
+    temp_c: float | None, condition: str | None, wind_kph: float | None,
+    precip_mm: float | None, humidity: int | None, xg_penalty: float, description: str | None,
+) -> bool:
+    """
+    Owner unic de scriere pentru `weather_forecast_cache` (disciplina
+    ADR-036) — exclusiv Sync Layer (`sync/sync_weather_forecast.py`),
+    niciodată Oracle Engine. `xg_penalty`/`description` sunt persistate
+    EXACT cum le calculează `oracle_api.get_weather()` — nu recalculate
+    aici (logica de penalizare rămâne definită într-un singur loc).
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("weather_forecast_cache").upsert({
+            "city": city,
+            "kickoff_date": kickoff_date,
+            "temp_c": temp_c,
+            "condition": condition,
+            "wind_kph": wind_kph,
+            "precip_mm": precip_mm,
+            "humidity": humidity,
+            "xg_penalty": xg_penalty,
+            "description": description,
+            "source_provider": "weatherapi",
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="city,kickoff_date").execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Queries] upsert_weather_forecast failed pentru %s/%s: %s", city, kickoff_date, exc)
+        return False
+
+
+def get_team_form_freelf_snapshot(team: str) -> dict | None:
+    """
+    Sursa canonică pentru standings/forma unei echipe (Free Live Football)
+    folosită de servirea live (oracle_engine._build_profile(), Level 0+1
+    fuzionate) — ADR-039, R-Sync-6. Înlocuiește apelurile live către
+    `oracle_api.get_freelf_standings()`/`get_team_form_freelf()` —
+    citire STRICT din Supabase, populată separat de Sync Layer
+    (sync/sync_team_form_freelf.py), niciodată direct de aici.
+
+    Identitate canonică prin nume normalizat (ADR-039 Principiul 7) — NU
+    prin ID-ul numeric de provider FreeLF; `team` trebuie să fie deja
+    trecut prin `normalize_team_name()` de apelant.
+
+    [NOTĂ, R-Sync-6] Coloana `form` va fi aproape mereu goală în practică
+    — reproduce fidel un bug preexistent în calea live
+    (`get_team_form_freelf()` returna deja mereu `[]` în producție, vezi
+    migrarea 021) — NU e o regresie introdusă aici.
+
+    Întoarce None dacă echipa nu a fost încă sincronizată — Regula #8.
+    """
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("freelf_team_form_snapshot")
+            .select("*")
+            .eq("team_name_canonical", team)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Queries] get_team_form_freelf_snapshot failed pentru %s: %s", team, exc)
+        return None
+
+
+def upsert_team_form_freelf(
+    team: str, played: int, wins: int, draws: int, losses: int,
+    goals_for: int, goals_against: int, points: int, position: int | None, form: str,
+) -> bool:
+    """
+    Owner unic de scriere pentru `freelf_team_form_snapshot` (disciplina
+    ADR-036) — exclusiv Sync Layer (`sync/sync_team_form_freelf.py`),
+    niciodată Oracle Engine.
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("freelf_team_form_snapshot").upsert({
+            "team_name_canonical": team,
+            "played": played, "wins": wins, "draws": draws, "losses": losses,
+            "goals_for": goals_for, "goals_against": goals_against,
+            "points": points, "position": position, "form": form,
+            "source_provider": "freelivefootball",
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="team_name_canonical").execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Queries] upsert_team_form_freelf failed pentru %s: %s", team, exc)
+        return False
+
+
+def get_team_recent_form_oddsapi(team: str, limit: int = 5) -> list[dict]:
+    """
+    Sursa canonică pentru formă (fallback tertiar, Level 2 în
+    `_build_profile()`) — Odds API meciuri terminate recente, sursă
+    UNICĂ, partajată cu `get_h2h_from_odds_recent()` (ADR-039, R-Sync-6,
+    audit opțiunea A). Citire STRICT din Supabase
+    (`odds_api_recent_results`), populată de Sync Layer
+    (sync/sync_odds_recent_results.py), niciodată apel live.
+
+    Căutare GLOBALĂ pe echipă (ambele orientări gazdă/oaspete), la fel ca
+    `get_latest_team_elo()`/`get_h2h_from_history()`.
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("odds_api_recent_results")
+            .select("*")
+            .or_(f"home_team_canonical.eq.{team},away_team_canonical.eq.{team}")
+            .order("kickoff_date", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Queries] get_team_recent_form_oddsapi failed pentru %s: %s", team, exc)
+        return []
+
+
+def get_h2h_from_odds_recent(home: str, away: str, last_n: int = 5) -> list[dict]:
+    """
+    Sursa canonică pentru H2H (fallback tertiar, în `_build_h2h()`) —
+    ACELAȘI tabel `odds_api_recent_results` folosit de
+    `get_team_recent_form_oddsapi()` (ADR-039, R-Sync-6, audit opțiunea
+    A) — un singur adaptor/tabel, două citiri diferite ale aceleiași date
+    canonice, nu două implementări separate.
+
+    Cheie naturală simetrică (home vs away) SAU (away vs home) — exact
+    tiparul deja folosit de `get_h2h_from_history()` (ADR-035 D3).
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("odds_api_recent_results")
+            .select("*")
+            .or_(f"and(home_team_canonical.eq.{home},away_team_canonical.eq.{away}),"
+                 f"and(home_team_canonical.eq.{away},away_team_canonical.eq.{home})")
+            .order("kickoff_date", desc=True)
+            .limit(last_n)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Queries] get_h2h_from_odds_recent failed pentru %s vs %s: %s", home, away, exc)
+        return []
+
+
+def upsert_odds_recent_result(
+    home_team: str, away_team: str, kickoff_date: str, league: str,
+    home_score: int | None, away_score: int | None,
+) -> bool:
+    """
+    Owner unic de scriere pentru `odds_api_recent_results` (disciplina
+    ADR-036) — exclusiv Sync Layer (`sync/sync_odds_recent_results.py`),
+    niciodată Oracle Engine.
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("odds_api_recent_results").upsert({
+            "home_team_canonical": home_team,
+            "away_team_canonical": away_team,
+            "kickoff_date": kickoff_date,
+            "league": league,
+            "home_score": home_score,
+            "away_score": away_score,
+            "source_provider": "oddsapi",
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="home_team_canonical,away_team_canonical,kickoff_date").execute()
+        return True
+    except Exception as exc:
+        logger.warning(
+            "[Queries] upsert_odds_recent_result failed pentru %s vs %s (%s): %s",
+            home_team, away_team, kickoff_date, exc,
+        )
+        return False
+
+
+def upsert_scheduled_fixture(
+    home_team: str, away_team: str, kickoff_date: str, provider_id: str,
+    league: str | None = None, kickoff_utc: str | None = None, venue_city: str | None = None,
+    status: str | None = None,
+    freelf_event_id: str | None = None, freelf_home_team_id: str | None = None,
+    freelf_away_team_id: str | None = None, freelf_coverage_level: str | None = None,
+    odds_api_event_id: str | None = None, odds_api_sport_key: str | None = None,
+    apifootball_fixture_id: str | None = None, apifootball_home_team_id: str | None = None,
+    apifootball_away_team_id: str | None = None,
+    tsdb_home_team_id: str | None = None, tsdb_away_team_id: str | None = None,
+    fd_home_team_id: str | None = None, fd_away_team_id: str | None = None,
+    espn_home_team_id: str | None = None, espn_away_team_id: str | None = None,
+) -> bool:
+    """
+    Owner unic de scriere pentru `scheduled_fixtures` (disciplina ADR-036)
+    — exclusiv Sync Layer, prin cei 6 adaptori de descoperire
+    (freelf/odds_api/footballdata/espn/tsdb/apifootball_fixture_adapter.py).
+    Oracle Engine NU scrie niciodată aici.
+
+    ÎNTREAGA logică FixtureMergePolicy trăiește în RPC-ul
+    `upsert_scheduled_fixture_merge` (migrare 023) — funcția de față e un
+    wrapper subțire, NU decide nimic: trimite doar câmpurile pe care
+    adaptorul le are (restul rămân `None` → `NULL` în SQL, ignorate de
+    RPC), la fel pentru orice provider. Decizie explicită, proprietar
+    produs: „adaptorul trimite doar câmpurile lui, RPC decide" — nicio
+    logică de merge duplicată aici sau în Python.
+
+    `provider_id`: `'freelf' | 'oddsapi' | 'apifootball' | 'tsdb' | 'fd' | 'espn'`
+    — cod scurt, intern RPC-ului, distinct de `SyncAdapter.provider_id`
+    folosit în restul Sync Layer (`'freelivefootball'`, `'footballdata'`
+    etc.) — documentat explicit aici ca să nu fie confundat.
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.rpc("upsert_scheduled_fixture_merge", {
+            "p_home_team_canonical": home_team,
+            "p_away_team_canonical": away_team,
+            "p_kickoff_date": kickoff_date,
+            "p_provider_id": provider_id,
+            "p_league": league,
+            "p_kickoff_utc": kickoff_utc,
+            "p_venue_city": venue_city,
+            "p_status": status,
+            "p_freelf_event_id": freelf_event_id,
+            "p_freelf_home_team_id": freelf_home_team_id,
+            "p_freelf_away_team_id": freelf_away_team_id,
+            "p_freelf_coverage_level": freelf_coverage_level,
+            "p_odds_api_event_id": odds_api_event_id,
+            "p_odds_api_sport_key": odds_api_sport_key,
+            "p_apifootball_fixture_id": apifootball_fixture_id,
+            "p_apifootball_home_team_id": apifootball_home_team_id,
+            "p_apifootball_away_team_id": apifootball_away_team_id,
+            "p_tsdb_home_team_id": tsdb_home_team_id,
+            "p_tsdb_away_team_id": tsdb_away_team_id,
+            "p_fd_home_team_id": fd_home_team_id,
+            "p_fd_away_team_id": fd_away_team_id,
+            "p_espn_home_team_id": espn_home_team_id,
+            "p_espn_away_team_id": espn_away_team_id,
+        }).execute()
+        return True
+    except Exception as exc:
+        logger.warning(
+            "[Queries] upsert_scheduled_fixture failed pentru %s vs %s @ %s (provider=%s): %s",
+            home_team, away_team, kickoff_date, provider_id, exc,
+        )
+        return False
+
+
+def get_scheduled_fixture(home_team: str, away_team: str, kickoff_date: str) -> dict | None:
+    """
+    Citire a unui meci descoperit, prin identitatea canonică
+    (ADR-024/025). NU folosită încă de Oracle Engine în R-Sync-7a
+    (rămâne pe cascada live veche, `get_matches_for_week()`) — pregătită
+    pentru R-Sync-7b, citire directă din tabelă.
+    """
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("scheduled_fixtures")
+            .select("*")
+            .eq("home_team_canonical", home_team)
+            .eq("away_team_canonical", away_team)
+            .eq("kickoff_date", kickoff_date)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning(
+            "[Queries] get_scheduled_fixture failed pentru %s vs %s @ %s: %s",
+            home_team, away_team, kickoff_date, exc,
+        )
+        return None
+
+
+def list_scheduled_fixtures(kickoff_date_from: str, kickoff_date_to: str) -> list[dict]:
+    """
+    Toate rândurile din `scheduled_fixtures` pentru o fereastră de date —
+    folosită EXCLUSIV de shadow-ul de comparație (R-Sync-7b,
+    `scheduled_fixtures_shadow.py`), pentru cardinalitate completă și
+    detectarea meciurilor „fantomă" (rânduri persistate fără corespondent
+    în calea live curentă) — imposibil de detectat prin lookup-uri punctuale
+    (`get_scheduled_fixture`, per meci live). Oracle Engine nu apelează
+    această funcție pentru servire (rămâne pe `get_matches_for_week()`
+    până la R-Sync-7c).
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("scheduled_fixtures")
+            .select("*")
+            .gte("kickoff_date", kickoff_date_from)
+            .lte("kickoff_date", kickoff_date_to)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning(
+            "[Queries] list_scheduled_fixtures failed pentru %s..%s: %s",
+            kickoff_date_from, kickoff_date_to, exc,
+        )
+        return []
+
+
+def upsert_equivalence_evaluation(
+    gate_key: str, entity: str, window_from: str, window_to: str,
+    live_count: int, scheduled_count: int, matched_count: int,
+    missing_scheduled_count: int, missing_live_count: int,
+    field_difference_count: int, provider_id_difference_count: int,
+    equivalence_state: str,
+    duplicate_key_count: int = 0, accepted_exception_count: int = 0,
+    equivalence_score: float | None = None,
+    provider_breakdown: dict | None = None, root_cause_summary: dict | None = None,
+    sample_missing_scheduled: list | None = None, sample_missing_live: list | None = None,
+    sample_field_differences: list | None = None, sample_provider_id_diffs: list | None = None,
+    run_id: int | None = None,
+) -> bool:
+    """
+    Owner unic de scriere pentru `equivalence_evaluations` (ADR-040) —
+    apelată EXCLUSIV prin `equivalence_governance.persist_equivalence_
+    evaluation()`, niciodată direct dintr-un hook de provider. Wrapper
+    subțire, zero logică de clasificare aici — scorul/starea sunt deja
+    calculate de apelant.
+
+    Istoric IMUABIL, append-only — `upsert` cu `on_conflict` pe UNIQUE
+    (gate_key, entity, window_to, matched_count) + `ignore_duplicates=True`
+    => ON CONFLICT DO NOTHING (migrarea 024), tipar identic cu
+    `record_champion_health_evaluation` (`supabase_client.py`).
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("equivalence_evaluations").upsert({
+            "gate_key": gate_key, "entity": entity,
+            "window_from": window_from, "window_to": window_to,
+            "live_count": live_count, "scheduled_count": scheduled_count,
+            "matched_count": matched_count,
+            "missing_scheduled_count": missing_scheduled_count,
+            "missing_live_count": missing_live_count,
+            "duplicate_key_count": duplicate_key_count,
+            "field_difference_count": field_difference_count,
+            "provider_id_difference_count": provider_id_difference_count,
+            "accepted_exception_count": accepted_exception_count,
+            "equivalence_score": equivalence_score,
+            "equivalence_state": equivalence_state,
+            "provider_breakdown": provider_breakdown or {},
+            "root_cause_summary": root_cause_summary or {},
+            "sample_missing_scheduled": sample_missing_scheduled or [],
+            "sample_missing_live": sample_missing_live or [],
+            "sample_field_differences": sample_field_differences or [],
+            "sample_provider_id_diffs": sample_provider_id_diffs or [],
+            "run_id": run_id,
+        }, on_conflict="gate_key,entity,window_to,matched_count", ignore_duplicates=True).execute()
+        return True
+    except Exception as exc:
+        logger.warning(
+            "[Queries] upsert_equivalence_evaluation failed pentru %s/%s @ %s: %s",
+            gate_key, entity, window_to, exc,
+        )
+        return False
+
+
+def get_migration_gate_status_row(gate_key: str, entity: str) -> dict | None:
+    """
+    Citește agregatele brute pentru un `(gate_key, entity)` din view-ul
+    `migration_gate_status` (migrarea 024/025) — folosit EXCLUSIV de
+    `migration_gate.py` (ADR-040, G3). View-ul nu decide PASS/FAIL/GRAY —
+    doar pregătește ingredientele (Nivel B); decizia rămâne în Python.
+    """
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("migration_gate_status")
+            .select("*")
+            .eq("gate_key", gate_key)
+            .eq("entity", entity)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning(
+            "[Queries] get_migration_gate_status_row failed pentru %s/%s: %s",
+            gate_key, entity, exc,
+        )
+        return None
+
+
+def list_recent_equivalence_evaluations(gate_key: str, entity: str, limit: int = 50) -> list[dict]:
+    """
+    Ultimele `limit` evaluări (orice stare, inclusiv insufficient_data/broken)
+    pentru un `(gate_key, entity)`, ordonate descrescător după `evaluated_at`
+    — folosit de `migration_gate.py` (`explain`) pentru agregarea
+    `root_cause_summary` peste istoricul recent. NU e sursa pentru Nivel B
+    (asta rămâne view-ul `migration_gate_status`).
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("equivalence_evaluations")
+            .select("*")
+            .eq("gate_key", gate_key)
+            .eq("entity", entity)
+            .order("evaluated_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning(
+            "[Queries] list_recent_equivalence_evaluations failed pentru %s/%s: %s",
+            gate_key, entity, exc,
+        )
+        return []
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # ML STATUS
 # ════════════════════════════════════════════════════════════════════════════
 

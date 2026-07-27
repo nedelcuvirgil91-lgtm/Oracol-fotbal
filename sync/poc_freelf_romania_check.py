@@ -29,10 +29,13 @@ if str(root) not in sys.path:
 
 import requests
 
-# Aceeasi cheie/URL deja folosite in productie de oracle_api.py — nu introduc
-# nimic nou, doar reutilizez ce exista deja (RAPIDAPI_KEY e cunoscut hardcodat
-# in oracle_api.py, documentat in CLAUDE.md ca gol cunoscut, neurgent).
-from oracle_api import FREE_LF_URL, FREE_LF_HOST, RAPIDAPI_KEY
+# Acelasi URL deja folosit in productie de oracle_api.py. [ACTUALIZAT R4.1]
+# RAPIDAPI_KEY nu mai exista ca literal hardcodat in oracle_api.py (migrat
+# la key_manager.py, provider "freelivefootball" — vezi audit §13, Step 1).
+from oracle_api import FREE_LF_URL, FREE_LF_HOST
+from key_manager import get_key_manager
+
+RAPIDAPI_KEY = get_key_manager().get_api_key_param("freelivefootball")
 
 # Nume de cluburi din Romania SuperLiga 2026-27 (sezon confirmat separat prin
 # API-Football /leagues, league_id=283) — folosite DOAR ca filtru text peste

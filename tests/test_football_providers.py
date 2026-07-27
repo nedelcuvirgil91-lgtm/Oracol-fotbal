@@ -21,7 +21,7 @@ def test_health_check_gate_blocks_when_no_key_configured():
     p = ApiFootballProvider(key_manager=_FakeKeyManagerNoKey())
     assert p._healthy() is False
     assert p.get_injuries("Arsenal", 42, "Premier League") == []
-    assert p.get_coaches("Arsenal", 42) == []
+    assert p.get_coaches("Arsenal", 42, "Premier League") == []
     assert p.resolve_team_id("Arsenal") is None
 
 
@@ -100,6 +100,36 @@ def test_get_fixtures_makes_zero_http_calls_when_plan_restricted():
     result = p.get_fixtures("Romania SuperLiga", 283, "2026-07-17", "2026-07-24", season=2026)
     assert result == []
     assert calls == []
+
+
+def test_get_coaches_makes_zero_http_calls_when_league_unsupported():
+    """Defect real reparat (audit §16/§4, R4.1 Step 2): get_coaches() era
+    singurul apel fara gate de coverage - o liga marcata explicit False/
+    plan_restricted putea declansa oricum o cerere HTTP, consumand cota
+    fara rost. Acum se comporta identic cu get_fixtures()/get_injuries()."""
+    p = _provider()
+    calls = []
+    p._get = lambda *a, **kw: calls.append(a) or {"response": []}
+    result = p.get_coaches("CFR Cluj", 555, "Liga Complet Necunoscuta")
+    assert result == []
+    assert calls == []
+
+
+def test_get_coaches_blocked_for_plan_restricted_league():
+    p = _provider()
+    calls = []
+    p._get = lambda *a, **kw: calls.append(a) or {"response": []}
+    assert p.get_coaches("FCSB", 556, "Romania SuperLiga") == []
+    assert calls == []
+
+
+def test_get_coaches_still_calls_get_for_covered_league():
+    """Regresie pozitiva: gardă nouă nu blochează liga acoperită normal."""
+    p = _provider()
+    calls = []
+    p._get = lambda *a, **kw: calls.append(a) or {"response": []}
+    p.get_coaches("Arsenal", 42, "Premier League")
+    assert len(calls) == 1
 
 
 def test_normalize_coach_confirmed_structure():
@@ -225,3 +255,92 @@ def test_placeholders_raise_not_implemented():
         raise AssertionError("get_team_stats ar fi trebuit sa arunce NotImplementedError")
     except NotImplementedError:
         pass
+
+
+# ── R4.1 — integrare reala cu _get(): RAM cache + rate limit (audit §4/§7) ──
+
+class _FakeHttpResponse:
+    def __init__(self, payload, ok=True, status_code=200, headers=None):
+        self._payload = payload
+        self.ok = ok
+        self.status_code = status_code
+        self.headers = headers or {}
+
+    def json(self):
+        return self._payload
+
+
+class _FakeHttpSession:
+    def __init__(self, response: _FakeHttpResponse):
+        self._response = response
+        self.calls: list[tuple] = []
+
+    def get(self, url, headers=None, params=None, timeout=12):
+        self.calls.append((url, params))
+        return self._response
+
+
+def _provider_with_isolated_infra(tmp_path, response: _FakeHttpResponse):
+    """Provider complet izolat — cache pe disc temporar (nu Supabase/L2 real),
+    Request Manager + Rate Limit Manager proprii (nu singleton-urile globale),
+    sesiune HTTP falsa. Testeaza calea REALA prin _get(), nu doar monkeypatch
+    pe _get insusi (deja acoperit de restul testelor din acest fisier)."""
+    import cache_manager as cache_manager_module
+    from request_manager import RequestManager
+    from rate_limit_manager import RateLimitManager
+
+    cache = cache_manager_module.CacheManager(base_dir=str(tmp_path))
+    rm = RequestManager(rate_limiter=RateLimitManager())
+    p = ApiFootballProvider(key_manager=get_key_manager(), cache=cache, request_manager=rm)
+    session = _FakeHttpSession(response)
+    p._session = session
+    return p, session, rm
+
+
+def test_get_makes_real_http_call_and_populates_ram_cache(tmp_path):
+    response = _FakeHttpResponse({"response": [{"id": 1}]}, headers={
+        "x-ratelimit-requests-limit": "100", "x-ratelimit-requests-remaining": "99",
+    })
+    p, session, rm = _provider_with_isolated_infra(tmp_path, response)
+    result = p._get("coachs", {"team": 42}, "coaches", "team:42:coaches")
+    assert result == {"response": [{"id": 1}]}
+    assert len(session.calls) == 1
+    assert rm.get_ram("apifootball", "coaches", "team:42:coaches") == {"response": [{"id": 1}]}
+
+
+def test_get_second_call_same_key_hits_ram_not_http(tmp_path):
+    """Deduplicare reala: a doua cerere identica, in aceeasi sesiune de
+    provider, NU mai atinge HTTP - RAM cache o intoarce direct (audit §4,
+    gol confirmat, acum acoperit)."""
+    response = _FakeHttpResponse({"response": [{"id": 1}]})
+    p, session, rm = _provider_with_isolated_infra(tmp_path, response)
+    first = p._get("coachs", {"team": 42}, "coaches", "team:42:coaches")
+    second = p._get("coachs", {"team": 42}, "coaches", "team:42:coaches")
+    assert first == second == {"response": [{"id": 1}]}
+    assert len(session.calls) == 1  # nu 2
+
+
+def test_get_records_rate_limit_headers_from_real_response(tmp_path):
+    response = _FakeHttpResponse({"response": []}, headers={
+        "x-ratelimit-requests-limit": "100", "x-ratelimit-requests-remaining": "0",
+    })
+    p, session, rm = _provider_with_isolated_infra(tmp_path, response)
+    p._get("coachs", {"team": 1}, "coaches", "team:1:coaches")
+    status = rm._rate_limiter.status("apifootball")
+    assert status["known"] is True
+    assert status["daily_remaining"] == 0
+
+
+def test_get_blocked_by_exhausted_daily_budget_makes_zero_http_calls(tmp_path):
+    """Odata ce bugetul zilnic e confirmat epuizat (dintr-un raspuns real
+    anterior), urmatoarea cerere DIFERITA (cheie noua, deci nu RAM hit) e
+    blocata inainte de HTTP - "ar trebui sa existe cererea?" (audit §16)."""
+    response = _FakeHttpResponse({"response": []}, headers={
+        "x-ratelimit-requests-limit": "100", "x-ratelimit-requests-remaining": "0",
+    })
+    p, session, rm = _provider_with_isolated_infra(tmp_path, response)
+    p._get("coachs", {"team": 1}, "coaches", "team:1:coaches")  # epuizeaza bugetul
+    assert len(session.calls) == 1
+    result = p._get("coachs", {"team": 2}, "coaches", "team:2:coaches")  # cheie noua
+    assert result is None
+    assert len(session.calls) == 1  # nu a mai facut al doilea apel HTTP

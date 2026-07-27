@@ -620,6 +620,19 @@ def verify_league_coverage(bootstrap_leagues: list[str] | None = None) -> dict[s
     return {"errors": errors, "warnings": warnings}
 
 
+#
+# [ADR-039, R-Sync-4 — soluție TEMPORARĂ de compatibilitate, nu decizie
+# permanentă] Folosit din 2026-07-27 și de EloRatingsAdapter
+# (elo_ratings_adapter.py, via oracle_api.get_national_elo_ratings_raw()),
+# fuzionat cu scrape-ul live eloratings.net în snapshot-ul persistat
+# (national_team_elo_snapshot) — evită o regresie: fără fuziune, orice
+# echipă prezentă azi doar aici (nu în tabelul scrape-uit) ar deveni
+# silențios „necunoscută" după migrare. TREBUIE eliminat (sau redus strict
+# la echipe fără nicio acoperire live confirmată) în momentul în care
+# sincronizarea live oferă acoperire completă pentru toate echipele de
+# mai jos — nu se lasă permanent din inerție. Verificare de acoperire:
+# comparat cu conținutul real al `national_team_elo_snapshot` după câteva
+# rulări ale sync/sync_national_team_elo.py.
 ELO_RATINGS_FALLBACK: dict[str, int] = {
     "Argentina": 2141, "France": 2085, "England": 2065, "Brazil": 2062,
     "Spain": 2052, "Belgium": 2040, "Portugal": 2038, "Netherlands": 2034,

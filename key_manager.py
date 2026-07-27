@@ -4,11 +4,33 @@ FOOTBALL ORACLE — API Key Manager v1.0
 ================================================================================
 """
 from __future__ import annotations
-import json, logging
+import json, logging, os
 from datetime import date, datetime
 from pathlib import Path
 
 logger = logging.getLogger("FootballOracle.KeyManager")
+
+# [ADAUGAT — eliminare completă a cheilor hardcodate, aprobată explicit]
+# Singurul mecanism de încărcare a cheilor: variabile de mediu. Niciun
+# provider nu mai are voie să aibă o valoare literală în acest fișier —
+# `PROVIDERS[*]["keys"]` pornește gol pentru toți; `_apply_env_overrides()`
+# populează lista DOAR dacă variabila de mediu corespunzătoare există și nu
+# e goală. Fără excepții, cerință explicită. Rotația unei chei = schimbarea
+# valorii variabilei de mediu (secret GitHub Actions / Streamlit secrets /
+# `.env` local) — zero atingere de cod, niciodată, pentru niciun provider.
+#
+# `default_limit` rămâne per-provider — NU e secret, e doar configurare de
+# plafon (limitele reale publicate de fiecare provider), păstrată aici ca
+# să nu se piardă precizia per-provider odată ce cheile nu mai sunt literali
+# din care limita putea fi dedusă implicit.
+_ENV_KEY_OVERRIDES: dict[str, str] = {
+    "apifootball":      "API_FOOTBALL_KEY",
+    "oddsapi":           "ODDS_API_KEY",
+    "weatherapi":        "WEATHER_API_KEY",
+    "sportapi":          "RAPIDAPI_KEY_SPORTAPI",
+    "freelivefootball":  "RAPIDAPI_KEY_FREELIVEFOOTBALL",
+    "footballdata":      "FOOTBALL_DATA_KEY",
+}
 
 BASE_DIR       = Path(__file__).parent
 CACHE_DIR      = BASE_DIR / "cache"
@@ -21,63 +43,60 @@ PROVIDERS: dict[str, dict] = {
         "host": "sportapi7.p.rapidapi.com",
         "base_url": "https://sportapi7.p.rapidapi.com/api/v1",
         "header_key": "x-rapidapi-key", "header_host": "x-rapidapi-host",
-        "keys": [{"key": "2ff60d8248msh65d53a6d077e4abp145f79jsn980ab63d585f", "limit": 50, "label": "SportAPI-Key1"}],
+        "default_limit": 50,
+        "keys": [],
     },
     "freelivefootball": {
         "name": "Free Live Football (RapidAPI)",
         "host": "free-api-live-football-data.p.rapidapi.com",
         "base_url": "https://free-api-live-football-data.p.rapidapi.com",
         "header_key": "x-rapidapi-key", "header_host": "x-rapidapi-host",
-        "keys": [{"key": "2ff60d8248msh65d53a6d077e4abp145f79jsn980ab63d585f", "limit": 100, "label": "FreeLive-Key1"}],
+        "default_limit": 100,
+        "keys": [],
     },
     "oddsapi": {
         "name": "The Odds API",
         "host": "api.the-odds-api.com",
         "base_url": "https://api.the-odds-api.com/v4",
         "header_key": None, "header_host": None,
-        "keys": [{"key": "b0e2ab9bcda1d9f4c5ddfe1063c81cd7", "limit": 500, "label": "OddsAPI-Key1"}],
+        "default_limit": 500,
+        "keys": [],
     },
     "weatherapi": {
         "name": "WeatherAPI",
         "host": "api.weatherapi.com",
         "base_url": "http://api.weatherapi.com/v1",
         "header_key": None, "header_host": None,
-        "keys": [{"key": "48a5b54b8ced45cc924153231263005", "limit": 1000000, "label": "Weather-Key1"}],
+        "default_limit": 1000000,
+        "keys": [],
     },
-    # [ADAUGAT] API-Football (api-sports.io) — fara nicio cheie reala inca.
-    # `keys: []` inseamna is_available("apifootball") returneaza False pana
-    # se adauga o cheie reala prin add_key("apifootball", cheie, limit, label)
-    # - health check-ul din football_providers.ApiFootballProvider respecta
-    # asta corect (blocheaza orice request pana exista o cheie).
-    # [ADAUGAT] football-data.org — cheia era hardcodata direct in oracle_api.py
-    # (FOOTBALL_DATA_KEY), migrata aici pt consistenta cu restul providerilor.
-    # NOTA: planul gratuit e limitat la 10 req/MINUT, nu per luna/zi - acelasi
-    # tip de discrepanta ca la API-Football (ciclul acestui sistem e lunar).
-    # Pun un plafon lunar generos, fara sa presupun un numar exact - impunerea
-    # reala a limitei de minut ramane pe seama raspunsurilor 429, deja
-    # gestionate gratios in cod.
+    # football-data.org — planul gratuit e limitat la 10 req/MINUT, nu per
+    # lună/zi - acelasi tip de discrepanță ca la API-Football (ciclul acestui
+    # sistem e lunar). Plafon lunar generos, fără să presupun un număr exact -
+    # impunerea reală a limitei de minut rămâne pe seama răspunsurilor 429,
+    # deja gestionate grațios în cod.
     "footballdata": {
         "name": "football-data.org",
         "host": "api.football-data.org",
         "base_url": "https://api.football-data.org/v4",
         "header_key": "X-Auth-Token", "header_host": None,
-        "keys": [{"key": "3934542be32c47f88a194f9eec0f44a1", "limit": 10000, "label": "FootballData-Key1"}],
+        "default_limit": 10000,
+        "keys": [],
     },
+    # API-Football (api-sports.io) — 100 request-uri/ZI (plan gratuit), dar
+    # acest sistem are ciclu de reset LUNAR (_reset_if_new_month). Un
+    # default_limit=100 literal ar bloca aplicația după doar 100 apeluri din
+    # toată luna, nu 100/zi cum e realitatea - subutilizare severă. Folosesc
+    # echivalentul lunar aproximativ (100 x ~30 zile); impunerea REALĂ a
+    # limitei zilnice + per-minut rămâne pe seama răspunsurilor 429 +
+    # header-elor de rate-limit citite direct (rate_limit_manager.py, R4.1).
     "apifootball": {
         "name": "API-Football (api-sports.io)",
         "host": "v3.football.api-sports.io",
         "base_url": "https://v3.football.api-sports.io",
         "header_key": "x-apisports-key", "header_host": None,
-        # [NOTA] API-Football e 100 request-uri/ZI (plan gratuit), dar acest
-        # sistem are ciclu de reset LUNAR (_reset_if_new_month). Un limit=100
-        # literal ar bloca aplicatia dupa doar 100 apeluri din toata luna, nu
-        # 100/zi cum e realitatea - subutilizare severa (~1/30 din capacitate).
-        # Folosesc echivalentul lunar aproximativ (100 x ~30 zile); impunerea
-        # REALA a limitei zilnice ramane pe seama raspunsurilor 429 de la
-        # provider, deja gestionate gratios in cod (validat live pe FreeLF).
-        # Nu construiesc un tracker zilnic separat - exact "fara sistem
-        # complex", cum ai cerut.
-        "keys": [{"key": "8efa575e4bd1b5831b3d4d2b3c56d6a1", "limit": 3000, "label": "ApiFootball-Key1"}],
+        "default_limit": 3000,
+        "keys": [],
     },
 }
 
@@ -90,6 +109,24 @@ class APIKeyManager:
         self._usage: dict = self._load_usage()
         self._exhausted: dict[str, set[str]] = {}
         self._reset_if_new_month()
+        self._apply_env_overrides()
+
+    def _apply_env_overrides(self) -> None:
+        """Singurul punct de încărcare a cheilor — niciun provider nu are
+        vreodată o valoare literală în PROVIDERS. Un provider fără variabilă
+        de mediu setată rămâne cu `keys: []` — `is_available()` întoarce
+        False, comportament corect ("necunoscut/neconfigurat", niciodată
+        aproximat), nu o eroare ascunsă."""
+        for provider, env_var in _ENV_KEY_OVERRIDES.items():
+            env_key = os.environ.get(env_var, "").strip()
+            if not env_key:
+                continue
+            prov = PROVIDERS.get(provider)
+            if not prov:
+                continue
+            limit = prov.get("default_limit", 100)
+            prov["keys"] = [{"key": env_key, "limit": limit, "label": f"{provider}-env"}]
+            logger.info("[KeyManager] %s: cheie incarcata din variabila de mediu %s (zero literal hardcodat)", provider, env_var)
 
     def _load_usage(self):
         local = {"month": date.today().strftime("%Y-%m"), "providers": {}}

@@ -12,7 +12,13 @@ logger = logging.getLogger("FootballOracle.Cache")
 
 CATEGORY_TTL: dict[str, float] = {
     "seasons": 24.0, "form": 6.0, "h2h": 48.0,
-    "corners": 24.0, "cards": 24.0, "injuries": 2.0,
+    "corners": 24.0, "cards": 24.0,
+    # [REPARAT R4.1] injuries: 2.0 -> 4.0 - cadenta oficiala de update
+    # API-Football e la 4h (confirmat oficial, dublu, audit §7/§17), TTL-ul
+    # de 2h era mai agresiv decat are rost - reimprospata de 2x mai des decat
+    # se schimba datele sursa. Reduce la jumatate volumul de cereri /injuries
+    # (consumatorul real principal de cota) fara nicio pierdere de acuratete.
+    "injuries": 4.0,
     "lineups": 1.0, "standings": 12.0, "odds": 4.0,
     "elo": 24.0, "events": 0.5,
     "coaches": 72.0,  # [ADAUGAT] schimba rar - TTL lung (3 zile)

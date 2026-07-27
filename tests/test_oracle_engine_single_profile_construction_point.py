@@ -87,12 +87,17 @@ def test_tsdb_team_stats_only_called_from_build_profile():
 
 
 def test_elo_read_only_called_from_build_profile():
-    """ADR-023 (Variant C) / ADR-035 D2: get_elo_rating() (provider extern)
-    și get_latest_team_elo() (sursa canonică, match_history) trebuie
-    apelate DINTR-UN SINGUR loc de producție — _build_profile(). O a doua
-    cale ar putea citi ELO fără să respecte ordinea Database-First (DB
-    întâi, provider doar ca fallback condiționat pe elo_raw is None)."""
-    names = {"get_elo_rating", "get_latest_team_elo"}
+    """ADR-023 (Variant C) / ADR-035 D2, [ACTUALIZAT — ADR-039 R-Sync-4]:
+    get_national_team_elo() (Supabase, fallback naționale) și
+    get_latest_team_elo() (sursa canonică, match_history) trebuie apelate
+    DINTR-UN SINGUR loc de producție — _build_profile(). O a doua cale ar
+    putea citi ELO fără să respecte ordinea Database-First (DB întâi,
+    snapshot național doar ca fallback condiționat pe elo_raw is None).
+
+    get_elo_rating() (apel live către eloratings.net) NU mai apare aici —
+    R-Sync-4 l-a eliminat din _build_profile(); verificat separat mai jos
+    (test_get_elo_rating_never_called_from_oracle_engine)."""
+    names = {"get_national_team_elo", "get_latest_team_elo"}
     path = ROOT / "oracle_engine.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename="oracle_engine.py")
 
@@ -104,14 +109,14 @@ def test_elo_read_only_called_from_build_profile():
                 calls_by_function[node.name] = lines
 
     assert calls_by_function == {"_build_profile": calls_by_function.get("_build_profile", [])}, (
-        f"get_elo_rating/get_latest_team_elo apelate din afara "
+        f"get_national_team_elo/get_latest_team_elo apelate din afara "
         f"_build_profile(): {calls_by_function} — cale paralelă către sursa "
         f"ELO, ocolește ordinea Database-First (ADR-023/ADR-035 D2)."
     )
     assert "_build_profile" in calls_by_function
     assert len(calls_by_function["_build_profile"]) == 2, (
         f"Așteptam exact 2 apeluri în _build_profile() — get_latest_team_elo "
-        f"(primar) și get_elo_rating (fallback) — găsit "
+        f"(primar) și get_national_team_elo (fallback naționale) — găsit "
         f"{calls_by_function['_build_profile']}."
     )
 
@@ -127,6 +132,22 @@ def test_elo_read_only_called_from_build_profile():
         t = ast.parse(p.read_text(encoding="utf-8"), filename=fname)
         lines = _calls_matching(t, names)
         assert not lines, f"{fname} apelează direct sursa ELO la liniile {lines}"
+
+
+def test_get_elo_rating_never_called_from_oracle_engine():
+    """[ADĂUGAT — ADR-039 R-Sync-4] Regresie directă: get_elo_rating()
+    (apel live la eloratings.net) nu mai are voie să fie apelat din
+    oracle_engine.py, sub nicio formă — singurul apelant de producție
+    rămâne Sync Layer (elo_ratings_adapter.py, prin
+    get_national_elo_ratings_raw())."""
+    path = ROOT / "oracle_engine.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename="oracle_engine.py")
+    lines = _calls_matching(tree, {"get_elo_rating"})
+    assert not lines, (
+        f"oracle_engine.py apelează încă get_elo_rating() la liniile {lines} — "
+        f"eliminat în R-Sync-4, ADR-039 (fallback naționale citit STRICT din "
+        f"Supabase, database.queries.get_national_team_elo())."
+    )
 
 
 def test_h2h_read_only_called_from_build_h2h():

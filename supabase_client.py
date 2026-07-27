@@ -1207,6 +1207,72 @@ def set_league_provider_coverage(
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# [ADAUGAT R4.1] COVERAGE CACHE API-FOOTBALL — api_football_league_coverage
+# ════════════════════════════════════════════════════════════════════════════
+# Design aprobat si inghetat: docs/03_ENGINE/API_FOOTBALL_SYNC_V2_AUDIT_2026-07-22.md §2,
+# citat explicit de ADR-038 ("Coverage Cache (audit §2)"). Distinct de
+# `league_provider_coverage` de mai sus (generic, fara sezon, neapelat azi) —
+# vezi nota din database/migrations/016_api_football_league_coverage.sql.
+# Tabela poate sa nu existe inca in proiectul conectat (migrare 016,
+# proiectata dar neaplicata pana la confirmare explicita — Supabase-safety) —
+# degradare gratioasa identica cu restul modulului: `client is None` sau
+# orice eroare -> None/False, niciodata exceptie propagata catre apelant.
+
+def get_league_coverage(league_id_canonical: str, api_football_league_id: int, season: int) -> dict | None:
+    """Ultima confirmare cunoscuta de coverage pentru (liga, sezon) — sau
+    None daca nu exista inca nicio confirmare (tratat ca "necunoscut",
+    Regula #8, nu aproximat)."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("api_football_league_coverage")
+            .select("*")
+            .eq("league_id_canonical", league_id_canonical)
+            .eq("api_football_league_id", api_football_league_id)
+            .eq("season", season)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.debug("[Supabase] get_league_coverage failed: %s", exc)
+        return None
+
+
+def set_league_coverage(
+    league_id_canonical: str, api_football_league_id: int, season: int,
+    fixtures_supported: str, coverage_raw: dict | None = None,
+    season_restriction: str | None = None, verified_via: str = "live_call",
+    raw_error_payload: dict | None = None,
+) -> bool:
+    """`fixtures_supported` una din cele 4 stari deja folosite in
+    mappings.LEAGUE_PROVIDERS ('True'/'False'/'necunoscut'/'plan_restricted') —
+    niciodata NULL, exact disciplina deja aplicata acolo."""
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("api_football_league_coverage").upsert({
+            "league_id_canonical": league_id_canonical,
+            "api_football_league_id": api_football_league_id,
+            "season": season,
+            "fixtures_supported": fixtures_supported,
+            "coverage_raw": coverage_raw,
+            "season_restriction": season_restriction,
+            "verified_via": verified_via,
+            "raw_error_payload": raw_error_payload,
+            "verified_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="league_id_canonical,api_football_league_id,season").execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Supabase] set_league_coverage failed: %s", exc)
+        return False
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # [ADAUGAT] QUOTA PROVIDERI — api_provider_status (vezi ADR-003)
 # ════════════════════════════════════════════════════════════════════════════
 # Extinde key_manager.py, care azi ține quota DOAR local (key_usage.json) —
