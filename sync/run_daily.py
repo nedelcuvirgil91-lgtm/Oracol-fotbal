@@ -89,6 +89,10 @@ PIPELINE_STEPS: tuple[PipelineStep, ...] = (
     PipelineStep("shadow_evaluation", depends_on=("feature_update",)),
     PipelineStep("odds_persistence"),
     PipelineStep("ml_retrain", depends_on=("feature_update",)),
+    # [ADAUGAT ADR-041 Faza 2, Sprint 1.1 #2] intretinere provider_call_log
+    # (retentie 9 zile) — fara dependinte, poate rula oricand in pipeline;
+    # plasat ultimul deliberat, housekeeping, nu afecteaza restul fluxului.
+    PipelineStep("provider_call_log_cleanup"),
 )
 
 
@@ -418,6 +422,23 @@ def run(
             ml_status = {"status": "error", "message": str(exc)}
 
     _print_ml_report(ml_status)
+
+    # ── Intretinere (PIPELINE_STEPS: "provider_call_log_cleanup") ──────────
+    # [ADAUGAT ADR-041 Faza 2, Sprint 1.1 #2] Singura intretinere necesara
+    # pentru provider_call_log (Health Score pe ferestre) — Python, aici,
+    # nu cron SQL, nu trigger, nu job separat (cerinta explicita). Retentie
+    # 9 zile — marja peste fereastra de 7 zile folosita de Health Score.
+    print("\n▶  Curățenie — provider_call_log (retenție 9 zile)...")
+    if dry_run:
+        print("  ℹ️  Sărit (dry run)")
+    else:
+        try:
+            from supabase_client import cleanup_provider_call_log
+            deleted = cleanup_provider_call_log(retention_days=9)
+            print(f"  ✅ {deleted} rânduri vechi șterse")
+        except Exception as exc:
+            logger.error("[DailySync] cleanup_provider_call_log failed: %s", exc)
+            print(f"  ⚠️  Eroare la curățenie provider_call_log: {exc}")
 
     # ── Raport final ──────────────────────────────────────────────────────
     total_duration = round(time.time() - start_total, 1)

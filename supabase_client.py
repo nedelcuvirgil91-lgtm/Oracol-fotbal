@@ -1328,10 +1328,23 @@ def set_provider_usage(provider: str, api_key_label: str, month: str, used: int,
 # cache_hits/cache_misses ar necesita instrumentarea separata a
 # cache_manager.py (CacheManager.get/.set) - ramane follow-up, nu ascuns.
 
-def record_provider_call(provider: str, endpoint: str, success: bool, latency_ms: float) -> bool:
+def record_provider_call(
+    provider: str, endpoint: str, success: bool, latency_ms: float,
+    http_status: int | None = None, failure_reason: str | None = None,
+    cache_hit: bool = False,
+) -> bool:
     """Read-then-write (2 round-trip-uri) - acceptabil la volumul actual de
     request-uri (zeci-sute, nu mii/secunda), consistent cu restul proiectului
-    (fara coada/async, vezi ADR-003)."""
+    (fara coada/async, vezi ADR-003).
+
+    [ADAUGAT ADR-041 Faza 2, Sprint 1.1 #2] Scrie și în `provider_call_log`
+    (un rând per apel, cu timestamp — sursa pentru Health Score pe ferestre
+    24h/7zile, breakdown de erori, cost estimation). `provider_metrics`
+    rămâne EXACT cum era — devine doar cache-ul agregat all-time, neatins.
+    `http_status`/`failure_reason`/`cache_hit` sunt opționale — apelanții
+    existenți (care nu le pasează încă) scriu rânduri cu aceste câmpuri
+    `NULL`/`False`, populate corect abia când apelantul le furnizează
+    (Sprint 1.1 #3 pentru captarea reală a codului HTTP)."""
     client = get_client()
     if client is None:
         return False
@@ -1367,10 +1380,65 @@ def record_provider_call(provider: str, endpoint: str, success: bool, latency_ms
                 "last_success": now if success else None,
                 "last_failure": None if success else now,
             }).execute()
-        return True
     except Exception as exc:
         logger.debug("[Supabase] record_provider_call failed: %s", exc)
         return False
+
+    # [ADAUGAT ADR-041 Faza 2] scriere separată, best-effort — un eșec aici
+    # nu trebuie să afecteze rezultatul principal (provider_metrics deja
+    # scris cu succes mai sus), consistent cu degradarea grațioasă folosită
+    # peste tot în proiect (ex. cache_manager.py, write-through L2).
+    try:
+        client.table("provider_call_log").insert({
+            "provider": provider, "endpoint": endpoint, "success": success,
+            "http_status": http_status, "failure_reason": failure_reason,
+            "cache_hit": cache_hit, "latency_ms": latency_ms,
+        }).execute()
+    except Exception as exc:
+        logger.debug("[Supabase] provider_call_log insert failed: %s", exc)
+
+    return True
+
+
+def get_provider_call_log(provider: str, hours: int) -> list[dict]:
+    """[ADAUGAT ADR-041 Faza 2, Sprint 1.1 #2] Rândurile din `provider_call_log`
+    pentru un provider, din ultimele `hours` ore — cutoff calculat în Python
+    (`datetime.now(timezone.utc) - timedelta(hours=hours)`), consistent cu
+    tiparul deja folosit de `database.queries.get_finished_matches_missing_stats()`
+    (fereastră relativă la azi, calculată client-side, nu SQL `interval`)."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+        res = (
+            client.table("provider_call_log").select("*")
+            .eq("provider", provider).gte("called_at", cutoff)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Supabase] get_provider_call_log failed: %s", exc)
+        return []
+
+
+def cleanup_provider_call_log(retention_days: int = 9) -> int:
+    """[ADAUGAT ADR-041 Faza 2, Sprint 1.1 #2] Șterge rândurile mai vechi de
+    `retention_days` zile — singura întreținere necesară, apelată zilnic din
+    `sync/run_daily.py` (Python, nu cron SQL, nu trigger, nu job separat —
+    cerință explicită). 9 zile: marjă peste fereastra de 7 zile folosită de
+    Health Score, tabelă ținută mică. Întoarce numărul de rânduri șterse,
+    sau 0 la eșec/indisponibilitate (degradare grațioasă, niciodată aruncă)."""
+    client = get_client()
+    if client is None:
+        return 0
+    try:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+        res = client.table("provider_call_log").delete().lt("called_at", cutoff).execute()
+        return len(res.data or [])
+    except Exception as exc:
+        logger.warning("[Supabase] cleanup_provider_call_log failed: %s", exc)
+        return 0
 
 
 def get_provider_metrics() -> list[dict]:

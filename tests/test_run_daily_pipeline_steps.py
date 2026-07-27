@@ -37,6 +37,13 @@ def test_match_statistics_declared_before_history_sync():
     assert order.index("match_statistics") < order.index("history_sync")
 
 
+def test_provider_call_log_cleanup_step_declared_with_no_dependencies():
+    """[ADR-041 Faza 2, Sprint 1.1 #2]"""
+    names = {s.name: s for s in run_daily.PIPELINE_STEPS}
+    assert "provider_call_log_cleanup" in names
+    assert names["provider_call_log_cleanup"].depends_on == ()
+
+
 def test_validate_rejects_forward_reference():
     step = run_daily.PipelineStep
     bad = (step("a", depends_on=("b",)), step("b"))
@@ -98,6 +105,17 @@ def test_print_match_statistics_report_shows_counts():
     out = buf.getvalue()
     assert "2/3" in out
     assert "boom" in out
+
+
+def test_dry_run_includes_provider_call_log_cleanup_step_and_skips_it():
+    """[ADR-041 Faza 2, Sprint 1.1 #2] dry_run sare curatenia, fara apel Supabase."""
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        run_daily.run(dry_run=True)
+    out = buf.getvalue()
+    assert "provider_call_log" in out
+    section = out.split("Curățenie — provider_call_log")[1]
+    assert "Sărit (dry run)" in section
 
 
 def test_print_match_statistics_report_no_errors_section_when_clean():
