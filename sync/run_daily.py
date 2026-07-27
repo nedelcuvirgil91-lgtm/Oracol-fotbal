@@ -89,6 +89,11 @@ PIPELINE_STEPS: tuple[PipelineStep, ...] = (
     # dependinte reale (ligi statice, mappings.FREE_LF_LEAGUE_IDS), plasat
     # aici doar ca ordine de citire, nu ca dependinta declarata.
     PipelineStep("team_form_freelf"),
+    # [ADAUGAT Sprint 2, Etapa C — Data Quality] Team Form football-data.org
+    # și Weather Forecast — la fel, fara dependinte reale (ligi/perechi
+    # statice sau derivate din discovery live, nu din alte PIPELINE_STEPS).
+    PipelineStep("team_form_footballdata"),
+    PipelineStep("weather_forecast"),
     PipelineStep("feature_update", depends_on=("history_sync",)),
     PipelineStep("shadow_evaluation", depends_on=("feature_update",)),
     PipelineStep("odds_persistence"),
@@ -299,6 +304,45 @@ def run(
         except Exception as exc:
             logger.error("[DailySync] sync_team_form_freelf failed: %s", exc)
             print(f"  ⚠️  Eroare la sync formă echipe (FreeLF): {exc}")
+
+    # ── (PIPELINE_STEPS: "team_form_footballdata") ──────────────────────────
+    # [ADAUGAT Sprint 2, Etapa C — Data Quality] Owner nou (football-data.org
+    # standings) pentru footballdata_team_form_snapshot — adaptor deja
+    # construit (R-Sync-3), niciodată programat până acum. Fără dependință
+    # de descoperirea meciurilor — iterează exclusiv mappings.FD_COMPETITIONS
+    # (8 ligi statice).
+    print("\n▶  Sincronizare formă echipe — football-data.org...")
+    if dry_run:
+        print("  ℹ️  Sărit (dry run)")
+    else:
+        try:
+            from sync.sync_team_form_footballdata import run as run_team_form_footballdata
+            team_form_fd_results = run_team_form_footballdata()
+            ran = sum(1 for r in team_form_fd_results if r.ran)
+            print(f"  ✅ {ran}/{len(team_form_fd_results)} ligi sincronizate (football-data.org)")
+        except Exception as exc:
+            logger.error("[DailySync] sync_team_form_footballdata failed: %s", exc)
+            print(f"  ⚠️  Eroare la sync formă echipe (football-data.org): {exc}")
+
+    # ── (PIPELINE_STEPS: "weather_forecast") ────────────────────────────────
+    # [ADAUGAT Sprint 2, Etapa C — Data Quality] Owner nou (WeatherAPI) pentru
+    # weather_forecast_cache — adaptor deja construit (R-Sync-5), niciodată
+    # programat până acum. Frecvență Daily (nu every-6h) — decizie explicită,
+    # proprietar produs: obiectivul Sprintului 2 e activarea pipeline-ului,
+    # nu optimizarea lui; every-6h rămâne o extensie viitoare, dacă se
+    # dovedește necesară.
+    print("\n▶  Sincronizare prognoză meteo...")
+    if dry_run:
+        print("  ℹ️  Sărit (dry run)")
+    else:
+        try:
+            from sync.sync_weather_forecast import run as run_weather_forecast
+            weather_results = run_weather_forecast()
+            ran = sum(1 for r in weather_results if r.ran)
+            print(f"  ✅ {ran}/{len(weather_results)} perechi (oraș, dată) sincronizate")
+        except Exception as exc:
+            logger.error("[DailySync] sync_weather_forecast failed: %s", exc)
+            print(f"  ⚠️  Eroare la sync prognoză meteo: {exc}")
 
     # ── Pasul 3 (PIPELINE_STEPS: "feature_update", depends_on="history_sync") ──
     # [ADAUGAT — ADR-014] Completează implementarea ADR-004 ("Toate

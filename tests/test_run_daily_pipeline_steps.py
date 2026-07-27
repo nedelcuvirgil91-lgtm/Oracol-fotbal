@@ -51,6 +51,20 @@ def test_team_form_freelf_step_declared_with_no_dependencies():
     assert names["team_form_freelf"].depends_on == ()
 
 
+def test_team_form_footballdata_step_declared_with_no_dependencies():
+    """[ADAUGAT Sprint 2, Etapa C — Data Quality]"""
+    names = {s.name: s for s in run_daily.PIPELINE_STEPS}
+    assert "team_form_footballdata" in names
+    assert names["team_form_footballdata"].depends_on == ()
+
+
+def test_weather_forecast_step_declared_with_no_dependencies():
+    """[ADAUGAT Sprint 2, Etapa C — Data Quality]"""
+    names = {s.name: s for s in run_daily.PIPELINE_STEPS}
+    assert "weather_forecast" in names
+    assert names["weather_forecast"].depends_on == ()
+
+
 def test_validate_rejects_forward_reference():
     step = run_daily.PipelineStep
     bad = (step("a", depends_on=("b",)), step("b"))
@@ -134,6 +148,26 @@ def test_dry_run_includes_team_form_freelf_step_and_skips_it():
     out = buf.getvalue()
     assert "Sincronizare formă echipe — FreeLF" in out
     section = out.split("Sincronizare formă echipe — FreeLF")[1]
+    assert "Sărit (dry run)" in section
+
+
+def test_dry_run_includes_team_form_footballdata_step_and_skips_it():
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        run_daily.run(dry_run=True)
+    out = buf.getvalue()
+    assert "Sincronizare formă echipe — football-data.org" in out
+    section = out.split("Sincronizare formă echipe — football-data.org")[1]
+    assert "Sărit (dry run)" in section
+
+
+def test_dry_run_includes_weather_forecast_step_and_skips_it():
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        run_daily.run(dry_run=True)
+    out = buf.getvalue()
+    assert "Sincronizare prognoză meteo" in out
+    section = out.split("Sincronizare prognoză meteo")[1]
     assert "Sărit (dry run)" in section
 
 
