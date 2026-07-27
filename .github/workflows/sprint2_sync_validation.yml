@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      SYNC_MODULE: sync_team_form_freelf
+      SYNC_MODULE: sync_team_form_footballdata
 
     steps:
       - name: Checkout repository
