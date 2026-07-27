@@ -31,6 +31,11 @@ on:
         required: false
         default: ""
         type: string
+      season_restriction_season:
+        description: "OPȚIONAL — dacă completat împreună cu league_id de mai sus, testează explicit /fixtures?league=&season=&date= (Sprint 1 — restricția e universală sau specifică SuperLiga?)"
+        required: false
+        default: ""
+        type: string
       freelf_romania_dates:
         description: "OPȚIONAL — date separate prin spațiu (YYYY-MM-DD), verifică dacă Free Live Football are meciuri Romania SuperLiga în acele zile"
         required: false
@@ -150,8 +155,16 @@ jobs:
 
       - name: Run season restriction check (next=/date=/live=)
         if: github.event.inputs.season_restriction_league_id != ''
+        env:
+          # [ADAUGAT Sprint 1] Lipsea — pasul n-a avut niciodată cheia
+          # necesară pentru key_manager.get_headers("apifootball").
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
         run: |
-          python sync/poc_api_football_season_restriction_check.py --league-id "${{ github.event.inputs.season_restriction_league_id }}"
+          ARGS="--league-id \"${{ github.event.inputs.season_restriction_league_id }}\""
+          if [ -n "${{ github.event.inputs.season_restriction_season }}" ]; then
+            ARGS="$ARGS --season \"${{ github.event.inputs.season_restriction_season }}\""
+          fi
+          eval python sync/poc_api_football_season_restriction_check.py $ARGS
 
       - name: Run FreeLF Romania SuperLiga check (discovery, nu integrare)
         if: github.event.inputs.freelf_romania_dates != ''

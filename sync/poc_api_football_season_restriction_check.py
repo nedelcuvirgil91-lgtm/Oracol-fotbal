@@ -52,6 +52,11 @@ def _call(km, path: str, params: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Verificare practica: next=/date=/live= ocolesc restrictia de sezon?")
     parser.add_argument("--league-id", type=int, required=True)
+    # [ADAUGAT] Sprint 1 — testeaza daca restrictia de sezon 2026 e specifica
+    # Romania SuperLiga sau universala (orice liga pe planul Free), ca sa nu
+    # se presupuna generalizarea dintr-un singur caz deja documentat.
+    parser.add_argument("--season", type=int, default=None,
+                         help="Daca precizat, testeaza explicit /fixtures?league=&season=&date= (reproduce eroarea deja documentata pt SuperLiga)")
     args = parser.parse_args()
 
     km = get_key_manager()
@@ -59,12 +64,17 @@ def main() -> None:
         print("Nicio cheie API-Football activa — abandonat.")
         return
 
+    from datetime import date, timedelta
+    target = (date.today() + timedelta(days=1)).isoformat()
+
+    if args.season is not None:
+        _call(km, "fixtures", {"league": args.league_id, "season": args.season, "date": target})
+        return
+
     # 1. /fixtures?league=&next= — fara parametrul season explicit
     _call(km, "fixtures", {"league": args.league_id, "next": 5})
 
     # 2. /fixtures?league=&date= — fara parametrul season explicit
-    from datetime import date, timedelta
-    target = (date.today() + timedelta(days=1)).isoformat()
     _call(km, "fixtures", {"league": args.league_id, "date": target})
 
     # 3. /fixtures?live=all — global, fara league/season deloc
