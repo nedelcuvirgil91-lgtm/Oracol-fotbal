@@ -85,6 +85,10 @@ PIPELINE_STEPS: tuple[PipelineStep, ...] = (
     PipelineStep("results"),
     PipelineStep("match_statistics", depends_on=("results",)),
     PipelineStep("history_sync"),
+    # [ADAUGAT Sprint 2, Etapa C — Data Quality] Team Form FreeLF — fara
+    # dependinte reale (ligi statice, mappings.FREE_LF_LEAGUE_IDS), plasat
+    # aici doar ca ordine de citire, nu ca dependinta declarata.
+    PipelineStep("team_form_freelf"),
     PipelineStep("feature_update", depends_on=("history_sync",)),
     PipelineStep("shadow_evaluation", depends_on=("feature_update",)),
     PipelineStep("odds_persistence"),
@@ -276,6 +280,25 @@ def run(
         ]
 
     _print_sync_report(sync_reports)
+
+    # ── (PIPELINE_STEPS: "team_form_freelf") ────────────────────────────────
+    # [ADAUGAT Sprint 2, Etapa C — Data Quality] Owner nou (FreeLF standings)
+    # pentru freelf_team_form_snapshot — adaptor deja construit (R-Sync-6),
+    # niciodată programat până acum (verificat live, 0 rânduri). Fără
+    # dependință de descoperirea meciurilor — iterează exclusiv
+    # mappings.FREE_LF_LEAGUE_IDS (8 ligi statice).
+    print("\n▶  Sincronizare formă echipe — FreeLF...")
+    if dry_run:
+        print("  ℹ️  Sărit (dry run)")
+    else:
+        try:
+            from sync.sync_team_form_freelf import run as run_team_form_freelf
+            team_form_freelf_results = run_team_form_freelf()
+            ran = sum(1 for r in team_form_freelf_results if r.ran)
+            print(f"  ✅ {ran}/{len(team_form_freelf_results)} ligi sincronizate (FreeLF)")
+        except Exception as exc:
+            logger.error("[DailySync] sync_team_form_freelf failed: %s", exc)
+            print(f"  ⚠️  Eroare la sync formă echipe (FreeLF): {exc}")
 
     # ── Pasul 3 (PIPELINE_STEPS: "feature_update", depends_on="history_sync") ──
     # [ADAUGAT — ADR-014] Completează implementarea ADR-004 ("Toate

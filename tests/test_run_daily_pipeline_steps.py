@@ -44,6 +44,13 @@ def test_provider_call_log_cleanup_step_declared_with_no_dependencies():
     assert names["provider_call_log_cleanup"].depends_on == ()
 
 
+def test_team_form_freelf_step_declared_with_no_dependencies():
+    """[ADAUGAT Sprint 2, Etapa C — Data Quality]"""
+    names = {s.name: s for s in run_daily.PIPELINE_STEPS}
+    assert "team_form_freelf" in names
+    assert names["team_form_freelf"].depends_on == ()
+
+
 def test_validate_rejects_forward_reference():
     step = run_daily.PipelineStep
     bad = (step("a", depends_on=("b",)), step("b"))
@@ -115,6 +122,18 @@ def test_dry_run_includes_provider_call_log_cleanup_step_and_skips_it():
     out = buf.getvalue()
     assert "provider_call_log" in out
     section = out.split("Curățenie — provider_call_log")[1]
+    assert "Sărit (dry run)" in section
+
+
+def test_dry_run_includes_team_form_freelf_step_and_skips_it():
+    """[ADAUGAT Sprint 2, Etapa C — Data Quality] dry_run sare sincronizarea,
+    fara apel real la FreeLF."""
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        run_daily.run(dry_run=True)
+    out = buf.getvalue()
+    assert "Sincronizare formă echipe — FreeLF" in out
+    section = out.split("Sincronizare formă echipe — FreeLF")[1]
     assert "Sărit (dry run)" in section
 
 

@@ -1,0 +1,52 @@
+name: Football Oracle — Sprint 2 Sync Validation (manual, temporar)
+
+# [ADAUGAT Sprint 2] Unealtă de validare pentru activarea celor 6 sync-uri
+# orfane (Etapa C, Data Quality) — rulează manual, o singură dată per sync,
+# ca să confirme end-to-end (rețea reală, scriere reală în Supabase) înainte
+# ca pasul respectiv să intre permanent în run_daily.py/weekly.yml. Se
+# șterge după ce toate cele 6 sunt validate și cablate permanent — nu e
+# infrastructură de producție.
+
+on:
+  workflow_dispatch:
+    inputs:
+      module:
+        description: "Modulul sync de rulat (fără prefixul sync.)"
+        required: true
+        type: choice
+        options:
+          - sync_team_form_freelf
+          - sync_team_form_footballdata
+          - sync_weather_forecast
+          - sync_national_team_elo
+          - sync_team_health
+          - sync_odds_recent_results
+
+jobs:
+  validate-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sync module
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          RAPIDAPI_KEY_FREELIVEFOOTBALL: ${{ secrets.RAPIDAPI_KEY_FREELIVEFOOTBALL }}
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: python -m sync.${{ github.event.inputs.module }}
