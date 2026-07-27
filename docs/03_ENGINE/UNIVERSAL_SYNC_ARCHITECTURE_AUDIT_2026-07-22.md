@@ -19,7 +19,8 @@
 | **football-data.org** | Fallback formă/standings (`get_standings_form`, `oracle_api.py:725`), fallback descoperire meciuri (`_fetch_matches_fd`, pasul 3 din `get_matches_for_week`) | Standings, fixtures | Env var (`FOOTBALL_DATA_KEY`), migrat R4.1 — **singurul provider deja bine practicat** înainte de R4.1 (folosea `key_manager` corect, fără duplicare) | NU | Apel live, fallback ADR-035 |
 | **FreeLF (Free Live Football)** | **Sursă PRIMARĂ** pentru descoperirea meciurilor săptămânii (pasul 2, `oracle_api.py:1194-1201`), plus fallback H2H (`self.api.get_h2h`, indirect via event_id FreeLF), formă (`get_team_form_freelf`), standings (`get_freelf_standings`) | Fixtures (primar), formă, standings | Env var (`RAPIDAPI_KEY_FREELIVEFOOTBALL`), migrat R4.1 | NU | Cel mai greu folosit provider structural — nu doar fallback, sursă primară de descoperire |
 | **ESPN** | Fallback descoperire meciuri (pasul 4, `_fetch_matches_espn`, `oracle_api.py:732`) | Fixtures | N/A — provider public, fără cheie (nu apare în `key_manager.PROVIDERS`) | NU | Apel live, fallback ADR-035 |
-| **TheSportsDB** | Fallback descoperire meciuri (pasul 5, `_fetch_matches_tsdb`, `oracle_api.py:806`), team stats (`get_team_stats`, `oracle_api.py:902`), ELO fallback pentru naționale (`ELO_RATINGS_FALLBACK`, `get_elo_rating`, `oracle_api.py:975`) | Fixtures, stats, ELO | N/A — provider public, fără cheie | NU | Apel live, fallback ADR-035; singura sursă reală pentru naționale (fără meciuri de club sincronizate) |
+| **TheSportsDB** | Fallback descoperire meciuri (pasul 5, `_fetch_matches_tsdb`, `oracle_api.py:830`), team stats (`get_team_stats`, `oracle_api.py:926`) — **team stats cuplat structural la `team_id` `tsdb_`-prefixat, produs DOAR de discovery** (dovadă §6c, R-Sync-4) | Fixtures, stats | N/A — provider public, fără cheie | NU | Apel live, fallback ADR-035 |
+| **eloratings.net** [**ADĂUGAT, §6c** — corectare a unei clasificări greșite moștenite din auditul inițial, care îl confunda cu TheSportsDB] | ELO fallback pentru echipele naționale (`get_elo_rating`/`_fetch_elo_ratings`, `oracle_api.py:964-1004`) — scrape HTML, provider distinct, nu API-ul TheSportsDB | ELO | N/A — provider public, fără cheie, scrape HTML (nu JSON API) | NU | Apel live, fallback ADR-035; singura sursă reală pentru naționale fără meciuri de club sincronizate |
 | **sportapi** (RapidAPI) | **Declarat în registry (ADR-034), niciodată apelat din nicio cale de producție** — confirmat prin grep, zero rezultate | — | Env var (`RAPIDAPI_KEY_SPORTAPI`), migrat R4.1 | N/A | N/A — dormant |
 | **Understat** | Neintegrat azi | — | — | — | — |
 
@@ -72,7 +73,8 @@ Per provider, ce adaptor ar rezulta (design, nu implementare):
 | football-data.org | `FootballDataFormAdapter` | Cel mai curat azi (deja folosea `key_manager` corect) — cel mai ieftin de migrat |
 | FreeLF | `FreeLfFixtureAdapter` + `FreeLfFormAdapter` (separate — roluri diferite, discovery vs. formă) | Necesită atenție — sursă primară, nu doar fallback |
 | ESPN | `EspnFixtureAdapter` | Fallback pur, risc mic |
-| TheSportsDB | `TsdbStatsAdapter` + `TsdbEloAdapter` | ELO pentru naționale e o cale critică (singura sursă reală) — migrare cu grijă suplimentară |
+| TheSportsDB | `TsdbStatsAdapter` (team stats) | **AMÂNAT explicit, §6c** — cuplat structural la `team_id` produs de Match Discovery; migrare abia după Universal Match Discovery Layer |
+| eloratings.net [**corectat, §6c** — nu e TheSportsDB] | `EloRatingsAdapter` | Tipar identic R-Sync-3 (un fetch → toate echipele naționale dintr-un scrape) — zero dependență de `team_id`/discovery, migrabil independent, acum |
 
 Niciunul dintre acestea nu se scrie acum — tabelul de mai sus e input pentru roadmap (§6), nu cod.
 
@@ -117,15 +119,16 @@ Tabele noi necesare (design, nicio migrare pregătită încă — se face per pa
 
 ## 6. Strategie de migrare provider cu provider
 
-Secvențiere pe risc crescător, exact disciplina deja aplicată la D1-D4 din ADR-035 (un pas mic, testat, verificat live, ÎNAINTE de următorul). **Corectată post-R-Sync-2 — vezi §6b pentru dovada exactă a corecției, nu doar concluzia.**
+Secvențiere pe risc crescător, exact disciplina deja aplicată la D1-D4 din ADR-035 (un pas mic, testat, verificat live, ÎNAINTE de următorul). **Corectată post-R-Sync-2 — vezi §6b — și din nou post-R-Sync-3 — vezi §6c — pentru dovada exactă a fiecărei corecții, nu doar concluzia.**
 
 1. **API-Football** (injuries/coaches) — ✅ **FINALIZAT, R-Sync-2** (`team_health_snapshot`, migrare 017, commit `0eb0469`).
-2. **football-data.org** — **DOAR** `get_standings_form()`/`get_team_form_fd()` (formă/standings). **Exclus explicit**: `_fetch_matches_fd()` (fixtures) — mutat la pasul 7 (Universal Match Discovery Layer).
-3. **TheSportsDB** (stats + ELO naționale) — atenție suplimentară la ELO (singura sursă reală pentru naționale). **Exclus explicit**: `_fetch_matches_tsdb()` (fixtures) — mutat la pasul 7 (era deja corect scopat așa, confirmat acum consecvent cu §6b).
+2. **football-data.org** — ✅ **FINALIZAT, R-Sync-3** — **DOAR** `get_standings_form()`/`get_team_form_fd()` (formă/standings). **Exclus explicit**: `_fetch_matches_fd()` (fixtures) — mutat la pasul 6 (Universal Match Discovery Layer).
+3. **eloratings.net** (ELO naționale) — **corectat, §6c**: NU e TheSportsDB (eroare de clasificare moștenită, corectată prin dovadă de cod) — provider distinct (scrape HTML). Migrare curată, tipar identic R-Sync-3 (un fetch → toate echipele naționale, multe înregistrări canonice per apel), zero dependență de `team_id`/discovery.
 4. **Weather** — nou tip de tabelă (cache prognoză), independent de restul.
-5. **FreeLF** (formă/standings fallback) + **Odds API** (fallback H2H/formă). **Exclus explicit, pentru amândoi**: orice rol de descoperire — `_fetch_freelf_matches()` (FreeLF) și `_fetch_events_odds_api()` (Odds API, pasul 1 din `get_matches_for_week` — distinct de `_fetch_market()`/`_fetch_odds()`, calea Frozen de persistare a cotelor, ADR-005/006, neatinsă) — mutate la pasul 7.
-6. **Universal Match Discovery Layer** (redefinit, §6b) — **TOȚI** providerii de fixtures, într-un singur pas: FreeLF, Odds API (events/discovery), football-data.org (fixtures), ESPN, TheSportsDB (fixtures), **și API-Football (fixtures)** — niciun provider tratat separat sau privilegiat. Etapă proprie, ultima înaintea curățării finale — schimbă o cale folosită și de UI, nu doar de predicție.
-7. Doar după pasul 6: eliminarea finală a `self.api` din `oracle_engine.py` — Oracle Engine citește exclusiv Supabase, pentru orice tip de date, de la orice provider.
+5. **FreeLF** (formă/standings fallback) + **Odds API** (fallback H2H/formă). **Exclus explicit, pentru amândoi**: orice rol de descoperire — `_fetch_freelf_matches()` (FreeLF) și `_fetch_events_odds_api()` (Odds API, pasul 1 din `get_matches_for_week` — distinct de `_fetch_market()`/`_fetch_odds()`, calea Frozen de persistare a cotelor, ADR-005/006, neatinsă) — mutate la pasul 6.
+6. **Universal Match Discovery Layer** (redefinit, §6b) — **TOȚI** providerii de fixtures, într-un singur pas: FreeLF, Odds API (events/discovery), football-data.org (fixtures), ESPN, TheSportsDB (fixtures), **și API-Football (fixtures)** — niciun provider tratat separat sau privilegiat. Etapă proprie — schimbă o cale folosită și de UI, nu doar de predicție.
+7. **TheSportsDB team stats** — **mutat aici, §6c**, DOAR după pasul 6: `get_team_stats()`/`get_team_last_events_tsdb()` cer un `team_id` `tsdb_`-prefixat, produs azi DOAR de discovery (`_fetch_matches_tsdb()`); migrarea izolată, înainte de Universal Match Discovery Layer, ar fi cerut fie duplicarea logicii de rezoluție de ID, fie o abstracție nouă de identity resolution (`searchteams.php`, nedorită — vezi §6c, Decizia 4). Abia după pasul 6, `scheduled_fixtures` conține ID-uri TSDB stabile, deja scrise, pe care Sync Layer le poate citi direct.
+8. Doar după pasul 7: eliminarea finală a `self.api` din `oracle_engine.py` — Oracle Engine citește exclusiv Supabase, pentru orice tip de date, de la orice provider.
 
 Fiecare pas: criteriu de succes verificabil (date complete în Supabase pentru un eșantion cunoscut), fail-before/pass-after, aprobare explicită înainte de commit — identic tiparului deja stabilit.
 
@@ -143,22 +146,61 @@ Două constatări, ambele verificate direct în cod, nu presupuse, în urma unui
 
 ---
 
+## 6c. Corecție de roadmap, post-R-Sync-3 (evidență, nu doar concluzie)
+
+Cerută explicit de proprietarul produsului înainte de a începe R-Sync-4 (auditul obligatoriu pre-implementare — vezi §8, nota de proces). Două constatări, ambele verificate direct în cod, nu presupuse.
+
+**1. ELO pentru naționale NU e TheSportsDB.** Auditul §1 original (rândul „TheSportsDB") grupa greșit trei responsabilități distincte sub un singur provider. Verificare directă:
+```python
+# oracle_api.py:61
+ELO_URL = "https://www.eloratings.net"          # NU thesportsdb.com
+
+# oracle_api.py:964-1004
+def _fetch_elo_ratings(self) -> dict[str, int]:
+    ...
+    r = self._s.get(ELO_URL, ...)               # scrape HTML (BeautifulSoup), nu apel JSON API TheSportsDB
+```
+`ELO_RATINGS_FALLBACK` (`mappings.py:623`) e un dicționar static hardcodat, nu date derivate din TheSportsDB. **eloratings.net e un provider complet separat** — roadmap-ul (§6, pasul 3 vechi) și auditul §1 au moștenit o eroare de clasificare din primul draft. Corectat acum: rând propriu în §1, adaptor propriu în §3, pas propriu în §6.
+
+**2. TheSportsDB team stats e cuplat structural, demonstrat, la Match Discovery.**
+```python
+# oracle_engine.py:948 (Level 4, _build_profile())
+if not stats and team_id and team_id.startswith("tsdb_"):
+    tsdb_stats = self.api.get_team_stats(team_id, league)
+
+# oracle_api.py:926
+def get_team_stats(self, team_id: str, league: str = "") -> list[dict]:
+    if team_id and team_id.startswith("tsdb_"):
+        return self.get_team_last_events_tsdb(team_id)   # cere ID numeric TSDB
+    return []
+```
+`team_id` vine din `match.get("home_team_id","")`/`away_team_id` (`oracle_engine.py:1284-1285`), populat cu prefixul `tsdb_` DOAR dacă meciul a fost descoperit prin `_fetch_matches_tsdb()` (pasul 5 din `get_matches_for_week()`). Singura alternativă azi e `TSDB_TEAM_IDS` (`mappings.py:559`) — **deliberat incomplet, manual, doar 5 echipe românești**, verificate live una câte una prin `searchteams.php` — cu un comentariu explicit în cod împotriva generalizării automate („`lookup_all_teams.php` s-a dovedit nefiabil... NU se generalizează automat").
+
+**Decizie explicită, proprietar produs**: nu se introduce o rezoluție automată de identitate prin `searchteams.php` acum — ar fi o abstracție nouă de identity resolution, nejustificată de o a doua implementare reală, și ar contrazice disciplina deja înghețată (`ADR-024`/`ADR-025`, identitate canonică doar prin nume normalizat, crosswalk de ID-uri explicit respins). Dacă va exista vreodată un resolver universal de identitate, capătă propriul ADR — nu se introduce implicit, în trecere, la migrarea unui singur provider.
+
+**Concluzie**: TheSportsDB team stats **rămâne pe calea live existentă**, neschimbat, mutat ca pas propriu DOAR după Universal Match Discovery Layer (§6, pasul 6) — moment în care `scheduled_fixtures` va conține deja ID-uri TSDB stabile, eliminând dependența fără nicio abstracție nouă.
+
+---
+
 ## 7. Vezi ADR-039
 
 `docs/00_GOVERNANCE/ADR-039-universal-synchronization-architecture-supabase-first.md`
 
 ---
 
-## 8. Roadmap de implementare (actualizat post-R-Sync-2, §6b)
+## 8. Roadmap de implementare (actualizat post-R-Sync-3, §6c)
 
 1. ✅ Formalizare `SyncAdapter` (interfață) — **FINALIZAT, R-Sync-1**.
 2. ✅ Migrare API-Football injuries/coaches (§6, pasul 1) — **FINALIZAT, R-Sync-2**.
-3. Migrare football-data.org — **DOAR** formă/standings (§6, pasul 2) — scope corectat, ESPN exclus.
-4. Migrare TheSportsDB — stats + ELO naționale (§6, pasul 3), fixtures exclus.
-5. `weather_forecast_cache` + adaptor Weather (§6, pasul 4).
-6. Migrare FreeLF formă/standings + Odds API fallback H2H/formă (§6, pasul 5) — orice rol de descoperire exclus explicit, pentru amândoi.
-7. **Universal Match Discovery Layer** (§6, pasul 6; §6b) — etapă proprie, cea mai mare: FreeLF + Odds API + football-data.org + ESPN + TheSportsDB + **API-Football**, toți ca fixtures-adaptori `SyncAdapter`, scriind în `scheduled_fixtures`. Plan separat, aprobare separată.
-8. Doar după toate cele de mai sus: eliminarea completă a `self.api` din `oracle_engine.py` — Oracle Engine citește exclusiv Supabase, pentru orice tip de date, de la orice provider, fără excepție.
+3. ✅ Migrare football-data.org — **DOAR** formă/standings (§6, pasul 2) — **FINALIZAT, R-Sync-3**, scope corectat, ESPN exclus.
+4. Migrare eloratings.net — **National Team ELO Synchronization** (§6, pasul 3 — **corectat, §6c: NU e TheSportsDB**) — **R-Sync-4, în curs**.
+5. `weather_forecast_cache` + adaptor Weather (§6, pasul 4) — R-Sync-5.
+6. Migrare FreeLF formă/standings + Odds API fallback H2H/formă (§6, pasul 5) — orice rol de descoperire exclus explicit, pentru amândoi — R-Sync-6.
+7. **Universal Match Discovery Layer** (§6, pasul 6; §6b) — etapă proprie, cea mai mare: FreeLF + Odds API + football-data.org + ESPN + TheSportsDB + **API-Football**, toți ca fixtures-adaptori `SyncAdapter`, scriind în `scheduled_fixtures`. Plan separat, aprobare separată — R-Sync-7.
+8. **TheSportsDB team stats** — **mutat aici, §6c**, DOAR după pasul 7 (dependență structurală de `team_id` produs de Match Discovery, demonstrată prin cod) — R-Sync-8.
+9. Doar după toate cele de mai sus: eliminarea completă a `self.api` din `oracle_engine.py` — Oracle Engine citește exclusiv Supabase, pentru orice tip de date, de la orice provider, fără excepție — R-Sync-9.
+
+**Notă de proces, adăugată la cererea proprietarului produsului (post-R-Sync-3)**: pentru fiecare pas de mai sus, ÎNAINTE de implementare, se produce un audit scurt care demonstrează explicit — ce elimină, ce adaugă, ce rămâne încă live, ce va elimina etapa următoare, dovadă că nu apare o dependență nouă. R-Sync-4 e primul pas care aplică formal acest tipar (vezi §6c) — evită exact genul de corecție post-hoc pe care a necesitat-o R-Sync-4 însuși.
 
 Fiecare pas urmează disciplina deja stabilită: design → implementare → teste → audit → aprobare explicită → commit → confirmare punct de restaurare.
 
