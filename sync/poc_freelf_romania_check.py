@@ -61,6 +61,12 @@ def check_date(date_str: str) -> None:
         timeout=15,
     )
     print(f"\n=== {date_str} — HTTP {r.status_code} ===")
+    # [ADAUGAT] Header-e de rate-limit RapidAPI — singura sursă reală pentru
+    # data de reset a cotei (nu presupusă) — RapidAPI le include de obicei
+    # pe orice răspuns, inclusiv 429.
+    rate_headers = {k: v for k, v in r.headers.items() if "ratelimit" in k.lower() or "quota" in k.lower() or "reset" in k.lower()}
+    if rate_headers:
+        print(f"Rate-limit headers: {rate_headers}")
     if not r.ok:
         print(f"Body: {r.text[:500]}")
         return
