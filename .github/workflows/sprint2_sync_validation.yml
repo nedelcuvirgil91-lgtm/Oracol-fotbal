@@ -1,31 +1,30 @@
-name: Football Oracle — Sprint 2 Sync Validation (manual, temporar)
+name: Football Oracle — Sprint 2 Sync Validation (temporar)
 
 # [ADAUGAT Sprint 2] Unealtă de validare pentru activarea celor 6 sync-uri
-# orfane (Etapa C, Data Quality) — rulează manual, o singură dată per sync,
-# ca să confirme end-to-end (rețea reală, scriere reală în Supabase) înainte
-# ca pasul respectiv să intre permanent în run_daily.py/weekly.yml. Se
-# șterge după ce toate cele 6 sunt validate și cablate permanent — nu e
-# infrastructură de producție.
+# orfane (Etapa C, Data Quality) — confirmă end-to-end (rețea reală, scriere
+# reală în Supabase) înainte ca pasul respectiv să intre permanent în
+# run_daily.py/weekly.yml. Se șterge după ce toate cele 6 sunt validate.
+#
+# Trigger pe `push`, nu `workflow_dispatch` — API-ul de dispatch cere ca
+# fișierul de workflow să existe deja pe branch-ul implicit (main), ceea ce
+# nu e cazul aici (branch de lucru, nemerge-uit încă). Modulul de rulat e
+# hardcodat mai jos (SYNC_MODULE) — se editează și se re-push-uiește pentru
+# fiecare din cele 6 validări, tiparul deja folosit la POC-urile anterioare
+# din acest proiect.
 
 on:
-  workflow_dispatch:
-    inputs:
-      module:
-        description: "Modulul sync de rulat (fără prefixul sync.)"
-        required: true
-        type: choice
-        options:
-          - sync_team_form_freelf
-          - sync_team_form_footballdata
-          - sync_weather_forecast
-          - sync_national_team_elo
-          - sync_team_health
-          - sync_odds_recent_results
+  push:
+    branches:
+      - claude/etapa-c-sprint2-data-quality
+    paths:
+      - .github/workflows/sprint2_sync_validation.yml
 
 jobs:
   validate-sync:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      SYNC_MODULE: sync_team_form_freelf
 
     steps:
       - name: Checkout repository
@@ -49,4 +48,4 @@ jobs:
           WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
           FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-        run: python -m sync.${{ github.event.inputs.module }}
+        run: python -m sync.$SYNC_MODULE
