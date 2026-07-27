@@ -28,6 +28,7 @@ except ImportError:
     CACHE_MANAGER_AVAILABLE = False
 
 from key_manager import get_key_manager
+from request_manager import get_request_manager  # [ADAUGAT R-Sync-6, ADR-039]
 
 try:
     from bs4 import BeautifulSoup
@@ -150,6 +151,14 @@ class FootballOracleAPI:
         # instanta noua (fiecare rerun Streamlit) pornea cu cache gol.
         self._cache_mgr = get_cache() if CACHE_MANAGER_AVAILABLE else None
         self._key_manager = get_key_manager()
+        # [ADAUGAT R-Sync-6, ADR-039] Request Manager (RAM L0 + dedup
+        # in-flight + gating de buget real din header-e) — FreeLF era
+        # singurul provider din oracle_api.py care ocolea complet
+        # infrastructura R4.1 (confirmat, audit R-Sync-6). Vezi
+        # _free_lf_get() pentru cablarea efectivă — restul providerilor
+        # din acest fișier (Odds API, football-data.org, ESPN, TheSportsDB,
+        # eloratings.net, Weather) rămân neatinși, scope strict FreeLF aici.
+        self._request_manager = get_request_manager()
         self._validate_api_keys()
         logger.info("FootballOracleAPI v2.3 initialised.")
 
@@ -237,38 +246,104 @@ class FootballOracleAPI:
         except Exception:
             pass
 
-    def _get(self, url: str, headers=None, params=None, timeout: int = 12):
+    def _get(self, url: str, headers=None, params=None, timeout: int = 12, return_headers: bool = False):
+        """[EXTINS — ADR-039 R-Sync-6, aditiv] `return_headers=True` face
+        `_get()` să întoarcă `(data, response_headers)` în loc de doar
+        `data` — necesar exclusiv pentru `_free_lf_get()`, ca să poată
+        alimenta `RateLimitManager.record_response_headers()` (R4.1),
+        exact tiparul deja dovedit în `ApiFootballProvider._get()`.
+        Implicit `False` — toți ceilalți apelanți existenți (Odds API,
+        football-data.org, ESPN, TheSportsDB, eloratings.net, Weather)
+        primesc exact `data`, comportament complet neschimbat."""
         start = time.monotonic()
+
+        def _ret(data, resp):
+            # [DEFENSIV] `getattr` — dublurile de test existente (ex.
+            # test_oracle_api_odds.py::_FakeResp) nu au atribut `headers`;
+            # `return_headers=False` (default, toți apelanții existenți)
+            # nu are nevoie de el, deci nu trebuie să existe pentru ei.
+            return (data, getattr(resp, "headers", None)) if return_headers else data
+
         try:
             r = self._s.get(url, headers=headers or {}, params=params or {}, timeout=timeout)
             latency_ms = (time.monotonic() - start) * 1000
             if r.status_code == 404:
-                logger.warning("[HTTP 404] %s", url[:80]); self._record_metric(url, False, latency_ms); return None
+                logger.warning("[HTTP 404] %s", url[:80]); self._record_metric(url, False, latency_ms); return _ret(None, r)
             if r.status_code == 403:
-                logger.warning("[HTTP 403] %s", url[:80]); self._record_metric(url, False, latency_ms); return None
+                logger.warning("[HTTP 403] %s", url[:80]); self._record_metric(url, False, latency_ms); return _ret(None, r)
             if r.status_code == 429:
                 logger.warning("[HTTP 429] %s", url[:80])
                 self._record_metric(url, False, latency_ms)
                 if FREE_LF_HOST in url:
                     self._freelf_exhausted = True
                     logger.warning("[FreeLF] Limita 429 — trecem pe fallback ESPN/demo.")
-                return None
+                return _ret(None, r)
             if not r.ok:
-                logger.warning("[HTTP %s] %s", r.status_code, url[:80]); self._record_metric(url, False, latency_ms); return None
+                logger.warning("[HTTP %s] %s", r.status_code, url[:80]); self._record_metric(url, False, latency_ms); return _ret(None, r)
             self._record_metric(url, True, latency_ms)
-            return r.json()
+            return _ret(r.json(), r)
         except Exception as exc:
             latency_ms = (time.monotonic() - start) * 1000
             self._record_metric(url, False, latency_ms)
-            logger.error("[HTTP] %s → %s", url[:80], exc); return None
+            logger.error("[HTTP] %s → %s", url[:80], exc); return _ret(None, None)
 
     def _free_lf_get(self, path: str, params=None):
-        """Wrapper pentru Free Live Football API (RapidAPI)."""
-        return self._get(
-            f"{FREE_LF_URL}/{path}",
-            headers=self._key_manager.get_headers("freelivefootball") or {},
-            params=params or {},
-        )
+        """Wrapper pentru Free Live Football API (RapidAPI).
+
+        [EXTINS — ADR-039 R-Sync-6, decizie explicită proprietar produs:
+        „Nu accept provideri care ocolesc infrastructura generică
+        introdusă în R4.1"] Trece acum prin Request Manager (RAM L0 +
+        dedup in-flight + gating de buget real din header-e de răspuns)
+        — exact tiparul deja dovedit în `ApiFootballProvider._get()`
+        (R4.1, `football_providers.py`). Confirmat prin audit R-Sync-6:
+        FreeLF era singurul provider din `oracle_api.py` care ocolea
+        complet infrastructura R4.1.
+
+        Cache-ul L1/L2 (CacheManager, prin `_cget`/`_cset` la nivelul
+        fiecărui apelant — `get_freelf_standings`/`_fetch_freelf_matches`/
+        etc.) rămâne COMPLET neatins, funcționează exact ca înainte — RAM
+        cache-ul de aici e un nivel SUPLIMENTAR, mai jos (L0), cu cheie
+        proprie (`path`+`params`), independentă de cheile L1/L2 ale
+        fiecărui apelant.
+
+        Header-ele reale de răspuns pot avea alt format decât cele
+        oficiale API-Football pe care `RateLimitManager` le recunoaște
+        azi (semnalat, neconfirmat live, în auditul R4.1/R-Sync-6) —
+        design-ul existent al `RateLimitManager` e deja fail-open pentru
+        header-e nerecunoscute (`can_request()` returnează `True` cât
+        timp niciun header cunoscut n-a fost citit încă), deci integrarea
+        de aici e sigură indiferent de rezultat, nu presupune formatul.
+        """
+        provider = "freelivefootball"
+        ram_category = "freelf_raw"
+        ram_key = f"{path}:{params or {}}"
+
+        ram_hit = self._request_manager.get_ram(provider, ram_category, ram_key)
+        if ram_hit is not None:
+            return ram_hit
+
+        if not self._request_manager.should_request(provider):
+            return None
+
+        acquired = self._request_manager.try_acquire_inflight(provider, ram_category, ram_key)
+        if not acquired:
+            logger.debug("[FreeLF] cerere deja in curs pentru %s — sar peste duplicat", ram_key)
+            return None
+
+        try:
+            data, response_headers = self._get(
+                f"{FREE_LF_URL}/{path}",
+                headers=self._key_manager.get_headers("freelivefootball") or {},
+                params=params or {},
+                return_headers=True,
+            )
+            if response_headers is not None:
+                self._request_manager.record_response_headers(provider, response_headers)
+            if data is not None:
+                self._request_manager.set_ram(provider, ram_category, ram_key, data)
+            return data
+        finally:
+            self._request_manager.release_inflight(provider, ram_category, ram_key)
 
     # ── Startup validation ────────────────────────────────────────────────
     def _validate_api_keys(self) -> None:
@@ -660,6 +735,21 @@ class FootballOracleAPI:
                          "goals_for": gf, "goals_against": ga,
                          "shots_on_goal": round(gf * 3.5, 1), "possession": 50.0})
         return sorted(form, key=lambda x: x["date"], reverse=True)
+
+    def get_recent_completed_matches_raw(self, sport_key: str, days_back: int = 3) -> list[dict]:
+        """[Sync Layer only — ADR-039, R-Sync-6] Meciuri TERMINATE recente
+        pentru un sport/ligă — expune public `_fetch_scores_odds_api()`
+        (deja funcțională, deja folosită azi ATÂT pentru formă
+        (`get_team_recent_form()`) CÂT ȘI pentru fallback-ul H2H din
+        `oracle_engine._build_h2h()`) ca punct de intrare Sync Layer, fără
+        s-o rescrie (ADR-039 Principiul 4).
+
+        Decizie explicită, proprietar produs (audit R-Sync-6, opțiunea A):
+        UN SINGUR fetch/adaptor persistă meciurile brute — formă și H2H se
+        derivă amândouă, la citire, din același tabel canonic
+        (`odds_api_recent_results`), nu din două implementări separate ale
+        aceleiași date."""
+        return self._fetch_scores_odds_api(sport_key, days_back=days_back)
 
     # ── football-data.org ─────────────────────────────────────────────────
     def _fetch_matches_fd(self, date_from: str, date_to: str, comp_codes=None) -> list[dict]:

@@ -753,6 +753,163 @@ def upsert_weather_forecast(
         return False
 
 
+def get_team_form_freelf_snapshot(team: str) -> dict | None:
+    """
+    Sursa canonică pentru standings/forma unei echipe (Free Live Football)
+    folosită de servirea live (oracle_engine._build_profile(), Level 0+1
+    fuzionate) — ADR-039, R-Sync-6. Înlocuiește apelurile live către
+    `oracle_api.get_freelf_standings()`/`get_team_form_freelf()` —
+    citire STRICT din Supabase, populată separat de Sync Layer
+    (sync/sync_team_form_freelf.py), niciodată direct de aici.
+
+    Identitate canonică prin nume normalizat (ADR-039 Principiul 7) — NU
+    prin ID-ul numeric de provider FreeLF; `team` trebuie să fie deja
+    trecut prin `normalize_team_name()` de apelant.
+
+    [NOTĂ, R-Sync-6] Coloana `form` va fi aproape mereu goală în practică
+    — reproduce fidel un bug preexistent în calea live
+    (`get_team_form_freelf()` returna deja mereu `[]` în producție, vezi
+    migrarea 021) — NU e o regresie introdusă aici.
+
+    Întoarce None dacă echipa nu a fost încă sincronizată — Regula #8.
+    """
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("freelf_team_form_snapshot")
+            .select("*")
+            .eq("team_name_canonical", team)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Queries] get_team_form_freelf_snapshot failed pentru %s: %s", team, exc)
+        return None
+
+
+def upsert_team_form_freelf(
+    team: str, played: int, wins: int, draws: int, losses: int,
+    goals_for: int, goals_against: int, points: int, position: int | None, form: str,
+) -> bool:
+    """
+    Owner unic de scriere pentru `freelf_team_form_snapshot` (disciplina
+    ADR-036) — exclusiv Sync Layer (`sync/sync_team_form_freelf.py`),
+    niciodată Oracle Engine.
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("freelf_team_form_snapshot").upsert({
+            "team_name_canonical": team,
+            "played": played, "wins": wins, "draws": draws, "losses": losses,
+            "goals_for": goals_for, "goals_against": goals_against,
+            "points": points, "position": position, "form": form,
+            "source_provider": "freelivefootball",
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="team_name_canonical").execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Queries] upsert_team_form_freelf failed pentru %s: %s", team, exc)
+        return False
+
+
+def get_team_recent_form_oddsapi(team: str, limit: int = 5) -> list[dict]:
+    """
+    Sursa canonică pentru formă (fallback tertiar, Level 2 în
+    `_build_profile()`) — Odds API meciuri terminate recente, sursă
+    UNICĂ, partajată cu `get_h2h_from_odds_recent()` (ADR-039, R-Sync-6,
+    audit opțiunea A). Citire STRICT din Supabase
+    (`odds_api_recent_results`), populată de Sync Layer
+    (sync/sync_odds_recent_results.py), niciodată apel live.
+
+    Căutare GLOBALĂ pe echipă (ambele orientări gazdă/oaspete), la fel ca
+    `get_latest_team_elo()`/`get_h2h_from_history()`.
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("odds_api_recent_results")
+            .select("*")
+            .or_(f"home_team_canonical.eq.{team},away_team_canonical.eq.{team}")
+            .order("kickoff_date", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Queries] get_team_recent_form_oddsapi failed pentru %s: %s", team, exc)
+        return []
+
+
+def get_h2h_from_odds_recent(home: str, away: str, last_n: int = 5) -> list[dict]:
+    """
+    Sursa canonică pentru H2H (fallback tertiar, în `_build_h2h()`) —
+    ACELAȘI tabel `odds_api_recent_results` folosit de
+    `get_team_recent_form_oddsapi()` (ADR-039, R-Sync-6, audit opțiunea
+    A) — un singur adaptor/tabel, două citiri diferite ale aceleiași date
+    canonice, nu două implementări separate.
+
+    Cheie naturală simetrică (home vs away) SAU (away vs home) — exact
+    tiparul deja folosit de `get_h2h_from_history()` (ADR-035 D3).
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("odds_api_recent_results")
+            .select("*")
+            .or_(f"and(home_team_canonical.eq.{home},away_team_canonical.eq.{away}),"
+                 f"and(home_team_canonical.eq.{away},away_team_canonical.eq.{home})")
+            .order("kickoff_date", desc=True)
+            .limit(last_n)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Queries] get_h2h_from_odds_recent failed pentru %s vs %s: %s", home, away, exc)
+        return []
+
+
+def upsert_odds_recent_result(
+    home_team: str, away_team: str, kickoff_date: str, league: str,
+    home_score: int | None, away_score: int | None,
+) -> bool:
+    """
+    Owner unic de scriere pentru `odds_api_recent_results` (disciplina
+    ADR-036) — exclusiv Sync Layer (`sync/sync_odds_recent_results.py`),
+    niciodată Oracle Engine.
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("odds_api_recent_results").upsert({
+            "home_team_canonical": home_team,
+            "away_team_canonical": away_team,
+            "kickoff_date": kickoff_date,
+            "league": league,
+            "home_score": home_score,
+            "away_score": away_score,
+            "source_provider": "oddsapi",
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="home_team_canonical,away_team_canonical,kickoff_date").execute()
+        return True
+    except Exception as exc:
+        logger.warning(
+            "[Queries] upsert_odds_recent_result failed pentru %s vs %s (%s): %s",
+            home_team, away_team, kickoff_date, exc,
+        )
+        return False
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # ML STATUS
 # ════════════════════════════════════════════════════════════════════════════

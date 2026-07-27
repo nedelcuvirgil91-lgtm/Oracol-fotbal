@@ -87,6 +87,7 @@ try:
     from database.queries import (
         get_latest_team_elo, get_h2h_from_history, get_team_health,
         get_team_form_footballdata, get_national_team_elo, get_weather_forecast,
+        get_team_form_freelf_snapshot, get_team_recent_form_oddsapi, get_h2h_from_odds_recent,
     )
     DB_QUERIES_MODULE_AVAILABLE = True
 except ModuleNotFoundError:
@@ -638,31 +639,37 @@ class FootballOracleEngine:
             except Exception as exc:
                 logger.warning("[H2H] FreeLF failed for event %s: %s", event_id, exc)
 
-        league    = match.get("league", "")
-        from mappings import ODDS_SPORT_KEYS
-        sport_key = ODDS_SPORT_KEYS.get(league)
-        if not sport_key:
+        # ── Odds API meciuri recente (ADR-039, R-Sync-6) ───────────────────
+        # Sync Layer only — citire STRICT din Supabase
+        # (odds_api_recent_results, populată de
+        # sync/sync_odds_recent_results.py), niciodată apel live. Aceeași
+        # tabelă citită și de _build_profile() Level 2 (formă) — o singură
+        # sursă canonică, două derivări la citire (audit R-Sync-6,
+        # opțiunea A). Nu mai are nevoie de `sport_key`/`ODDS_SPORT_KEYS`
+        # la citire — cheia e direct perechea de nume canonice, valabilă
+        # indiferent de ligă (simplificare permisă de migrare, la fel ca
+        # eliminarea gate-ului `team_id.startswith("fd_")` la R-Sync-3).
+        if not DB_QUERIES_MODULE_AVAILABLE:
             return H2HRecord.empty(home_name, away_name)
 
-        scores = self.api._fetch_scores_odds_api(sport_key, days_back=3)
         home_c = normalize_team_name(home_name)
         away_c = normalize_team_name(away_name)
-        meetings: list[dict] = []
-        for s in scores:
-            h = normalize_team_name(s.get("home_team", ""))
-            a = normalize_team_name(s.get("away_team", ""))
-            if (h == home_c and a == away_c) or (h == away_c and a == home_c):
-                meetings.append(s)
+        try:
+            odds_rows = get_h2h_from_odds_recent(home_c, away_c)
+        except Exception as exc:
+            odds_rows = []
+            logger.warning("[H2H] Odds API Supabase read failed for %s vs %s: %s", home_c, away_c, exc)
 
-        if not meetings:
+        if not odds_rows:
             return H2HRecord.empty(home_name, away_name)
 
         home_wins = draws = away_wins = 0
         home_g = away_g = 0
         last_5: list[str] = []
-        for m in meetings[:5]:
-            is_home_first = normalize_team_name(m["home_team"]) == home_c
-            hs  = m.get("home_score", 0); as_ = m.get("away_score", 0)
+        for row in odds_rows[:5]:
+            is_home_first = row.get("home_team_canonical") == home_c
+            hs  = row.get("home_score", 0) or 0
+            as_ = row.get("away_score", 0) or 0
             gf  = hs if is_home_first else as_
             ga  = as_ if is_home_first else hs
             home_g += gf; away_g += ga
@@ -673,7 +680,7 @@ class FootballOracleEngine:
             else:
                 draws += 1; last_5.append("D")
 
-        n = len(meetings[:5])
+        n = len(odds_rows[:5])
         h2h_modifier = compute_h2h_modifier(
             home_wins, away_wins, n, weight=float(self.config.get("h2h_weight", 0.15))
         )
@@ -768,9 +775,8 @@ class FootballOracleEngine:
         Cascade:
            DB. Supabase match_history (get_team_recent_results)      ← PRIMAR, ADR-035/D1
           -1. Date naționale hardcodate (World Cup + naționale)      — fallback, doar dacă Level DB nu are date
-           0. Free Live Football standings (get_freelf_standings)    — fallback, doar dacă Level DB nu are date
-           1. Free Live Football form      (get_team_form_freelf)    — fallback
-           2. Odds API /scores             (get_team_recent_form)    — fallback
+           0+1. FreeLF standings+formă (Supabase) (get_team_form_freelf_snapshot) — fallback, ADR-039 R-Sync-6
+           2. Odds API meciuri recente (Supabase) (get_team_recent_form_oddsapi) — fallback, ADR-039 R-Sync-6
            3. fd.org standings (Supabase)  (get_team_form_footballdata) — fallback, ADR-039 R-Sync-3
            4. TheSportsDB events           (get_team_stats)          — fallback
            5. ELO sigmoid                  (întotdeauna blended)
@@ -885,47 +891,72 @@ class FootballOracleEngine:
             data_source  = "national-stats-hardcoded"
             logger.info("[Profile] %s — national stats hardcoded (gf=%.2f ga=%.2f)", canonical, gf, ga)
 
-        # ── Level 0: Free Live Football standings ─────────────────────────
-        # (subordonat Level DB — ADR-035: providerii nu pot avea prioritate
-        # asupra datelor deja sincronizate în baza canonică)
-        try:
-            standings_list = self.api.get_freelf_standings(league) if not stats else []
-            for entry in standings_list:
-                if entry.get("team", "").lower() == canonical.lower():
-                    season_entry = entry
-                    break
-            if season_entry:
-                gf     = season_entry.get("avg_gf", 1.25)
-                ga     = season_entry.get("avg_ga", 1.25)
+        # ── Level 0+1: Free Live Football standings + formă (ADR-039, R-Sync-6) ─
+        # Sync Layer only — citire STRICT din Supabase
+        # (freelf_team_form_snapshot, populată de
+        # sync/sync_team_form_freelf.py), niciodată apel live. Fuzionează
+        # foștii Level 0 (standings) + Level 1 (formă) — ambii citeau
+        # ACELAȘI răspuns FreeLF standings (team_id-ul folosit de fostul
+        # Level 1 venea din fostul Level 0, nicio dependență de discovery,
+        # verificat la audit) — un singur rând persistat servește ambele
+        # semnale acum.
+        #
+        # [GĂSIT LA AUDIT, nu ascuns] `form` va fi aproape mereu goală —
+        # reproduce fidel un bug preexistent din calea live (vezi migrarea
+        # 021, freelf_form_adapter.py) — NU e o regresie introdusă aici.
+        recent_form: list[dict] = []
+        if not stats and DB_QUERIES_MODULE_AVAILABLE:
+            try:
+                freelf_row = get_team_form_freelf_snapshot(canonical)
+            except Exception as exc:
+                freelf_row = None
+                logger.warning("[Profile] FreeLF Supabase read failed for %s: %s", canonical, exc)
+            if freelf_row:
+                played = freelf_row.get("played") or 5
+                gf     = (freelf_row.get("goals_for", 0) or 0) / max(played, 1)
+                ga     = (freelf_row.get("goals_against", 0) or 0) / max(played, 1)
                 sot    = real_sot if real_sot is not None else gf * 0.45
                 pos    = 50.0
-                played = season_entry.get("played", 5)
                 stats  = [
                     {"result": "W", "goals_for": gf, "goals_against": ga,
                      "shots_on_goal": sot, "possession": pos}
                 ] * min(played, 5)
                 data_source  = "freelf-standings"
-        except Exception as exc:
-            logger.warning("[Profile] FreeLF standings error for %s: %s", team_name, exc)
+                season_entry = {"avg_gf": gf, "avg_ga": ga}
+                form_str = freelf_row.get("form", "") or ""
+                recent_form = [
+                    {"result": ch.upper(), "goals_for": 0, "goals_against": 0, "date": ""}
+                    for ch in form_str[-last_n:]
+                ]
 
-        # ── Level 1: Free Live Football form ──────────────────────────────
-        recent_form: list[dict] = []
-        try:
-            freelf_id = season_entry.get("team_id") if season_entry else None
-            if freelf_id:
-                recent_form = self.api.get_team_form_freelf(int(freelf_id), league, last_n)
-        except Exception as exc:
-            logger.warning("[Profile] FreeLF form error for %s: %s", team_name, exc)
-
-        # ── Level 2: Odds API /scores ─────────────────────────────────────
-        if not stats:
+        # ── Level 2: Odds API meciuri recente (ADR-039, R-Sync-6) ─────────
+        # Sync Layer only — citire STRICT din Supabase
+        # (odds_api_recent_results, populată de
+        # sync/sync_odds_recent_results.py), niciodată apel live. Aceeași
+        # tabelă e citită și de _build_h2h() (fallback H2H) — o singură
+        # sursă canonică, două derivări la citire (audit R-Sync-6,
+        # opțiunea A).
+        if not stats and DB_QUERIES_MODULE_AVAILABLE:
             try:
-                scores_form = self.api.get_team_recent_form(canonical, league, days_back=14)
+                odds_rows = get_team_recent_form_oddsapi(canonical)
+                scores_form: list[dict] = []
+                for row in odds_rows:
+                    is_home = row.get("home_team_canonical") == canonical
+                    gf = row.get("home_score") if is_home else row.get("away_score")
+                    ga = row.get("away_score") if is_home else row.get("home_score")
+                    if gf is None or ga is None:
+                        continue
+                    result = "W" if gf > ga else ("L" if gf < ga else "D")
+                    scores_form.append({
+                        "date": row.get("kickoff_date", ""), "result": result,
+                        "goals_for": gf, "goals_against": ga,
+                        "shots_on_goal": round(gf * 3.5, 1), "possession": 50.0,
+                    })
                 if scores_form:
                     stats        = scores_form
                     data_source  = "scores-api"
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("[Profile] Odds API Supabase read failed for %s: %s", canonical, exc)
 
         # ── Level 3: football-data.org standings (ADR-039, R-Sync-3) ───────
         # Sync Layer only, dupa migrare — citire STRICT din Supabase

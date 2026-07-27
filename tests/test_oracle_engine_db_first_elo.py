@@ -21,13 +21,11 @@ import oracle_engine
 
 
 def _fake_api():
-    """`self.api` nu mai expune ELO — fallback-ul pentru naționale vine
-    strict din Supabase (get_national_team_elo), niciodată de la
-    provider."""
+    """`self.api` nu mai expune ELO/FreeLF/Odds formă — toate fallback-urile
+    de mai jos vin strict din Supabase (get_national_team_elo,
+    get_team_form_freelf_snapshot, get_team_recent_form_oddsapi),
+    niciodată de la provider."""
     return SimpleNamespace(
-        get_freelf_standings=lambda league: [],
-        get_team_form_freelf=lambda tid, league, n: [],
-        get_team_recent_form=lambda name, league, days_back=14: [],
         get_team_stats=lambda tid, league: [],
     )
 
