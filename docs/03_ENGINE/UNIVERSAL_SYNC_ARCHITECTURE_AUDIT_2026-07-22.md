@@ -207,13 +207,55 @@ if event_id:
 
 ---
 
+## 6e. R-Sync-7a — Universal Match Discovery Layer, fundația (evidență, nu doar concluzie)
+
+Etapă separată, aprobată explicit ca sub-pas al R-Sync-7 (§6b), împărțită în 7a/7b/7c. **R-Sync-7a construiește fundația — tabela + adaptorii + politica de merge + sincronizare paralelă — fără să modifice `oracle_engine.py`.** Oracle Engine continuă să citească exclusiv `get_matches_for_week()` (calea veche, live) până la R-Sync-7b.
+
+**Motivația (§7, auditul R-Sync-7 original)**: `get_matches_for_week()` (`oracle_api.py`) agregă 6 provideri prin `_add()`, care deduplică pe `match_key()` cu semantică **first-provider-wins** — dovedit prin simulare live (`python3` cu `match_key()` real), nu presupus: al doilea provider care raportează același meci își pierde definitiv toți identificatorii proprii (`_freelf_event_id`, `tsdb_*_id`, etc.). Aceasta e cauza structurală exactă care blochează R-Sync-8 (FreeLF H2H, TSDB team stats) — ambele au nevoie de un `team_id`/`event_id` care poate fi „pierdut" azi dacă alt provider a raportat primul.
+
+**Decizie, proprietar produs**: MERGE, nu first-wins — o singură identitate canonică (`(home_team_canonical, away_team_canonical, kickoff_date)`, cheia naturală de Match deja Frozen ADR-024/025), N identificatori de provider, niciun identificator existent nu poate fi șters de un provider ulterior.
+
+**Schema — `scheduled_fixtures` (migrare 023)**: identitate (`home_team_canonical`/`away_team_canonical`/`kickoff_date`, UNIQUE); câmpuri guvernate (`league`, `kickoff_utc`, `venue_city`, `status`) + `field_provenance` (JSONB, urmărește ce provider deține azi valoarea fiecărui câmp guvernat); 14 coloane deținute de provideri (2-3 per provider: `freelf_event_id`/`freelf_home_team_id`/`freelf_away_team_id`/`freelf_coverage_level`, `odds_api_event_id`/`odds_api_sport_key`, `apifootball_fixture_id`/`apifootball_home_team_id`/`apifootball_away_team_id`, `tsdb_home_team_id`/`tsdb_away_team_id`, `fd_home_team_id`/`fd_away_team_id`, `espn_home_team_id`/`espn_away_team_id`); `source_mask` (JSONB, ce provideri au contribuit) + `merge_count` (INTEGER) — utile pentru debugging/audit pe termen lung, cerute explicit de proprietarul produsului, fără necesitate funcțională imediată.
+
+**FixtureMergePolicy — implementată integral în RPC `upsert_scheduled_fixture_merge` (nu read-modify-write din Python, decizie explicită proprietar produs), field-level, nu row-level**:
+- Coloanele deținute de provider: `COALESCE(existing, new)` — owner unic per coloană, niciodată suprascris, niciodată golit de alt provider.
+- `status`: last-write-wins (singurul câmp care se schimbă legitim în timp).
+- `league`/`venue_city`/`kickoff_utc`: guvernate de **SourcePriority** — ranguri fixe per provider, comparate cu `field_provenance` stocat, NU cu ordinea de execuție a sync-ului (decizie explicită proprietar produs: „ordinea în care rulează providerii este o decizie tehnică, nu o măsură a calității datelor" — SourcePriority întâi, apoi MergePolicy, niciodată invers). Doar o sursă strict mai bine clasată poate suprascrie; egalitate sau rang mai slab nu suprascrie niciodată.
+  - `league`: freelf=espn=tsdb=apifootball=oddsapi=1 (toate canonice prin construcție) > footballdata=2 — găsit la audit: `_fetch_matches_fd()` nu apelează niciodată `normalize_league_name()` (`mappings.py:829`, confirmat prin grep — apelată doar din scripturi offline de import istoric, niciodată din calea live `oracle_api.py`), singurul provider cu acest gol.
+  - `venue_city`: freelf=1 > espn=2 > apifootball=3 > footballdata=4 (`area.name` e țară, nu oraș — găsit la R-Sync-5) > tsdb/oddsapi=5 (nu furnizează niciodată venue_city; TSDB reparat la sursă în R-Sync-5, `strVenue` nu mai populează `venue_city`).
+  - `kickoff_utc`: **fără ierarhie de calitate** — niciun provider nu are un defect demonstrat, spre deosebire de `league`/`venue_city`. Decizie explicită, conservatoare (proprietar produs): tie-break pur determinist, arbitrar, doar pentru reproductibilitate: apifootball(1) < espn(2) < footballdata(3) < freelf(4) < oddsapi(5) < tsdb(6). Documentat verbatim în comentariul RPC-ului: „SourcePriority reprezintă ownership-ul sau calitatea demonstrată a câmpului. Pentru câmpurile fără dovezi obiective privind calitatea (ex. kickoff_utc), sistemul nu stabilește o ierarhie semantică între provideri; se aplică doar un tie-break determinist pentru a garanta reproductibilitatea."
+- Demo Mode (`_generate_demo_matches()`) exclus complet din persistare — aprobat explicit, 100%.
+
+**Validare live pe producție (branch Supabase indisponibil — plan curent nu include Branching, `PaymentRequiredException`; alternativă aprobată explicit: testare directă pe producție cu date sintetice `ZZTEST_*`, cleanup explicit, același rigor de logging cerut inițial pentru branch)**:
+
+| # | Scenariu | Rezultat |
+|---|---|---|
+| 1 | Insert meci nou | PASS |
+| 2 | Merge — al doilea provider adaugă un ID propriu | PASS |
+| 3 | Merge — ordine inversă de sosire a providerilor | PASS |
+| 4 | Precedență `venue_city` (SourcePriority) | PASS |
+| 5 | Precedență `league` (SourcePriority) | PASS |
+| 6 | No-downgrade — sursă cu rang mai slab nu suprascrie | PASS |
+| 7 | Idempotență — reapelare cu aceleași date | PASS |
+| 8 | Concurență minimă | Netestat sub concurență REALĂ (limitare unealtă — execuție SQL strict secvențială) — dar investigația declanșată de acest scenariu a găsit un bug real (vezi mai jos) |
+
+7 rânduri inserate în total (S1-S7) + 1 rând suplimentar de regresie (S9, după fix). Toate verificările PASS. Cleanup: `DELETE FROM scheduled_fixtures WHERE home_team_canonical LIKE 'ZZTEST_%' OR away_team_canonical LIKE 'ZZTEST_%'`, confirmat prin `SELECT count(*) FROM scheduled_fixtures` → `0` (tabelă complet goală, inclusiv de date reale, întrucât niciun sync real nu rulase încă pe producție).
+
+**Bug real găsit prin validare live, nu prin trace manual** — cel mai valoros rezultat al etapei: ramura INSERT din RPC nu avea `ON CONFLICT`, expusă la o excepție necontrolată de constrângere unică dacă doi provideri descoperă concurent, pentru prima dată, același meci nou. **Validation note: During live validation a race condition was discovered in the initial INSERT path. The RPC now uses INSERT ... ON CONFLICT DO NOTHING RETURNING id followed by a merge fallback, making concurrent first inserts safe.** Fix redeployat pe producție (`CREATE OR REPLACE FUNCTION`) și regresie-verificat (scenariul 9 + reconfirmare S1-S7 neschimbate).
+
+**Ce elimină R-Sync-7a**: nimic din calea live a `oracle_engine.py` — `oracle_engine.py` e neatins deliberat în această etapă. **Ce adaugă**: fundația de persistare (`scheduled_fixtures`, 6 adaptori de fixtures, `sync/sync_scheduled_fixtures.py`) care va alimenta R-Sync-7b. **Ce rămâne live**: toate cele 5 rânduri de discovery din tabelul cumulat (§8) — neschimbate față de închiderea R-Sync-6, întrucât Oracle Engine nu citește încă din `scheduled_fixtures`.
+
+**Fișiere**: `database/migrations/023_scheduled_fixtures.sql`; 6 wrapper-e publice noi în `oracle_api.py` (`get_freelf_matches_raw`, `get_odds_api_events_raw`, `get_football_data_matches_raw`, `get_espn_matches_raw`, `get_tsdb_matches_raw`, `get_api_football_matches_raw`); `database/queries.py` (`upsert_scheduled_fixture`, `get_scheduled_fixture`); `fixture_discovery_common.py` (helper comun, justificat de 6 implementări reale simultane); 6 adaptori (`freelf_fixture_adapter.py`, `odds_api_fixture_adapter.py`, `footballdata_fixture_adapter.py`, `espn_fixture_adapter.py`, `tsdb_fixture_adapter.py`, `apifootball_fixture_adapter.py`); `sync/sync_scheduled_fixtures.py`; 9 fișiere de test noi.
+
+---
+
 ## 7. Vezi ADR-039
 
 `docs/00_GOVERNANCE/ADR-039-universal-synchronization-architecture-supabase-first.md`
 
 ---
 
-## 8. Roadmap de implementare (actualizat post-R-Sync-6, §6d)
+## 8. Roadmap de implementare (actualizat post-R-Sync-7a, §6e)
 
 1. ✅ Formalizare `SyncAdapter` (interfață) — **FINALIZAT, R-Sync-1**.
 2. ✅ Migrare API-Football injuries/coaches (§6, pasul 1) — **FINALIZAT, R-Sync-2**.
@@ -221,13 +263,16 @@ if event_id:
 4. ✅ Migrare eloratings.net — **National Team ELO Synchronization** (§6, pasul 3 — **corectat, §6c: NU e TheSportsDB**) — **FINALIZAT, R-Sync-4** (`national_team_elo_snapshot`, migrare 019).
 5. ✅ `weather_forecast_cache` + adaptor Weather (§6, pasul 4) — **FINALIZAT, R-Sync-5**.
 6. ✅ Migrare FreeLF formă/standings + Odds API fallback H2H/formă (§6, pasul 5) — **FINALIZAT, R-Sync-6** — **corectat, §6d**: FreeLF H2H exclus (cuplat la discovery, mutat la R-Sync-8), Odds API H2H/formă unificate într-un singur tabel canonic (`odds_api_recent_results`, opțiunea A), FreeLF integrată în Request Manager/Rate Limit Manager (R4.1) înainte de migrare.
-7. **Universal Match Discovery Layer** (§6, pasul 6; §6b) — etapă proprie, cea mai mare: FreeLF + Odds API + football-data.org + ESPN + TheSportsDB + **API-Football**, toți ca fixtures-adaptori `SyncAdapter`, scriind în `scheduled_fixtures`. Plan separat, aprobare separată — **R-Sync-7, următorul**.
+7. **Universal Match Discovery Layer** (§6, pasul 6; §6b) — etapă proprie, cea mai mare, împărțită în 7a/7b/7c:
+   - 7a. ✅ **FINALIZAT** — fundația: `scheduled_fixtures` (migrare 023) + RPC `upsert_scheduled_fixture_merge` (FixtureMergePolicy, field-level merge, validat live pe producție) + 6 adaptori de fixtures + `sync/sync_scheduled_fixtures.py`. `oracle_engine.py` neatins deliberat — vezi §6e.
+   - 7b. Oracle Engine citește `scheduled_fixtures`, comparație cu calea veche (`get_matches_for_week()`), calea veche păstrată în spatele unui flag implicit dezactivat — **următorul, neînceput**.
+   - 7c. Eliminarea căii vechi după dovadă de echivalență — neînceput.
 8. **Post-Discovery Cleanup** — **redefinit, §6d**: TheSportsDB team stats (mutat, §6c) **+ FreeLF H2H** (mutat, §6d) — ambele cuplate structural la `team_id`/`event_id` produs DOAR de Match Discovery, deblocate abia după R-Sync-7 — R-Sync-8.
 9. Doar după toate cele de mai sus: eliminarea completă a `self.api` din `oracle_engine.py` — Oracle Engine citește exclusiv Supabase, pentru orice tip de date, de la orice provider, fără excepție — R-Sync-9.
 
 **Task separat, neînceput** (§6d): R-Sync-6a — verificare live payload FreeLF standings, identificare nume real câmp „form", reparare `get_freelf_standings()`.
 
-### Tabel cumulat — dependențe live rămase în Oracle Engine (actualizat, post-R-Sync-6)
+### Tabel cumulat — dependențe live rămase în Oracle Engine (actualizat, post-R-Sync-7a — neschimbat față de R-Sync-6: `oracle_engine.py` neatins în R-Sync-7a, vezi §6e)
 
 | Provider / sursă | Oracle Engine mai face apel live? | Motiv / unde | Eliminare planificată |
 |---|---|---|---|
@@ -246,7 +291,7 @@ if event_id:
 | TheSportsDB (descoperire meciuri) | DA | `_fetch_matches_tsdb`, `get_matches_for_week()` | R-Sync-7 |
 | Odds API (cote pre-meci) | DA — dar deja conform (Frozen) | `odds_persistence_service.py`, ADR-005/006 — nu e candidat de migrare | N/A, deja sync-first |
 
-**Progres obiectiv, post-R-Sync-6**: **6 din 13** surse reale de apel live eliminate (exclus rândul „deja conform"). Rămân 7: 5 se rezolvă la R-Sync-7 (Universal Match Discovery Layer), 2 la R-Sync-8 (Post-Discovery Cleanup). `self.api` complet eliminat din `oracle_engine.py` abia la R-Sync-9.
+**Progres obiectiv, post-R-Sync-7a**: **6 din 13** surse reale de apel live eliminate (exclus rândul „deja conform") — **neschimbat față de R-Sync-6**. R-Sync-7a a construit fundația de persistare (`scheduled_fixtures`) fără să comute vreo citire a Oracle Engine — niciun apel live nu a dispărut încă din cele 5 rânduri de discovery de mai sus. Rămân 7: 5 se rezolvă la R-Sync-7b (comutarea efectivă a Oracle Engine pe `scheduled_fixtures`), 2 la R-Sync-8 (Post-Discovery Cleanup). `self.api` complet eliminat din `oracle_engine.py` abia la R-Sync-9.
 
 **Notă de proces, adăugată la cererea proprietarului produsului (post-R-Sync-3)**: pentru fiecare pas de mai sus, ÎNAINTE de implementare, se produce un audit scurt care demonstrează explicit — ce elimină, ce adaugă, ce rămâne încă live, ce va elimina etapa următoare, dovadă că nu apare o dependență nouă. R-Sync-4 e primul pas care aplică formal acest tipar (vezi §6c) — evită exact genul de corecție post-hoc pe care a necesitat-o R-Sync-4 însuși.
 

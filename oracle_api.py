@@ -1307,6 +1307,32 @@ class FootballOracleAPI:
         except Exception as exc:
             logger.warning("[Weather] %s: %s", city, exc); return base
 
+    # ── Sync Layer discovery wrappers (R-Sync-7a, ADR-039) ──────────────────
+    # [ADR-039 Principiul 4] Pure adăugiri — expun public metodele private
+    # de fetch deja funcționale (folosite intern de get_matches_for_week()),
+    # ca punct de intrare Sync Layer pentru cei 6 adaptori de discovery
+    # (freelf_fixture_adapter.py, odds_api_fixture_adapter.py,
+    # footballdata_fixture_adapter.py, espn_fixture_adapter.py,
+    # tsdb_fixture_adapter.py, apifootball_fixture_adapter.py). Niciuna nu
+    # rescrie logica de fetch/parsare existentă — doar o expune.
+    def get_freelf_matches_raw(self, target_date: str, league: str) -> list[dict]:
+        return self._fetch_freelf_matches(target_date, league)
+
+    def get_odds_api_events_raw(self, sport_key: str, days_ahead: int = 7) -> list[dict]:
+        return self._fetch_events_odds_api(sport_key, days_ahead)
+
+    def get_football_data_matches_raw(self, date_from: str, date_to: str, comp_codes=None) -> list[dict]:
+        return self._fetch_matches_fd(date_from, date_to, comp_codes)
+
+    def get_espn_matches_raw(self, league: str, target_date: str) -> list[dict]:
+        return self._fetch_matches_espn(league, target_date)
+
+    def get_tsdb_matches_raw(self, league_id: str, league_name: str) -> list[dict]:
+        return self._fetch_matches_tsdb(league_id, league_name)
+
+    def get_api_football_matches_raw(self, league: str, date_from: str, date_to: str) -> list[dict]:
+        return self._fetch_matches_api_football(league, date_from, date_to)
+
     # ── Orchestrator principal ────────────────────────────────────────────
     def get_matches_for_week(self, days_ahead: int = 7,
                              competitions: list[str] | None = None) -> list[dict]:

@@ -910,6 +910,106 @@ def upsert_odds_recent_result(
         return False
 
 
+def upsert_scheduled_fixture(
+    home_team: str, away_team: str, kickoff_date: str, provider_id: str,
+    league: str | None = None, kickoff_utc: str | None = None, venue_city: str | None = None,
+    status: str | None = None,
+    freelf_event_id: str | None = None, freelf_home_team_id: str | None = None,
+    freelf_away_team_id: str | None = None, freelf_coverage_level: str | None = None,
+    odds_api_event_id: str | None = None, odds_api_sport_key: str | None = None,
+    apifootball_fixture_id: str | None = None, apifootball_home_team_id: str | None = None,
+    apifootball_away_team_id: str | None = None,
+    tsdb_home_team_id: str | None = None, tsdb_away_team_id: str | None = None,
+    fd_home_team_id: str | None = None, fd_away_team_id: str | None = None,
+    espn_home_team_id: str | None = None, espn_away_team_id: str | None = None,
+) -> bool:
+    """
+    Owner unic de scriere pentru `scheduled_fixtures` (disciplina ADR-036)
+    — exclusiv Sync Layer, prin cei 6 adaptori de descoperire
+    (freelf/odds_api/footballdata/espn/tsdb/apifootball_fixture_adapter.py).
+    Oracle Engine NU scrie niciodată aici.
+
+    ÎNTREAGA logică FixtureMergePolicy trăiește în RPC-ul
+    `upsert_scheduled_fixture_merge` (migrare 023) — funcția de față e un
+    wrapper subțire, NU decide nimic: trimite doar câmpurile pe care
+    adaptorul le are (restul rămân `None` → `NULL` în SQL, ignorate de
+    RPC), la fel pentru orice provider. Decizie explicită, proprietar
+    produs: „adaptorul trimite doar câmpurile lui, RPC decide" — nicio
+    logică de merge duplicată aici sau în Python.
+
+    `provider_id`: `'freelf' | 'oddsapi' | 'apifootball' | 'tsdb' | 'fd' | 'espn'`
+    — cod scurt, intern RPC-ului, distinct de `SyncAdapter.provider_id`
+    folosit în restul Sync Layer (`'freelivefootball'`, `'footballdata'`
+    etc.) — documentat explicit aici ca să nu fie confundat.
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.rpc("upsert_scheduled_fixture_merge", {
+            "p_home_team_canonical": home_team,
+            "p_away_team_canonical": away_team,
+            "p_kickoff_date": kickoff_date,
+            "p_provider_id": provider_id,
+            "p_league": league,
+            "p_kickoff_utc": kickoff_utc,
+            "p_venue_city": venue_city,
+            "p_status": status,
+            "p_freelf_event_id": freelf_event_id,
+            "p_freelf_home_team_id": freelf_home_team_id,
+            "p_freelf_away_team_id": freelf_away_team_id,
+            "p_freelf_coverage_level": freelf_coverage_level,
+            "p_odds_api_event_id": odds_api_event_id,
+            "p_odds_api_sport_key": odds_api_sport_key,
+            "p_apifootball_fixture_id": apifootball_fixture_id,
+            "p_apifootball_home_team_id": apifootball_home_team_id,
+            "p_apifootball_away_team_id": apifootball_away_team_id,
+            "p_tsdb_home_team_id": tsdb_home_team_id,
+            "p_tsdb_away_team_id": tsdb_away_team_id,
+            "p_fd_home_team_id": fd_home_team_id,
+            "p_fd_away_team_id": fd_away_team_id,
+            "p_espn_home_team_id": espn_home_team_id,
+            "p_espn_away_team_id": espn_away_team_id,
+        }).execute()
+        return True
+    except Exception as exc:
+        logger.warning(
+            "[Queries] upsert_scheduled_fixture failed pentru %s vs %s @ %s (provider=%s): %s",
+            home_team, away_team, kickoff_date, provider_id, exc,
+        )
+        return False
+
+
+def get_scheduled_fixture(home_team: str, away_team: str, kickoff_date: str) -> dict | None:
+    """
+    Citire a unui meci descoperit, prin identitatea canonică
+    (ADR-024/025). NU folosită încă de Oracle Engine în R-Sync-7a
+    (rămâne pe cascada live veche, `get_matches_for_week()`) — pregătită
+    pentru R-Sync-7b, citire directă din tabelă.
+    """
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("scheduled_fixtures")
+            .select("*")
+            .eq("home_team_canonical", home_team)
+            .eq("away_team_canonical", away_team)
+            .eq("kickoff_date", kickoff_date)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning(
+            "[Queries] get_scheduled_fixture failed pentru %s vs %s @ %s: %s",
+            home_team, away_team, kickoff_date, exc,
+        )
+        return None
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # ML STATUS
 # ════════════════════════════════════════════════════════════════════════════
