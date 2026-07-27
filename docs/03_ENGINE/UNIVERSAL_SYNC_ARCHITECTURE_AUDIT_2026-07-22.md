@@ -249,6 +249,47 @@ Etapă separată, aprobată explicit ca sub-pas al R-Sync-7 (§6b), împărțit�
 
 ---
 
+## 6f. R-Sync-7b — audit pre-design (evidență, nu doar concluzie)
+
+Cerut de disciplina deja stabilită: audit complet, fără cod, înainte de proiectarea mecanismului shadow. Patru puncte, plus un criteriu suplimentar adăugat de proprietarul produsului.
+
+**1. Strategia de comutare (feature flag)**. Precedent direct în codebase pentru exact acest tipar — „shadow, fără schimbare de comportament" — ADR-034 PR5, `shadow_config.py`:
+```python
+_DEFAULT_CONFIG = {"selection_engine_shadow_enabled": False}
+def is_enabled() -> bool:
+    cfg = sb.load_config(_DEFAULT_CONFIG)
+    return bool(cfg.get("selection_engine_shadow_enabled", False))
+```
+Consumat din `oracle_api.get_matches_for_week()` printr-un hook strict observațional (`_shadow_evaluate_selection_engine()`, `oracle_api.py:1438`) — best-effort, `try/except Exception` complet, nu poate influența `matches`, no-op dacă flag-ul e False.
+
+**Decizie, proprietar produs**: flag NOU, dedicat, **nu** reutilizarea `selection_engine_shadow_enabled` — `scheduled_fixtures_shadow_enabled`, citit din `model_config` (Supabase) via `sb.load_config()`, implicit `False` (North Star #3). Modul dedicat (nu `shadow_config.py`, care rămâne exclusiv al Selection Engine), responsabilități separate, rollback trivial (un singur boolean).
+
+**2. Echivalența rezultatelor (comparație veche vs. nouă)**. Același tipar ca `_shadow_evaluate_selection_engine()`: hook observațional care, doar dacă flag-ul e True, citește `scheduled_fixtures` (via `get_scheduled_fixture()`, deja scris și neutilizat — `database/queries.py:983`, comentariu explicit „pregătită pentru R-Sync-7b") pentru fiecare meci din `matches` (calea veche), loghează diferențele — fără să le folosească vreodată pentru a modifica `matches`.
+
+Criterii de comparație, **aprobate**:
+- Identitatea completă a meciului (existența rândului canonic).
+- Câmpurile guvernate (`league`, `venue_city`, `kickoff_utc`) — valoarea din calea veche vs. valoarea consolidată din `scheduled_fixtures`.
+- Metadatele de provider — dacă toți identificatorii prezenți pe meciul live (`_freelf_event_id`, `_odds_api_id`, `home_team_id`/`away_team_id` per provider, etc.) există și în rândul din `scheduled_fixtures` — dovadă directă că merge-ul field-level chiar reține ce pierdea first-wins-ul.
+- **Cardinalitate, criteriu adăugat explicit de proprietarul produsului**: comparație pe trei axe, nu doar per-meci —
+  1. numărul total de meciuri produse de calea live (`get_matches_for_week()`);
+  2. numărul de rânduri canonice corespunzătoare din `scheduled_fixtures` (pentru aceeași fereastră de date);
+  3. lista completă de `match_key()` lipsă în ambele direcții (prezente în calea veche dar absente în `scheduled_fixtures`, ȘI invers — prezente în tabelă dar absente din rezultatul live).
+
+  Scop explicit: nu doar verificarea că fiecare meci individual există, ci excluderea explicită a trei clase de eroare — meciuri duplicate, meciuri pierdute, meciuri „fantomă" (rânduri persistate care nu mai corespund niciunui meci live real, de ex. rămase după o schimbare de dată/echipă). Control ieftin, rulează o singură dată per evaluare shadow, oferă o garanție puternică înainte de orice comutare efectivă.
+
+**3. Fallback dacă `scheduled_fixtures` e incomplet/gol**. Nu se pune încă problema în R-Sync-7b propriu-zis (Oracle Engine rămâne pe calea veche, doar comparație observațională). **Decizie, proprietar produs**: **niciun fallback silențios**, nici la comutarea efectivă (R-Sync-7c) — dacă `scheduled_fixtures` nu are un rând pentru un meci pe care calea veche îl are, acesta e un semnal de problemă în pipeline-ul de sincronizare (Regula #8: o stare necunoscută/incompletă nu se aproximează, nu se ascunde printr-o revenire automată la calea veche). Faza shadow (7b) există exact pentru a scoate la iveală asemenea goluri de acoperire înainte de orice comutare reală (7c).
+
+**4. Impactul asupra componentelor Frozen — trei dependințe confirmate prin citire de cod, plus o găsire nouă**:
+- `_attach_odds()` (`oracle_api.py:1221`, cale Frozen ADR-005/006) citește `m.get("_odds_api_id")` — valoare identică cu `scheduled_fixtures.odds_api_event_id`/`odds_api_sport_key` (`_fetch_events_odds_api()`, `oracle_api.py:671,681`: `ev["id"]`/`sport_key`, neprefixate). **Compatibil direct**, deja documentat în `odds_api_fixture_adapter.py` („NEATINSĂ aici — R-Sync-7a doar persistă identitatea, nu schimbă cotele").
+- `fixture_id` (folosit de `odds_persistence_service.py` pentru `odds_history`) e generat per-provider, prefixat diferit per sursă (`freelf_{id}`, `odds_{id}`, `fd_{id}`, `espn_{id}`, `tsdb_{id}`) — **NU** identic cu `scheduled_fixtures.id` (PK intern, nou). Rămâne neatins — R-Sync-7b/7c nu-l ating, generat exact ca azi.
+- `coverage_level` — există doar pe FreeLF (`freelf_coverage_level`, migrat 1:1 în schema 023). Niciun impact.
+- **Găsire nouă la acest audit**: `_freelf_home_id`/`_freelf_away_id` (folosite de `injury_manager.get_lineup_absences()`, `oracle_engine.py:1365,1371`) — valorile RAW (neprefixate) NU sunt stocate ca atare în `scheduled_fixtures`; coloana `freelf_home_team_id` stochează `home_team_id` deja prefixat (`freelf_{id}`), nu id-ul brut. Recuperabil determinist (strip prefix `"freelf_"`), dar transformarea trebuie făcută explicit la citire, niciodată presupusă — de tratat explicit în designul shadow/comutare dacă injury lookup ajunge vreodată să citească din `scheduled_fixtures`.
+- `team_id` → gate TSDB (`oracle_engine.py:988`, `team_id.startswith("tsdb_")`) — deja cunoscut (R-Sync-8), confirmă din nou dependența first-wins-fragilă pe care R-Sync-7a o rezolvă structural.
+
+**Concluzie, aprobată**: nu e necesară nicio schimbare de design înainte de R-Sync-7b. Niciun cod scris în această etapă, ADR-039 neatins. Pasul următor: proiectarea exactă a mecanismului shadow (citire paralelă + metrici de cardinalitate + raport de diferențe), aprobare explicită a designului, abia apoi implementare.
+
+---
+
 ## 7. Vezi ADR-039
 
 `docs/00_GOVERNANCE/ADR-039-universal-synchronization-architecture-supabase-first.md`
@@ -265,7 +306,7 @@ Etapă separată, aprobată explicit ca sub-pas al R-Sync-7 (§6b), împărțit�
 6. ✅ Migrare FreeLF formă/standings + Odds API fallback H2H/formă (§6, pasul 5) — **FINALIZAT, R-Sync-6** — **corectat, §6d**: FreeLF H2H exclus (cuplat la discovery, mutat la R-Sync-8), Odds API H2H/formă unificate într-un singur tabel canonic (`odds_api_recent_results`, opțiunea A), FreeLF integrată în Request Manager/Rate Limit Manager (R4.1) înainte de migrare.
 7. **Universal Match Discovery Layer** (§6, pasul 6; §6b) — etapă proprie, cea mai mare, împărțită în 7a/7b/7c:
    - 7a. ✅ **FINALIZAT** — fundația: `scheduled_fixtures` (migrare 023) + RPC `upsert_scheduled_fixture_merge` (FixtureMergePolicy, field-level merge, validat live pe producție) + 6 adaptori de fixtures + `sync/sync_scheduled_fixtures.py`. `oracle_engine.py` neatins deliberat — vezi §6e.
-   - 7b. Oracle Engine citește `scheduled_fixtures`, comparație cu calea veche (`get_matches_for_week()`), calea veche păstrată în spatele unui flag implicit dezactivat — **următorul, neînceput**.
+   - 7b. Oracle Engine citește `scheduled_fixtures`, comparație cu calea veche (`get_matches_for_week()`), calea veche păstrată în spatele unui flag implicit dezactivat — **audit pre-design FINALIZAT (§6f)**, design-ul mecanismului shadow (citire paralelă + metrici de cardinalitate + raport de diferențe) **neînceput**, implementarea neînceput.
    - 7c. Eliminarea căii vechi după dovadă de echivalență — neînceput.
 8. **Post-Discovery Cleanup** — **redefinit, §6d**: TheSportsDB team stats (mutat, §6c) **+ FreeLF H2H** (mutat, §6d) — ambele cuplate structural la `team_id`/`event_id` produs DOAR de Match Discovery, deblocate abia după R-Sync-7 — R-Sync-8.
 9. Doar după toate cele de mai sus: eliminarea completă a `self.api` din `oracle_engine.py` — Oracle Engine citește exclusiv Supabase, pentru orice tip de date, de la orice provider, fără excepție — R-Sync-9.
