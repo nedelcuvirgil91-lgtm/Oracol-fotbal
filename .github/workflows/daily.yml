@@ -45,6 +45,12 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          # [ADAUGAT Sprint 1] Necesar pt. Match Statistics (FreeLF Event
+          # Resolver + get_match_statistics) — descoperire colaterală: acest
+          # secret lipsea din workflow și pentru fluxurile deja existente
+          # care-l folosesc (Pasul 5, odds/get_matches_for_week) — gol
+          # pre-existent, nu introdus aici, semnalat separat utilizatorului.
+          RAPIDAPI_KEY_FREELIVEFOOTBALL: ${{ secrets.RAPIDAPI_KEY_FREELIVEFOOTBALL }}
         run: |
           ARGS=""
           if [ "${{ github.event.inputs.skip_features }}" = "true" ]; then ARGS="$ARGS --no-features"; fi

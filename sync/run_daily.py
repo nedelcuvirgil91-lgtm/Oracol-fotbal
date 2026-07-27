@@ -8,19 +8,22 @@ Punctul de intrare pentru sincronizarea zilnică automată.
 Rulat de GitHub Actions la 03:00 UTC în fiecare zi.
 
 Flux de execuție:
-  1. Sincronizează meciuri noi (football-data.org + openfootball)
-  2. Actualizează feature-urile derivate (formă, H2H, cornere, cartonașe,
+  0. Sincronizează rezultatele meciurilor de ieri (owner `actual_*`)
+  1. Match Statistics — posesie + xG real (owner nou, FreeLF), pentru
+     meciurile din pasul 0 (Sprint 1, ADR-039) — vezi PIPELINE_STEPS mai jos
+  2. Sincronizează meciuri noi (football-data.org + openfootball)
+  3. Actualizează feature-urile derivate (formă, H2H, cornere, cartonașe,
      faulturi) pentru meciurile noi — sync.backfill_features.run_backfill(),
      non-destructiv, gating per-coloană (Regula #13). Vezi ADR-014. ELO-ul
      e recalculat aici (ELOTracker, MOV V2_damped — ADR-022), nu mai printr-un
      pas separat — vezi ARCHITECTURE_AUDIT_2026-07-15.md pt eliminarea
      implementării ELO necanonice (sync/calculate_elo.py).
-  3. Evaluează experimentele shadow active (shadow_testing.py — vezi
+  4. Evaluează experimentele shadow active (shadow_testing.py — vezi
      architecture/ADR-004-continuous-learning.md pt ordinea completă)
-  4. Persistă cote de piață (odds_history) — vezi
+  5. Persistă cote de piață (odds_history) — vezi
      docs/03_ENGINE/ODDS_PERSISTENCE_DESIGN.md (Frozen, ADR-005, ADR-006)
-  5. Verifică dacă trebuie reantrenat modelul ML
-  6. Afișează raport de sincronizare
+  6. Verifică dacă trebuie reantrenat modelul ML
+  7. Afișează raport de sincronizare
 
 Folosire:
   python sync/run_daily.py                # rulare completă
@@ -35,6 +38,7 @@ import argparse
 import logging
 import sys
 import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -51,6 +55,58 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger("FootballOracle.DailySync")
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PIPELINE STEPS — manifest declarativ (Sprint 1, ADR-039, decizie explicită
+# proprietar produs: "gândește run_daily.py ca un orchestrator de pipeline,
+# nu pași hardcodați unul după altul")
+# ════════════════════════════════════════════════════════════════════════════
+# [NOTĂ DE SCOP] NU e un motor de execuție — corpul lui `run()` de mai jos
+# rămâne imperativ, exact ordinea din acest manifest (zero regresie pe cod
+# deja testat/funcțional, "no defect, no rewrite"). Acest manifest e sursa
+# de adevăr DECLARATĂ pentru nume + dependențe — validată static la import
+# (`_validate_pipeline_steps`, mai jos) — orice pas nou adăugat în viitor
+# trebuie declarat aici, cu dependențele lui reale, înainte de a fi inserat
+# în `run()`. O adevărată orchestrare bazată pe acest manifest (execuție
+# automată în ordine topologică) rămâne o extindere viitoare, neaprobată
+# acum — scop deliberat restrâns (Sprint 1 „solid, nu mare").
+
+@dataclass(frozen=True)
+class PipelineStep:
+    name: str
+    depends_on: tuple[str, ...] = field(default_factory=tuple)
+
+
+PIPELINE_STEPS: tuple[PipelineStep, ...] = (
+    PipelineStep("results"),
+    PipelineStep("match_statistics", depends_on=("results",)),
+    PipelineStep("history_sync"),
+    PipelineStep("feature_update", depends_on=("history_sync",)),
+    PipelineStep("shadow_evaluation", depends_on=("feature_update",)),
+    PipelineStep("odds_persistence"),
+    PipelineStep("ml_retrain", depends_on=("feature_update",)),
+)
+
+
+def _validate_pipeline_steps(steps: tuple[PipelineStep, ...]) -> None:
+    """Fail-fast, la import — un pas nu poate depinde de un nume nedeclarat
+    încă (referință înainte) sau inexistent. Nu verifică ordinea reală de
+    execuție din `run()` (asta ar fi motorul de execuție, explicit deferat)."""
+    declared: set[str] = set()
+    for step in steps:
+        for dep in step.depends_on:
+            if dep not in declared:
+                raise ValueError(
+                    f"PIPELINE_STEPS: pasul '{step.name}' depinde de '{dep}', "
+                    "care nu e declarat înainte de el (sau nu există deloc)"
+                )
+        if step.name in declared:
+            raise ValueError(f"PIPELINE_STEPS: pas duplicat '{step.name}'")
+        declared.add(step.name)
+
+
+_validate_pipeline_steps(PIPELINE_STEPS)
 
 
 def _print_separator(char: str = "─", width: int = 60) -> None:
@@ -110,6 +166,20 @@ def _print_ml_report(status: dict) -> None:
         print(f"  ⚠️  {status.get('message', 'Status necunoscut')}")
 
 
+def _print_match_statistics_report(results: list) -> None:
+    """`results`: listă de `SyncTaskResult` (sync_orchestrator.py) —
+    posesie + xG real, owner nou FreeLF (Sprint 1)."""
+    print("\n📊  MATCH STATISTICS (posesie + xG real)")
+    _print_separator()
+    ran = sum(1 for r in results if r.ran)
+    errors = [r for r in results if r.error]
+    print(f"  ✅ {ran}/{len(results)} meciuri completate cu statistici noi")
+    if errors:
+        print(f"  ⚠️  {len(errors)} erori")
+        for r in errors[:5]:
+            print(f"     - {r.task_name}: {r.error}")
+
+
 def _print_features_report(result: dict) -> None:
     print("\n🧩  FEATURE UPDATE")
     _print_separator()
@@ -135,7 +205,7 @@ def run(
     if dry_run:
         print("  ⚠️  DRY RUN — nicio scriere în Supabase\n")
 
-    # ── Pasul 0: Rezultate de ieri ────────────────────────────────────────
+    # ── Pasul 0 (PIPELINE_STEPS: "results") — Rezultate de ieri ────────────
     print("▶  Pasul 0/6 — Rezultate meciuri de ieri...")
 
     if dry_run:
@@ -153,8 +223,26 @@ def run(
             logger.error("[DailySync] sync_yesterday_results failed: %s", exc)
             print(f"  ⚠️  Eroare la sync rezultate: {exc}")
 
-    # ── Pasul 1: Sincronizare meciuri ─────────────────────────────────────
-    print("▶  Pasul 1/6 — Sincronizare meciuri istorice...")
+    # ── Pasul 1 (PIPELINE_STEPS: "match_statistics", depends_on="results") ─
+    # [ADAUGAT Sprint 1] Owner nou (FreeLF) pentru posesie + xG real —
+    # rulează DUPĂ rezultate (pasul 0), pe fereastra scurtă implicită (2
+    # zile) — sincronizare zilnică, separată deliberat de backfill istoric
+    # (`sync/backfill_match_stats.py`, extins separat).
+    print("\n▶  Pasul 1/6 — Match Statistics (posesie + xG real)...")
+
+    if dry_run:
+        print("  ℹ️  Sărit (dry run)")
+    else:
+        try:
+            from sync.sync_match_statistics import run as run_match_statistics
+            match_stats_results = run_match_statistics()
+            _print_match_statistics_report(match_stats_results)
+        except Exception as exc:
+            logger.error("[DailySync] sync_match_statistics failed: %s", exc)
+            print(f"  ⚠️  Eroare la sync statistici meci: {exc}")
+
+    # ── Pasul 2 (PIPELINE_STEPS: "history_sync") ───────────────────────────
+    print("▶  Pasul 2/6 — Sincronizare meciuri istorice...")
 
     if not dry_run:
         from sync.sync_matches import sync_all
@@ -176,7 +264,7 @@ def run(
 
     _print_sync_report(sync_reports)
 
-    # ── Pasul 3: Actualizare feature-uri derivate ──────────────────────────
+    # ── Pasul 3 (PIPELINE_STEPS: "feature_update", depends_on="history_sync") ──
     # [ADAUGAT — ADR-014] Completează implementarea ADR-004 ("Toate
     # feature-urile — ELO, formă, standings — se recalculează incremental
     # după fiecare actualizare de rezultate"): înainte, acest pas rula doar
@@ -202,7 +290,7 @@ def run(
 
     _print_features_report(features_result)
 
-    # ── Pasul 4: Evaluare experimente shadow ──────────────────────────────
+    # ── Pasul 4 (PIPELINE_STEPS: "shadow_evaluation", depends_on="feature_update") ──
     # [ADAUGAT] Vezi architecture/ADR-004-continuous-learning.md — ordinea
     # corectă e ELO/formă/standings -> shadow evaluation -> ML retraining,
     # NU recalibrare automată per-meci (deja discutat, dezactivat separat).
@@ -243,7 +331,7 @@ def run(
             except Exception:
                 pass
 
-    # ── Pasul 5: Persistare cote de piață (odds_history) ──────────────────
+    # ── Pasul 5 (PIPELINE_STEPS: "odds_persistence") — cote de piață ───────
     # [ADAUGAT] Conform docs/03_ENGINE/ODDS_PERSISTENCE_DESIGN.md (Frozen,
     # ADR-005, ADR-006). Domain service independent - vezi services/.
     print("\n▶  Pasul 5/6 — Persistare cote de piață (odds_history)...")
@@ -287,7 +375,7 @@ def run(
             except Exception:
                 pass
 
-    # ── Pasul 6: ML retraining ────────────────────────────────────────────
+    # ── Pasul 6 (PIPELINE_STEPS: "ml_retrain", depends_on="feature_update") ──
     print("\n▶  Pasul 6/6 — Verificare / reantrenare ML...")
 
     if skip_ml:

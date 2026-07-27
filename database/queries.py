@@ -218,6 +218,57 @@ def count_matches_with_result() -> int:
         return 0
 
 
+def get_finished_matches_missing_stats(
+    days_back: int = 2, limit: int = 200,
+    date_from: str | None = None, date_to: str | None = None,
+    league: str | None = None,
+) -> list[dict]:
+    """
+    [ADAUGAT Sprint 1 — Match Statistics] Meciuri deja ÎNCHEIATE
+    (`actual_home_goals` populat de `sync_results`, owner exclusiv, ADR-036)
+    care încă NU au `home_possession`.
+
+    Mod implicit (`date_from`/`date_to` neprecizate) — fereastră scurtă,
+    `days_back` zile de la azi, ținta reală a `sync/sync_match_statistics.py`
+    (sincronizare ZILNICĂ — vezi `DATA_WAREHOUSE_ARCHITECTURE_ETAPA_B_
+    2026-07-27.md §1`). Fereastră scurtă deliberată: FreeLF nu garantează
+    retenție istorică lungă.
+
+    Mod explicit (`date_from`/`date_to` precizate) — reutilizat de
+    `sync/backfill_match_statistics_freelf.py` (backfill istoric, separat
+    deliberat de sincronizarea zilnică, aceeași funcție/adaptor, doar
+    fereastra de date diferă).
+    """
+    client = get_client()
+    if client is None:
+        return []
+    from datetime import date, timedelta
+    if date_from is None:
+        date_from = (date.today() - timedelta(days=days_back)).isoformat()
+    try:
+        query = (
+            client.table("match_history")
+            .select("home_team,away_team,kickoff_date,league")
+            .not_.is_("actual_home_goals", "null")
+            .is_("home_possession", "null")
+            .gte("kickoff_date", date_from)
+        )
+        if date_to is not None:
+            query = query.lte("kickoff_date", date_to)
+        if league is not None:
+            query = query.eq("league", league)
+        res = (
+            query
+            .order("kickoff_date", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.error("[Queries] get_finished_matches_missing_stats failed: %s", exc)
+        return []
+
+
 def get_matches_by_league(league: str, limit: int = 100) -> list[dict]:
     """Returnează meciurile dintr-o ligă, ordonate descrescător după dată."""
     client = get_client()

@@ -1,0 +1,60 @@
+name: Football Oracle — Backfill Match Statistics (FreeLF)
+
+# Backfill istoric, manual, separat deliberat de sincronizarea zilnică
+# (Sprint 1, decizie de politică aprobată explicit — o singură rulare per
+# extindere de acoperire, nu recurent).
+
+on:
+  workflow_dispatch:
+    inputs:
+      date_from:
+        description: "Data de start (YYYY-MM-DD)"
+        required: true
+        type: string
+      date_to:
+        description: "Data de final (YYYY-MM-DD)"
+        required: true
+        type: string
+      league:
+        description: "Opțional — restrânge la o singură ligă"
+        required: false
+        default: ""
+        type: string
+      dry_run:
+        description: "Dry run (fără scriere în Supabase)"
+        required: false
+        default: "true"
+        type: boolean
+
+jobs:
+  backfill-match-statistics-freelf:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run FreeLF match statistics backfill
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          RAPIDAPI_KEY_FREELIVEFOOTBALL: ${{ secrets.RAPIDAPI_KEY_FREELIVEFOOTBALL }}
+        run: |
+          ARGS="--date-from \"${{ github.event.inputs.date_from }}\" --date-to \"${{ github.event.inputs.date_to }}\""
+          if [ -n "${{ github.event.inputs.league }}" ]; then
+            ARGS="$ARGS --league \"${{ github.event.inputs.league }}\""
+          fi
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          eval python -m sync.backfill_match_statistics_freelf $ARGS

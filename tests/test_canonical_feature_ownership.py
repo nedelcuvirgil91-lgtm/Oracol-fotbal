@@ -94,6 +94,50 @@ def test_prediction_engine_writes_neither_features_nor_actual_results():
     )
 
 
+MATCH_STATISTICS_OWNED_COLUMNS = {"home_possession", "away_possession", "home_xg_actual", "away_xg_actual"}
+
+
+def test_oracle_engine_never_writes_match_statistics_columns():
+    """Sprint 1 (ADR-039) — owner nou (FreeLF, `MatchStatisticsAdapter`),
+    aceeași disciplină ADR-036: Prediction Engine nu scrie niciodată
+    `home/away_possession`/`home/away_xg_actual`, pe nicio cale de scriere
+    în match_history."""
+    tree = ast.parse((ROOT / "oracle_engine.py").read_text(encoding="utf-8"))
+    written = _dict_keys_written_to(tree, MATCH_HISTORY_WRITE_FUNCS)
+    leaked = written & MATCH_STATISTICS_OWNED_COLUMNS
+    assert not leaked, (
+        f"oracle_engine.py scrie coloane owner-ate de MatchStatisticsAdapter: "
+        f"{sorted(leaked)} — încalcă ownership-ul nou stabilit (Sprint 1)."
+    )
+
+
+def test_match_statistics_adapter_normalize_stays_within_approved_scope():
+    """Gardă pozitivă + scope: `normalize()` scrie exact cele 4 coloane
+    aprobate + `stats_source` — niciodată `big_chance`/`shots_on_target`
+    (owner rămas football_data_co_uk, decizie explicită de scope Sprint 1)."""
+    tree = ast.parse((ROOT / "match_statistics_adapter.py").read_text(encoding="utf-8"))
+    func = _function_def(tree, "normalize")
+    assert func is not None, "normalize() nu a fost găsită în match_statistics_adapter.py"
+
+    keys: set[str] = set()
+    for node in ast.walk(func):
+        if isinstance(node, ast.Dict):
+            for k in node.keys:
+                if isinstance(k, ast.Constant) and isinstance(k.value, str):
+                    keys.add(k.value)
+
+    out_of_scope = {"home_big_chance", "away_big_chance", "big_chance",
+                     "home_shots_on_target", "away_shots_on_target"}
+    assert not (keys & out_of_scope), (
+        f"MatchStatisticsAdapter.normalize() scrie coloane în afara scope-ului "
+        f"aprobat explicit pentru Sprint 1: {sorted(keys & out_of_scope)}"
+    )
+    assert MATCH_STATISTICS_OWNED_COLUMNS <= keys, (
+        f"MatchStatisticsAdapter.normalize() nu scrie toate cele 4 coloane owner-ate: "
+        f"lipsesc {sorted(MATCH_STATISTICS_OWNED_COLUMNS - keys)}"
+    )
+
+
 def test_sync_results_remains_owner_of_actual_columns():
     """ADR-036 Stage 3 (gardă pozitivă): owner-ul canonic al `actual_*` există
     și scrie efectiv — `sync/sync_results.py` conține scrierea acestor coloane

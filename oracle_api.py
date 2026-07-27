@@ -458,6 +458,70 @@ class FootballOracleAPI:
         self._cset(cache_key, results)
         return results
 
+    # ── Free Live Football — rezolvare event_id pt. meciuri ÎNCHEIATE ─────
+    def resolve_freelf_finished_match_id(self, home_team: str, away_team: str,
+                                          kickoff_date: str, league: str) -> int | None:
+        """
+        Rezolvă `event_id`-ul FreeLF pentru un meci deja JUCAT — spre
+        deosebire de `_fetch_freelf_matches()` (folosită exclusiv pentru
+        descoperire pre-meci), care filtrează explicit orice status diferit
+        de `notstarted`/`inprogress` (linia ~419) și de aceea NU poate fi
+        reutilizată aici fără să-i schimbe comportamentul existent (Sync
+        Layer, R-Sync-1/ADR-039 §1 — zero regresie pe calea activă).
+
+        Consumator: `freelf_event_resolver.py` (Sync Layer, serviciu
+        reutilizabil — Match Statistics azi, Lineups/Injuries/Referees/
+        Player Statistics ulterior, aceeași nevoie de ID).
+        """
+        if self._freelf_exhausted:
+            return None
+        league_id = FREE_LF_LEAGUE_IDS.get(league)
+        if not league_id:
+            return None
+        cache_key = f"freelf_finished_id_{kickoff_date}_{league}"
+        cached = self._cget(cache_key)
+        if cached is not None:
+            data = cached
+        else:
+            date_fmt = kickoff_date.replace("-", "")
+            data = self._free_lf_get("football-get-matches-by-date", params={"date": date_fmt})
+            self._cset(cache_key, data or {})
+        if not data:
+            return None
+
+        raw_list: list = []
+        resp = data.get("response")
+        if isinstance(resp, list):
+            raw_list = resp
+        elif isinstance(resp, dict):
+            for inner_key in ("matches", "events", "data", "fixtures", "results"):
+                if isinstance(resp.get(inner_key), list):
+                    raw_list = resp[inner_key]
+                    break
+        elif isinstance(data.get("matches"), list):
+            raw_list = data["matches"]
+
+        target_home = normalize_team_name(home_team)
+        target_away = normalize_team_name(away_team)
+        for ev in raw_list:
+            if not isinstance(ev, dict):
+                continue
+            parent_lid = ev.get("parentLeagueId") or ev.get("leagueId")
+            if parent_lid != league_id:
+                continue
+            home_raw = (ev.get("homeTeam") or {}).get("name", "") or ""
+            away_raw = (ev.get("awayTeam") or {}).get("name", "") or ""
+            if normalize_team_name(home_raw) != target_home or normalize_team_name(away_raw) != target_away:
+                continue
+            event_id = ev.get("id") or ev.get("eventId")
+            if event_id is None:
+                continue
+            try:
+                return int(event_id)
+            except (TypeError, ValueError):
+                return None
+        return None
+
     # ── Free Live Football — standings ────────────────────────────────────
     def get_freelf_standings(self, league: str) -> list[dict]:
         if self._freelf_exhausted:

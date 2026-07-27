@@ -26,6 +26,7 @@ CATEGORY_TTL: dict[str, float] = {
     "stats": 2.0,     # [ADAUGAT] statistici per-meci (xG, posesie) - schimba pana la final
     "teams": 720.0,   # [ADAUGAT] rezolvare nume->ID provider (ex. API-Football) - practic permanent (30 zile)
     "api_football_probe": 24.0,  # [ADAUGAT] sondaj discovery /fixtures/statistics - fixture_id + verdict 403/404, nu productie
+    "freelf_event_resolution": 720.0,  # [ADAUGAT Sprint 1] FreeLF Event Resolver — event_id per meci încheiat, identificator stabil odată rezolvat (tratat ca team_id, 30 zile)
 }
 
 class CacheManager:

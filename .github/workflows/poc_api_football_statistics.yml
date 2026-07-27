@@ -155,6 +155,11 @@ jobs:
 
       - name: Run FreeLF Romania SuperLiga check (discovery, nu integrare)
         if: github.event.inputs.freelf_romania_dates != ''
+        env:
+          # [ADAUGAT Sprint 1] Lipsea — pasul n-a putut fi niciodată rulat cu
+          # succes până acum (motivul real al statusului "necunoscut" din
+          # mappings.py pentru freelf/Romania SuperLiga).
+          RAPIDAPI_KEY_FREELIVEFOOTBALL: ${{ secrets.RAPIDAPI_KEY_FREELIVEFOOTBALL }}
         run: |
           python sync/poc_freelf_romania_check.py --dates ${{ github.event.inputs.freelf_romania_dates }}
 
