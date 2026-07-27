@@ -86,7 +86,7 @@ except ModuleNotFoundError:
 try:
     from database.queries import (
         get_latest_team_elo, get_h2h_from_history, get_team_health,
-        get_team_form_footballdata, get_national_team_elo,
+        get_team_form_footballdata, get_national_team_elo, get_weather_forecast,
     )
     DB_QUERIES_MODULE_AVAILABLE = True
 except ModuleNotFoundError:
@@ -1297,10 +1297,25 @@ class FootballOracleEngine:
 
         h2h = self._build_h2h(home_name, away_name, match)
 
-        city    = match.get("venue_city", "") or league
-        weather = self.api.get_weather(city, match.get("kickoff_date"))
-        w_pen   = float(weather.get("xg_penalty", 0.0))
-        w_note  = weather.get("description", "")
+        # [ADR-039, R-Sync-5] Citire STRICT din Supabase
+        # (weather_forecast_cache, populată de Sync Layer,
+        # sync/sync_weather_forecast.py) — niciodată apel live către
+        # WeatherAPI din Oracle Engine (self.api.get_weather(), eliminat
+        # de aici). Cheia (city, kickoff_date) trebuie să fie IDENTICĂ cu
+        # cea folosită la sincronizare — `venue_city` brut, FĂRĂ fallback
+        # pe numele ligii (fallback-ul vechi era chiar bug-ul demonstrat
+        # în audit: trimitea "Premier League" ca oraș). Dacă orașul
+        # lipsește sau perechea nu a fost încă sincronizată, penalizarea
+        # rămâne 0.0 — neutru, nu aproximat (Regula #8).
+        city    = match.get("venue_city", "")
+        weather = None
+        if DB_QUERIES_MODULE_AVAILABLE and city:
+            try:
+                weather = get_weather_forecast(city, match.get("kickoff_date", ""))
+            except Exception as exc:
+                logger.warning("[Weather] Supabase read failed for %s: %s", city, exc)
+        w_pen   = float(weather.get("xg_penalty", 0.0)) if weather else 0.0
+        w_note  = weather.get("description", "") if weather else ""
 
         home_xg, away_xg = self._calibrate_xg(home_p, away_p, league, w_pen, h2h)
 

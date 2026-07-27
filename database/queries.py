@@ -681,6 +681,78 @@ def upsert_national_team_elo(team: str, elo_rating: int) -> bool:
         return False
 
 
+def get_weather_forecast(city: str, kickoff_date: str) -> dict | None:
+    """
+    Sursa canonică pentru condițiile meteo la o pereche (oraș, dată) —
+    folosită de servirea live (oracle_engine.evaluate_match(), penalizare
+    xG) — ADR-039, R-Sync-5. Înlocuiește apelul live către
+    `oracle_api.get_weather()` — citire STRICT din Supabase, populată
+    separat de Sync Layer (sync/sync_weather_forecast.py), niciodată
+    direct de aici.
+
+    Cheie: (city, kickoff_date) — NU per meci, NU per echipă. `city`
+    trebuie să fie EXACT stringul folosit la sincronizare (fără
+    normalizare — nu există încă un mecanism de identitate canonică
+    pentru orașe, decizie explicită, proprietar produs, R-Sync-5).
+
+    Întoarce None dacă perechea nu a fost încă sincronizată — Regula #8,
+    tratat de apelant ca „necunoscut", niciodată motiv de fallback live
+    către provider.
+    """
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("weather_forecast_cache")
+            .select("*")
+            .eq("city", city)
+            .eq("kickoff_date", kickoff_date)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Queries] get_weather_forecast failed pentru %s/%s: %s", city, kickoff_date, exc)
+        return None
+
+
+def upsert_weather_forecast(
+    city: str, kickoff_date: str,
+    temp_c: float | None, condition: str | None, wind_kph: float | None,
+    precip_mm: float | None, humidity: int | None, xg_penalty: float, description: str | None,
+) -> bool:
+    """
+    Owner unic de scriere pentru `weather_forecast_cache` (disciplina
+    ADR-036) — exclusiv Sync Layer (`sync/sync_weather_forecast.py`),
+    niciodată Oracle Engine. `xg_penalty`/`description` sunt persistate
+    EXACT cum le calculează `oracle_api.get_weather()` — nu recalculate
+    aici (logica de penalizare rămâne definită într-un singur loc).
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("weather_forecast_cache").upsert({
+            "city": city,
+            "kickoff_date": kickoff_date,
+            "temp_c": temp_c,
+            "condition": condition,
+            "wind_kph": wind_kph,
+            "precip_mm": precip_mm,
+            "humidity": humidity,
+            "xg_penalty": xg_penalty,
+            "description": description,
+            "source_provider": "weatherapi",
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="city,kickoff_date").execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Queries] upsert_weather_forecast failed pentru %s/%s: %s", city, kickoff_date, exc)
+        return False
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # ML STATUS
 # ════════════════════════════════════════════════════════════════════════════

@@ -819,7 +819,13 @@ class FootballOracleAPI:
                 "away_team_id":  f"tsdb_{ev.get('idAwayTeam','')}",
                 "kickoff_utc":   ko_utc, "kickoff_date": ev_date,
                 "league":        league_name, "season": DEFAULT_SEASON,
-                "venue_city":    ev.get("strVenue", ""), "status": "scheduled",
+                # [REPARAT — ADR-039 R-Sync-5, audit] Câmpul TheSportsDB
+                # `strVenue` e numele STADIONULUI (ex. "Old Trafford"), nu
+                # al orașului — populat greșit aici drept `venue_city`,
+                # confirmat prin auditul Weather. Lăsat gol, nu aproximat
+                # (Regula #8) — apelantul (weather lookup) tratează gol ca
+                # "necunoscut", nu ca stadion travestit în oraș.
+                "venue_city":    "", "status": "scheduled",
                 "coverage_level": "",
                 "home_odds":     None, "draw_odds": None, "away_odds": None,
                 "odds_source":   None, "source": "thesportsdb",
