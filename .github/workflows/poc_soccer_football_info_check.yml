@@ -1,0 +1,30 @@
+name: POC (temporar) — Soccer Football Info live check
+
+# POC izolat, temporar — discovery only, nu integrare.
+# Declansat automat la push pe branch-ul dedicat.
+# Sters impreuna cu scriptul dupa incheierea testului.
+
+on:
+  push:
+    branches:
+      - claude/poc-soccer-football-info
+    paths:
+      - "sync/poc_soccer_football_info_check_v5.py"
+      - ".github/workflows/poc_soccer_football_info_check.yml"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install requests
+
+      - name: Run Soccer Football Info live check
+        env:
+          RAPIDAPI_KEY_FREELIVEFOOTBALL: ${{ secrets.RAPIDAPI_KEY_FREELIVEFOOTBALL }}
+        run: python sync/poc_soccer_football_info_check_v5.py
