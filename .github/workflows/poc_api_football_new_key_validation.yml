@@ -1,0 +1,64 @@
+name: Football Oracle — Probă cheie nouă API-Football (izolată)
+
+# Etapa C, Regula 1 (chei API = infrastructură critică, aprobată explicit
+# 2026-07-27). Rulează EXCLUSIV `sync/poc_api_football_new_key_validation.py`
+# — nu atinge secretul API_FOOTBALL_KEY (cel vechi), nu atinge key_manager.py,
+# nu scrie în Supabase, nu apelează niciun cod de producție. Necesită un
+# secret NOU, separat, `API_FOOTBALL_KEY_NEW`, adăugat manual în GitHub
+# Settings înainte de rulare — acest workflow nu-l creează.
+
+# Trigger unic, exclusiv manual — NICIUN alt trigger (push/schedule/
+# pull_request) nu declanșează acest workflow, intenționat, per aprobare
+# explicită (item 2, runda a doua). Consumul de cotă rămâne întotdeauna sub
+# control direct, niciodată automat.
+on:
+  workflow_dispatch:
+    inputs:
+      team:
+        description: "Echipă de test pentru rezolvare ID (implicit Arsenal)"
+        required: false
+        default: "Arsenal"
+        type: string
+      max_calls:
+        description: "Plafon apeluri live către cheia nouă (implicit 5, niciodată peste 20)"
+        required: false
+        default: "5"
+        type: string
+
+jobs:
+  validate-new-key:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: "CONFIRMARE LOG — POC MODE / NO PRODUCTION CODE TOUCHED / OLD API KEY NOT READ / NEW API KEY ONLY"
+        run: |
+          echo "================================================================"
+          echo "POC MODE"
+          echo "NO PRODUCTION CODE TOUCHED"
+          echo "OLD API KEY NOT READ"
+          echo "NEW API KEY ONLY"
+          echo "================================================================"
+          echo "Acest pas confirmă la nivel de workflow (nu doar în scriptul"
+          echo "Python) că rularea e un experiment izolat — vezi și banner-ul"
+          echo "identic tipărit de scriptul de mai jos, la începutul rulării."
+
+      - name: Run isolated new-key validation (nu atinge cheia veche)
+        env:
+          API_FOOTBALL_KEY_NEW: ${{ secrets.API_FOOTBALL_KEY_NEW }}
+        run: |
+          python sync/poc_api_football_new_key_validation.py \
+            --team "${{ github.event.inputs.team }}" \
+            --max-calls "${{ github.event.inputs.max_calls }}"
