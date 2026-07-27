@@ -2,8 +2,6 @@
 Supabase live (supabase_client.load_config e mock-uit peste tot)."""
 from __future__ import annotations
 
-import pytest
-
 import sync_provider_manager as spm
 from provider_selector import ProviderRecommendation, ProviderScore, ScoreComponents
 
@@ -50,7 +48,7 @@ def test_flag_enabled_domain_unknown_to_static_chain_too_returns_none(monkeypatc
 def test_flag_enabled_no_candidates_falls_back_to_static(monkeypatch):
     monkeypatch.setattr(spm.sb, "load_config", _fake_load_config(True))
 
-    def _fake_recommend(league, data_type, current_provider, weights):
+    def _fake_recommend(league, data_type, current_provider, weights, priority_fn=None):
         return ProviderRecommendation(
             league=league, data_type=data_type, current_provider=current_provider,
             current_score=None, recommended_provider=None, recommended_score=None,
@@ -71,7 +69,7 @@ def test_flag_enabled_uses_selection_engine_when_candidate_found(monkeypatch):
                                   quota=0.8, latency=0.7, priority=0.5)
     fake_score = ProviderScore(provider_id="freelivefootball", components=components, total=0.9)
 
-    def _fake_recommend(league, data_type, current_provider, weights):
+    def _fake_recommend(league, data_type, current_provider, weights, priority_fn=None):
         return ProviderRecommendation(
             league=league, data_type=data_type, current_provider=current_provider,
             current_score=None, recommended_provider="freelivefootball",
@@ -91,7 +89,7 @@ def test_backfill_intent_uses_backfill_weights(monkeypatch):
 
     captured = {}
 
-    def _fake_recommend(league, data_type, current_provider, weights):
+    def _fake_recommend(league, data_type, current_provider, weights, priority_fn=None):
         captured["weights"] = weights
         return ProviderRecommendation(
             league=league, data_type=data_type, current_provider=current_provider,
@@ -118,3 +116,49 @@ def test_default_flag_is_off_when_config_missing(monkeypatch):
         return dict(default)
     monkeypatch.setattr(spm.sb, "load_config", _load)
     assert spm.is_selection_engine_v2_enabled() is False
+
+
+def test_fallback_chain_returns_full_static_chain_for_known_domain():
+    chain = spm.fallback_chain("match_statistics")
+    assert chain == ("soccerfootballinfo", "freelivefootball", "sportapi")
+
+
+def test_fallback_chain_returns_empty_tuple_for_unknown_domain():
+    assert spm.fallback_chain("nonexistent_domain") == ()
+
+
+def test_fallback_chain_matches_static_chains_source_of_truth():
+    for domain, chain in spm._STATIC_FALLBACK_CHAINS.items():
+        assert spm.fallback_chain(domain) == chain
+
+
+def test_provider_priority_fn_defaults_to_neutral_when_config_missing(monkeypatch):
+    # [ADR-041 Faza 1] Regula #3 CLAUDE.md -- fara "provider_priority" in
+    # config, comportamentul ramane identic celui de dinainte (0.5 pentru toti).
+    monkeypatch.setattr(spm.sb, "load_config", lambda default: dict(default))
+    assert spm._provider_priority_fn("soccerfootballinfo") == 0.5
+    assert spm._provider_priority_fn("freelivefootball") == 0.5
+
+
+def test_provider_priority_fn_reads_from_supabase_config(monkeypatch):
+    monkeypatch.setattr(spm.sb, "load_config",
+                         lambda default: {"provider_priority": {"soccerfootballinfo": 0.8}})
+    assert spm._provider_priority_fn("soccerfootballinfo") == 0.8
+    assert spm._provider_priority_fn("freelivefootball") == 0.5  # neconfigurat -> neutru
+
+
+def test_choose_provider_passes_provider_priority_fn_to_recommend_provider(monkeypatch):
+    monkeypatch.setattr(spm.sb, "load_config", _fake_load_config(True))
+    captured = {}
+
+    def _fake_recommend(league, data_type, current_provider, weights, priority_fn):
+        captured["priority_fn"] = priority_fn
+        return ProviderRecommendation(
+            league=league, data_type=data_type, current_provider=current_provider,
+            current_score=None, recommended_provider="soccerfootballinfo",
+            recommended_score=None, reason=None, decision_changed=True,
+        )
+    monkeypatch.setattr(spm, "recommend_provider", _fake_recommend)
+
+    spm.choose_provider("match_statistics", "Romania SuperLiga")
+    assert captured["priority_fn"] is spm._provider_priority_fn

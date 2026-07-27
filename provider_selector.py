@@ -110,8 +110,14 @@ ALGORITHM_VERSION = 1
 
 # Tie-breaker static — neutru (0.5) pentru toți providerii până la o
 # calibrare reală din date de shadow mode (ADR-034, §Consequences: "nu
-# poate fi ghicită corect din prima").
+# poate fi ghicită corect din prima"). Rămâne default-ul folosit când
+# apelantul nu injectează un `priority_fn` propriu (vezi mai jos) — zero
+# schimbare de comportament pentru orice cod existent.
 _PROVIDER_PRIORITY: Mapping[str, float] = MappingProxyType({})
+
+
+def _default_priority_fn(provider_id: str) -> float:
+    return _PROVIDER_PRIORITY.get(provider_id, 0.5)
 
 _LATENCY_REFERENCE_MS = 2000.0
 
@@ -274,17 +280,28 @@ def score_provider(
     capabilities_fn: Callable[[str, DataType], bool] | None = None,
     league_state_fn: Callable[[str, str], LeagueProviderState | None] | None = None,
     health_fn: Callable[[str], ProviderHealth | None] | None = None,
+    priority_fn: Callable[[str], float] | None = None,
     weights: SelectionWeights = SELECTION_WEIGHTS,
 ) -> ProviderScore | None:
     """General-purpose — funcționează pentru ORICE provider cunoscut
     Registry-ului, candidat sau nu (necesar pentru a putea scora providerul
     curent chiar și atunci când el e respins de filtrarea tare — altfel
-    Reason n-ar putea explica de ce a pierdut)."""
+    Reason n-ar putea explica de ce a pierdut).
+
+    `priority_fn` [ADAUGAT ADR-041 Faza 1] — dependință injectabilă, exact
+    tiparul deja folosit de `health_fn`/`league_state_fn` — NU o citire
+    directă de Supabase aici (ar încălca "Dependency Direction" din
+    docstring-ul modulului: acest fișier nu importă niciodată
+    `supabase_client`). Implicit `_default_priority_fn` (tie-breaker static
+    0.5, neschimbat) — un apelant din Sync Layer (`sync_provider_manager.py`,
+    care POATE importa `supabase_client`) poate injecta o sursă de
+    configurare externă, fără să atingă puritatea acestui modul."""
     registry = registry or get_provider_registry()
     capabilities_fn = capabilities_fn or supports
     league_state_fn = league_state_fn or get_league_provider_state
     if health_fn is None:
         health_fn = lambda pid: get_provider_health(pid, registry=registry)  # noqa: E731
+    priority_fn = priority_fn or _default_priority_fn
 
     record = registry.get_provider(provider_id)
     if record is None:
@@ -299,7 +316,7 @@ def score_provider(
     reliability = 0.5 if (health is None or health.reliability is None) else health.reliability
     quota = 1.0 if (health is None or health.quota_remaining_pct is None) else health.quota_remaining_pct / 100.0
     latency = _latency_component(health.avg_latency_ms if health is not None else None)
-    priority = _PROVIDER_PRIORITY.get(provider_id, 0.5)
+    priority = priority_fn(provider_id)
 
     components = ScoreComponents(
         availability=availability, coverage=coverage, reliability=reliability,
@@ -336,6 +353,7 @@ def recommend_provider(
     capabilities_fn: Callable[[str, DataType], bool] | None = None,
     league_state_fn: Callable[[str, str], LeagueProviderState | None] | None = None,
     health_fn: Callable[[str], ProviderHealth | None] | None = None,
+    priority_fn: Callable[[str], float] | None = None,
     weights: SelectionWeights = SELECTION_WEIGHTS,
 ) -> ProviderRecommendation:
     registry = registry or get_provider_registry()
@@ -343,6 +361,7 @@ def recommend_provider(
     league_state_fn = league_state_fn or get_league_provider_state
     if health_fn is None:
         health_fn = lambda pid: get_provider_health(pid, registry=registry)  # noqa: E731
+    priority_fn = priority_fn or _default_priority_fn
 
     candidates = find_candidates(league, data_type, registry=registry,
                                   capabilities_fn=capabilities_fn, league_state_fn=league_state_fn)
@@ -351,13 +370,15 @@ def recommend_provider(
     for candidate in candidates:  # tuple, ordine fixă -> primul maxim câștigă determinist
         score = score_provider(candidate.provider_id, league, data_type,
                                 registry=registry, capabilities_fn=capabilities_fn,
-                                league_state_fn=league_state_fn, health_fn=health_fn, weights=weights)
+                                league_state_fn=league_state_fn, health_fn=health_fn,
+                                priority_fn=priority_fn, weights=weights)
         if score is not None and (best is None or score.total > best.total):
             best = score
 
     current_score = score_provider(current_provider, league, data_type,
                                     registry=registry, capabilities_fn=capabilities_fn,
-                                    league_state_fn=league_state_fn, health_fn=health_fn, weights=weights)
+                                    league_state_fn=league_state_fn, health_fn=health_fn,
+                                    priority_fn=priority_fn, weights=weights)
 
     if best is None:
         return ProviderRecommendation(

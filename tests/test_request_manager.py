@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import time
 
-from request_manager import RequestManager, _RAM_TTL_SECONDS
+from request_manager import RequestManager
 
 
 def test_ram_cache_miss_returns_none():

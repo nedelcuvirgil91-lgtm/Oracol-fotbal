@@ -96,6 +96,28 @@ def test_prediction_engine_writes_neither_features_nor_actual_results():
 
 MATCH_STATISTICS_OWNED_COLUMNS = {"home_possession", "away_possession", "home_xg_actual", "away_xg_actual"}
 
+# [ADAUGAT ADR-041 Faza 1] Coloane scrise EXCLUSIV de
+# SoccerFootballInfoMatchStatisticsAdapter — niciun alt adaptor (FreeLF,
+# Oracle Engine) nu are voie să le scrie vreodată. Cele 4 din
+# MATCH_STATISTICS_OWNED_COLUMNS rămân distincte — acelea SUNT împărțite
+# intenționat între FreeLF și Soccer Football Info (COALESCE-only, primul
+# scriitor câștigă, ADR-036), nu exclusive unui singur adaptor.
+SOCCERFOOTBALLINFO_ONLY_COLUMNS = {
+    "home_shots", "away_shots",
+    "home_shots_on_target", "away_shots_on_target",
+    "home_shots_off_target", "away_shots_off_target",
+    "home_corners", "away_corners",
+    "home_fouls", "away_fouls",
+    "home_offsides", "away_offsides",
+    "home_yellow_cards", "away_yellow_cards",
+    "home_red_cards", "away_red_cards",
+    "home_penalties", "away_penalties",
+    "home_substitutions", "away_substitutions",
+    "home_lineup", "away_lineup",
+    "home_manager", "away_manager",
+    "referee", "stadium", "provider_raw_json",
+}
+
 
 def test_oracle_engine_never_writes_match_statistics_columns():
     """Sprint 1 (ADR-039) — owner nou (FreeLF, `MatchStatisticsAdapter`),
@@ -111,10 +133,26 @@ def test_oracle_engine_never_writes_match_statistics_columns():
     )
 
 
+def test_oracle_engine_never_writes_soccerfootballinfo_columns():
+    """[ADAUGAT ADR-041 Faza 1] Aceeași disciplină, extinsă la setul mult mai
+    larg owner-at de Soccer Football Info (shots/corners/fouls/lineup/
+    manageri/arbitru/stadion/provider_raw_json) — Prediction Engine nu scrie
+    niciodată niciuna dintre ele, pe nicio cale de scriere în match_history."""
+    tree = ast.parse((ROOT / "oracle_engine.py").read_text(encoding="utf-8"))
+    written = _dict_keys_written_to(tree, MATCH_HISTORY_WRITE_FUNCS)
+    leaked = written & SOCCERFOOTBALLINFO_ONLY_COLUMNS
+    assert not leaked, (
+        f"oracle_engine.py scrie coloane owner-ate exclusiv de "
+        f"SoccerFootballInfoMatchStatisticsAdapter: {sorted(leaked)} — "
+        f"încalcă ownership-ul stabilit (ADR-041 Faza 1)."
+    )
+
+
 def test_match_statistics_adapter_normalize_stays_within_approved_scope():
     """Gardă pozitivă + scope: `normalize()` scrie exact cele 4 coloane
     aprobate + `stats_source` — niciodată `big_chance`/`shots_on_target`
-    (owner rămas football_data_co_uk, decizie explicită de scope Sprint 1)."""
+    (owner rămas football_data_co_uk, decizie explicită de scope Sprint 1),
+    și niciodată vreo coloană exclusivă Soccer Football Info (ADR-041)."""
     tree = ast.parse((ROOT / "match_statistics_adapter.py").read_text(encoding="utf-8"))
     func = _function_def(tree, "normalize")
     assert func is not None, "normalize() nu a fost găsită în match_statistics_adapter.py"
@@ -126,8 +164,9 @@ def test_match_statistics_adapter_normalize_stays_within_approved_scope():
                 if isinstance(k, ast.Constant) and isinstance(k.value, str):
                     keys.add(k.value)
 
-    out_of_scope = {"home_big_chance", "away_big_chance", "big_chance",
-                     "home_shots_on_target", "away_shots_on_target"}
+    out_of_scope = ({"home_big_chance", "away_big_chance", "big_chance",
+                      "home_shots_on_target", "away_shots_on_target"}
+                     | SOCCERFOOTBALLINFO_ONLY_COLUMNS)
     assert not (keys & out_of_scope), (
         f"MatchStatisticsAdapter.normalize() scrie coloane în afara scope-ului "
         f"aprobat explicit pentru Sprint 1: {sorted(keys & out_of_scope)}"
@@ -135,6 +174,35 @@ def test_match_statistics_adapter_normalize_stays_within_approved_scope():
     assert MATCH_STATISTICS_OWNED_COLUMNS <= keys, (
         f"MatchStatisticsAdapter.normalize() nu scrie toate cele 4 coloane owner-ate: "
         f"lipsesc {sorted(MATCH_STATISTICS_OWNED_COLUMNS - keys)}"
+    )
+
+
+def test_soccerfootballinfo_adapter_normalize_stays_within_approved_scope():
+    """[ADAUGAT ADR-041 Faza 1] Gardă pozitivă + scope, oglindă a testului
+    FreeLF de mai sus: `normalize()` scrie exact cele 4 coloane împărțite
+    (owner comun cu FreeLF, COALESCE-only) + setul exclusiv Soccer Football
+    Info + `stats_source` — niciodată vreo coloană owner-ată de backfill
+    (FEATURE_COLUMNS walk-forward) sau `actual_*` (owner: sync_results)."""
+    tree = ast.parse((ROOT / "soccerfootballinfo_match_statistics_adapter.py").read_text(encoding="utf-8"))
+    func = _function_def(tree, "normalize")
+    assert func is not None, "normalize() nu a fost găsită în soccerfootballinfo_match_statistics_adapter.py"
+
+    keys: set[str] = set()
+    for node in ast.walk(func):
+        if isinstance(node, ast.Dict):
+            for k in node.keys:
+                if isinstance(k, ast.Constant) and isinstance(k.value, str):
+                    keys.add(k.value)
+
+    out_of_scope = BACKFILL_OWNED_CONFLICT | RESULT_COLUMNS
+    assert not (keys & out_of_scope), (
+        f"SoccerFootballInfoMatchStatisticsAdapter.normalize() scrie coloane "
+        f"în afara scope-ului aprobat (ADR-041): {sorted(keys & out_of_scope)}"
+    )
+    expected = MATCH_STATISTICS_OWNED_COLUMNS | SOCCERFOOTBALLINFO_ONLY_COLUMNS
+    assert expected <= keys, (
+        f"SoccerFootballInfoMatchStatisticsAdapter.normalize() nu scrie toate "
+        f"coloanele owner-ate: lipsesc {sorted(expected - keys)}"
     )
 
 

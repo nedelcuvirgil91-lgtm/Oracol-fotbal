@@ -9,8 +9,11 @@ Rulat de GitHub Actions la 03:00 UTC în fiecare zi.
 
 Flux de execuție:
   0. Sincronizează rezultatele meciurilor de ieri (owner `actual_*`)
-  1. Match Statistics — posesie + xG real (owner nou, FreeLF), pentru
-     meciurile din pasul 0 (Sprint 1, ADR-039) — vezi PIPELINE_STEPS mai jos
+  1. Match Statistics — Soccer Football Info (owner nou, Sprint 1 v6/ADR-041
+     Faza 1), cu fallback real către FreeLF pentru ligile neacoperite încă —
+     alegerea providerului trece prin sync_provider_manager.choose_provider(),
+     pentru meciurile din pasul 0 (Sprint 1, ADR-039/ADR-041) — vezi
+     PIPELINE_STEPS mai jos
   2. Sincronizează meciuri noi (football-data.org + openfootball)
   3. Actualizează feature-urile derivate (formă, H2H, cornere, cartonașe,
      faulturi) pentru meciurile noi — sync.backfill_features.run_backfill(),
@@ -168,8 +171,9 @@ def _print_ml_report(status: dict) -> None:
 
 def _print_match_statistics_report(results: list) -> None:
     """`results`: listă de `SyncTaskResult` (sync_orchestrator.py) —
-    posesie + xG real, owner nou FreeLF (Sprint 1)."""
-    print("\n📊  MATCH STATISTICS (posesie + xG real)")
+    Soccer Football Info (owner nou, Sprint 1 v6/ADR-041 Faza 1), fallback
+    real FreeLF pentru ligile neacoperite încă."""
+    print("\n📊  MATCH STATISTICS (Soccer Football Info + fallback FreeLF)")
     _print_separator()
     ran = sum(1 for r in results if r.ran)
     errors = [r for r in results if r.error]
@@ -224,11 +228,16 @@ def run(
             print(f"  ⚠️  Eroare la sync rezultate: {exc}")
 
     # ── Pasul 1 (PIPELINE_STEPS: "match_statistics", depends_on="results") ─
-    # [ADAUGAT Sprint 1] Owner nou (FreeLF) pentru posesie + xG real —
-    # rulează DUPĂ rezultate (pasul 0), pe fereastra scurtă implicită (2
-    # zile) — sincronizare zilnică, separată deliberat de backfill istoric
-    # (`sync/backfill_match_stats.py`, extins separat).
-    print("\n▶  Pasul 1/6 — Match Statistics (posesie + xG real)...")
+    # [ADAUGAT Sprint 1, extins ADR-041 Faza 1] Owner nou (Soccer Football
+    # Info) pentru setul complet de statistici — posesie, xG, șuturi,
+    # cornere, faulturi, cartonașe, lineup, manageri, arbitru, stadion —
+    # ales per meci prin sync_provider_manager.choose_provider(), cu
+    # fallback real către FreeLF (posesie + xG) pentru ligile neacoperite
+    # încă de Soccer Football Info. Rulează DUPĂ rezultate (pasul 0), pe
+    # fereastra scurtă implicită (2 zile) — sincronizare zilnică, separată
+    # deliberat de backfill istoric (`sync/backfill_match_stats.py`,
+    # `sync/backfill_match_statistics_freelf.py`).
+    print("\n▶  Pasul 1/6 — Match Statistics (Soccer Football Info + fallback FreeLF)...")
 
     if dry_run:
         print("  ℹ️  Sărit (dry run)")

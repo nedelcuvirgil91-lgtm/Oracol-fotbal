@@ -75,6 +75,22 @@ def is_selection_engine_v2_enabled() -> bool:
     return bool(cfg.get("selection_engine_v2", False))
 
 
+def _provider_priority_fn(provider_id: str) -> float:
+    """[ADAUGAT ADR-041 Faza 1] "Priority ca valoare de config, nu cod"
+    (Sprint 1 v6, §13, Faza 1 obligatorie) — injectat în
+    `provider_selector.score_provider()`/`recommend_provider()` prin
+    parametrul `priority_fn` (dependință explicită, Regula de Aur #5), NU
+    citit direct în `provider_selector.py` (ar încălca "Dependency
+    Direction" — acel modul nu importă niciodată `supabase_client`). Cheie
+    nouă în același blob JSON (`model_config`, id=1) — `{}` implicit dacă
+    lipsește -> 0.5 pentru orice provider, identic tie-breaker-ul static de
+    azi (`_PROVIDER_PRIORITY = {}`), zero schimbare de comportament până la
+    o configurare explicită (Regula #3, CLAUDE.md)."""
+    cfg = sb.load_config({"provider_priority": {}})
+    priorities = cfg.get("provider_priority") or {}
+    return float(priorities.get(provider_id, 0.5))
+
+
 @dataclass(frozen=True)
 class ProviderChoice:
     provider_id: str | None
@@ -82,6 +98,19 @@ class ProviderChoice:
     weights_name: str | None
     weights_version: int | None
     reason: str
+
+
+def fallback_chain(domain: str) -> tuple[str, ...]:
+    """Accesor public al lanțului static COMPLET pentru un domeniu (Sprint 1
+    v6, §3 — "Owner + Fallback"). `choose_provider()` întoarce un singur
+    candidat "cel mai bun" pentru o pereche (domeniu, ligă) — un adaptor
+    concret al Sync Layer-ului (ex. `sync/sync_match_statistics.py`) are însă
+    nevoie de ordinea COMPLETĂ de încercare, ca să încerce providerul următor
+    din lanț atunci când cel ales de `choose_provider()` nu produce date
+    pentru un meci anume (ex. ligă neacoperită încă de Owner-ul nou) — fără
+    asta, niciun provider existent nu ar mai rămâne accesibil ca fallback
+    real, contrazicând cerința explicită de redundanță (Sprint 1 v6, §0)."""
+    return _STATIC_FALLBACK_CHAINS.get(domain, ())
 
 
 def choose_provider(domain: str, league: str, *, intent: Intent = Intent.LIVE) -> ProviderChoice:
@@ -120,6 +149,7 @@ def choose_provider(domain: str, league: str, *, intent: Intent = Intent.LIVE) -
 
     recommendation = recommend_provider(
         league, data_type, current_provider=static_chain[0], weights=weights,
+        priority_fn=_provider_priority_fn,
     )
     if recommendation.recommended_provider is None:
         # Niciun candidat trece filtrarea tare a Selection Engine-ului —

@@ -215,6 +215,32 @@ def test_score_provider_reliability_neutral_default_when_no_health():
     assert score.components.latency == 0.5
 
 
+def test_score_provider_priority_defaults_to_neutral_when_not_injected():
+    """[ADR-041 Faza 1] Fara priority_fn -> tie-breaker static 0.5, identic
+    comportamentul de dinainte de injectare (zero regresie)."""
+    reg = _registry()
+    states = {"alpha": _state("alpha")}
+    score = score_provider("alpha", "L", DataType.FIXTURES, registry=reg,
+                            capabilities_fn=_capabilities_fn({"alpha"}),
+                            league_state_fn=_league_state_fn(states),
+                            health_fn=_health_fn({}))
+    assert score.components.priority == 0.5
+
+
+def test_score_provider_priority_uses_injected_priority_fn():
+    """[ADR-041 Faza 1] priority_fn injectat (ex. din config Supabase, prin
+    sync_provider_manager.py) — acest modul rămâne pur, nu citește Supabase
+    direct (Dependency Direction, docstring modul)."""
+    reg = _registry()
+    states = {"alpha": _state("alpha")}
+    score = score_provider("alpha", "L", DataType.FIXTURES, registry=reg,
+                            capabilities_fn=_capabilities_fn({"alpha"}),
+                            league_state_fn=_league_state_fn(states),
+                            health_fn=_health_fn({}),
+                            priority_fn=lambda pid: {"alpha": 0.9}.get(pid, 0.5))
+    assert score.components.priority == 0.9
+
+
 def test_score_provider_quota_full_when_no_quota_concept():
     reg = _registry()
     states = {"gamma": _state("gamma")}
@@ -273,6 +299,26 @@ def test_recommend_provider_changes_when_better_candidate_exists():
     # suma deltas trebuie sa reconstituie EXACT diferenta de scor total (Regula de Aur #3)
     total_delta = rec.recommended_score.total - rec.current_score.total
     assert sum(rec.reason.component_deltas.values()) == pytest.approx(total_delta)
+
+
+def test_recommend_provider_propagates_injected_priority_fn():
+    """[ADR-041 Faza 1] priority_fn injectat trebuie folosit atat pentru
+    candidati cat si pentru providerul curent (altfel comparatia ar fi
+    inconsistenta)."""
+    reg = _registry()
+    states = {"alpha": _state("alpha"), "beta": _state("beta")}
+    # Health identic pentru ambii -- doar priority ii diferentiaza.
+    healths = {"alpha": _health(reliability=0.5, latency=1000.0, quota_pct=50.0),
+               "beta": _health(reliability=0.5, latency=1000.0, quota_pct=50.0)}
+    rec = recommend_provider(
+        "L", DataType.FIXTURES, "alpha", registry=reg,
+        capabilities_fn=_capabilities_fn({"alpha", "beta"}),
+        league_state_fn=_league_state_fn(states), health_fn=_health_fn(healths),
+        priority_fn=lambda pid: {"alpha": 0.1, "beta": 0.9}.get(pid, 0.5),
+    )
+    assert rec.recommended_provider == "beta"
+    assert rec.current_score.components.priority == 0.1
+    assert rec.recommended_score.components.priority == 0.9
 
 
 def test_recommend_provider_none_when_no_candidates():
