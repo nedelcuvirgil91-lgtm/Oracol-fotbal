@@ -79,6 +79,8 @@ O medie ar permite unui defect catastrofal (ex. pierderea completă a `freelf_ev
 
 **Notă tehnică importantă**: formula de scor de la Principiul 3 exclude deja excepțiile acceptate din numărătoare — deci GREEN și YELLOW ar avea, altfel, scor identic (1.0). Distincția dintre ele se face separat, prin `accepted_exception_count`, nu prin scor. Scorul decide doar RED vs. non-RED.
 
+**Notă de scop**: cele cinci stări de mai sus (`insufficient_data`/`broken`/`red`/`yellow`/`green`) sunt proprietatea unui SINGUR rând (o singură rulare). Decizia dacă etapa următoare poate începe e o întrebare separată, agregată pe istoric — vezi Principiul 6 (Nivel A/B) — nu se confundă cele două.
+
 ### Principiul 5 — Provider breakdown + politică de excepții + root cause (best-effort, etichetat ca atare)
 
 `provider_breakdown` (JSONB): per provider (`freelf`/`oddsapi`/`fd`/`espn`/`tsdb`/`apifootball`), `{matched, field_diff, id_diff, missing_scheduled}` — derivat din câmpul `source` deja folosit de `scheduled_fixtures_shadow.evaluate()` pentru alegerea coloanelor de comparat (extensie directă, nicio sursă nouă de date).
@@ -110,21 +112,28 @@ O medie ar permite unui defect catastrofal (ex. pierderea completă a `freelf_ev
 
 `UNKNOWN` e un rezultat acceptat, nu un eșec al clasificării — a forța o categorie fără semnal determinist ar fi exact genul de aproximare interzisă de Regula #8.
 
-### Principiul 6 — Praguri pe volum, configurabile, nu pe timp
+### Principiul 6 — Două praguri distincte, nu unul: validitate (Nivel A) vs. maturitate (Nivel B)
 
-Renunțat explicit la N=5 rulări/7 zile (versiunea anterioară a acestui design). Prag nou:
+Renunțat explicit la N=5 rulări/7 zile (versiunea anterioară a acestui design), și corectată o ambiguitate reală găsită după prima variantă: „prag 500" nu poate fi o singură noțiune — o fereastră zilnică de discovery (~7 zile, cât are azi `get_matches_for_week()`) nu atinge niciodată 500 de meciuri simultan, deci pragul de maturitate trebuie cumulat pe istoric, în timp ce pragul de validitate a unei rulări individuale trebuie să rămână per-rând (exact tiparul `champion_health_evaluations.MIN_MATCHES_FOR_HEALTH=30`, deja Frozen). Sunt DOUĂ întrebări diferite, cu praguri diferite.
 
-- `min_matched_total` (implicit **500**) — `matched_count` cumulat pe fereastra evaluată.
-- `min_matched_per_provider` (implicit **50**) — pentru FIECARE provider relevant `entity`-ului (pentru `scheduled_fixtures`: toți cei 6).
+**Nivel A — validitatea unei evaluări** („merită această rulare să fie luată în calcul?"): `MIN_LIVE_FOR_EVALUATION` (implicit **30**, mirror direct al `champion_health`). Dacă `live_count < 30` pentru o rulare, rândul se **scrie oricum** (Regula #9 — trasabilitate completă, nimic nu se sare din persistare), dar `equivalence_state = 'insufficient_data'` pentru ACEL rând, și e exclus din calculul de la Nivelul B.
 
-Stocate în `model_config` (Supabase, deja existent — cheie nouă `migration_gate_thresholds`, JSONB `{"R-Sync-7b": {"min_matched_total": 500, "min_matched_per_provider": 50}}`), nu tabelă nouă — reutilizează substratul deja folosit de `scheduled_fixtures_shadow_config.py`/`shadow_config.py`.
+**Nivel B — maturitatea porții** („avem suficiente dovezi să permitem etapa următoare?"), calculat de view-ul `migration_gate_status`, NU stocat per rând:
 
-**Risc numit, nu ascuns**: dacă un provider e structural minoritar (ex. TSDB, aproape mereu în urma altor 5 la discovery), pragul per-provider ar putea să nu fie atins niciodată în practică — poarta rămâne GRAY indefinit pentru acea dimensiune. Nu e un defect de design, e o proprietate corectă (Regula #8: dacă nu există dovadă, rămâne „necunoscut", nu „presupus ok") — dar trebuie observată operațional, nu ignorată. Prag configurabil explicit pentru acest motiv.
+- `historical_confidence` — `MIN(SUM(matched_count) / min_matched_total, MIN_per_provider(SUM(provider_breakdown[p].matched) / min_matched_per_provider))`, capat la 1.0, sumat DOAR peste rândurile eligibile — stare `IN ('red','yellow','green')`, exclude explicit atât `insufficient_data` (dovadă insuficientă pe acel rând) cât și `broken` (numerele unei rulări stricate structural nu sunt de încredere, nu trebuie să umfle volumul cumulat). MIN, nu medie — consecvent cu Principiul 3.
+- `current_health` — starea celei mai recente evaluări eligibile pentru sănătate, unde „eligibilă" înseamnă stare `IN ('red','yellow','green','broken')` — sare peste rândurile `insufficient_data` (o zi cu prea puține meciuri nu spune nimic despre sănătate, nici bine nici rău), dar **NU** sare peste `broken` (o rulare care a crăpat structural E un semnal, nu absența unuia — mapează la RED, fail-closed, Principiul 4).
+- `min_matched_total` (implicit **500**), `min_matched_per_provider` (implicit **50**, pentru FIECARE provider relevant `entity`-ului) — stocate în `model_config` (Supabase, deja existent — cheie nouă `migration_gate_thresholds`, JSONB `{"R-Sync-7b": {"min_matched_total": 500, "min_matched_per_provider": 50}}`), nu tabelă nouă — reutilizează substratul deja folosit de `scheduled_fixtures_shadow_config.py`/`shadow_config.py`.
+
+**Regula care domină, cerută explicit, insistent, de proprietarul produsului**: `migration_gate status` = **PASS** ⟺ `historical_confidence >= 1.0` ȘI `current_health IN ('green', 'yellow')`. Istoricul (chiar și „3000 de fixture perfecte acum o lună") NU e suficient singur — dacă rularea cea mai recentă eligibilă e RED, poarta e blocată **imediat**, indiferent de volumul cumulat anterior. Istoricul construiește încrederea; ultima rulare confirmă că încrederea e încă validă.
+
+**Limită onest declarată, cu TODO explicit** (semnalată de proprietarul produsului): `SUM(matched_count)` numără OBSERVAȚII, nu meciuri DISTINCTE — dacă aceleași 100 de meciuri sunt validate identic 5 zile la rând, suma dă 500, dar nu înseamnă 500 de meciuri diferite validate. Acceptat explicit ca primă versiune (G1), NU rezolvat aici. **TODO, versiune viitoare**: `historical_confidence` calculat pe baza numărului de `match_key` DISTINCTE acumulate în timp (cere un tabel/set auxiliar de chei văzute, nu doar un contor), nu pe simpla sumă a rulărilor.
+
+**Risc numit, nu ascuns**: dacă un provider e structural minoritar (ex. TSDB, aproape mereu în urma altor 5 la discovery), pragul per-provider ar putea să nu fie atins niciodată în practică — `historical_confidence` rămâne sub 1.0 indefinit pentru acea dimensiune, poarta rămâne GRAY. Nu e un defect de design, e o proprietate corectă (Regula #8) — dar trebuie observată operațional, nu ignorată.
 
 ### Principiul 7 — `migration_gate` CLI, patru comenzi
 
 ```
-migration_gate status <gate_key>    # GREEN/YELLOW/RED/GRAY, exit code 0/1/2
+migration_gate status <gate_key>    # PASS/FAIL/GRAY (historical_confidence + current_health), exit code 0/1/2
 migration_gate explain <gate_key>   # verdict + condiții eșuate + root cause dominant + acțiune recomandată
 migration_gate attest <gate_key>    # scrie docs/00_GOVERNANCE/gates/<gate_key>.attestation.json
 migration_gate verify <gate_key>    # re-derivă din DB, detectează atestare stale/falsificată
