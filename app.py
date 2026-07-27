@@ -965,6 +965,49 @@ elif nav == "settings":
             st.caption("Fără date de sănătate provideri încă (necesită Supabase activ + apeluri recente).")
 
         st.markdown("---")
+        st.markdown('<span class="sub-label">🩺 Provider Health — ferestre 24h/7 zile (Sprint 1.1, ADR-041 Faza 2)</span>', unsafe_allow_html=True)
+        # [ADAUGAT ADR-041 Faza 2, Sprint 1.1 #5] Distinct de tabelul all-time
+        # de mai sus (provider_metrics) — citește provider_call_log (Sprint
+        # 1.1 #2), un rând per apel real. Gated după buton (nu la fiecare
+        # rerun Streamlit) — fiecare provider cere câteva interogări
+        # Supabase separate (health score + breakdown + cost), inutil de
+        # repetat la orice interacțiune din pagină.
+        st.caption("Health Score, breakdown erori (429/403/timeout/5xx) și cost estimat, per provider — sursă separată (provider_call_log), fără să atingă tabelul all-time de mai sus.")
+        if st.button("🩺 Calculează Health Score (24h/7z)"):
+            from provider_registry import get_provider_registry
+            from provider_health_score import get_health_score_24h, get_health_score_7d, get_error_breakdown_24h
+            from provider_cost_estimator import get_cost_estimate
+
+            def _pct(value):
+                return f"{value * 100:.1f}%" if value is not None else "—"
+
+            with st.spinner("Citesc provider_call_log..."):
+                health_rows = []
+                for record in get_provider_registry().list_providers():
+                    pid = record.provider_id
+                    h24 = get_health_score_24h(pid)
+                    h7d = get_health_score_7d(pid)
+                    err24 = get_error_breakdown_24h(pid)
+                    cost = get_cost_estimate(pid, 24)
+                    health_rows.append({
+                        "Provider": pid,
+                        "Apeluri 24h": h24.total_calls, "Succes 24h": _pct(h24.success_rate),
+                        "Apeluri 7z": h7d.total_calls, "Succes 7z": _pct(h7d.success_rate),
+                        "429": err24.quota, "403": err24.forbidden,
+                        "Timeout": err24.timeout, "5xx": err24.upstream_5xx, "Altele": err24.other,
+                        "Cotă folosită": f"{cost.quota_used_pct:.1f}%" if cost.quota_used_pct is not None else "—",
+                        "Epuizare estimată": f"{cost.projected_hours_to_exhaustion:.1f}h" if cost.projected_hours_to_exhaustion is not None else "—",
+                        "Cost estimat": f"${cost.estimated_cost:.4f}" if cost.estimated_cost is not None else "—",
+                    })
+                st.session_state["provider_health_score_report"] = health_rows
+
+        health_report = st.session_state.get("provider_health_score_report")
+        if health_report:
+            st.dataframe(pd.DataFrame(health_report), use_container_width=True, hide_index=True)
+        else:
+            st.caption("Fără raport încă — apasă butonul de mai sus.")
+
+        st.markdown("---")
         st.markdown('<span class="sub-label">Performanță — ultima rulare Value Bets</span>', unsafe_allow_html=True)
         # [ADAUGAT] Mini audit de performanță (nefuncțional pentru utilizator,
         # doar informativ) — populat de view-ul VALUE BETS la fiecare rulare.
