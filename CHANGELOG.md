@@ -2,6 +2,19 @@
 
 Toate schimbările notabile ale proiectului sunt documentate aici.
 
+## [Nelansat] — Migrare cheie API-Football: `API_FOOTBALL_KEY_NEW` devine cheia activă
+
+**Context**: cheia API-Football originală (`API_FOOTBALL_KEY`) a fost suspendată/blocată de provider — nu mai poate fi folosită. Migrarea a urmat integral procesul aprobat explicit (§„Regulile pentru chei API și provideri externi", `CLAUDE.md`), cu excepția documentată a pasului 6 (cheie veche ca fallback), inaplicabil prin forța faptelor.
+
+### Guvernanță
+- POC izolat rulat live (`workflow_dispatch`, GitHub Actions run [30276111299](https://github.com/nedelcuvirgil91-lgtm/Oracol-fotbal/actions/runs/30276111299)) — **VERDICT: PASS**. Autentificare OK, 4/4 verificări structurale compatibile (`/status`, `/teams`, `/injuries`, `/coachs`), zero diferență de plan/cotă față de ce era documentat pentru cheia veche (Free, 100/zi). Segmentul validat = exact ce e activ azi în producție (Team Health, R-Sync-2) — `/fixtures/statistics`, `/fixtures/lineups`, `/standings` rămân netestate, în afara scopului acestei migrări.
+- POC-ul (`sync/poc_api_football_new_key_validation.py` + workflow-ul dedicat + testele lui) **șters din cod** după închiderea migrării — dovada rămâne în istoricul rulării GitHub Actions de mai sus, nu ca infrastructură vie permanentă.
+- Adăugată secțiunea „Regulile pentru chei API și provideri externi" în `CLAUDE.md` — Regula 1 (proces de migrare pas-cu-pas), Regula 2 (zero regresii funcționale), regulă generală (niciun provider nou „mai bun" doar pentru că e nou).
+
+### Cunoscut, neschimbat în această versiune
+- `key_manager.py` — zero schimbare de cod: `PROVIDERS["apifootball"]` citește în continuare din variabila de mediu `API_FOOTBALL_KEY` (nume standard, neschimbat) — doar **valoarea** secretului GitHub s-a schimbat (acțiune manuală, ireductibilă, a proprietarului produsului — acces la serviciu extern).
+- Orchestrarea automată (`sync/sync_team_health.py` → `sync/run_daily.py`) **rămâne un pas separat**, neexecutat încă în acest commit — necesită confirmare explicită înainte de implementare (schimbare de comportament în producție), prezentată separat.
+
 ## [Nelansat] — Learning Core: Orchestrare (ADR-037, Stage R3) — cod complet, NEMERGE-UIT pe `main`
 
 Cablarea Champion Guardian (R2) + Rollback Engine (R1) în bucla `continuous_learning`
