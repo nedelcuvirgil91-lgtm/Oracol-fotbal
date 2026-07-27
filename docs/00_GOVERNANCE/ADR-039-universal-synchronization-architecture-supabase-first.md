@@ -50,6 +50,7 @@ Regula ADR-035 („Niciun provider extern nu poate avea prioritate asupra unei i
 - **Neutre**: infrastructura deja construită în R4.1 (Scheduler, Request Manager, Rate Limit Manager) rămâne complet reutilizabilă — zero regresie de arhitectură deja funcțională.
 - **Risc acceptat, documentat**: descoperirea meciurilor (FreeLF/Odds/football-data/ESPN) e o migrare structural mai mare decât oricare fallback individual — afectează calea prin care se află *ce meciuri există*, nu doar *ce date are un meci deja cunoscut*. Tratată explicit ca etapă proprie, ultima, nu subestimată prin includere tacită în pașii anteriori.
 - **Cost real, numit**: cadența de sincronizare diferă masiv per provider (Kaggle: o dată; injuries: ore; descoperire meciuri: posibil ore; vreme: de câteva ori/zi) — nu există o cadență universală unică, fiecare adaptor își declară propria politică.
+- **Debt temporar, numit explicit (R-Sync-4)**: `ELO_RATINGS_FALLBACK` (`mappings.py`) e fuzionat cu scrape-ul live eloratings.net în `national_team_elo_snapshot`, ca soluție de tranziție — evită o regresie imediată (echipe prezente doar în fallback ar deveni „necunoscute" altfel), NU o decizie permanentă. Se elimină (sau se reduce strict la echipele fără acoperire live confirmată) odată ce sincronizarea live demonstrează acoperire completă — nu se păstrează din inerție.
 
 ## Referințe
 

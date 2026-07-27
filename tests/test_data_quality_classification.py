@@ -94,7 +94,6 @@ def _engine(monkeypatch, db_rows, tsdb_stats=None):
     eng.weights = {}
     eng.config = {}
     eng.api = SimpleNamespace(
-        get_elo_rating=lambda name: None,
         get_freelf_standings=lambda league: [],
         get_team_form_freelf=lambda tid, league, n: [],
         get_team_recent_form=lambda name, league, days_back=14: [],

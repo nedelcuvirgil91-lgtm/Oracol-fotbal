@@ -17,9 +17,12 @@ Ce NU conține acest modul (intenționat):
     live citește acum ELO-ul PRIMAR din match_history.home_elo_after/
     away_elo_after (Canonical Live ELO Snapshot) prin
     database.queries.get_latest_team_elo() — vezi
-    docs/00_GOVERNANCE/ADR-023-canonical-live-elo-source.md. API-ul extern
-    (get_elo_rating) rămâne fallback, folosit doar când echipa n-are
-    meciuri de club sincronizate (tipic: naționale).
+    docs/00_GOVERNANCE/ADR-023-canonical-live-elo-source.md.
+    [ACTUALIZAT — ADR-039 R-Sync-4] Fallback-ul pentru echipele naționale
+    (fără meciuri de club sincronizate) citește acum STRICT din Supabase
+    (database.queries.get_national_team_elo(), national_team_elo_snapshot)
+    — API-ul extern (oracle_api.get_elo_rating(), eloratings.net) nu mai e
+    apelat live de motor, doar de Sync Layer (sync/sync_national_team_elo.py).
   - Formula de calcul a offensive_rating/defensive_rating din backfill
     (FormTracker.calculate_ratings), care în prezent NU include blend-ul ELO
     folosit de motorul live. Aceasta este o divergență de MODEL cunoscută și

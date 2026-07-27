@@ -86,7 +86,7 @@ except ModuleNotFoundError:
 try:
     from database.queries import (
         get_latest_team_elo, get_h2h_from_history, get_team_health,
-        get_team_form_footballdata,
+        get_team_form_footballdata, get_national_team_elo,
     )
     DB_QUERIES_MODULE_AVAILABLE = True
 except ModuleNotFoundError:
@@ -779,8 +779,10 @@ class FootballOracleEngine:
         ELO de club (separat de cascada de mai sus, rulează în paralel):
         match_history.home_elo_after/away_elo_after (get_latest_team_elo,
         ADR-023/ADR-035 D2) — PRIMAR, global per club, indiferent de ligă;
-        fallback pe get_elo_rating() (eloratings.net + hardcodat) doar dacă
-        echipa n-are meciuri de club sincronizate (tipic: naționale).
+        fallback pe get_national_team_elo() (Supabase, national_team_elo_
+        snapshot, ADR-039 R-Sync-4 — populat de Sync Layer din
+        eloratings.net, niciodată citit live) doar dacă echipa n-are
+        meciuri de club sincronizate (tipic: naționale).
 
         Principiul de proiectare (ADR-035): niciun provider extern nu poate
         avea prioritate asupra unei informații deja sincronizate și
@@ -798,9 +800,11 @@ class FootballOracleEngine:
         # PRIMUL ──────────────────────────────────────────────────────────
         # Principiul de proiectare (ADR-035): niciun provider extern nu
         # poate avea prioritate asupra unei informații deja sincronizate în
-        # baza canonică. get_elo_rating() (eloratings.net + fallback
-        # hardcodat) rămâne fallback — singura sursă reală pentru echipele
-        # naționale, care nu au meciuri de club în match_history.
+        # baza canonică. Fallback pentru echipele naționale (fără meciuri
+        # de club în match_history) — ADR-039, R-Sync-4: citire STRICT din
+        # Supabase (national_team_elo_snapshot, populată de Sync Layer,
+        # sync/sync_national_team_elo.py), niciodată apel live către
+        # eloratings.net (self.api.get_elo_rating(), eliminat de aici).
         elo_raw = None
         if DB_QUERIES_MODULE_AVAILABLE:
             try:
@@ -808,8 +812,13 @@ class FootballOracleEngine:
             except Exception as exc:
                 elo_raw = None
                 logger.warning("[Profile] DB-first ELO read failed for %s: %s", canonical, exc)
-        if elo_raw is None:
-            elo_raw = self.api.get_elo_rating(canonical)
+            if elo_raw is None:
+                try:
+                    national_elo = get_national_team_elo(canonical)
+                    if national_elo:
+                        elo_raw = national_elo.get("elo_rating")
+                except Exception as exc:
+                    logger.warning("[Profile] national ELO Supabase read failed for %s: %s", canonical, exc)
         elo_off   = self._elo_to_multiplier(elo_raw)           if elo_raw else None
         elo_def   = self._elo_to_defensive_multiplier(elo_raw) if elo_raw else None
         elo_blend = float(self.config.get("elo_blend_weight", 0.35))

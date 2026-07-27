@@ -1005,6 +1005,32 @@ class FootballOracleAPI:
             if result: logger.info("[ELO] %s in hardcoded fallback: %d", canonical, result)
         return result
 
+    def get_national_elo_ratings_raw(self) -> dict[str, int]:
+        """[Sync Layer only — ADR-039, R-Sync-4] Toate ratingurile ELO
+        naționale cunoscute, brute, dintr-un singur scrape — expune
+        public `_fetch_elo_ratings()` (deja funcțională, deja normalizează
+        numele la scrape) ca punct de intrare Sync Layer, fără s-o
+        rescrie (ADR-039 Principiul 4).
+
+        Reproduce EXPLICIT semantica pe două niveluri deja folosită de
+        `get_elo_rating()` (live scrape are prioritate, `ELO_RATINGS_FALLBACK`
+        completează echipele lipsă) — nu doar fallback-ul „scrape eșuat
+        total" deja intern lui `_fetch_elo_ratings()`. Necesar aici fiindcă,
+        după migrare, Oracle Engine nu mai citește live deloc — dacă
+        snapshot-ul persistat n-ar include și completarea per-echipă din
+        `ELO_RATINGS_FALLBACK`, orice echipă prezentă azi doar în fallback
+        (nu în tabelul scrape-uit) ar deveni silențios „necunoscută" după
+        migrare — o regresie reală, nu doar o schimbare de sursă.
+
+        [ADR-039, R-Sync-4 — TEMPORAR, nu permanent] `ELO_RATINGS_FALLBACK`
+        e o soluție de tranziție, nu o decizie arhitecturală definitivă —
+        vezi comentariul de la definiția ei (`mappings.py`). Se elimină (sau
+        se reduce strict) odată ce sincronizarea live confirmă acoperire
+        completă pentru toate echipele din ea, nu se păstrează din inerție."""
+        merged = dict(ELO_RATINGS_FALLBACK)
+        merged.update(self._fetch_elo_ratings())
+        return merged
+
     # ── Odds ──────────────────────────────────────────────────────────────
     def _fetch_market(self, sport_key: str, markets: str) -> list | None:
         """Un singur apel către /odds cu setul de piețe dat — izolat, astfel

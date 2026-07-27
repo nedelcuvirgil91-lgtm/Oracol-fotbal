@@ -618,6 +618,69 @@ def upsert_team_form_footballdata(
         return False
 
 
+def get_national_team_elo(team: str) -> dict | None:
+    """
+    Sursa canonică pentru ELO-ul echipelor NAȚIONALE (eloratings.net) —
+    folosită de servirea live (oracle_engine._build_profile(), fallback
+    ELO după Level DB) — ADR-039, R-Sync-4. Înlocuiește apelul live către
+    `oracle_api.get_elo_rating()` — citire STRICT din Supabase, populată
+    separat de Sync Layer (sync/sync_national_team_elo.py), niciodată
+    direct de aici.
+
+    NU se confundă cu `get_latest_team_elo()` (ELO de club, match_history,
+    ADR-023/D2) — acela rămâne sursa primară, neatinsă, pentru orice
+    echipă cu meciuri de club sincronizate. Funcția de față e strict
+    fallback-ul pentru naționale.
+
+    Identitate canonică prin nume normalizat (ADR-039 Principiul 7) — NU
+    prin ID numeric de provider; `team` trebuie să fie deja trecut prin
+    `normalize_team_name()` de apelant, exact ca la `get_team_health()`/
+    `get_team_form_footballdata()`.
+
+    Întoarce None dacă echipa nu a fost încă sincronizată — Regula #8,
+    tratat de apelant ca „necunoscut", niciodată motiv de fallback live
+    către provider.
+    """
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("national_team_elo_snapshot")
+            .select("*")
+            .eq("team_name_canonical", team)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Queries] get_national_team_elo failed pentru %s: %s", team, exc)
+        return None
+
+
+def upsert_national_team_elo(team: str, elo_rating: int) -> bool:
+    """
+    Owner unic de scriere pentru `national_team_elo_snapshot` (disciplina
+    ADR-036) — exclusiv Sync Layer (`sync/sync_national_team_elo.py`),
+    niciodată Oracle Engine.
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("national_team_elo_snapshot").upsert({
+            "team_name_canonical": team,
+            "elo_rating": elo_rating,
+            "source_provider": "eloratings",
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="team_name_canonical").execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Queries] upsert_national_team_elo failed pentru %s: %s", team, exc)
+        return False
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # ML STATUS
 # ════════════════════════════════════════════════════════════════════════════
