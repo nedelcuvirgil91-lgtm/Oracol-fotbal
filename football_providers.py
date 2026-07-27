@@ -205,10 +205,13 @@ class ApiFootballProvider(FootballDataProvider):
             success = False
             data = None
             response_headers = None
+            status_code = None
+            caught_exc = None
             try:
                 session = self._get_session()
                 r = session.get(f"{self.BASE_URL}/{path}", headers=headers, params=params, timeout=12)
                 success = r.ok
+                status_code = r.status_code
                 response_headers = r.headers
                 if success:
                     data = r.json()
@@ -216,6 +219,7 @@ class ApiFootballProvider(FootballDataProvider):
                     logger.warning("[ApiFootball] HTTP %s pentru %s", r.status_code, path)
             except Exception as exc:
                 logger.error("[ApiFootball] Eroare request %s: %s", path, exc)
+                caught_exc = exc
             latency_ms = (time.monotonic() - start) * 1000
 
             self._key_manager.record_request(self.PROVIDER_ID)
@@ -225,10 +229,18 @@ class ApiFootballProvider(FootballDataProvider):
             if response_headers is not None:
                 self._request_manager.record_response_headers(self.PROVIDER_ID, response_headers)
 
+            # [ADAUGAT ADR-041 Faza 2, Sprint 1.1 #3] breakdown 429/403/
+            # timeout/5xx — clasificare doar la esec, punct unic reutilizat.
+            failure_reason = None
+            if not success:
+                from provider_call_classification import classify_failure
+                status_code, failure_reason = classify_failure(status_code, exc=caught_exc)
+
             # 7. actualizare provider_metrics
             try:
                 import supabase_client as _sb
-                _sb.record_provider_call(self.PROVIDER_ID, path, success, latency_ms)
+                _sb.record_provider_call(self.PROVIDER_ID, path, success, latency_ms,
+                                          http_status=status_code, failure_reason=failure_reason)
             except Exception:
                 pass
 

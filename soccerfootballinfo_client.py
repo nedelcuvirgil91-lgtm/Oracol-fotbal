@@ -101,10 +101,13 @@ class SoccerFootballInfoClient:
             success = False
             data = None
             response_headers = None
+            status_code = None
+            caught_exc = None
             try:
                 session = self._get_session()
                 resp = session.get(f"{BASE_URL}/{path}", headers=headers, params=params, timeout=12)
                 success = resp.ok
+                status_code = resp.status_code
                 response_headers = resp.headers
                 if success:
                     data = resp.json()
@@ -112,14 +115,18 @@ class SoccerFootballInfoClient:
                     logger.warning("[SoccerFootballInfo] HTTP %s pentru %s", resp.status_code, path)
             except Exception as exc:
                 logger.error("[SoccerFootballInfo] Eroare request %s: %s", path, exc)
+                caught_exc = exc
             latency_ms = (time.monotonic() - start) * 1000
 
             self._key_manager.record_request(PROVIDER_ID)
             if response_headers is not None:
                 self._request_manager.record_response_headers(PROVIDER_ID, response_headers)
 
-            # ADR-041 Faza 1 — punct unic de scriere pentru cod NOU de Sync Layer.
-            self._request_manager.record_result(PROVIDER_ID, path, success, latency_ms)
+            # ADR-041 Faza 1 — punct unic de scriere pentru cod NOU de Sync
+            # Layer. [ADAUGAT ADR-041 Faza 2, Sprint 1.1 #3] status_code/exc
+            # -- clasificate de RequestManager.record_result() insusi.
+            self._request_manager.record_result(PROVIDER_ID, path, success, latency_ms,
+                                                  status_code=status_code, exc=caught_exc)
 
             if success and data is not None:
                 self._cache.set(cache_category, cache_key, data, provider=PROVIDER_ID)

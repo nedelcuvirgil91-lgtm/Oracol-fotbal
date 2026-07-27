@@ -109,7 +109,10 @@ class RequestManager:
         if self._rate_limiter is not None:
             self._rate_limiter.record_response_headers(provider, headers)
 
-    def record_result(self, provider: str, endpoint: str, success: bool, latency_ms: float) -> None:
+    def record_result(
+        self, provider: str, endpoint: str, success: bool, latency_ms: float,
+        status_code: int | None = None, exc: Exception | None = None,
+    ) -> None:
         """[ADAUGAT] ADR-041 Faza 1 — punct unic de scriere in provider_metrics
         pentru orice apel care trece prin RequestManager. oracle_api.py si
         football_providers.py apeleaza supabase_client.record_provider_call()
@@ -120,10 +123,19 @@ class RequestManager:
         paralel — exact cerinta explicita: o singura cale de scriere pentru
         cod nou. Import leneș, best-effort — nu blocheaza fluxul daca
         Supabase e indisponibil (acelasi principiu de degradare gratioasa
-        deja aplicat in tot proiectul)."""
+        deja aplicat in tot proiectul).
+
+        [ADAUGAT ADR-041 Faza 2, Sprint 1.1 #3] `status_code`/`exc` opționale
+        — clasificate prin punctul unic reutilizat
+        (provider_call_classification.classify_failure), doar la eșec."""
         try:
+            failure_reason = None
+            if not success:
+                from provider_call_classification import classify_failure
+                status_code, failure_reason = classify_failure(status_code, exc=exc)
             import supabase_client as _sb
-            _sb.record_provider_call(provider, endpoint, success, latency_ms)
+            _sb.record_provider_call(provider, endpoint, success, latency_ms,
+                                      http_status=status_code, failure_reason=failure_reason)
         except Exception:
             pass
 

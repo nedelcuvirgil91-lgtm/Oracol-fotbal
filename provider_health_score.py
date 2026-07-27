@@ -1,6 +1,6 @@
 """
 ================================================================================
-FOOTBALL ORACLE — Health Score pe ferestre (ADR-041 Faza 2, Sprint 1.1 #2)
+FOOTBALL ORACLE — Health Score pe ferestre (ADR-041 Faza 2, Sprint 1.1 #2/#3)
 ================================================================================
 Module: provider_health_score.py
 
@@ -9,6 +9,11 @@ FEREASTRĂ de timp (24h, 7 zile) — distinct de `provider_health.py`
 (`ProviderHealth`), care rămâne starea cumulativă ALL-TIME, neschimbată.
 Cele două module coexistă deliberat, exact cum `provider_call_log` (per
 eveniment) coexistă cu `provider_metrics` (agregat) la nivel de date.
+
+[ADAUGAT Sprint 1.1 #3] Breakdown pe tip de eroare (429/403/timeout/5xx) —
+folosește exact aceleași `ProviderCallLogRow` (câmpul `failure_reason`,
+populat de `provider_call_classification.classify_failure()` la scriere),
+niciun câmp/tabelă nouă.
 
 NU decide nimic — nu alege provideri, nu calculează scoruri de selecție
 (Selection Engine, provider_selector.py, neatins de acest modul). Un
@@ -82,3 +87,56 @@ def get_health_score_24h(provider_id: str, *, source: ProviderCallLogSource | No
 
 def get_health_score_7d(provider_id: str, *, source: ProviderCallLogSource | None = None) -> HealthScoreWindow:
     return get_health_score_window(provider_id, WINDOW_7D_HOURS, source=source)
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# Breakdown pe tip de eroare (Sprint 1.1 #3)
+# ────────────────────────────────────────────────────────────────────────────
+
+@dataclass(frozen=True)
+class ErrorBreakdown:
+    provider_id: str
+    window_hours: int
+    total_errors: int
+    quota: int          # http_status == 429
+    forbidden: int       # http_status == 403
+    timeout: int          # exceptie de tip timeout, fara raspuns
+    upstream_5xx: int     # http_status in [500, 600)
+    other: int             # orice alt tip de esec (network, other_error, necunoscut)
+
+
+def compute_error_breakdown(
+    provider_id: str, window_hours: int, rows: list[ProviderCallLogRow],
+) -> ErrorBreakdown:
+    """Funcție pură — identic tiparul `compute_health_score_window()`.
+    `failure_reason` NU e un enum închis (schema `provider_call_log`,
+    aprobată explicit) — orice valoare nerecunoscută cade în `other`, nu
+    aruncă și nu se pierde din `total_errors`."""
+    failures = [r for r in rows if not r.success]
+    quota = sum(1 for r in failures if r.failure_reason == "quota")
+    forbidden = sum(1 for r in failures if r.failure_reason == "forbidden")
+    timeout = sum(1 for r in failures if r.failure_reason == "timeout")
+    upstream_5xx = sum(1 for r in failures if r.failure_reason == "upstream_5xx")
+    known = quota + forbidden + timeout + upstream_5xx
+    other = len(failures) - known
+
+    return ErrorBreakdown(
+        provider_id=provider_id, window_hours=window_hours, total_errors=len(failures),
+        quota=quota, forbidden=forbidden, timeout=timeout, upstream_5xx=upstream_5xx, other=other,
+    )
+
+
+def get_error_breakdown_window(
+    provider_id: str, window_hours: int, *, source: ProviderCallLogSource | None = None,
+) -> ErrorBreakdown:
+    source = source or get_default_call_log_source()
+    rows = source.get_calls_since(provider_id, window_hours)
+    return compute_error_breakdown(provider_id, window_hours, rows)
+
+
+def get_error_breakdown_24h(provider_id: str, *, source: ProviderCallLogSource | None = None) -> ErrorBreakdown:
+    return get_error_breakdown_window(provider_id, WINDOW_24H_HOURS, source=source)
+
+
+def get_error_breakdown_7d(provider_id: str, *, source: ProviderCallLogSource | None = None) -> ErrorBreakdown:
+    return get_error_breakdown_window(provider_id, WINDOW_7D_HOURS, source=source)

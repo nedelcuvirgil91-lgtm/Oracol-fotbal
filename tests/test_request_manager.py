@@ -97,14 +97,14 @@ def test_record_result_calls_supabase_record_provider_call(monkeypatch):
     orice adaptor nou de Sync Layer care trece prin RequestManager."""
     calls = []
 
-    def _fake_record(provider, endpoint, success, latency_ms):
-        calls.append((provider, endpoint, success, latency_ms))
+    def _fake_record(provider, endpoint, success, latency_ms, http_status=None, failure_reason=None):
+        calls.append((provider, endpoint, success, latency_ms, http_status, failure_reason))
         return True
 
     monkeypatch.setattr("supabase_client.record_provider_call", _fake_record)
     rm = RequestManager()
     rm.record_result("soccerfootballinfo", "matches/view/full", True, 123.4)
-    assert calls == [("soccerfootballinfo", "matches/view/full", True, 123.4)]
+    assert calls == [("soccerfootballinfo", "matches/view/full", True, 123.4, None, None)]
 
 
 def test_record_result_never_raises_when_supabase_unavailable(monkeypatch):
@@ -114,3 +114,39 @@ def test_record_result_never_raises_when_supabase_unavailable(monkeypatch):
     monkeypatch.setattr("supabase_client.record_provider_call", _boom)
     rm = RequestManager()
     rm.record_result("soccerfootballinfo", "matches/view/full", False, 5000.0)  # nu arunca
+
+
+def test_record_result_classifies_failure_status_code(monkeypatch):
+    """[ADR-041 Faza 2, Sprint 1.1 #3] status_code cunoscut, esec HTTP curat
+    (fara exceptie) -- clasificat prin punctul unic reutilizat."""
+    calls = []
+
+    def _fake_record(provider, endpoint, success, latency_ms, http_status=None, failure_reason=None):
+        calls.append((http_status, failure_reason))
+
+    monkeypatch.setattr("supabase_client.record_provider_call", _fake_record)
+    rm = RequestManager()
+    rm.record_result("soccerfootballinfo", "matches/view/full", False, 100.0, status_code=429)
+    assert calls == [(429, "quota")]
+
+
+def test_record_result_classifies_exception():
+    """[ADR-041 Faza 2, Sprint 1.1 #3] exceptie de retea -- clasificata prin
+    punctul unic reutilizat, fara sa aiba nevoie de mock pe supabase_client
+    (call log e best-effort, esueaza gratios fara Supabase live in teste)."""
+    rm = RequestManager()
+    exc = RuntimeError("connection refused")
+    rm.record_result("soccerfootballinfo", "matches/view/full", False, 100.0, exc=exc)  # nu arunca
+
+
+def test_record_result_does_not_classify_on_success(monkeypatch):
+    """Succes -- failure_reason ramane None, chiar daca status_code e pasat."""
+    calls = []
+
+    def _fake_record(provider, endpoint, success, latency_ms, http_status=None, failure_reason=None):
+        calls.append((http_status, failure_reason))
+
+    monkeypatch.setattr("supabase_client.record_provider_call", _fake_record)
+    rm = RequestManager()
+    rm.record_result("soccerfootballinfo", "matches/view/full", True, 100.0, status_code=200)
+    assert calls == [(200, None)]

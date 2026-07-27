@@ -236,13 +236,23 @@ class FootballOracleAPI:
                 return name, endpoint
         return "unknown", "unknown"
 
-    def _record_metric(self, url: str, success: bool, latency_ms: float) -> None:
+    def _record_metric(self, url: str, success: bool, latency_ms: float,
+                        status_code: int | None = None, exc: Exception | None = None) -> None:
         # Best-effort, nu blocheaza fluxul principal daca esueaza (acelasi
         # principiu de degradare gratioasa folosit peste tot in proiect).
+        #
+        # [ADAUGAT ADR-041 Faza 2, Sprint 1.1 #3] breakdown 429/403/timeout/
+        # 5xx — clasificare doar la esec, prin punctul unic reutilizat
+        # (provider_call_classification.classify_failure), nu duplicata aici.
         try:
             provider, endpoint = self._detect_provider_endpoint(url)
+            failure_reason = None
+            if not success:
+                from provider_call_classification import classify_failure
+                status_code, failure_reason = classify_failure(status_code, exc=exc)
             import supabase_client as _sb
-            _sb.record_provider_call(provider, endpoint, success, latency_ms)
+            _sb.record_provider_call(provider, endpoint, success, latency_ms,
+                                      http_status=status_code, failure_reason=failure_reason)
         except Exception:
             pass
 
@@ -268,23 +278,23 @@ class FootballOracleAPI:
             r = self._s.get(url, headers=headers or {}, params=params or {}, timeout=timeout)
             latency_ms = (time.monotonic() - start) * 1000
             if r.status_code == 404:
-                logger.warning("[HTTP 404] %s", url[:80]); self._record_metric(url, False, latency_ms); return _ret(None, r)
+                logger.warning("[HTTP 404] %s", url[:80]); self._record_metric(url, False, latency_ms, status_code=404); return _ret(None, r)
             if r.status_code == 403:
-                logger.warning("[HTTP 403] %s", url[:80]); self._record_metric(url, False, latency_ms); return _ret(None, r)
+                logger.warning("[HTTP 403] %s", url[:80]); self._record_metric(url, False, latency_ms, status_code=403); return _ret(None, r)
             if r.status_code == 429:
                 logger.warning("[HTTP 429] %s", url[:80])
-                self._record_metric(url, False, latency_ms)
+                self._record_metric(url, False, latency_ms, status_code=429)
                 if FREE_LF_HOST in url:
                     self._freelf_exhausted = True
                     logger.warning("[FreeLF] Limita 429 — trecem pe fallback ESPN/demo.")
                 return _ret(None, r)
             if not r.ok:
-                logger.warning("[HTTP %s] %s", r.status_code, url[:80]); self._record_metric(url, False, latency_ms); return _ret(None, r)
-            self._record_metric(url, True, latency_ms)
+                logger.warning("[HTTP %s] %s", r.status_code, url[:80]); self._record_metric(url, False, latency_ms, status_code=r.status_code); return _ret(None, r)
+            self._record_metric(url, True, latency_ms, status_code=r.status_code)
             return _ret(r.json(), r)
         except Exception as exc:
             latency_ms = (time.monotonic() - start) * 1000
-            self._record_metric(url, False, latency_ms)
+            self._record_metric(url, False, latency_ms, exc=exc)
             logger.error("[HTTP] %s → %s", url[:80], exc); return _ret(None, None)
 
     def _free_lf_get(self, path: str, params=None):
