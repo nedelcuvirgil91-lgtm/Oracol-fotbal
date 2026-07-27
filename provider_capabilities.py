@@ -133,6 +133,20 @@ _CAPABILITIES: dict[str, ProviderCapability] = {
         cost_class=CostClass.FREE_UNLIMITED,
         cache_ttl_hours={DataType.FIXTURES: 1},
     ),
+    # [ADAUGAT] Etapa C, Sprint 1 (ADR-041 Faza 1) — verificat live 2026-07-27.
+    # LINEUPS/MANAGERS vin "gratis" din acelasi apel matches/view/full folosit
+    # pentru STATISTICS/XG — zero cost suplimentar de request. STANDINGS
+    # confirmat prin championships/view. H2H neinclus — neverificat live.
+    # cost_class MONTHLY_QUOTA_STRICT: 200/zi, cea mai mica cota confirmata
+    # dintre providerii cu STATISTICS (vezi rate_limit_manager.py).
+    "soccerfootballinfo": ProviderCapability(
+        provider_id="soccerfootballinfo", version=1,
+        data_types=frozenset({DataType.STATISTICS, DataType.XG, DataType.LINEUPS,
+                               DataType.MANAGERS, DataType.STANDINGS}),
+        cost_class=CostClass.MONTHLY_QUOTA_STRICT,
+        cache_ttl_hours={DataType.STATISTICS: 720, DataType.XG: 720, DataType.LINEUPS: 720,
+                          DataType.MANAGERS: 720, DataType.STANDINGS: 12},
+    ),
 }
 
 CAPABILITIES: Mapping[str, ProviderCapability] = MappingProxyType(_CAPABILITIES)

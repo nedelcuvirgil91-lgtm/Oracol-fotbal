@@ -30,6 +30,14 @@ _ENV_KEY_OVERRIDES: dict[str, str] = {
     "sportapi":          "RAPIDAPI_KEY_SPORTAPI",
     "freelivefootball":  "RAPIDAPI_KEY_FREELIVEFOOTBALL",
     "footballdata":      "FOOTBALL_DATA_KEY",
+    # [ADAUGAT] Etapa C, Sprint 1 (ADR-041 Faza 1) — reutilizeaza deliberat
+    # variabila FreeLF: acelasi cont RapidAPI autentifica orice subscriptie de
+    # pe cont (confirmat explicit de Product Owner, verificat live 2026-07-27
+    # — acelasi x-rapidapi-key, doar x-rapidapi-host difera). Nu introduce, nu
+    # inlocuieste niciun secret existent. Un secret dedicat
+    # RAPIDAPI_KEY_SOCCERFOOTBALLINFO ramane recomandare de igiena viitoare,
+    # nu o cerinta functionala azi.
+    "soccerfootballinfo": "RAPIDAPI_KEY_FREELIVEFOOTBALL",
 }
 
 BASE_DIR       = Path(__file__).parent
@@ -96,6 +104,19 @@ PROVIDERS: dict[str, dict] = {
         "base_url": "https://v3.football.api-sports.io",
         "header_key": "x-apisports-key", "header_host": None,
         "default_limit": 3000,
+        "keys": [],
+    },
+    # [ADAUGAT] Soccer Football Info (RapidAPI) — 200 req/zi, 4 req/s,
+    # confirmat live 2026-07-27 din header-ele reale de rate-limit
+    # (X-RateLimit-Requests-Limit=200, decrementat per apel). default_limit
+    # zilnic real, spre deosebire de aproximarile lunare ale altor provideri
+    # de mai sus — fereastra reala de reset e ~24h, nu lunara.
+    "soccerfootballinfo": {
+        "name": "Soccer Football Info (RapidAPI)",
+        "host": "soccer-football-info.p.rapidapi.com",
+        "base_url": "https://soccer-football-info.p.rapidapi.com",
+        "header_key": "x-rapidapi-key", "header_host": "x-rapidapi-host",
+        "default_limit": 200,
         "keys": [],
     },
 }

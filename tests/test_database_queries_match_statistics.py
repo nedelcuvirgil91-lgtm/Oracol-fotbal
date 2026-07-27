@@ -129,6 +129,29 @@ def test_no_league_filter_when_omitted(monkeypatch):
     assert eq_calls == []
 
 
+def test_require_referee_false_keeps_existing_home_possession_filter(monkeypatch):
+    """[Sprint 1 Faza 1, ADR-041] Comportament neschimbat pentru apelanții
+    existenți (FreeLF, scope îngust) — default `require_referee=False`."""
+    fake = _FakeClient(rows=[])
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    q.get_finished_matches_missing_stats(days_back=5)
+    is_calls = [c[1] for c in fake.calls if c[0] == "is_"]
+    assert ("home_possession", "null") in is_calls
+    assert ("referee", "null") not in is_calls
+
+
+def test_require_referee_true_filters_on_referee_instead(monkeypatch):
+    """Soccer Football Info (owner nou, câmpuri mult mai largi) — `referee`
+    e populat STRICT de acest adaptor, semnalul corect de "lipsesc datele
+    bogate" indiferent dacă FreeLF a completat deja `home_possession`."""
+    fake = _FakeClient(rows=[])
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    q.get_finished_matches_missing_stats(days_back=5, require_referee=True)
+    is_calls = [c[1] for c in fake.calls if c[0] == "is_"]
+    assert ("referee", "null") in is_calls
+    assert ("home_possession", "null") not in is_calls
+
+
 def test_default_days_back_computes_cutoff_relative_to_today(monkeypatch):
     from datetime import date, timedelta
     fake = _FakeClient(rows=[])

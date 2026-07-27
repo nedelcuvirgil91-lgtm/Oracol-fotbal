@@ -222,11 +222,12 @@ def get_finished_matches_missing_stats(
     days_back: int = 2, limit: int = 200,
     date_from: str | None = None, date_to: str | None = None,
     league: str | None = None,
+    require_referee: bool = False,
 ) -> list[dict]:
     """
     [ADAUGAT Sprint 1 — Match Statistics] Meciuri deja ÎNCHEIATE
     (`actual_home_goals` populat de `sync_results`, owner exclusiv, ADR-036)
-    care încă NU au `home_possession`.
+    care încă NU au datele de statistici.
 
     Mod implicit (`date_from`/`date_to` neprecizate) — fereastră scurtă,
     `days_back` zile de la azi, ținta reală a `sync/sync_match_statistics.py`
@@ -238,6 +239,16 @@ def get_finished_matches_missing_stats(
     `sync/backfill_match_statistics_freelf.py` (backfill istoric, separat
     deliberat de sincronizarea zilnică, aceeași funcție/adaptor, doar
     fereastra de date diferă).
+
+    `require_referee` [ADAUGAT Sprint 1 Faza 1, ADR-041] — implicit `False`,
+    comportament NESCHIMBAT pentru apelanții existenți (`home_possession IS
+    NULL`, scope-ul îngust FreeLF: doar possession+xG). Soccer Football
+    Info (owner nou, set de câmpuri mult mai larg — shots/corners/fouls/
+    lineup/manageri/arbitru/stadion) trebuie să folosească `True`: `referee`
+    e populat STRICT de acest adaptor, deci e semnalul corect de "lipsesc
+    datele bogate" — un meci la care `home_possession` a fost deja completat
+    de FreeLF (owner diferit, COALESCE-only, ADR-036) tot trebuie procesat
+    de Soccer Football Info dacă `referee` încă lipsește.
     """
     client = get_client()
     if client is None:
@@ -250,9 +261,9 @@ def get_finished_matches_missing_stats(
             client.table("match_history")
             .select("home_team,away_team,kickoff_date,league")
             .not_.is_("actual_home_goals", "null")
-            .is_("home_possession", "null")
             .gte("kickoff_date", date_from)
         )
+        query = query.is_("referee", "null") if require_referee else query.is_("home_possession", "null")
         if date_to is not None:
             query = query.lte("kickoff_date", date_to)
         if league is not None:

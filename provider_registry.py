@@ -57,6 +57,11 @@ _PROVIDER_DECLARATIONS: tuple[ProviderRecord, ...] = (
     ProviderRecord("weatherapi", "WeatherAPI", requires_credentials=True),
     ProviderRecord("espn", "ESPN (public API)", requires_credentials=False),
     ProviderRecord("thesportsdb", "TheSportsDB (free tier)", requires_credentials=False),
+    # [ADAUGAT] Etapa C, Sprint 1 (ADR-041 Faza 1) — verificat live 2026-07-27
+    # (POC izolat, sters dupa test): Romania Liga I confirmata (important=true),
+    # UEFA Champions/Europa/Conference League + qualifiers confirmate, meci real
+    # verificat integral (Dinamo Bucuresti - Universitatea Craiova, 25.07.2026).
+    ProviderRecord("soccerfootballinfo", "Soccer Football Info (RapidAPI)", requires_credentials=True),
 )
 
 

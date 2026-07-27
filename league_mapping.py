@@ -94,6 +94,9 @@ class LeagueProviderState:
 # pentru orice altă pereche, onest, nu presupus.
 _CONFIDENCE_OVERRIDES: dict[tuple[str, str], Confidence] = {
     ("Romania SuperLiga", "apifootball"): Confidence.CONFIRMED,  # league_id=283, verificat live 2026-07-17
+    # [ADAUGAT] Etapa C, Sprint 1 (ADR-041 Faza 1) — id "6250830696ec934",
+    # important=true, meci real complet verificat, live, 2026-07-27.
+    ("Romania SuperLiga", "soccerfootballinfo"): Confidence.CONFIRMED,
 }
 
 

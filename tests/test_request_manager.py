@@ -90,3 +90,27 @@ def test_record_response_headers_forwards_to_rate_limiter():
     rm = RequestManager(rate_limiter=_FakeLimiter())
     rm.record_response_headers("apifootball", {"x-ratelimit-requests-remaining": "5"})
     assert calls == [("apifootball", {"x-ratelimit-requests-remaining": "5"})]
+
+
+def test_record_result_calls_supabase_record_provider_call(monkeypatch):
+    """ADR-041 Faza 1 — punct unic de scriere in provider_metrics pentru
+    orice adaptor nou de Sync Layer care trece prin RequestManager."""
+    calls = []
+
+    def _fake_record(provider, endpoint, success, latency_ms):
+        calls.append((provider, endpoint, success, latency_ms))
+        return True
+
+    monkeypatch.setattr("supabase_client.record_provider_call", _fake_record)
+    rm = RequestManager()
+    rm.record_result("soccerfootballinfo", "matches/view/full", True, 123.4)
+    assert calls == [("soccerfootballinfo", "matches/view/full", True, 123.4)]
+
+
+def test_record_result_never_raises_when_supabase_unavailable(monkeypatch):
+    def _boom(*args, **kwargs):
+        raise RuntimeError("Supabase indisponibil")
+
+    monkeypatch.setattr("supabase_client.record_provider_call", _boom)
+    rm = RequestManager()
+    rm.record_result("soccerfootballinfo", "matches/view/full", False, 5000.0)  # nu arunca

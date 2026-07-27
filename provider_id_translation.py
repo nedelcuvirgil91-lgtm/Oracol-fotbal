@@ -33,6 +33,11 @@ LEGACY_TO_CANONICAL: Mapping[str, str] = MappingProxyType({
     "freelf": "freelivefootball",
     "api_football": "apifootball",
     "espn": "espn",
+    # [ADAUGAT] Etapa C, Sprint 1 (ADR-041 Faza 1) — provider NOU, nu migrare
+    # dintr-un nume legacy: auto-mapare, cheia din mappings.py e deja
+    # canonica. Pastreaza contractul bijectiv al acestui fisier fara sa
+    # introduca logica noua in league_mapping.py.
+    "soccerfootballinfo": "soccerfootballinfo",
 })
 
 CANONICAL_TO_LEGACY: Mapping[str, str] = MappingProxyType(

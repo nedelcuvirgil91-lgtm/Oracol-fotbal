@@ -12,9 +12,15 @@ rescrie. Adauga exact ce lipsea, confirmat de audit (§4/§7/§16):
 Cache-ul disk+Supabase (L1/L2, cache_manager.py), coverage check
 (football_providers._covered) si retry HTTP (urllib3.Retry) raman complet
 neatinse - functioneaza deja, per regula "no defect, no rewrite" (ADR-038,
-principiul 3). Scope strict API-Football pentru R4.1 (cum a cerut misiunea),
-dar clasa nu hardcodeaza numele providerului - parametrizata explicit, ca
-o eventuala extindere la alt provider sa fie o extensie, nu o rescriere.
+principiul 3). Scope inițial API-Football pentru R4.1 (cum a cerut misiunea),
+dar clasa nu hardcodeaza numele providerului - parametrizata explicit, exact
+ca extinderea la un al doilea provider (Soccer Football Info,
+soccerfootballinfo_client.py, ADR-041 Faza 1) să fie o extensie prin
+reutilizare, nu o rescriere. `RateLimitManager` (rate_limit_manager.py)
+insusi e deja complet generic - stare `dict[str, _ProviderRateState]` cheiata
+pe `provider`, fara nicio ramura hardcodata - orice provider nou care trece
+prin `RequestManager` capata automat buget real per header-e, fara nicio
+schimbare de cod in acest modul.
 ================================================================================
 """
 from __future__ import annotations
@@ -102,6 +108,24 @@ class RequestManager:
     def record_response_headers(self, provider: str, headers) -> None:
         if self._rate_limiter is not None:
             self._rate_limiter.record_response_headers(provider, headers)
+
+    def record_result(self, provider: str, endpoint: str, success: bool, latency_ms: float) -> None:
+        """[ADAUGAT] ADR-041 Faza 1 — punct unic de scriere in provider_metrics
+        pentru orice apel care trece prin RequestManager. oracle_api.py si
+        football_providers.py apeleaza supabase_client.record_provider_call()
+        direct, dinainte de acest modul — ramane neatins, nu se rescrie o cale
+        deja functionala (regula "no defect, no rewrite", ADR-038). Orice
+        adaptor NOU de Sync Layer (ADR-039) care trece prin RequestManager
+        capata insa automat aceeasi scriere, fara sa reimplementeze un INSERT
+        paralel — exact cerinta explicita: o singura cale de scriere pentru
+        cod nou. Import leneș, best-effort — nu blocheaza fluxul daca
+        Supabase e indisponibil (acelasi principiu de degradare gratioasa
+        deja aplicat in tot proiectul)."""
+        try:
+            import supabase_client as _sb
+            _sb.record_provider_call(provider, endpoint, success, latency_ms)
+        except Exception:
+            pass
 
 
 _rm_instance: RequestManager | None = None

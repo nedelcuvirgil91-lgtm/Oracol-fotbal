@@ -464,8 +464,15 @@ LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
         # First League' (lookupleague.php?id=4652 → Macedonia, dovada in log),
         # iar eventsnextleague.php?id=4691 a intors meciul real al zilei
         # ('Oțelul Galați' vs 'CFR Cluj', 2026-07-18 15:30) — nu presupus.
+        # [ADAUGAT] soccerfootballinfo="6250830696ec934" — id-ul real "Romania
+        # Liga I" la Soccer Football Info, VERIFICAT LIVE 2026-07-27 (POC izolat,
+        # sters dupa test): important=true, sezon curent "Superliga 26/27"
+        # prezent, meci real complet verificat (Dinamo Bucuresti 5-1
+        # Universitatea Craiova, 25.07.2026 — scor/cartonase/gol anulat VAR
+        # identice cu sursa independenta de control).
         provider_ids={"football_data": None, "espn": "rou.1", "tsdb": "4691",
-                       "odds": "soccer_romania_1_liga", "freelf": None, "api_football": 283},
+                       "odds": "soccer_romania_1_liga", "freelf": None, "api_football": 283,
+                       "soccerfootballinfo": "6250830696ec934"},
         supported={
             "football_data": False,  # CONFIRMAT: planul gratuit football-data.org
                                       # acopera exact 12 competitii publicate oficial,
@@ -473,6 +480,7 @@ LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
             "espn": True, "tsdb": True, "odds": True,
             "freelf": "necunoscut",
             "api_football": "plan_restricted",
+            "soccerfootballinfo": True,  # verificat live 2026-07-27, important=true
         },
     ),
     "World Cup 2026": LeagueDefinition(

@@ -27,6 +27,9 @@ CATEGORY_TTL: dict[str, float] = {
     "teams": 720.0,   # [ADAUGAT] rezolvare nume->ID provider (ex. API-Football) - practic permanent (30 zile)
     "api_football_probe": 24.0,  # [ADAUGAT] sondaj discovery /fixtures/statistics - fixture_id + verdict 403/404, nu productie
     "freelf_event_resolution": 720.0,  # [ADAUGAT Sprint 1] FreeLF Event Resolver — event_id per meci încheiat, identificator stabil odată rezolvat (tratat ca team_id, 30 zile)
+    "soccerfootballinfo_event_resolution": 720.0,  # [ADAUGAT ADR-041 Faza 1] identic FreeLF — match_id stabil odata rezolvat
+    "soccerfootballinfo_day_full": 24.0,  # [ADAUGAT ADR-041 Faza 1] payload brut per zi — evita N apeluri redundante cand se rezolva mai multe meciuri din aceeasi zi (backfill)
+    "soccerfootballinfo_match_detail": 720.0,  # [ADAUGAT ADR-041 Faza 1] detaliu complet per meci ÎNCHEIAT — valorile sunt finale, identic ratiunea "teams" (practic permanent, 30 zile)
 }
 
 class CacheManager:

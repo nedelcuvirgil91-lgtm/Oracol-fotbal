@@ -65,6 +65,15 @@ class SelectionWeights:
     quota: float
     latency: float
     priority: float
+    # [ADAUGAT] ADR-041 Faza 1 — versiunea ACESTUI preset de ponderi, distinctă
+    # de ALGORITHM_VERSION (care versionează structura formulei pe 6
+    # componente, neschimbată). Fiecare preset (LIVE, BACKFILL, orice preset
+    # viitor) își ține propria linie de versionare, incrementată DOAR manual,
+    # la o recalibrare reală bazată pe date din shadow mode — niciodată
+    # dedusă din git/commit. Scop: decizii istorice reproductibile — un
+    # consumator care loghează (weights_name, weights.version) alături de o
+    # decizie poate reconstitui exact ce calibrare a produs-o.
+    version: int = 1
 
     def __post_init__(self) -> None:
         total = (self.availability + self.coverage + self.reliability
@@ -73,14 +82,30 @@ class SelectionWeights:
             raise ValueError(f"SelectionWeights trebuie să însumeze 1.0, nu {total}")
 
 
+# LIVE — implicit, folosit de oracle_api.py (shadow, ADR-034), neschimbat.
 SELECTION_WEIGHTS = SelectionWeights(
     availability=0.40, coverage=0.25, reliability=0.15,
     quota=0.10, latency=0.05, priority=0.05,
+    version=1,
 )
 
-# Se incrementează DOAR manual, la o recalibrare reală a formulei/ponderilor,
-# bazată pe date din shadow mode — niciodată dedusă din git/commit/altă
-# infrastructură (ar rupe Regula de Aur #4/#5).
+# [ADAUGAT] BACKFILL — ADR-041 Faza 1. Prioritizează cota rămasă (0.40, cea
+# mai mare pondere) și elimină latența (irelevantă pentru sincronizare
+# offline) — opusul calibrării LIVE, aceeași formulă pe 6 componente,
+# neschimbată (compute_weighted_total() rămâne identic). Motivează exact
+# comportamentul cerut explicit: un backfill mare nu epuizează providerul
+# premium rezervat pentru LIVE, ci se redistribuie spre cel cu cotă mai mare,
+# pe măsură ce starea reală de cotă se actualizează între apeluri succesive.
+SELECTION_WEIGHTS_BACKFILL = SelectionWeights(
+    availability=0.20, coverage=0.15, reliability=0.15,
+    quota=0.40, latency=0.00, priority=0.10,
+    version=1,
+)
+
+# Se incrementează DOAR manual, la o recalibrare reală a STRUCTURII formulei
+# (numărul/semnificația componentelor) — niciodată a valorilor unui preset,
+# acelea își au propriul SelectionWeights.version — niciodată dedusă din
+# git/commit/altă infrastructură (ar rupe Regula de Aur #4/#5).
 ALGORITHM_VERSION = 1
 
 # Tie-breaker static — neutru (0.5) pentru toți providerii până la o

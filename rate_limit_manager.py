@@ -20,6 +20,15 @@ confirmat de audit (§14): preveni depasirea sustinuta a plafonului per-minut
 in interiorul UNUI singur proces care evalueaza mai multe meciuri la rand -
 risc real, confirmat oficial ("access can be temporarily or permanently
 blocked... without prior warning").
+
+[ADAUGAT ADR-041 Faza 1] Clasa a fost ÎNTOTDEAUNA generică per `provider`
+(`_state: dict[str, _ProviderRateState]`, nicio ramură hardcodată la
+API-Football) — extinderea la Soccer Football Info
+(`soccerfootballinfo_client.py`) nu a cerut nicio schimbare aici, doar un al
+doilea apelant real prin `RequestManager` (același header-e
+`x-ratelimit-*`, confirmate live 2026-07-27: 200/zi, 4/s). Orice provider
+viitor care trece prin `RequestManager` capătă automat același gating, fără
+cod nou în acest modul.
 ================================================================================
 """
 from __future__ import annotations
