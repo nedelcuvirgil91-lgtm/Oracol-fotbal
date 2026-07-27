@@ -1100,6 +1100,65 @@ def upsert_equivalence_evaluation(
         return False
 
 
+def get_migration_gate_status_row(gate_key: str, entity: str) -> dict | None:
+    """
+    Citește agregatele brute pentru un `(gate_key, entity)` din view-ul
+    `migration_gate_status` (migrarea 024/025) — folosit EXCLUSIV de
+    `migration_gate.py` (ADR-040, G3). View-ul nu decide PASS/FAIL/GRAY —
+    doar pregătește ingredientele (Nivel B); decizia rămâne în Python.
+    """
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("migration_gate_status")
+            .select("*")
+            .eq("gate_key", gate_key)
+            .eq("entity", entity)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning(
+            "[Queries] get_migration_gate_status_row failed pentru %s/%s: %s",
+            gate_key, entity, exc,
+        )
+        return None
+
+
+def list_recent_equivalence_evaluations(gate_key: str, entity: str, limit: int = 50) -> list[dict]:
+    """
+    Ultimele `limit` evaluări (orice stare, inclusiv insufficient_data/broken)
+    pentru un `(gate_key, entity)`, ordonate descrescător după `evaluated_at`
+    — folosit de `migration_gate.py` (`explain`) pentru agregarea
+    `root_cause_summary` peste istoricul recent. NU e sursa pentru Nivel B
+    (asta rămâne view-ul `migration_gate_status`).
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("equivalence_evaluations")
+            .select("*")
+            .eq("gate_key", gate_key)
+            .eq("entity", entity)
+            .order("evaluated_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning(
+            "[Queries] list_recent_equivalence_evaluations failed pentru %s/%s: %s",
+            gate_key, entity, exc,
+        )
+        return []
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # ML STATUS
 # ════════════════════════════════════════════════════════════════════════════
