@@ -93,6 +93,23 @@ Guvernanța (ADR-uri, documente Frozen, promovare manuală) e tratată ca avanta
 - **Canonical Feature Ownership (ADR-036 / D3.5, COMPLETED 2026-07-20)**: fiecare coloană canonică din `match_history` are un owner unic de scriere — `run_backfill` pentru `FEATURE_COLUMNS` (+ import pentru `home_elo`/`away_elo`), `sync_results` pentru `actual_*`, `_cache_prediction` doar pentru ieșirile de predicție. Prediction Engine NU scrie niciodată feature-uri ML sau rezultate; garda AST `tests/test_canonical_feature_ownership.py` impune asta. RPC `upsert_match_canonical` rămâne contract generic. Niciun cod nou nu scrie o coloană cu owner existent.
 - **Proiectul Supabase conectat e producție reală, nu sandbox** — `execute_sql`/`apply_migration` scriu direct, fără preview automat. Nicio migrare fără să fi arătat utilizatorului SQL-ul exact înainte de rulare.
 
+## Regulile pentru chei API și provideri externi (aprobate explicit, 2026-07-27; validate live prin migrarea API-Football, 2026-07-27)
+
+Cheile API sunt tratate ca infrastructură critică — nu ca detalii de configurare, nu ca ceva ce se rotește sau se înlocuiește „din mers".
+
+- **Niciun secret, cheie API, provider sau variabilă de mediu nu se șterge sau se înlocuiește fără un audit scris al utilizării** (tabel: Provider / Variabilă / Folosită? / Unde exact / Poate fi eliminată?) **și aprobarea explicită a proprietarului produsului.** Nicio „curățenie preventivă".
+- **Regula 1 — proces obligatoriu de migrare a unei chei**, fără excepție, pas cu pas, fiecare pas aprobat separat:
+  1. cheia nouă se adaugă ca secret **separat**, temporar (ex. `<PROVIDER>_KEY_NEW`) — niciodată suprascriind cheia activă;
+  2. se validează autentificarea cu cheia nouă;
+  3. se validează endpoint-urile relevante cu cheia nouă;
+  4. se compară răspunsurile cu ce așteaptă implementarea existentă (parsere, forme de date, ID-uri);
+  5. abia după validare completă se poate schimba providerul activ către cheia nouă;
+  6. cheia veche rămâne disponibilă ca fallback până la aprobarea explicită a proprietarului produsului — **excepție documentată**: dacă cheia veche e deja suspendată/blocată de provider (caz real, API-Football, 2026-07-27), acest pas devine inaplicabil prin forța faptelor, nu se omite din neglijență — se notează explicit motivul în CHANGELOG;
+  7. eliminarea cheii vechi se face doar după un audit separat, dedicat, nu ca parte a pasului 5.
+- **Regula 2 — zero regresii funcționale**: nu e suficient ca o cheie/provider nouă „să răspundă". Trebuie demonstrat că produce aceleași date, aceleași ID-uri, aceleași mapping-uri, și că nu schimbă comportamentul Oracle Engine, Predictorului sau ML. Orice diferență găsită = cheia nouă NU devine activă.
+- **Validarea unei chei noi se face printr-un POC izolat, temporar** (nu importă niciodată `key_manager.py` sau modulul providerului activ, nu citește niciodată variabila de mediu a cheii vechi, nu modifică workflow-uri existente, nu e importat de niciun cod de producție, rulează doar `workflow_dispatch` manual) — comparația structurală se face contra formei STATICE așteptate de parserul de producție (citată exact, cu linie sursă), nu contra unui al doilea apel live pe cheia veche. POC-ul se șterge din cod după închiderea migrării — dovada rămâne în istoricul rulărilor GitHub Actions + CHANGELOG, nu ca infrastructură vie permanentă.
+- **Nu se presupune niciodată că o cheie/provider nou e „mai bun" doar pentru că e nou.** Sistemul funcțional existent rămâne activ până când cel nou dovedește, prin teste și audit, că îl poate înlocui fără regresii — regulă valabilă pentru orice provider extern, nu doar API-Football.
+
 ## Regulile testelor
 
 - `pytest tests/` trebuie să rămână verde — 82 de teste confirmate, fără dependință de rețea.
