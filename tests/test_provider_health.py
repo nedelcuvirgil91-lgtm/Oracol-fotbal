@@ -168,12 +168,70 @@ def test_aggregation_is_deterministic_across_repeated_calls():
     assert all(r == results[0] for r in results)
 
 
-def test_provider_health_has_no_timestamp_fields():
-    """Regresie directa impotriva reintroducerii last_success/last_failure -
-    ProviderHealth descrie starea CURENTA, nu istoricul."""
+def test_provider_health_exposes_last_success_and_last_failure():
+    """[ADR-041 Faza 2, Sprint 1.1 #1] Decizie arhitecturală răsturnată
+    explicit față de PR5 (ADR-034): last_success/last_failure NU mai sunt
+    tratate ca "istoric" incompatibil cu "sănătate curentă" — sunt ele
+    însele fapte observate curente ("ultima dată când a mers"), exact
+    tiparul deja folosit de consecutive_failures. Coloanele existau deja în
+    provider_metrics (scrise de record_provider_call), doar neexpuse până
+    acum — zero migrare."""
     field_names = set(ProviderHealth.__dataclass_fields__.keys())
-    assert "last_success" not in field_names
-    assert "last_failure" not in field_names
+    assert "last_success" in field_names
+    assert "last_failure" in field_names
+
+
+def test_last_success_and_last_failure_are_none_with_no_rows():
+    reg = _registry()
+    source = _FakeMetricsSource({})
+    health = get_provider_health("alpha", registry=reg, metrics_source=source)
+    assert health.last_success is None
+    assert health.last_failure is None
+
+
+def test_last_success_and_last_failure_pass_through_single_row():
+    reg = _registry()
+    rows = {"alpha": [
+        ProviderMetricsRow(endpoint="fixtures", calls=3, errors=1, consecutive_failures=0,
+                            avg_latency_ms=100.0,
+                            last_success="2026-07-27T10:00:00+00:00",
+                            last_failure="2026-07-26T09:00:00+00:00"),
+    ]}
+    source = _FakeMetricsSource(rows)
+    health = get_provider_health("alpha", registry=reg, metrics_source=source)
+    assert health.last_success == "2026-07-27T10:00:00+00:00"
+    assert health.last_failure == "2026-07-26T09:00:00+00:00"
+
+
+def test_last_success_and_last_failure_take_most_recent_across_endpoints():
+    reg = _registry()
+    rows = {"alpha": [
+        ProviderMetricsRow(endpoint="fixtures", calls=1, errors=0, consecutive_failures=0,
+                            avg_latency_ms=None,
+                            last_success="2026-07-25T10:00:00+00:00", last_failure=None),
+        ProviderMetricsRow(endpoint="odds", calls=1, errors=1, consecutive_failures=1,
+                            avg_latency_ms=None,
+                            last_success="2026-07-27T08:00:00+00:00",
+                            last_failure="2026-07-27T09:00:00+00:00"),
+    ]}
+    source = _FakeMetricsSource(rows)
+    health = get_provider_health("alpha", registry=reg, metrics_source=source)
+    assert health.last_success == "2026-07-27T08:00:00+00:00"  # cel mai recent, nu primul rand
+    assert health.last_failure == "2026-07-27T09:00:00+00:00"
+
+
+def test_last_success_is_none_when_only_last_failure_present():
+    """Provider care a eșuat mereu — niciun succes încă."""
+    reg = _registry()
+    rows = {"alpha": [
+        ProviderMetricsRow(endpoint="fixtures", calls=2, errors=2, consecutive_failures=2,
+                            avg_latency_ms=None,
+                            last_success=None, last_failure="2026-07-27T09:00:00+00:00"),
+    ]}
+    source = _FakeMetricsSource(rows)
+    health = get_provider_health("alpha", registry=reg, metrics_source=source)
+    assert health.last_success is None
+    assert health.last_failure == "2026-07-27T09:00:00+00:00"
 
 
 def test_provider_health_is_frozen():

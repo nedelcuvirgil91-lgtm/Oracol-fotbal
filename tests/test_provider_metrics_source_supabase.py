@@ -28,6 +28,43 @@ def test_get_metrics_rows_filters_by_provider_id(monkeypatch):
     assert {r.endpoint for r in rows} == {"fixtures", "odds"}
 
 
+def test_get_metrics_rows_passes_through_last_success_and_last_failure(monkeypatch):
+    """[ADR-041 Faza 2, Sprint 1.1 #1] Coloanele existau deja în raspunsul
+    Supabase (.select("*")) — doar acum sunt mapate in ProviderMetricsRow."""
+    def _fake_get_provider_metrics():
+        return [
+            {"provider": "sportapi", "endpoint": "fixtures", "calls": 10, "errors": 1,
+             "consecutive_failures": 0, "avg_latency_ms": 120.0,
+             "last_success": "2026-07-27T10:00:00+00:00", "last_failure": None},
+        ]
+
+    import supabase_client as _sb
+    monkeypatch.setattr(_sb, "get_provider_metrics", _fake_get_provider_metrics)
+
+    source = SupabaseProviderMetricsSource()
+    rows = source.get_metrics_rows("sportapi")
+    assert rows[0].last_success == "2026-07-27T10:00:00+00:00"
+    assert rows[0].last_failure is None
+
+
+def test_get_metrics_rows_defaults_last_success_failure_to_none_when_missing(monkeypatch):
+    """Randuri vechi, scrise inainte ca aceste coloane sa existe — degradare
+    gratioasa, niciodata KeyError."""
+    def _fake_get_provider_metrics():
+        return [
+            {"provider": "sportapi", "endpoint": "fixtures", "calls": 10, "errors": 1,
+             "consecutive_failures": 0, "avg_latency_ms": 120.0},
+        ]
+
+    import supabase_client as _sb
+    monkeypatch.setattr(_sb, "get_provider_metrics", _fake_get_provider_metrics)
+
+    source = SupabaseProviderMetricsSource()
+    rows = source.get_metrics_rows("sportapi")
+    assert rows[0].last_success is None
+    assert rows[0].last_failure is None
+
+
 def test_get_metrics_rows_empty_list_for_unknown_provider(monkeypatch):
     import supabase_client as _sb
     monkeypatch.setattr(_sb, "get_provider_metrics", lambda: [])

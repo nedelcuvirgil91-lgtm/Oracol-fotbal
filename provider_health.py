@@ -19,11 +19,18 @@ lanțul strict de dependință:
     provider_health -> provider_metrics_source -> provider_metrics_source_supabase
 
 Agregare STRICT determinist funcțională: aceeași listă de
-ProviderMetricsRow produce mereu exact același ProviderHealth. Fără
-timestamp-uri (niciun last_success/last_failure — acelea sunt istoric, nu
-"sănătate curentă"), fără side effects, fără cache intern, fără
-actualizări de stare. O simplă funcție pură de agregare peste datele
-citite la momentul apelului.
+ProviderMetricsRow produce mereu exact același ProviderHealth. Fără side
+effects, fără cache intern, fără actualizări de stare — o simplă funcție
+pură de agregare peste datele citite la momentul apelului.
+
+[ADAUGAT ADR-041 Faza 2, Sprint 1.1 #1] `last_success`/`last_failure` SUNT
+acum expuse (cel mai recent, pe toate endpoint-urile unui provider) — nu
+mai sunt tratate ca "istoric" incompatibil cu "sănătate curentă": sunt ele
+însele stare curentă ("ultima dată când a mers"/"ultima dată când n-a
+mers"), exact tipul de fapt observat pe care acest modul îl expune deja
+pentru alte câmpuri (`consecutive_failures`). Agregarea rămâne strict
+determinist funcțională — `max()` lexicografic pe string-uri ISO 8601 UTC,
+fără parsare la `datetime`, fără citire a ceasului (Regula de Aur #4).
 ================================================================================
 """
 from __future__ import annotations
@@ -44,6 +51,11 @@ class ProviderHealth:
     consecutive_failures: int
     total_calls: int
     total_errors: int
+    # [ADAUGAT ADR-041 Faza 2, Sprint 1.1 #1] cel mai recent succes/eșec, pe
+    # toate endpoint-urile providerului — string ISO 8601 UTC, sau None daca
+    # nu s-a întâmplat încă niciodată.
+    last_success: str | None = None
+    last_failure: str | None = None
 
 
 def _aggregate_rows(rows: list[ProviderMetricsRow]) -> tuple[int, int, int, float | None]:
@@ -63,6 +75,15 @@ def _aggregate_rows(rows: list[ProviderMetricsRow]) -> tuple[int, int, int, floa
         avg_latency_ms = None
 
     return total_calls, total_errors, consecutive_failures, avg_latency_ms
+
+
+def _latest_timestamp(values: list[str | None]) -> str | None:
+    """Cel mai recent timestamp ISO 8601 UTC dintr-o listă (poate conține
+    `None`) — comparație lexicografică, validă pentru ISO 8601 cu format
+    consistent (exact ce scrie `record_provider_call()`, `datetime.now
+    (timezone.utc).isoformat()`). `None` dacă toate valorile sunt `None`."""
+    present = [v for v in values if v is not None]
+    return max(present) if present else None
 
 
 def _quota_remaining_pct(registry: ProviderRegistry, provider_id: str) -> float | None:
@@ -105,4 +126,6 @@ def get_provider_health(
         consecutive_failures=consecutive_failures,
         total_calls=total_calls,
         total_errors=total_errors,
+        last_success=_latest_timestamp([row.last_success for row in rows]),
+        last_failure=_latest_timestamp([row.last_failure for row in rows]),
     )

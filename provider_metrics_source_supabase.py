@@ -38,6 +38,11 @@ class SupabaseProviderMetricsSource(ProviderMetricsSource):
                 errors=row.get("errors", 0) or 0,
                 consecutive_failures=row.get("consecutive_failures", 0) or 0,
                 avg_latency_ms=row.get("avg_latency_ms"),
+                # [ADAUGAT ADR-041 Faza 2, Sprint 1.1 #1] coloane deja scrise
+                # de record_provider_call(), fara migrare noua — doar citite
+                # pentru prima data aici.
+                last_success=row.get("last_success"),
+                last_failure=row.get("last_failure"),
             )
             for row in raw_rows
             if row.get("provider") == provider_id

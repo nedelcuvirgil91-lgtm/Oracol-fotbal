@@ -32,13 +32,22 @@ from dataclasses import dataclass
 class ProviderMetricsRow:
     """O linie bruta de metrici, per (provider, endpoint) — asa cum sunt
     stocate azi in tabela provider_metrics (vezi supabase_client.py,
-    record_provider_call/get_provider_metrics). Fara last_success/
-    last_failure — Health Monitor lucreaza cu stare curenta, nu istoric."""
+    record_provider_call/get_provider_metrics).
+
+    [ADAUGAT ADR-041 Faza 2, Sprint 1.1 #1] `last_success`/`last_failure` —
+    coloane deja scrise de `record_provider_call()` (ISO 8601 UTC, sau
+    `None` daca nu s-a intamplat inca), doar neexpuse pana acum prin acest
+    port. Ramase string-uri brute la acest nivel (nu `datetime`) — parsarea
+    e responsabilitatea consumatorului (ex. Health Score pe ferestre
+    24h/7zile, Sprint 1.1 #2), acest port ramane strict o oglinda fidela a
+    randului din baza de date, fara logica suplimentara."""
     endpoint: str
     calls: int
     errors: int
     consecutive_failures: int
     avg_latency_ms: float | None
+    last_success: str | None = None
+    last_failure: str | None = None
 
 
 class ProviderMetricsSource(ABC):
