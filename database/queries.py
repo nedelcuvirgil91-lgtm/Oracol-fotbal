@@ -1010,6 +1010,96 @@ def get_scheduled_fixture(home_team: str, away_team: str, kickoff_date: str) -> 
         return None
 
 
+def list_scheduled_fixtures(kickoff_date_from: str, kickoff_date_to: str) -> list[dict]:
+    """
+    Toate rândurile din `scheduled_fixtures` pentru o fereastră de date —
+    folosită EXCLUSIV de shadow-ul de comparație (R-Sync-7b,
+    `scheduled_fixtures_shadow.py`), pentru cardinalitate completă și
+    detectarea meciurilor „fantomă" (rânduri persistate fără corespondent
+    în calea live curentă) — imposibil de detectat prin lookup-uri punctuale
+    (`get_scheduled_fixture`, per meci live). Oracle Engine nu apelează
+    această funcție pentru servire (rămâne pe `get_matches_for_week()`
+    până la R-Sync-7c).
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("scheduled_fixtures")
+            .select("*")
+            .gte("kickoff_date", kickoff_date_from)
+            .lte("kickoff_date", kickoff_date_to)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning(
+            "[Queries] list_scheduled_fixtures failed pentru %s..%s: %s",
+            kickoff_date_from, kickoff_date_to, exc,
+        )
+        return []
+
+
+def upsert_equivalence_evaluation(
+    gate_key: str, entity: str, window_from: str, window_to: str,
+    live_count: int, scheduled_count: int, matched_count: int,
+    missing_scheduled_count: int, missing_live_count: int,
+    field_difference_count: int, provider_id_difference_count: int,
+    equivalence_state: str,
+    duplicate_key_count: int = 0, accepted_exception_count: int = 0,
+    equivalence_score: float | None = None,
+    provider_breakdown: dict | None = None, root_cause_summary: dict | None = None,
+    sample_missing_scheduled: list | None = None, sample_missing_live: list | None = None,
+    sample_field_differences: list | None = None, sample_provider_id_diffs: list | None = None,
+    run_id: int | None = None,
+) -> bool:
+    """
+    Owner unic de scriere pentru `equivalence_evaluations` (ADR-040) —
+    apelată EXCLUSIV prin `equivalence_governance.persist_equivalence_
+    evaluation()`, niciodată direct dintr-un hook de provider. Wrapper
+    subțire, zero logică de clasificare aici — scorul/starea sunt deja
+    calculate de apelant.
+
+    Istoric IMUABIL, append-only — `upsert` cu `on_conflict` pe UNIQUE
+    (gate_key, entity, window_to, matched_count) + `ignore_duplicates=True`
+    => ON CONFLICT DO NOTHING (migrarea 024), tipar identic cu
+    `record_champion_health_evaluation` (`supabase_client.py`).
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("equivalence_evaluations").upsert({
+            "gate_key": gate_key, "entity": entity,
+            "window_from": window_from, "window_to": window_to,
+            "live_count": live_count, "scheduled_count": scheduled_count,
+            "matched_count": matched_count,
+            "missing_scheduled_count": missing_scheduled_count,
+            "missing_live_count": missing_live_count,
+            "duplicate_key_count": duplicate_key_count,
+            "field_difference_count": field_difference_count,
+            "provider_id_difference_count": provider_id_difference_count,
+            "accepted_exception_count": accepted_exception_count,
+            "equivalence_score": equivalence_score,
+            "equivalence_state": equivalence_state,
+            "provider_breakdown": provider_breakdown or {},
+            "root_cause_summary": root_cause_summary or {},
+            "sample_missing_scheduled": sample_missing_scheduled or [],
+            "sample_missing_live": sample_missing_live or [],
+            "sample_field_differences": sample_field_differences or [],
+            "sample_provider_id_diffs": sample_provider_id_diffs or [],
+            "run_id": run_id,
+        }, on_conflict="gate_key,entity,window_to,matched_count", ignore_duplicates=True).execute()
+        return True
+    except Exception as exc:
+        logger.warning(
+            "[Queries] upsert_equivalence_evaluation failed pentru %s/%s @ %s: %s",
+            gate_key, entity, window_to, exc,
+        )
+        return False
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # ML STATUS
 # ════════════════════════════════════════════════════════════════════════════

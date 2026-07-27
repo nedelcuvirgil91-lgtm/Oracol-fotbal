@@ -1433,6 +1433,7 @@ class FootballOracleAPI:
         matches = self._attach_odds(matches)
         matches.sort(key=lambda m: m.get("kickoff_utc", ""))
         self._shadow_evaluate_selection_engine(comps, matches)
+        self._shadow_evaluate_scheduled_fixtures(matches, d_from, d_to)
         self._cset(cache_key, matches); return matches
 
     def _shadow_evaluate_selection_engine(self, comps: list[str], matches: list[dict]) -> None:
@@ -1463,6 +1464,59 @@ class FootballOracleAPI:
                 shadow_recorder.record_shadow_recommendation(recommendation, shadow_run_id)
         except Exception as exc:
             logger.debug("[SelectionEngineShadow] evaluare shadow eșuată: %s", exc)
+
+    def _shadow_evaluate_scheduled_fixtures(self, matches: list[dict], d_from: str, d_to: str) -> None:
+        """[ADAUGAT] R-Sync-7b (ADR-039/ADR-040) — efect secundar, STRICT
+        observațional. Nu modifică niciodată `matches` (doar îl citește,
+        deja finalizat) — nu poate influența valoarea de retur a
+        get_matches_for_week(). Nu face nimic (return imediat) dacă
+        scheduled_fixtures_shadow_enabled=False (implicit, North Star #3).
+
+        [G2, ADR-040, principiul 2 — hook FOARTE SUBȚIRE, decizie explicită
+        proprietar produs] Doar: verifică flag-ul, citește scheduled_fixtures,
+        apelează evaluatorul, persistă rezultatul. Zero SQL, zero logică de
+        clasificare aici — trăiesc în `scheduled_fixtures_shadow.py`
+        (evaluator pur) și `equivalence_governance.py` (generic).
+
+        [G2, principiul 6 — fail-safe, „shadow-ul observă, nu influențează"]
+        Orice eroare aici NU afectează niciodată `matches`/rezultatul
+        predictorului. Eșecul procesului (nu al conținutului evaluat — vezi
+        `equivalence_state='broken'` pentru asta) se înregistrează în
+        `automation_runs` (ADR-026), nu doar în log."""
+        try:
+            import scheduled_fixtures_shadow_config
+            if not scheduled_fixtures_shadow_config.is_enabled():
+                return
+
+            import automation_runs as ar
+            run_id = ar.write_run(
+                producer="ADR-040", process_type="equivalence_evaluation",
+                tier="T1", target_key=f"R-Sync-7b|scheduled_fixtures|{d_to}",
+            )
+            if run_id is not None:
+                ar.start_run(run_id)
+
+            try:
+                from database.queries import list_scheduled_fixtures
+                import equivalence_governance
+                import scheduled_fixtures_shadow
+
+                scheduled_rows = list_scheduled_fixtures(d_from, d_to)
+                report = scheduled_fixtures_shadow.evaluate(matches, scheduled_rows)
+                equivalence_governance.persist_equivalence_evaluation(
+                    gate_key="R-Sync-7b", entity="scheduled_fixtures", report=report,
+                    window_from=d_from, window_to=d_to, run_id=run_id,
+                )
+                if run_id is not None:
+                    ar.complete_run(run_id, summary={
+                        "live_count": report.live_count, "scheduled_count": report.scheduled_count,
+                    })
+            except Exception as inner_exc:
+                if run_id is not None:
+                    ar.fail_run(run_id, error_detail=str(inner_exc))
+                raise
+        except Exception as exc:
+            logger.error("[ScheduledFixturesShadow] evaluare shadow eșuată: %s", exc)
 
     def get_matches_for_date(self, target_date: str) -> list[dict]:
         return [m for m in self.get_matches_for_week(days_ahead=7)

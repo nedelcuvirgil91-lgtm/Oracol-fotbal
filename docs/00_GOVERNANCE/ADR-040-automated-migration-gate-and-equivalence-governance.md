@@ -191,6 +191,30 @@ Consumatori naturali ai `equivalence_evaluations`/`migration_gate`, neproiectaț
 
 Scop explicit al acestei liste: peste șase luni, nimeni să nu întrebe „de ce am construit toate astea?" — infrastructura generică (Principiul 2) există special ca să le servească pe toate, nu doar `scheduled_fixtures`.
 
+## Validare G1/G2 (evidență live, nu doar concluzie)
+
+**G1** — migrarea 024 (`equivalence_evaluations` + view `migration_gate_status`) aplicată pe producție (`Prediction`), verificată pre/post-apply (schema, FK, RLS, view interogabil), confirmată în `list_migrations`. Snapshot de schemă salvat (`docs/00_GOVERNANCE/schema-snapshots/2026-07-27_post_migration_024.md`).
+
+**G2** — implementare completă: `scheduled_fixtures_shadow.py` (evaluator pur, fără I/O — verificat prin gardă AST dedicată, `test_evaluator_has_no_io_or_logging_dependencies`), `equivalence_root_cause.py` (clasificare extensibilă prin dicționar), `equivalence_governance.py` (generic, entity-agnostic — testat cu un raport-fake, nu doar cu `ScheduledFixturesShadowReport`, ca dovadă de reutilizabilitate), `database.queries.upsert_equivalence_evaluation()` (owner unic de scriere), hook subțire în `oracle_api.py` (verifică flag → citește → evaluează → persistă, cu `automation_runs` pentru fail-safe). 66 teste noi/rescrise, suita completă rămâne verde (1152 passed, aceleași 3 eșecuri pre-existente neschimbate).
+
+**Demonstrație live, cerută explicit** (4 stări + 1 caz invalid, `gate_key='R-Sync-7b-demo'`, șters imediat după verificare — decizie explicită proprietar produs: „nu vreau date sintetice permanente într-o tabelă de guvernanță"):
+
+| Stare | live/scheduled/matched | Scor | provider_breakdown | root_cause_summary |
+|---|---|---|---|---|
+| GREEN | 40/40/40 | 1.0 | freelivefootball:25, the-odds-api:15, zero diff | {} |
+| YELLOW | 35/35/35 | 1.0 | football-data.org:35, zero diff neacceptat | {VENUE_PRIORITY: 1} |
+| RED | 32/30/28 | 0.875 | freelivefootball:18 (id_diff:1), the-odds-api:10 | {PROVIDER_TIMEOUT:4, UNKNOWN:2, MISSING_PROVIDER_ID:1} |
+| GRAY (insufficient_data) | 12/12/10 | NULL | thesportsdb:10 | {PROVIDER_TIMEOUT:2} |
+
+Toate 4 confirmate prin `SELECT` direct din `equivalence_evaluations`, valorile scor/stare produse de funcția REALĂ `equivalence_governance.classify_evaluation()` (rulată local, nu calculate de mână). View-ul `migration_gate_status` verificat pe același set: `total_matched_eligible=103` (40+35+28, GRAY corect exclus), `eligible_row_count=3`, `min_provider_matched=25` (MIN peste toți providerii eligibili), `current_health='green'`.
+
+**Două găsiri reale, de la validarea live, nu prezumate**:
+
+1. **Ambiguitate de tie-break în `current_health`**: cele 3 rânduri eligibile din demonstrație au `evaluated_at` identic (aceeași instrucțiune INSERT) — `DISTINCT ON (gate_key, entity) ... ORDER BY evaluated_at DESC` nu are un al doilea criteriu determinist pentru egalitate. În producție reală (o rulare/zi) improbabil să apară, dar rămâne o slăbiciune de proiectare. **Recomandare pentru G3**: adăugare `id DESC` ca tiebreaker secundar în `ORDER BY`.
+2. **Schema acceptă silențios date imposibile** — testat explicit, cerut de proprietarul produsului: `INSERT` cu `live_count=10, matched_count=300` a reușit fără nicio eroare (niciun `CHECK` care impune `matched_count <= live_count` și `matched_count <= scheduled_count`). Migrarea 024 nu are acest invariant. **Recomandare, neaplicată aici** (cere aprobare separată): migrare 025, `CHECK (matched_count <= live_count AND matched_count <= scheduled_count)`.
+
+Cleanup confirmat: `DELETE FROM equivalence_evaluations WHERE gate_key='R-Sync-7b-demo'` (5 rânduri, inclusiv cazul invalid), apoi `SELECT count(*)` → 0, atât pentru `gate_key='R-Sync-7b-demo'` cât și pentru tabela întreagă.
+
 ## Consecințe
 
 - **Pozitive**: R-Sync-7c devine imposibil de început fără dovadă automată, persistentă, re-verificabilă. A2 (cea mai gravă găsire a auditului) se repară prin propria primă utilizare a mecanismului (G1). Infrastructura servește orice etapă viitoare fără schemă nouă.
