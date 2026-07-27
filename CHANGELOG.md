@@ -261,6 +261,42 @@ exclusiv fluxul de date de intrare.
   pentru unicitatea punctelor de citire, și verificare live pe date reale
   (GitHub Actions). Zero regresii pe cele 9 ligi.
 
+## [4.2.0] — 2026-07-27
+
+Merge în `main` (PR #41, commit `6a39461`) — 21 commit-uri, trei arcuri de lucru, fiecare închis cu disciplina audit → design → implementare → teste → auto-audit → aprobare explicită → commit.
+
+### Adăugat (Universal Synchronization Architecture — ADR-038/039, R4.1, R-Sync-1→7a)
+- Migrarea accesului la provideri externi într-un tipar exclusiv Sync-Layer (`Provider → Sync Adapter → Normalize → Validate → Persist → Supabase`) — Oracle Engine/Prediction Engine/ML nu mai apelează niciun provider extern direct, pentru domeniile migrate.
+- R4.1 — Request Manager, Rate Limit Manager, Coverage Cache, Sync Orchestrator; eliminarea completă a cheilor de provider hardcodate.
+- R-Sync-1 — interfața `SyncAdapter` formalizată.
+- R-Sync-2 — API-Football (accidentări/antrenori).
+- R-Sync-3 — football-data.org (formă/standings).
+- R-Sync-4 — ELO național (eloratings.net) — corectat pe parcurs dintr-o clasificare greșită inițială (TheSportsDB), găsită și reparată prin dovadă de cod live, nu presupunere.
+- R-Sync-5 — sincronizare prognoză meteo.
+- R-Sync-6 — formă FreeLF + fallback H2H/formă Odds API.
+- R-Sync-7a — fundația Universal Match Discovery Layer: `scheduled_fixtures` + RPC `FixtureMergePolicy` field-level (migrarea 023), validat live pe producție, inclusiv un bug real de concurență găsit și reparat în timpul validării (`INSERT ... ON CONFLICT DO NOTHING` + fallback de merge).
+- R-Sync-7b — **oprit deliberat la etapa de design/audit** (§6f/§6g din auditul de sincronizare) după ce a fost găsit un defect structural chiar în mecanismul lui de shadow logging — vezi ADR-040 mai jos.
+
+### Adăugat (ADR-040 — Automated Migration Gate & Equivalence Governance)
+- Escaladat dintr-un bug (validarea shadow a R-Sync-7b producea dovezi vizibile doar dacă cineva citea log-uri manual) într-o infrastructură de guvernanță generică, reutilizabilă — `equivalence_evaluations` + view-ul `migration_gate_status` + `migration_gate.py` (`status`/`explain`/`attest`/`verify`).
+- Validat live pe producție cu exemple reale GREEN/YELLOW/RED/GRAY plus un caz intenționat invalid (prins de o migrare ulterioară care adaugă constrângeri `CHECK` de integritate).
+- `scheduled_fixtures_shadow_enabled` rămâne `False` — acest merge construiește și demonstrează poarta, nu activează comparația shadow live a R-Sync-7b.
+
+### Adăugat (Data Warehouse — Etapa A/B)
+- `docs/05_DATA_AUDIT/DATA_WAREHOUSE_CURRENT_STATE_2026-07-27.md` — consolidează 4 audituri preexistente în loc să le dubleze; găsirea centrală: 6 componente Sync Layer complet construite au zero rânduri pentru că `sync/run_daily.py` nu le apelează niciodată (gol de orchestrare, nu de infrastructură lipsă).
+- `docs/05_DATA_AUDIT/DATA_WAREHOUSE_ARCHITECTURE_ETAPA_B_2026-07-27.md` — document de arhitectură viu, 11 domenii funcționale (Match Statistics, Team Form, Lineups, Injuries, Referees, Weather, Betting Markets, Team Strength, Historical Performance, Player Statistics, Competition Metadata), fiecare câmp cu owner/fallback/politică de merge/consumator, plus Data Freshness, Data Lineage, matrice P0-P3 cu Business Impact.
+
+### Guvernanță
+- ADR-038, ADR-039 — înghețate (Frozen).
+- ADR-040 — introdus ca PROPOSED (devine Frozen abia după G4-G6, puse deliberat în așteptare).
+- Regulă nouă de proces, adoptată de proprietarul produsului: `main` e sursa oficială de adevăr; branch-urile sunt spații temporare; fiecare etapă aprobată urmează commit → push → PR → merge (după aprobare explicită) → confirmare restore point → ștergere branch — o etapă nu se consideră închisă până la confirmarea tuturor acestor pași.
+
+### Cunoscut, neschimbat în această versiune
+- **Zero schimbare de comportament live** — toate flag-urile noi implicit `False`; `oracle_engine.py` citește exact aceleași surse ca înainte de acest merge.
+- Sync Layer (R-Sync-3→7a) rămâne neorchestrat — prioritatea #1 din Etapa A, neexecutată încă.
+- Cele 8 tabele fără RLS semnalate în auditul din 13 iulie rămân nerezolvate (preexistente acestui merge).
+- Ștergerea branch-ului remote `claude/continua-faza-1-adr5-o52jat` a eșuat (HTTP 403, politică de proxy a sesiunii pe operații distructive remote) — branch-ul local a fost șters; cel remote rămâne, complet fuzionat, inert.
+
 ## [4.1.0] — 2026-07-17
 
 ### Adăugat (Learning Core)
