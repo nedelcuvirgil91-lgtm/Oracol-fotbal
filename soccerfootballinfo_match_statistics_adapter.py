@@ -50,11 +50,24 @@ def _float_or_none(value: Any) -> float | None:
 
 
 def _team_stats(team: dict) -> dict:
-    shoots = team.get("shoots") or {}
-    corners = team.get("corners") or {}
-    fouls = team.get("fouls") or {}
-    attacks = team.get("attacks") or {}
-    xg = team.get("xG") or {}
+    """[REPARAT Sprint 3, Prioritatea 1 — verificat live, 2026-07-28]
+    Payload-ul REAL (`api_cache.soccerfootballinfo_match_detail`, meci
+    Tottenham 1-0 Everton, 2026-05-24) are toate câmpurile de mai jos
+    imbricate sub `team["stats"]`, NU direct pe `team` — assumpția
+    anterioară (nicăieri verificată contra unui payload real în afara
+    singurului meci citat în docstring-ul modulului) era greșită. Bug
+    confirmat prin dovadă directă: 147 apeluri `matches/view/full/` reușite
+    (HTTP 200, `provider_call_log`) în rularea de catch-up Sprint 3, 0
+    rânduri scrise — `_team_stats()` extrăgea mereu dict-uri goale din
+    `team.get("shoots")`/`team.get("xG")`/etc., toate `_CORE_FIELDS` None,
+    `validate()` excludea corect (dar orb) fiecare rând. `lineup`/`manager`
+    rămân la nivelul de top al lui `team` (confirmate corect, neschimbate)."""
+    stats = team.get("stats") or {}
+    shoots = stats.get("shoots") or {}
+    corners = stats.get("corners") or {}
+    fouls = stats.get("fouls") or {}
+    attacks = stats.get("attacks") or {}
+    xg = stats.get("xG") or {}
 
     # xG live e mai precis (recalculat pe parcursul meciului) — kickoff e
     # doar estimarea pre-meci, folosit strict ca fallback dacă live lipsește.
@@ -63,7 +76,7 @@ def _team_stats(team: dict) -> dict:
         xg_value = xg.get("kickoff")
 
     return {
-        "possession": _int_or_none(team.get("possession")),
+        "possession": _int_or_none(stats.get("possession")),
         "xg_actual": _float_or_none(xg_value),
         "shots": _int_or_none(shoots.get("t")),
         "shots_on_target": _int_or_none(shoots.get("on")),
@@ -73,8 +86,8 @@ def _team_stats(team: dict) -> dict:
         "offsides": _int_or_none(attacks.get("o_s")),
         "yellow_cards": _int_or_none(fouls.get("y_c")),
         "red_cards": _int_or_none(fouls.get("r_c")),
-        "penalties": _int_or_none(team.get("penalties")),
-        "substitutions": _int_or_none(team.get("substitutions")),
+        "penalties": _int_or_none(stats.get("penalties")),
+        "substitutions": _int_or_none(stats.get("substitutions")),
     }
 
 

@@ -33,22 +33,34 @@ _DEFAULT = object()
 
 
 def _detail_payload():
+    """[REPARAT Sprint 3, Prioritatea 1 — verificat live, 2026-07-28]
+    Structura EXACTĂ a payload-ului real (`api_cache.
+    soccerfootballinfo_match_detail`, meci Tottenham 1-0 Everton,
+    2026-05-24, championship_id="eb57e70ef2e7077e" — England Premier
+    League): possession/xG/shoots/corners/fouls/attacks/penalties/
+    substitutions sunt TOATE imbricate sub `team["stats"]`, nu direct pe
+    `team`. `lineup`/`manager` rămân la nivelul de top (confirmate
+    corecte)."""
     return {
         "referee": {"name": "Istvan Kovacs"},
         "stadium": {"name": "National Arena"},
         "teamA": {
-            "possession": 58, "xG": {"live": 2.1, "kickoff": 1.4},
-            "shoots": {"t": 14, "on": 7, "off": 5},
-            "corners": {"t": 6}, "fouls": {"t": 9, "y_c": 2, "r_c": 0},
-            "attacks": {"o_s": 3}, "penalties": 1, "substitutions": 4,
+            "stats": {
+                "possession": 58, "xG": {"live": 2.1, "kickoff": 1.4},
+                "shoots": {"t": 14, "on": 7, "off": 5},
+                "corners": {"t": 6}, "fouls": {"t": 9, "y_c": 2, "r_c": 0},
+                "attacks": {"o_s": 3}, "penalties": 1, "substitutions": 4,
+            },
             "lineup": {"formation": "4-3-3", "starters": ["A", "B"]},
             "manager": {"name": "Nuno Campos"},
         },
         "teamB": {
-            "possession": 42, "xG": {"live": 0.8, "kickoff": 1.1},
-            "shoots": {"t": 8, "on": 3, "off": 4},
-            "corners": {"t": 2}, "fouls": {"t": 11, "y_c": 3, "r_c": 1},
-            "attacks": {"o_s": 1}, "penalties": 0, "substitutions": 3,
+            "stats": {
+                "possession": 42, "xG": {"live": 0.8, "kickoff": 1.1},
+                "shoots": {"t": 8, "on": 3, "off": 4},
+                "corners": {"t": 2}, "fouls": {"t": 11, "y_c": 3, "r_c": 1},
+                "attacks": {"o_s": 1}, "penalties": 0, "substitutions": 3,
+            },
             "lineup": {"formation": "4-4-2", "starters": ["C", "D"]},
             "manager": {"name": "Filipe Coelho"},
         },
@@ -116,7 +128,7 @@ def test_normalize_maps_full_field_set():
 
 def test_normalize_falls_back_to_kickoff_xg_when_live_missing():
     detail = _detail_payload()
-    detail["teamA"]["xG"] = {"kickoff": 1.4}
+    detail["teamA"]["stats"]["xG"] = {"kickoff": 1.4}
     adapter = _adapter(detail=detail)
     raw = adapter.fetch(_PARAMS)
     r = adapter.normalize(raw)[0]
