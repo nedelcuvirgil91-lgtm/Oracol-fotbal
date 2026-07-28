@@ -100,6 +100,13 @@ PIPELINE_STEPS: tuple[PipelineStep, ...] = (
     # real de cota API-Football (audit §5), activat ultimul dintre cele
     # ieftine/gratuite conform ordinii aprobate.
     PipelineStep("team_health"),
+    # [ADAUGAT Sprint 2, Etapa C — Data Quality] Odds API meciuri terminate
+    # recente — sursa canonica unica pentru forma echipe SI H2H (audit
+    # R-Sync-6, optiunea A), consumatorul de cota Odds API din cele 6.
+    # Ultimul din ordinea aprobata (cele doua provideri "serioase" ca
+    # cota — API-Football, Odds API — activate la final, izolabile usor
+    # daca apare o problema de consum).
+    PipelineStep("odds_recent_results"),
     PipelineStep("feature_update", depends_on=("history_sync",)),
     PipelineStep("shadow_evaluation", depends_on=("feature_update",)),
     PipelineStep("odds_persistence"),
@@ -369,6 +376,25 @@ def run(
         except Exception as exc:
             logger.error("[DailySync] sync_team_health failed: %s", exc)
             print(f"  ⚠️  Eroare la sync stare sănătate echipe: {exc}")
+
+    # ── (PIPELINE_STEPS: "odds_recent_results") ─────────────────────────────
+    # [ADAUGAT Sprint 2, Etapa C — Data Quality] Owner nou (Odds API /scores)
+    # pentru odds_api_recent_results — adaptor deja construit (R-Sync-6),
+    # niciodată programat până acum. Sursă canonică unică pentru formă
+    # echipe ȘI H2H (audit R-Sync-6, opțiunea A) — ultimul din cele 6
+    # sync-uri orfane activate, conform ordinii aprobate.
+    print("\n▶  Sincronizare rezultate recente (Odds API)...")
+    if dry_run:
+        print("  ℹ️  Sărit (dry run)")
+    else:
+        try:
+            from sync.sync_odds_recent_results import run as run_odds_recent_results
+            odds_recent_results = run_odds_recent_results()
+            ran = sum(1 for r in odds_recent_results if r.ran)
+            print(f"  ✅ {ran}/{len(odds_recent_results)} ligi sincronizate (Odds API)")
+        except Exception as exc:
+            logger.error("[DailySync] sync_odds_recent_results failed: %s", exc)
+            print(f"  ⚠️  Eroare la sync rezultate recente (Odds API): {exc}")
 
     # ── Pasul 3 (PIPELINE_STEPS: "feature_update", depends_on="history_sync") ──
     # [ADAUGAT — ADR-014] Completează implementarea ADR-004 ("Toate
