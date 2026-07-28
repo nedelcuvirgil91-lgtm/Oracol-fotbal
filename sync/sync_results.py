@@ -16,6 +16,29 @@ Flux:
      care se potrivesc cu home_team + away_team + kickoff_date
   3. Actualizează scorurile + marchează pentru backfill
   4. Calculează feature-urile ML pentru meciurile nou-completate
+
+[INVESTIGAT — audit Sprint 3, 2026-07-28] Romania SuperLiga (și, prin
+extensie, orice ligă în aceeași situație): football-data.org nu o acoperă
+(documentat) ȘI bridge-ul Odds API (a doua sursă, Sprint 0 Etapa 2) nu poate
+funcționa pentru ea — verificat live, `soccer_romania_1_liga` e marcat
+"dead" chiar de `FootballOracleAPI._validate_api_keys()` (nu apare în
+`/sports?all=true`, filtrat după `has_outrights`) — Odds API pur și simplu
+nu are piață de pariuri per meci pentru această ligă azi. Gol structural
+upstream, nu bug de cod (același tipar ca cel documentat pentru cupele
+europene, `mappings.py`, lângă `TSDB_TEAM_IDS`).
+
+Alternativă REALĂ, dar neconfirmată încă end-to-end: Soccer Football Info
+acoperă Romania SuperLiga (verificat live, Sprint 1) și are deja un rezultat
+real confirmat (Dinamo București 5-1 Universitatea Craiova, 2026-07-25,
+notă în `mappings.py`). O încercare de reverificare live (`matches/day/full`
+pentru 3 zile trecute) a întors 0 meciuri globale — inconcludent (posibil
+rate-limit din testarea repetată din aceeași sesiune, posibil endpoint-ul nu
+servește date istorice, nu confirmat care), NU o dovadă că sursa lipsește.
+Nu s-a implementat o a treia sursă (SFI) în acest sync fără o reverificare
+live curată, separată — următorul pas, dacă se reia: reverifică
+`matches/day/full`/rezolvarea match_id pentru un meci Romania SuperLiga deja
+confirmat, la distanță de alte teste SFI din aceeași fereastră (evită
+coliziunea de rate-limit), înainte de a extinde `sync_results.py`.
 ================================================================================
 """
 from __future__ import annotations
