@@ -51,6 +51,17 @@ jobs:
           # care-l folosesc (Pasul 5, odds/get_matches_for_week) — gol
           # pre-existent, nu introdus aici, semnalat separat utilizatorului.
           RAPIDAPI_KEY_FREELIVEFOOTBALL: ${{ secrets.RAPIDAPI_KEY_FREELIVEFOOTBALL }}
+          # [ADAUGAT Sprint 0 — Stabilizare] Cele 4 chei lipseau din acest
+          # workflow (găsit prin audit: toate sync-urile Sprint 2 rulau
+          # neautentificate în jobul nocturn — 401 pe oddsapi/freelivefootball,
+          # confirmat live în provider_call_log). Fără excepție, orice
+          # provider apelat de sync/run_daily.py trebuie să-și primească
+          # cheia aici — pipeline-ul nu se poate autentifica prin cache sau
+          # printr-un alt job.
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: |
           ARGS=""
           if [ "${{ github.event.inputs.skip_features }}" = "true" ]; then ARGS="$ARGS --no-features"; fi
