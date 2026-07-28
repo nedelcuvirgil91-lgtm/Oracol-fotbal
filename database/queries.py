@@ -282,6 +282,43 @@ def get_finished_matches_missing_stats(
         return []
 
 
+def get_matches_missing_results(days_back: int = 60, limit: int = 200) -> list[dict]:
+    """
+    [ADAUGAT Sprint 3, Pasul 1 — închidere retroactivă Feedback Loop]
+    Meciuri din trecut (kickoff_date < azi) fără NICIUN rezultat real încă
+    (`actual_result IS NULL`) — indiferent dacă au sau nu predicție salvată
+    (`prob_home_pred`), fiindcă orice rând fără rezultat blochează
+    permanent bucla Prediction → Result → Evaluation pentru acel meci.
+    Ținta reală a `sync/sync_results.py:fetch_results_from_
+    soccerfootballinfo()` — a treia sursă de rezultate reale, după
+    football-data.org și odds_api_recent_results, pentru ligile acoperite
+    de League Mapping v2 Soccer Football Info (Sprint 3, Prioritatea 1).
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        from datetime import date, timedelta
+        today = date.today()
+        date_from = (today - timedelta(days=days_back)).isoformat()
+        date_to = today.isoformat()
+        res = (
+            client.table("match_history")
+            .select("id,home_team,away_team,league,kickoff_date")
+            .is_("actual_result", "null")
+            .is_("superseded_by", "null")
+            .gte("kickoff_date", date_from)
+            .lt("kickoff_date", date_to)
+            .order("kickoff_date", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.error("[Queries] get_matches_missing_results failed: %s", exc)
+        return []
+
+
 def get_matches_by_league(league: str, limit: int = 100) -> list[dict]:
     """Returnează meciurile dintr-o ligă, ordonate descrescător după dată."""
     client = get_client()

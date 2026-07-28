@@ -201,6 +201,7 @@ def test_sync_yesterday_results_combines_both_sources(monkeypatch):
 
     monkeypatch.setattr(sr, "fetch_yesterday_results", lambda: fd_results)
     monkeypatch.setattr(sr, "fetch_results_from_odds_api_recent", lambda: odds_results)
+    monkeypatch.setattr(sr, "fetch_results_from_soccerfootballinfo", lambda: [])
 
     captured = {}
 
@@ -229,6 +230,7 @@ def test_sync_yesterday_results_survives_odds_bridge_failure(monkeypatch):
         raise RuntimeError("simulated failure")
 
     monkeypatch.setattr(sr, "fetch_results_from_odds_api_recent", _boom)
+    monkeypatch.setattr(sr, "fetch_results_from_soccerfootballinfo", lambda: [])
 
     captured = {}
 
@@ -242,3 +244,93 @@ def test_sync_yesterday_results_survives_odds_bridge_failure(monkeypatch):
 
     assert captured["results"] == fd_results
     assert result["updated"] == 1
+
+
+# ── fetch_results_from_soccerfootballinfo (Sprint 3, Pasul 1) ──
+
+class _FakeSfiResolver:
+    def __init__(self, match_ids: dict):
+        self._match_ids = match_ids
+        self.calls: list = []
+
+    def resolve(self, home_team, away_team, kickoff_date, league):
+        self.calls.append((home_team, away_team, kickoff_date, league))
+        return self._match_ids.get((home_team, away_team))
+
+
+class _FakeSfiClient:
+    def __init__(self, details: dict):
+        self._details = details
+        self.calls: list = []
+
+    def get_match_detail(self, match_id):
+        self.calls.append(match_id)
+        return self._details.get(match_id)
+
+
+def test_fetch_results_from_soccerfootballinfo_extracts_ended_matches(monkeypatch):
+    import database.queries as q
+    import soccerfootballinfo_event_resolver as ser
+    import soccerfootballinfo_client as sc
+
+    rows = [{"id": 1, "home_team": "England", "away_team": "DR Congo",
+             "league": "World Cup 2026", "kickoff_date": "2026-07-01"}]
+    monkeypatch.setattr(q, "get_matches_missing_results", lambda days_back=60: rows)
+
+    resolver = _FakeSfiResolver({("England", "DR Congo"): "match123"})
+    client = _FakeSfiClient({"match123": {
+        "status": "ENDED",
+        "teamA": {"score": {"f": 3}}, "teamB": {"score": {"f": 1}},
+    }})
+    monkeypatch.setattr(ser, "get_soccerfootballinfo_event_resolver", lambda: resolver)
+    monkeypatch.setattr(sc, "get_soccerfootballinfo_client", lambda: client)
+
+    results = sr.fetch_results_from_soccerfootballinfo()
+
+    assert len(results) == 1
+    r = results[0]
+    assert r["home_team"] == "England" and r["away_team"] == "DR Congo"
+    assert r["league"] == "World Cup 2026" and r["kickoff_date"] == "2026-07-01"
+    assert r["home_goals"] == 3 and r["away_goals"] == 1
+    assert r["actual_result"] == "H"
+    assert r["fd_id"] is None
+
+
+def test_fetch_results_from_soccerfootballinfo_skips_unresolved_match_id(monkeypatch):
+    import database.queries as q
+    import soccerfootballinfo_event_resolver as ser
+    import soccerfootballinfo_client as sc
+
+    rows = [{"id": 1, "home_team": "A", "away_team": "B",
+             "league": "E1 (necunoscuta SFI)", "kickoff_date": "2026-07-01"}]
+    monkeypatch.setattr(q, "get_matches_missing_results", lambda days_back=60: rows)
+    monkeypatch.setattr(ser, "get_soccerfootballinfo_event_resolver", lambda: _FakeSfiResolver({}))
+    monkeypatch.setattr(sc, "get_soccerfootballinfo_client", lambda: _FakeSfiClient({}))
+
+    assert sr.fetch_results_from_soccerfootballinfo() == []
+
+
+def test_fetch_results_from_soccerfootballinfo_skips_not_ended(monkeypatch):
+    import database.queries as q
+    import soccerfootballinfo_event_resolver as ser
+    import soccerfootballinfo_client as sc
+
+    rows = [{"id": 1, "home_team": "England", "away_team": "DR Congo",
+             "league": "World Cup 2026", "kickoff_date": "2026-07-01"}]
+    monkeypatch.setattr(q, "get_matches_missing_results", lambda days_back=60: rows)
+    resolver = _FakeSfiResolver({("England", "DR Congo"): "match123"})
+    client = _FakeSfiClient({"match123": {"status": "SCHEDULED"}})
+    monkeypatch.setattr(ser, "get_soccerfootballinfo_event_resolver", lambda: resolver)
+    monkeypatch.setattr(sc, "get_soccerfootballinfo_client", lambda: client)
+
+    assert sr.fetch_results_from_soccerfootballinfo() == []
+
+
+def test_fetch_results_from_soccerfootballinfo_returns_empty_on_exception(monkeypatch):
+    import database.queries as q
+
+    def _boom(days_back=60):
+        raise RuntimeError("simulated failure")
+
+    monkeypatch.setattr(q, "get_matches_missing_results", _boom)
+    assert sr.fetch_results_from_soccerfootballinfo() == []
