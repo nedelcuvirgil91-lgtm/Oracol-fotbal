@@ -1,7 +1,11 @@
 name: POC izolat — UDAL POC_SCRAPER_SOURCE_01 (WorldFootball + SofaScore, temporar)
 
 on:
-  workflow_dispatch:
+  push:
+    branches: [claude/sprint0-stabilizare-feedback-loop]
+    paths:
+      - ".github/workflows/poc_scraper_source_01_temp.yml"
+      - "scripts/_poc_scraper_source_01_temp.py"
 
 permissions:
   contents: write
