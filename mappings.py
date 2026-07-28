@@ -158,6 +158,17 @@ TEAM_ALIASES: dict[str, list[str]] = {
     # confirmat live, 15+ meciuri reale (ian-mai 2026) invizibile din
     # _build_profile() pentru echipa nouă. Unificate sub forma completă.
     "Csíkszereda Miercurea Ciuc": ["Csikszereda M. Ciuc"],
+    # [ADAUGAT — audit Sprint 3, 2026-07-28, al doilea val] Cerere explicită
+    # a proprietarului produsului: "verifică toate echipele din SuperLiga",
+    # nu doar Csíkszereda. Verificare sistematică pe TOATE cele 16 echipe
+    # curente (roster confirmat prin volumul de meciuri din ultimele 365
+    # zile) contra numelor folosite de meciurile sezonului nou (iulie 2026+)
+    # — găsite live încă 3 dedublări reale, IDENTICE ca tipar (nume vechi,
+    # din import istoric, vs. nume nou, folosit de discovery/TSDB azi):
+    "Argeș Pitești": ["FC Arges"],       # 153 meciuri reale (2021-2026) ascunse sub forma veche
+    "Oțelul Galați": ["Otelul"],          # 133 meciuri reale (2023-2026) ascunse sub forma veche
+    "Sepsi OSK": ["Sepsi Sf. Gheorghe"],  # 201 meciuri reale (2021-2025) ascunse sub forma veche
+    "Universitatea Cluj": ["U. Cluj"],    # 194 meciuri reale (2022-2026) ascunse sub forma veche
     # [ADAUGAT — audit Sprint 3, 2026-07-28] "HamKam" (fără cratimă) vs.
     # "Ham-Kam" — găsit prin verificare sistemică pentru dedublări similare
     # Csíkszereda; "Ham-Kam" e forma majoritară (50 vs. 34 rânduri).
