@@ -88,7 +88,7 @@ try:
         get_latest_team_elo, get_h2h_from_history, get_team_health,
         get_team_form_footballdata, get_national_team_elo, get_weather_forecast,
         get_team_form_freelf_snapshot, get_team_recent_form_oddsapi, get_h2h_from_odds_recent,
-        get_team_stats_tsdb,
+        get_team_stats_tsdb, get_freelf_h2h_snapshot,
     )
     DB_QUERIES_MODULE_AVAILABLE = True
 except ModuleNotFoundError:
@@ -618,15 +618,23 @@ class FootballOracleEngine:
                             home_c, away_c, db_h2h.meetings)
                 return db_h2h
 
-        event_id = match.get("_freelf_event_id")
-
-        if event_id:
+        # ── FreeLF H2H (ADR-039, R-Sync-9) ──────────────────────────────────
+        # Sync Layer only — citire STRICT din Supabase (freelf_h2h_snapshot,
+        # populată de sync/sync_h2h_freelf.py), niciodată apel live către
+        # provider. Identitate ORIENTATĂ prin nume canonice normalizate — nu
+        # mai necesită `_freelf_event_id` la citire (gate-ul vechi, eliminat
+        # — depindea de identificatorul de provider al meciului curent;
+        # sincronizarea folosește azi event_id-urile deja descoperite în
+        # scheduled_fixtures, R-Sync-7a).
+        if DB_QUERIES_MODULE_AVAILABLE:
+            home_c = normalize_team_name(home_name)
+            away_c = normalize_team_name(away_name)
             try:
-                freelf_h2h = self.api.get_h2h(int(event_id), home_name, away_name)
+                freelf_h2h = get_freelf_h2h_snapshot(home_c, away_c)
                 if freelf_h2h and freelf_h2h.get("meetings", 0) >= 1:
                     return H2HRecord(
-                        home_team      = normalize_team_name(home_name),
-                        away_team      = normalize_team_name(away_name),
+                        home_team      = home_c,
+                        away_team      = away_c,
                         meetings       = freelf_h2h["meetings"],
                         home_wins      = freelf_h2h["home_wins"],
                         draws          = freelf_h2h["draws"],
@@ -638,7 +646,7 @@ class FootballOracleEngine:
                         summary        = freelf_h2h["summary"],
                     )
             except Exception as exc:
-                logger.warning("[H2H] FreeLF failed for event %s: %s", event_id, exc)
+                logger.warning("[H2H] FreeLF Supabase read failed for %s vs %s: %s", home_c, away_c, exc)
 
         # ── Odds API meciuri recente (ADR-039, R-Sync-6) ───────────────────
         # Sync Layer only — citire STRICT din Supabase

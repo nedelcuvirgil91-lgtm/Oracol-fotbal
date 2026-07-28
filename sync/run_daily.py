@@ -101,6 +101,12 @@ PIPELINE_STEPS: tuple[PipelineStep, ...] = (
     # deblocheaza acest sync, sunt scrise DOAR de TsdbFixtureAdapter, in
     # acel pas.
     PipelineStep("team_stats_tsdb", depends_on=("scheduled_fixtures",)),
+    # [ADAUGAT Sprint 3, Pasul 3 — R-Sync-9] H2H Free Live Football —
+    # inlocuieste ultimul apel live ramas, eliminabil, din
+    # oracle_engine._build_h2h() (self.api.get_h2h()). Depinde REAL de
+    # "scheduled_fixtures": freelf_event_id, cheia care deblocheaza acest
+    # sync, e scris DOAR de FreelfFixtureAdapter, in acel pas.
+    PipelineStep("h2h_freelf", depends_on=("scheduled_fixtures",)),
     # [ADAUGAT Sprint 2, Etapa C — Data Quality] Team Form FreeLF — fara
     # dependinte reale (ligi statice, mappings.FREE_LF_LEAGUE_IDS), plasat
     # aici doar ca ordine de citire, nu ca dependinta declarata.
@@ -349,6 +355,25 @@ def run(
         except Exception as exc:
             logger.error("[DailySync] sync_team_stats_tsdb failed: %s", exc)
             print(f"  ⚠️  Eroare la sync team stats (TheSportsDB): {exc}")
+
+    # ── (PIPELINE_STEPS: "h2h_freelf") ───────────────────────────────────────
+    # [ADAUGAT Sprint 3, Pasul 3 — R-Sync-9] Owner nou (Free Live Football
+    # H2H) pentru freelf_h2h_snapshot — înlocuiește ultimul apel live rămas,
+    # eliminabil, din oracle_engine._build_h2h(). Rulează DUPĂ
+    # "scheduled_fixtures" — citește fixture-urile de sincronizat din
+    # freelf_event_id, scris de acel pas.
+    print("\n▶  Sincronizare H2H — Free Live Football...")
+    if dry_run:
+        print("  ℹ️  Sărit (dry run)")
+    else:
+        try:
+            from sync.sync_h2h_freelf import run as run_h2h_freelf
+            h2h_freelf_results = run_h2h_freelf()
+            ran = sum(1 for r in h2h_freelf_results if r.ran)
+            print(f"  ✅ {ran}/{len(h2h_freelf_results)} fixture-uri sincronizate (FreeLF H2H)")
+        except Exception as exc:
+            logger.error("[DailySync] sync_h2h_freelf failed: %s", exc)
+            print(f"  ⚠️  Eroare la sync H2H (FreeLF): {exc}")
 
     # ── (PIPELINE_STEPS: "team_form_freelf") ────────────────────────────────
     # [ADAUGAT Sprint 2, Etapa C — Data Quality] Owner nou (FreeLF standings)

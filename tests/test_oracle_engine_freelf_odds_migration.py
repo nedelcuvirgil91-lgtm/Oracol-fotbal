@@ -184,7 +184,7 @@ def test_odds_h2h_derives_correctly_from_supabase_rows(monkeypatch):
     eng = oracle_engine.FootballOracleEngine.__new__(oracle_engine.FootballOracleEngine)
     eng.weights = {}
     eng.config = {}
-    eng.api = SimpleNamespace(get_h2h=lambda eid, h, a: None)
+    eng.api = SimpleNamespace()
 
     h = eng._build_h2h("Arsenal", "Chelsea", _match())
 
@@ -200,7 +200,7 @@ def test_odds_h2h_empty_when_no_rows(monkeypatch):
     eng = oracle_engine.FootballOracleEngine.__new__(oracle_engine.FootballOracleEngine)
     eng.weights = {}
     eng.config = {}
-    eng.api = SimpleNamespace(get_h2h=lambda eid, h, a: None)
+    eng.api = SimpleNamespace()
 
     h = eng._build_h2h("Arsenal", "Chelsea", _match())
 
@@ -218,17 +218,19 @@ def test_odds_h2h_read_failure_returns_empty_not_crash(monkeypatch):
     eng = oracle_engine.FootballOracleEngine.__new__(oracle_engine.FootballOracleEngine)
     eng.weights = {}
     eng.config = {}
-    eng.api = SimpleNamespace(get_h2h=lambda eid, h, a: None)
+    eng.api = SimpleNamespace()
 
     h = eng._build_h2h("Arsenal", "Chelsea", _match())  # nu crapă
 
     assert h.meetings == 0
 
 
-def test_freelf_h2h_still_takes_priority_over_odds_when_event_id_present(monkeypatch):
-    """Regresie: FreeLF H2H (deliberat neatinsă, R-Sync-8) rămâne
-    prioritară față de Odds API atunci când _freelf_event_id există —
-    Odds API rămâne strict fallback de nivel următor."""
+def test_freelf_h2h_still_takes_priority_over_odds(monkeypatch):
+    """[ACTUALIZAT — ADR-039 R-Sync-9] FreeLF H2H (acum Database-First, prin
+    get_freelf_h2h_snapshot) rămâne prioritară față de Odds API — Odds API
+    rămâne strict fallback de nivel următor. Citirea nu mai depinde de
+    `_freelf_event_id` în dict-ul meciului curent (era relevant doar pentru
+    vechiul apel live) — cheia e azi direct perechea de nume canonice."""
     monkeypatch.setattr(oracle_engine, "DB_QUERIES_MODULE_AVAILABLE", True, raising=False)
     monkeypatch.setattr(oracle_engine, "get_h2h_from_history", lambda home, away, last_n=10: [], raising=False)
     monkeypatch.setattr(
@@ -240,12 +242,13 @@ def test_freelf_h2h_still_takes_priority_over_odds_when_event_id_present(monkeyp
     freelf_h2h = {"meetings": 3, "home_wins": 3, "draws": 0, "away_wins": 0,
                   "home_goals_avg": 2.0, "away_goals_avg": 0.0, "last_5": ["H", "H", "H"],
                   "h2h_modifier": 0.15, "summary": "FREELF"}
+    monkeypatch.setattr(oracle_engine, "get_freelf_h2h_snapshot", lambda home, away: freelf_h2h, raising=False)
     eng = oracle_engine.FootballOracleEngine.__new__(oracle_engine.FootballOracleEngine)
     eng.weights = {}
     eng.config = {}
-    eng.api = SimpleNamespace(get_h2h=lambda eid, h, a: freelf_h2h)
+    eng.api = SimpleNamespace()
 
-    h = eng._build_h2h("Arsenal", "Chelsea", {**_match(), "_freelf_event_id": 123})
+    h = eng._build_h2h("Arsenal", "Chelsea", _match())
 
     assert h.summary == "FREELF"
     assert h.meetings == 3

@@ -185,12 +185,12 @@ def test_get_elo_rating_never_called_from_oracle_engine():
 
 
 def test_h2h_read_only_called_from_build_h2h():
-    """ADR-035 D3: get_h2h() (provider FreeLF) și get_h2h_from_history()
-    (sursa canonică, match_history) trebuie apelate DINTR-UN SINGUR loc de
-    producție — _build_h2h(). O a doua cale ar putea citi H2H fără să
-    respecte ordinea Database-First (DB întâi, prag ≥3, provider doar ca
-    fallback)."""
-    names = {"get_h2h", "get_h2h_from_history"}
+    """[ACTUALIZAT — ADR-039 R-Sync-9] `get_h2h_from_history()` (sursa
+    canonică, match_history) și `get_freelf_h2h_snapshot()` (Database-First,
+    R-Sync-9) trebuie apelate DINTR-UN SINGUR loc de producție —
+    _build_h2h(). O a doua cale ar putea citi H2H fără să respecte ordinea
+    Database-First (DB întâi, prag ≥3, snapshot FreeLF doar ca fallback)."""
+    names = {"get_h2h_from_history", "get_freelf_h2h_snapshot"}
     path = ROOT / "oracle_engine.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename="oracle_engine.py")
 
@@ -202,15 +202,15 @@ def test_h2h_read_only_called_from_build_h2h():
                 calls_by_function[node.name] = lines
 
     assert calls_by_function == {"_build_h2h": calls_by_function.get("_build_h2h", [])}, (
-        f"get_h2h/get_h2h_from_history apelate din afara _build_h2h(): "
-        f"{calls_by_function} — cale paralelă către sursa H2H, ocolește "
-        f"ordinea Database-First (ADR-035 D3)."
+        f"get_h2h_from_history/get_freelf_h2h_snapshot apelate din afara "
+        f"_build_h2h(): {calls_by_function} — cale paralelă către sursa "
+        f"H2H, ocolește ordinea Database-First (ADR-035 D3 / ADR-039 R-Sync-9)."
     )
     assert "_build_h2h" in calls_by_function
     assert len(calls_by_function["_build_h2h"]) == 2, (
         f"Așteptam exact 2 apeluri în _build_h2h() — get_h2h_from_history "
-        f"(primar) și get_h2h (fallback FreeLF) — găsit "
-        f"{calls_by_function['_build_h2h']}."
+        f"(primar) și get_freelf_h2h_snapshot (fallback FreeLF, "
+        f"Database-First) — găsit {calls_by_function['_build_h2h']}."
     )
 
     # Nicio altă locație din PRODUCTION_FILES (în afara oracle_api.py și
@@ -225,3 +225,33 @@ def test_h2h_read_only_called_from_build_h2h():
         t = ast.parse(p.read_text(encoding="utf-8"), filename=fname)
         lines = _calls_matching(t, names)
         assert not lines, f"{fname} apelează direct sursa H2H la liniile {lines}"
+
+
+def test_get_h2h_live_never_called_from_oracle_engine():
+    """[ADĂUGAT — ADR-039 R-Sync-9] `get_h2h()` (apel live FreeLF, provider)
+    nu mai are voie să fie apelat din oracle_engine.py, sub nicio formă —
+    fallback-ul FreeLF din `_build_h2h()` citește azi STRICT din Supabase
+    (`get_freelf_h2h_snapshot()`, vezi testul de mai sus). Singurul apelant
+    de producție al funcției live rămâne Sync Layer
+    (`freelf_h2h_adapter.py`, prin `sync/sync_h2h_freelf.py`) — exact
+    tiparul deja stabilit de `test_get_team_stats_tsdb_never_called_live_
+    from_oracle_engine` (R-Sync-8) și `test_get_elo_rating_never_called_
+    from_oracle_engine` (R-Sync-4)."""
+    path = ROOT / "oracle_engine.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename="oracle_engine.py")
+    lines = _calls_matching(tree, {"get_h2h"})
+    assert not lines, (
+        f"oracle_engine.py apelează încă get_h2h() (live FreeLF) la liniile "
+        f"{lines} — eliminat în R-Sync-9, ADR-039 (fallback citit STRICT din "
+        f"Supabase, database.queries.get_freelf_h2h_snapshot())."
+    )
+
+    for fname in PRODUCTION_FILES:
+        if fname in ("oracle_engine.py", "oracle_api.py"):
+            continue
+        p = ROOT / fname
+        if not p.exists():
+            continue
+        t = ast.parse(p.read_text(encoding="utf-8"), filename=fname)
+        lines = _calls_matching(t, {"get_h2h"})
+        assert not lines, f"{fname} apelează direct H2H live la liniile {lines}"

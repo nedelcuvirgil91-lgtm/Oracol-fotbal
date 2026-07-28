@@ -1286,6 +1286,112 @@ def upsert_team_stats_tsdb(team: str, tsdb_team_id: str, events: list[dict]) -> 
         return False
 
 
+def get_freelf_fixtures_needing_h2h(days_ahead: int = 14) -> list[dict]:
+    """
+    [ADAUGAT Sprint 3, R-Sync-9] Meciuri viitoare descoperite de FreeLF
+    (`scheduled_fixtures.freelf_event_id` populat, R-Sync-7a) — sursa unică
+    pentru Sync Layer (`sync/sync_h2h_freelf.py`). NU se mai caută
+    `event_id` live — vine deja din discovery, deja persistat.
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        from datetime import date, timedelta
+        today = date.today()
+        date_to = (today + timedelta(days=days_ahead)).isoformat()
+        res = (
+            client.table("scheduled_fixtures")
+            .select("home_team_canonical,away_team_canonical,freelf_event_id")
+            .gte("kickoff_date", today.isoformat())
+            .lte("kickoff_date", date_to)
+            .not_.is_("freelf_event_id", "null")
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.error("[Queries] get_freelf_fixtures_needing_h2h failed: %s", exc)
+        return []
+
+
+def get_freelf_h2h_snapshot(home_team: str, away_team: str) -> dict | None:
+    """
+    Sursa canonică pentru H2H Free Live Football (`oracle_engine._build_h2h()`,
+    fallback după Level DB) — ADR-039, R-Sync-9. Înlocuiește apelul live
+    `oracle_api.get_h2h(event_id, home_name, away_name)` — citire STRICT
+    din Supabase, populată separat de Sync Layer
+    (`sync/sync_h2h_freelf.py`), niciodată direct de aici.
+
+    Identitate ORIENTATĂ (home/away, nu simetrică) prin nume normalizate —
+    `home_team`/`away_team` trebuie deja trecute prin
+    `normalize_team_name()` de apelant.
+
+    Întoarce None dacă perechea nu a fost încă sincronizată — Regula #8,
+    tratat de apelant ca „necunoscut" (cade pe nivelul următor din
+    cascadă), niciodată motiv de fallback live către provider.
+    """
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("freelf_h2h_snapshot")
+            .select("*")
+            .eq("home_team_canonical", home_team)
+            .eq("away_team_canonical", away_team)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning(
+            "[Queries] get_freelf_h2h_snapshot failed pentru %s vs %s: %s",
+            home_team, away_team, exc,
+        )
+        return None
+
+
+def upsert_freelf_h2h_snapshot(
+    home_team: str, away_team: str, freelf_event_id: str,
+    meetings: int, home_wins: int, draws: int, away_wins: int,
+    home_goals_avg: float, away_goals_avg: float, last_5: list[str],
+    h2h_modifier: float, summary: str,
+) -> bool:
+    """
+    Owner unic de scriere pentru `freelf_h2h_snapshot` (disciplina ADR-036)
+    — exclusiv Sync Layer (`sync/sync_h2h_freelf.py`), niciodată Oracle
+    Engine.
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("freelf_h2h_snapshot").upsert({
+            "home_team_canonical": home_team,
+            "away_team_canonical": away_team,
+            "freelf_event_id": freelf_event_id,
+            "meetings": meetings,
+            "home_wins": home_wins,
+            "draws": draws,
+            "away_wins": away_wins,
+            "home_goals_avg": home_goals_avg,
+            "away_goals_avg": away_goals_avg,
+            "last_5": last_5,
+            "h2h_modifier": h2h_modifier,
+            "summary": summary,
+            "source_provider": "freelivefootball",
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="home_team_canonical,away_team_canonical").execute()
+        return True
+    except Exception as exc:
+        logger.warning(
+            "[Queries] upsert_freelf_h2h_snapshot failed pentru %s vs %s: %s",
+            home_team, away_team, exc,
+        )
+        return False
+
+
 def upsert_equivalence_evaluation(
     gate_key: str, entity: str, window_from: str, window_to: str,
     live_count: int, scheduled_count: int, matched_count: int,
