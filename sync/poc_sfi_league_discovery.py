@@ -36,13 +36,15 @@ from soccerfootballinfo_client import get_soccerfootballinfo_client
 # UEFA, o dată recentă pentru MLS (sezon în curs), o dată din fereastra
 # World Cup 2026 (11 iunie - 19 iulie 2026, real).
 DISCOVERY_DATES = [
-    "2026-05-24",  # PL / La Liga / Serie A — ultima zi de sezon (confirmat, match_history)
-    "2026-05-17",  # Bundesliga / Ligue 1 — ultima zi de sezon (confirmat, match_history)
-    "2026-05-20",  # fereastră tipică finală UEFA (Champions League / Europa League / Conference League)
-    "2026-05-27",  # a doua fereastră finală UEFA, dacă 05-20 nu prinde
-    "2026-07-19",  # World Cup 2026 — finala (dată reală)
-    "2026-07-12",  # World Cup 2026 — semifinale
-    "2026-07-27",  # MLS — sezon în curs (ieri, față de azi 2026-07-28)
+    # [Runda 2] Runda 1 (05-24/05-17/05-20/05-27/07-19/07-12/07-27) a confirmat
+    # deja: England Premier League, France Ligue 1, Italy Serie A, Spain La
+    # Liga, UEFA Europa League, UEFA Conference League, USA MLS, World Cup
+    # 2026. Lipsesc: "Germany Bundesliga" (top-flight — doar II/U19/Women
+    # găsite) și "UEFA Champions League" (deloc). Date noi, țintite.
+    "2026-05-16",  # Bundesliga — ultima etapă tipică (o zi înainte de 05-17)
+    "2026-05-09",  # Bundesliga — penultima etapă
+    "2026-05-30",  # UEFA Champions League — finala 2025/26 (dată reală)
+    "2026-05-06",  # UEFA Champions League — semifinală retur (fereastră tipică)
 ]
 
 
