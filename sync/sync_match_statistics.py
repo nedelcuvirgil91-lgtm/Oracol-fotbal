@@ -95,8 +95,17 @@ def _provider_order(league: str) -> list[str]:
 
 
 def _matches_missing_stats(days_back: int = 2) -> list[dict]:
+    """[REPARAT Sprint 3, Prioritatea 1] `require_referee=True` — exact
+    semnalul descris în docstring-ul `get_finished_matches_missing_stats()`
+    (`referee` e populat STRICT de Soccer Football Info). Cu implicitul
+    vechi (`home_possession IS NULL`), un meci la care FreeLF completa deja
+    possession+xG dispărea permanent din rezultat — Soccer Football Info nu
+    mai apuca niciodată să încerce restul câmpurilor (shots/corners/fouls/
+    cards/offsides/penalties/substitutions/lineup/manager/stadion/
+    provider_raw_json), deși owner-ul lor rămâne exclusiv SFI și COALESCE-
+    only (ADR-036) nu risca nicio suprascriere."""
     from database.queries import get_finished_matches_missing_stats
-    return get_finished_matches_missing_stats(days_back=days_back)
+    return get_finished_matches_missing_stats(days_back=days_back, require_referee=True)
 
 
 def _make_task_runner(match: dict, provider_order: list[str]):

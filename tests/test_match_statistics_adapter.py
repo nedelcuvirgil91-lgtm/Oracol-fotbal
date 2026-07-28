@@ -1,7 +1,8 @@
-"""Teste pentru match_statistics_adapter.py (Sprint 1, ADR-039). Fără
-rețea — api/resolver injectate ca fake-uri. Verifică inclusiv scope-ul
-aprobat explicit: DOAR possession/xg_actual, niciodată big_chance/
-shots_on_target (owner rămas football_data_co_uk)."""
+"""Teste pentru match_statistics_adapter.py (Sprint 1, ADR-039; scope extins
+Sprint 3 Prioritatea 1). Fără rețea — api/resolver injectate ca fake-uri.
+Verifică inclusiv scope-ul aprobat explicit: possession/xg_actual/
+shots_on_target (COALESCE-only, fallback — owner PRIMAR rămâne
+football_data_co_uk), niciodată big_chance (coloană inexistentă)."""
 from __future__ import annotations
 
 from match_statistics_adapter import MatchStatisticsAdapter
@@ -72,10 +73,11 @@ def test_normalize_maps_only_approved_scope_fields():
     assert r["away_possession"] == 39.0
     assert r["home_xg_actual"] == 1.8
     assert r["away_xg_actual"] == 0.9
+    assert r["home_shots_on_target"] == 5
+    assert r["away_shots_on_target"] == 2
     assert r["stats_source"] == "freelivefootball"
     # Scope explicit aprobat — NICIODATĂ scrise de acest adaptor:
     assert "home_big_chance" not in r and "big_chance" not in r
-    assert "home_shots_on_target" not in r and "shots_on_target" not in r
     assert "home_shots_ot" not in r
 
 

@@ -616,15 +616,33 @@ class FootballOracleAPI:
         if not data:
             self._cset(cache_key, None); return None
         stats = data.get("statistics") or data.get("response") or {}
+        home_raw = stats.get("home") or {}
+        away_raw = stats.get("away") or {}
+
+        # [REPARAT Sprint 3, Prioritatea 1, Regula 5 — "nu aproxima, nu
+        # hardcoda"] Versiunea anterioară folosea `or 0`/`or 50` — un câmp
+        # REALMENTE lipsă din payload (None) devenea silențios 0 (xG/shots)
+        # sau 50 (possession, valoarea NEUTRĂ folosită și de cascada de
+        # fallback din oracle_engine._build_profile()), indistingibil de o
+        # valoare reală. `_num_or_none()` propagă None explicit — Regula #8,
+        # CLAUDE.md: nicio stare necunoscută nu se aproximează.
+        def _num_or_none(value, cast):
+            if value is None:
+                return None
+            try:
+                return cast(value)
+            except (TypeError, ValueError):
+                return None
+
         result = {
-            "home_xg":         float((stats.get("home") or {}).get("expected_goals") or 0),
-            "away_xg":         float((stats.get("away") or {}).get("expected_goals") or 0),
-            "home_possession": float((stats.get("home") or {}).get("BallPossession") or 50),
-            "away_possession": float((stats.get("away") or {}).get("BallPossession") or 50),
-            "home_shots_ot":   int((stats.get("home") or {}).get("ShotsOnTarget") or 0),
-            "away_shots_ot":   int((stats.get("away") or {}).get("ShotsOnTarget") or 0),
-            "home_big_chance": int((stats.get("home") or {}).get("big_chance") or 0),
-            "away_big_chance": int((stats.get("away") or {}).get("big_chance") or 0),
+            "home_xg":         _num_or_none(home_raw.get("expected_goals"), float),
+            "away_xg":         _num_or_none(away_raw.get("expected_goals"), float),
+            "home_possession": _num_or_none(home_raw.get("BallPossession"), float),
+            "away_possession": _num_or_none(away_raw.get("BallPossession"), float),
+            "home_shots_ot":   _num_or_none(home_raw.get("ShotsOnTarget"), int),
+            "away_shots_ot":   _num_or_none(away_raw.get("ShotsOnTarget"), int),
+            "home_big_chance": _num_or_none(home_raw.get("big_chance"), int),
+            "away_big_chance": _num_or_none(away_raw.get("big_chance"), int),
             "source": "freelivefootball-statistics",
         }
         self._cset(cache_key, result)

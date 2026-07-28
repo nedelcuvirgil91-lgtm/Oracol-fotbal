@@ -53,11 +53,19 @@ def _clear_adapter_cache():
 
 
 def test_matches_missing_stats_delegates_to_query(monkeypatch):
+    """[REPARAT Sprint 3, Prioritatea 1] `require_referee=True` — vezi
+    docstring-ul `_matches_missing_stats()`: fără el, un meci deja completat
+    de FreeLF cu possession+xG dispărea permanent din rezultat, iar Soccer
+    Football Info nu mai apuca să încerce restul câmpurilor."""
     rows = [dict(_MATCH)]
-    monkeypatch.setattr("database.queries.get_finished_matches_missing_stats",
-                         lambda days_back: rows)
+    calls = []
+    monkeypatch.setattr(
+        "database.queries.get_finished_matches_missing_stats",
+        lambda days_back, require_referee=False: (calls.append((days_back, require_referee)), rows)[1],
+    )
     result = sync_match_statistics._matches_missing_stats(days_back=3)
     assert result == rows
+    assert calls == [(3, True)]
 
 
 def test_provider_order_uses_choice_then_rest_of_fallback_chain(monkeypatch):
