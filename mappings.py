@@ -631,6 +631,23 @@ TSDB_LEAGUE_IDS: dict[str, str] = {
 # dovadă live că endpointurile de ligă sunt incomplete) și după popularea
 # TSDB_TEAM_IDS pentru acele ligi. NU se generalizează automat — filosofia
 # proiectului: „Verificat, nu presupus".
+#
+# [INVESTIGAT — audit Sprint 3, 2026-07-28] Champions League/Europa
+# League/Conference League: raportat de proprietarul produsului — UCL arăta
+# 1 meci din 6 reale azi (calificări). POC izolat, temporar, live (rulare
+# GitHub Actions, șters după test): ZERO din cele 3 surse alternative
+# testate găsesc meciurile lipsă — TSDB eventsseason.php (0 meciuri azi),
+# Soccer Football Info matches/day/full (25 meciuri globale azi, ZERO
+# Champions League sub orice championship_id), ESPN raw scoreboard
+# (0 evenimente, necondiționat de filtrul nostru de stare — problema e la
+# sursă, nu în parsare). Concluzie: spre deosebire de SuperLiga (unde
+# supliment per-echipă a dovedit 3 meciuri reale ascunse), nu există dovadă
+# că reconcilierea per-echipă ar rezolva calificările europene — ar necesita
+# înregistrare manuală de team_id TSDB pentru zeci de cluburi de calificare,
+# reînnoită la fiecare rundă, fără nicio garanție că TSDB le are nici la
+# nivel de echipă. Tratat ca gol structural de acoperire upstream, NU ca bug
+# de cod — nu s-a forțat o "reparație" nedovedită. Reluat DOAR dacă apare o
+# sursă nouă, verificată live să acopere calificările.
 TSDB_TEAM_IDS: dict[str, dict[str, str]] = {
     "Romania SuperLiga": {
         "Petrolul Ploiești": "134398",
