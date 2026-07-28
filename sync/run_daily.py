@@ -94,6 +94,13 @@ PIPELINE_STEPS: tuple[PipelineStep, ...] = (
     # neînceput). Fără dependințe reale (surse externe, nu alte pipeline
     # steps).
     PipelineStep("scheduled_fixtures"),
+    # [ADAUGAT Sprint 3, Pasul 3 — R-Sync-8] Team Stats TheSportsDB —
+    # inlocuieste Level 4 live din oracle_engine._build_profile()
+    # (self.api.get_team_stats()). Depinde REAL de "scheduled_fixtures"
+    # (pasul de mai sus): tsdb_home_team_id/tsdb_away_team_id, cheia care
+    # deblocheaza acest sync, sunt scrise DOAR de TsdbFixtureAdapter, in
+    # acel pas.
+    PipelineStep("team_stats_tsdb", depends_on=("scheduled_fixtures",)),
     # [ADAUGAT Sprint 2, Etapa C — Data Quality] Team Form FreeLF — fara
     # dependinte reale (ligi statice, mappings.FREE_LF_LEAGUE_IDS), plasat
     # aici doar ca ordine de citire, nu ca dependinta declarata.
@@ -323,6 +330,25 @@ def run(
         except Exception as exc:
             logger.error("[DailySync] sync_scheduled_fixtures failed: %s", exc)
             print(f"  ⚠️  Eroare la descoperire meciuri: {exc}")
+
+    # ── (PIPELINE_STEPS: "team_stats_tsdb") ─────────────────────────────────
+    # [ADAUGAT Sprint 3, Pasul 3 — R-Sync-8] Owner nou (TheSportsDB events)
+    # pentru tsdb_team_stats_snapshot — înlocuiește Level 4 live din
+    # oracle_engine._build_profile(). Rulează DUPĂ "scheduled_fixtures" —
+    # citește echipele de sincronizat din tsdb_home_team_id/
+    # tsdb_away_team_id, scrise de acel pas.
+    print("\n▶  Sincronizare team stats — TheSportsDB...")
+    if dry_run:
+        print("  ℹ️  Sărit (dry run)")
+    else:
+        try:
+            from sync.sync_team_stats_tsdb import run as run_team_stats_tsdb
+            team_stats_tsdb_results = run_team_stats_tsdb()
+            ran = sum(1 for r in team_stats_tsdb_results if r.ran)
+            print(f"  ✅ {ran}/{len(team_stats_tsdb_results)} echipe sincronizate (TheSportsDB)")
+        except Exception as exc:
+            logger.error("[DailySync] sync_team_stats_tsdb failed: %s", exc)
+            print(f"  ⚠️  Eroare la sync team stats (TheSportsDB): {exc}")
 
     # ── (PIPELINE_STEPS: "team_form_freelf") ────────────────────────────────
     # [ADAUGAT Sprint 2, Etapa C — Data Quality] Owner nou (FreeLF standings)

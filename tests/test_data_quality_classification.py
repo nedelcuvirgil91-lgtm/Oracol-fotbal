@@ -93,9 +93,7 @@ def _engine(monkeypatch, db_rows, tsdb_stats=None):
     eng = oracle_engine.FootballOracleEngine.__new__(oracle_engine.FootballOracleEngine)
     eng.weights = {}
     eng.config = {}
-    eng.api = SimpleNamespace(
-        get_team_stats=lambda tid, league: list(tsdb_stats or []),
-    )
+    eng.api = SimpleNamespace()
     fake_sb = SimpleNamespace(
         get_team_recent_results=lambda team, league, last_n=5, lookback_days=365: list(db_rows),
         get_team_recent_shots=lambda team, league, last_n=5: [],
@@ -103,7 +101,18 @@ def _engine(monkeypatch, db_rows, tsdb_stats=None):
     )
     monkeypatch.setattr(oracle_engine, "sb", fake_sb, raising=False)
     monkeypatch.setattr(oracle_engine, "SUPABASE_MODULE_AVAILABLE", True, raising=False)
-    monkeypatch.setattr(oracle_engine, "DB_QUERIES_MODULE_AVAILABLE", False, raising=False)
+    # [ACTUALIZAT R-Sync-8] Level 4 (TSDB) citește azi prin
+    # database.queries.get_team_stats_tsdb() — necesită
+    # DB_QUERIES_MODULE_AVAILABLE=True (spre deosebire de vechiul
+    # self.api.get_team_stats(), independent de acest flag). Nivelurile
+    # 0+1/2/3 (freelf/odds/fd) rămân neinterceptate — funcțiile reale
+    # întorc None/[] fără client Supabase configurat în mediul de test.
+    monkeypatch.setattr(oracle_engine, "DB_QUERIES_MODULE_AVAILABLE", True, raising=False)
+    monkeypatch.setattr(
+        oracle_engine, "get_team_stats_tsdb",
+        lambda team: list(tsdb_stats or []),
+        raising=False,
+    )
     return eng
 
 

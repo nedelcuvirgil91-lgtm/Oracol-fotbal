@@ -88,6 +88,7 @@ try:
         get_latest_team_elo, get_h2h_from_history, get_team_health,
         get_team_form_footballdata, get_national_team_elo, get_weather_forecast,
         get_team_form_freelf_snapshot, get_team_recent_form_oddsapi, get_h2h_from_odds_recent,
+        get_team_stats_tsdb,
     )
     DB_QUERIES_MODULE_AVAILABLE = True
 except ModuleNotFoundError:
@@ -778,7 +779,7 @@ class FootballOracleEngine:
            0+1. FreeLF standings+formă (Supabase) (get_team_form_freelf_snapshot) — fallback, ADR-039 R-Sync-6
            2. Odds API meciuri recente (Supabase) (get_team_recent_form_oddsapi) — fallback, ADR-039 R-Sync-6
            3. fd.org standings (Supabase)  (get_team_form_footballdata) — fallback, ADR-039 R-Sync-3
-           4. TheSportsDB events           (get_team_stats)          — fallback
+           4. TheSportsDB events (Supabase) (get_team_stats_tsdb)     — fallback, ADR-039 R-Sync-8
            5. ELO sigmoid                  (întotdeauna blended)
            6. Neutral defaults
 
@@ -984,15 +985,23 @@ class FootballOracleEngine:
             except Exception as exc:
                 logger.warning("[Profile] footballdata form read failed for %s: %s", canonical, exc)
 
-        # ── Level 4: TheSportsDB ──────────────────────────────────────────
-        if not stats and team_id and team_id.startswith("tsdb_"):
+        # ── Level 4: TheSportsDB (ADR-039, R-Sync-8) ────────────────────────
+        # Sync Layer only — citire STRICT din Supabase
+        # (tsdb_team_stats_snapshot, populată de
+        # sync/sync_team_stats_tsdb.py), niciodată apel live către provider.
+        # Identitate prin nume canonic normalizat (ADR-039 Principiul 7) —
+        # NU mai necesită team_id prefixat "tsdb_" la citire (gate-ul vechi,
+        # eliminat — depindea de identificatorul de provider al meciului
+        # curent; sincronizarea folosește azi tsdb_team_id-urile deja
+        # descoperite în scheduled_fixtures, R-Sync-7a).
+        if not stats and DB_QUERIES_MODULE_AVAILABLE:
             try:
-                tsdb_stats = self.api.get_team_stats(team_id, league)
+                tsdb_stats = get_team_stats_tsdb(canonical)
                 if tsdb_stats:
                     stats        = tsdb_stats
                     data_source  = "thesportsdb"
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("[Profile] TheSportsDB Supabase read failed for %s: %s", canonical, exc)
 
         # ── Compute ratings din stats ─────────────────────────────────────
         if stats:

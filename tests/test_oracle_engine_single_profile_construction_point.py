@@ -55,26 +55,27 @@ def test_teamprofile_constructed_in_exactly_one_place():
     assert list(hits.keys()) == ["oracle_engine.py"]
 
 
-def test_tsdb_team_stats_only_called_from_build_profile():
+def test_get_team_stats_tsdb_never_called_live_from_oracle_engine():
+    """[ACTUALIZAT — ADR-039 R-Sync-8] `get_team_stats`/
+    `get_team_last_events_tsdb` (apeluri live TheSportsDB) nu mai au voie să
+    fie apelate din oracle_engine.py, sub nicio formă — Level 4 din
+    `_build_profile()` citește azi STRICT din Supabase
+    (`database.queries.get_team_stats_tsdb()`, vezi testul de mai jos).
+    Singurul apelant de producție al funcțiilor live rămâne Sync Layer
+    (`tsdb_team_stats_adapter.py`, prin `sync/sync_team_stats_tsdb.py`) —
+    exact tiparul deja stabilit de `test_get_elo_rating_never_called_from_
+    oracle_engine` (R-Sync-4)."""
     path = ROOT / "oracle_engine.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename="oracle_engine.py")
-
-    calls_by_function: dict[str, list[int]] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef):
-            lines = _calls_matching(node, {"get_team_stats", "get_team_last_events_tsdb"})
-            if lines:
-                calls_by_function[node.name] = lines
-
-    assert calls_by_function == {"_build_profile": calls_by_function.get("_build_profile", [])}, (
-        f"get_team_stats/get_team_last_events_tsdb apelate din afara "
-        f"_build_profile(): {calls_by_function} — cale paralelă către TSDB, "
-        f"ocolește Level DB (ADR-035/D1)."
+    lines = _calls_matching(tree, {"get_team_stats", "get_team_last_events_tsdb"})
+    assert not lines, (
+        f"oracle_engine.py apelează încă TSDB live la liniile {lines} — "
+        f"eliminat în R-Sync-8, ADR-039 (Level 4 citit STRICT din Supabase, "
+        f"database.queries.get_team_stats_tsdb())."
     )
-    assert "_build_profile" in calls_by_function
 
-    # Verificare separată: nicio altă locație din PRODUCTION_FILES (in afara
-    # oracle_api.py, unde functiile sunt DEFINITE, nu apelate) nu le apelează.
+    # Nicio altă locație din PRODUCTION_FILES (in afara oracle_api.py, unde
+    # funcțiile sunt DEFINITE, nu apelate) nu le apelează.
     for fname in PRODUCTION_FILES:
         if fname in ("oracle_engine.py", "oracle_api.py"):
             continue
@@ -84,6 +85,39 @@ def test_tsdb_team_stats_only_called_from_build_profile():
         t = ast.parse(p.read_text(encoding="utf-8"), filename=fname)
         lines = _calls_matching(t, {"get_team_stats", "get_team_last_events_tsdb"})
         assert not lines, f"{fname} apelează direct TSDB team-stats la liniile {lines}"
+
+
+def test_tsdb_team_stats_db_first_only_called_from_build_profile():
+    """[ADĂUGAT — ADR-039 R-Sync-8] `get_team_stats_tsdb()` (citire
+    Database-First, Level 4) trebuie apelată DINTR-UN SINGUR loc de
+    producție — `_build_profile()` — la fel ca restul nivelurilor cascadei
+    (footballdata, odds API, FreeLF)."""
+    path = ROOT / "oracle_engine.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename="oracle_engine.py")
+
+    calls_by_function: dict[str, list[int]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            lines = _calls_matching(node, {"get_team_stats_tsdb"})
+            if lines:
+                calls_by_function[node.name] = lines
+
+    assert calls_by_function == {"_build_profile": calls_by_function.get("_build_profile", [])}, (
+        f"get_team_stats_tsdb apelată din afara _build_profile(): "
+        f"{calls_by_function} — cale paralelă către Level 4, ocolește "
+        f"ordinea Database-First (ADR-039 R-Sync-8)."
+    )
+    assert "_build_profile" in calls_by_function
+
+    for fname in PRODUCTION_FILES:
+        if fname in ("oracle_engine.py", "database/queries.py"):
+            continue
+        p = ROOT / fname
+        if not p.exists():
+            continue
+        t = ast.parse(p.read_text(encoding="utf-8"), filename=fname)
+        lines = _calls_matching(t, {"get_team_stats_tsdb"})
+        assert not lines, f"{fname} apelează direct get_team_stats_tsdb la liniile {lines}"
 
 
 def test_elo_read_only_called_from_build_profile():

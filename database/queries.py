@@ -1179,6 +1179,113 @@ def list_scheduled_fixtures(kickoff_date_from: str, kickoff_date_to: str) -> lis
         return []
 
 
+def get_teams_with_tsdb_id(days_ahead: int = 14) -> list[dict]:
+    """
+    [ADAUGAT Sprint 3, R-Sync-8] Echipe cu meci programat în următoarele
+    `days_ahead` zile care AU un `tsdb_*_team_id` cunoscut — sursa unică
+    pentru Sync Layer (`sync/sync_team_stats_tsdb.py`), citită din
+    `scheduled_fixtures` (populată de `TsdbFixtureAdapter`, R-Sync-7a; vezi
+    comentariul din `tsdb_fixture_adapter.py`: "Singurul adaptor care
+    furnizează tsdb_home_team_id/tsdb_away_team_id — cheia care deblochează
+    TheSportsDB team stats la R-Sync-8"). NU se mai caută team_id prin
+    apel live de căutare — vine deja din discovery, deja persistat.
+
+    Distinct pe `team_name_canonical` — o echipă poate apărea de mai multe
+    ori (acasă/oaspete, meciuri multiple) în fereastră; se ia primul
+    tsdb_team_id găsit.
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        from datetime import date, timedelta
+        today = date.today()
+        date_to = (today + timedelta(days=days_ahead)).isoformat()
+        res = (
+            client.table("scheduled_fixtures")
+            .select("home_team_canonical,away_team_canonical,tsdb_home_team_id,tsdb_away_team_id")
+            .gte("kickoff_date", today.isoformat())
+            .lte("kickoff_date", date_to)
+            .or_("tsdb_home_team_id.not.is.null,tsdb_away_team_id.not.is.null")
+            .execute()
+        )
+        rows = res.data or []
+    except Exception as exc:
+        logger.error("[Queries] get_teams_with_tsdb_id failed: %s", exc)
+        return []
+
+    teams: dict[str, str] = {}
+    for row in rows:
+        home = row.get("home_team_canonical")
+        away = row.get("away_team_canonical")
+        home_id = row.get("tsdb_home_team_id")
+        away_id = row.get("tsdb_away_team_id")
+        if home and home_id and home not in teams:
+            teams[home] = home_id
+        if away and away_id and away not in teams:
+            teams[away] = away_id
+    return [{"team_name": name, "tsdb_team_id": tid} for name, tid in teams.items()]
+
+
+def get_team_stats_tsdb(team: str) -> list[dict]:
+    """
+    Sursa canonică pentru ultimele evenimente TheSportsDB ale unei echipe
+    (`oracle_engine._build_profile()`, Level 4) — ADR-039, R-Sync-8.
+    Înlocuiește apelul live `oracle_api.get_team_stats(team_id, league)` —
+    citire STRICT din Supabase, populată separat de Sync Layer
+    (`sync/sync_team_stats_tsdb.py`), niciodată direct de aici.
+
+    Identitate canonică prin nume normalizat (ADR-039 Principiul 7) — `team`
+    trebuie deja trecut prin `normalize_team_name()` de apelant, exact ca la
+    `get_team_form_footballdata()`.
+
+    Întoarce listă goală dacă echipa nu a fost încă sincronizată — Regula
+    #8, tratat de apelant ca „necunoscut" (cade pe nivelul următor din
+    cascadă), niciodată motiv de fallback live către provider.
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("tsdb_team_stats_snapshot")
+            .select("events")
+            .eq("team_name_canonical", team)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if not rows:
+            return []
+        return rows[0].get("events") or []
+    except Exception as exc:
+        logger.warning("[Queries] get_team_stats_tsdb failed pentru %s: %s", team, exc)
+        return []
+
+
+def upsert_team_stats_tsdb(team: str, tsdb_team_id: str, events: list[dict]) -> bool:
+    """
+    Owner unic de scriere pentru `tsdb_team_stats_snapshot` (disciplina
+    ADR-036) — exclusiv Sync Layer (`sync/sync_team_stats_tsdb.py`),
+    niciodată Oracle Engine.
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("tsdb_team_stats_snapshot").upsert({
+            "team_name_canonical": team,
+            "tsdb_team_id": tsdb_team_id,
+            "events": events,
+            "source_provider": "thesportsdb",
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="team_name_canonical").execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Queries] upsert_team_stats_tsdb failed pentru %s: %s", team, exc)
+        return False
+
+
 def upsert_equivalence_evaluation(
     gate_key: str, entity: str, window_from: str, window_to: str,
     live_count: int, scheduled_count: int, matched_count: int,
