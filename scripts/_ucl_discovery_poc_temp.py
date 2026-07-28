@@ -1,13 +1,11 @@
 """
-POC izolat, temporar — verifică live, pentru Champions League, dacă
-eventsseason.php (TheSportsDB) și/sau get_matches_for_day (Soccer Football
-Info) găsesc meciurile de calificare de azi pe care eventsnextleague.php
-(calea curentă, singura folosită azi pentru cupele europene) le ratează.
+POC izolat, temporar — runda 2: verifică live dacă Soccer Football Info
+etichetează calificările UCL sub un championship_id SEPARAT de turneul
+principal, și ce întoarce ESPN direct (folosind codul de producție
+_fetch_matches_espn(), nu un apel brut) pentru Champions League azi.
 
-Nu importă key_manager.py/oracle_api.py — folosește clienții deja existenți
-direct, fără fallback live către alt provider. Se șterge din cod după
-închiderea investigației (dovada rămâne în istoricul rulării GitHub Actions +
-commit message), per regula POC-urilor din CLAUDE.md.
+Se șterge din cod după închiderea investigației (dovada rămâne în
+istoricul rulării GitHub Actions + commit message).
 """
 from __future__ import annotations
 
@@ -23,45 +21,9 @@ if str(root) not in sys.path:
 import requests
 
 TODAY = date.today().isoformat()
-UCL_TSDB_ID = "4480"
-UCL_SFI_CHAMPIONSHIP_ID = "3f2c3ee6eba0dd06"
 
 
-def _season_string() -> str:
-    d = date.today()
-    start = d.year if d.month >= 7 else d.year - 1
-    return f"{start}-{start + 1}"
-
-
-def check_tsdb_eventsnextleague() -> list[dict]:
-    resp = requests.get(
-        "https://www.thesportsdb.com/api/v1/json/3/eventsnextleague.php",
-        params={"id": UCL_TSDB_ID}, timeout=15,
-    )
-    data = resp.json() if resp.ok else {}
-    events = data.get("events") or []
-    return [
-        {"date": e.get("dateEvent"), "home": e.get("strHomeTeam"), "away": e.get("strAwayTeam")}
-        for e in events
-    ]
-
-
-def check_tsdb_eventsseason() -> list[dict]:
-    season = _season_string()
-    resp = requests.get(
-        "https://www.thesportsdb.com/api/v1/json/3/eventsseason.php",
-        params={"id": UCL_TSDB_ID, "s": season}, timeout=15,
-    )
-    data = resp.json() if resp.ok else {}
-    events = data.get("events") or []
-    today_events = [e for e in events if e.get("dateEvent") == TODAY]
-    return [
-        {"date": e.get("dateEvent"), "home": e.get("strHomeTeam"), "away": e.get("strAwayTeam")}
-        for e in today_events
-    ]
-
-
-def check_sfi_matches_for_day() -> list[dict]:
+def sfi_all_championships_today() -> None:
     from key_manager import get_key_manager
 
     km = get_key_manager()
@@ -72,34 +34,77 @@ def check_sfi_matches_for_day() -> list[dict]:
         params={"d": compact}, headers=headers, timeout=20,
     )
     if not resp.ok:
-        return [{"error": f"HTTP {resp.status_code}: {resp.text[:300]}"}]
+        print(f"SFI HTTP {resp.status_code}: {resp.text[:300]}")
+        return
     data = resp.json()
     matches = data.get("result") or []
-    ucl = [m for m in matches if str((m.get("championship") or {}).get("id")) == UCL_SFI_CHAMPIONSHIP_ID]
-    return [
-        {
-            "status": m.get("status"), "date": m.get("date"),
-            "home": (m.get("teamA") or {}).get("name"),
-            "away": (m.get("teamB") or {}).get("name"),
-        }
-        for m in ucl
-    ]
+    print(f"Total meciuri globale SFI azi: {len(matches)}")
+
+    # Caută orice championship al cărui nume conține "champions" / "uefa"
+    seen: dict[str, str] = {}
+    for m in matches:
+        champ = m.get("championship") or {}
+        cid, cname = str(champ.get("id")), champ.get("name", "")
+        if cid not in seen:
+            seen[cid] = cname
+        if "champion" in (cname or "").lower() or "uefa" in (cname or "").lower():
+            print(f"  MATCH candidat: champ_id={cid} champ_name={cname!r} "
+                  f"{(m.get('teamA') or {}).get('name')} vs {(m.get('teamB') or {}).get('name')} "
+                  f"status={m.get('status')}")
+
+    # Caută explicit echipele cunoscute din UI (Lincoln Red Imps / Mjällby)
+    for m in matches:
+        ta = (m.get("teamA") or {}).get("name", "")
+        tb = (m.get("teamB") or {}).get("name", "")
+        if "lincoln" in ta.lower() or "lincoln" in tb.lower() or "mjall" in ta.lower() or "mjall" in tb.lower():
+            champ = m.get("championship") or {}
+            print(f"  GASIT prin nume echipa: champ_id={champ.get('id')} champ_name={champ.get('name')!r} "
+                  f"{ta} vs {tb} status={m.get('status')}")
+
+
+def espn_raw_via_production_code() -> None:
+    from oracle_api import FootballOracleAPI
+
+    api = FootballOracleAPI()
+    raw_events = api._fetch_matches_espn("Champions League", TODAY)
+    print(f"_fetch_matches_espn('Champions League', {TODAY!r}) -> {len(raw_events)} meciuri (dupa filtrare stare pre/in)")
+    print(json.dumps(raw_events, indent=2, ensure_ascii=False))
+
+
+def espn_raw_unfiltered() -> None:
+    """Bypasseaza filtrul stare pre/in din _fetch_matches_espn, ca sa vedem
+    daca ESPN chiar intoarce toate cele 6 meciuri dar cu o stare neasteptata."""
+    from mappings import ESPN_LEAGUE_SLUGS
+
+    slug = ESPN_LEAGUE_SLUGS.get("Champions League")
+    resp = requests.get(
+        f"https://site.api.espn.com/apis/site/v2/sports/soccer/{slug}/scoreboard",
+        headers={"User-Agent": "Mozilla/5.0"},
+        params={"dates": TODAY.replace("-", "")},
+        timeout=15,
+    )
+    if not resp.ok:
+        print(f"ESPN HTTP {resp.status_code}")
+        return
+    data = resp.json()
+    events = data.get("events", [])
+    print(f"ESPN RAW (fara filtrare stare) -> {len(events)} evenimente")
+    for ev in events:
+        comps = ev.get("competitions", [{}])[0]
+        competitors = comps.get("competitors", [])
+        names = [c.get("team", {}).get("displayName", "?") for c in competitors]
+        state = (ev.get("status") or {}).get("type", {}).get("state", "?")
+        print(f"  {ev.get('date')} | {names} | state={state}")
 
 
 if __name__ == "__main__":
     print(f"=== TODAY = {TODAY} ===\n")
 
-    print("--- 1. TSDB eventsnextleague.php (calea CURENTĂ) ---")
-    en = check_tsdb_eventsnextleague()
-    print(f"Total evenimente viitoare (toate datele): {len(en)}")
-    print(json.dumps(en, indent=2, ensure_ascii=False))
+    print("--- A. SFI: toate championship-urile din ziua de azi (cauta UCL sub alt id) ---")
+    sfi_all_championships_today()
 
-    print("\n--- 2. TSDB eventsseason.php, filtrat pe azi ---")
-    es = check_tsdb_eventsseason()
-    print(f"Meciuri azi ({TODAY}): {len(es)}")
-    print(json.dumps(es, indent=2, ensure_ascii=False))
+    print("\n--- B. ESPN, cod de productie (_fetch_matches_espn, cu filtrare stare) ---")
+    espn_raw_via_production_code()
 
-    print("\n--- 3. Soccer Football Info, matches/day/full, filtrat pe UCL ---")
-    sfi = check_sfi_matches_for_day()
-    print(f"Meciuri UCL azi ({TODAY}): {len(sfi)}")
-    print(json.dumps(sfi, indent=2, ensure_ascii=False))
+    print("\n--- C. ESPN, raspuns brut, FARA filtrare stare (verifica daca gate-ul pre/in scapa meciuri) ---")
+    espn_raw_unfiltered()
