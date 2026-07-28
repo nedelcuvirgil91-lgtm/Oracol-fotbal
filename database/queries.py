@@ -972,6 +972,41 @@ def upsert_odds_recent_result(
         return False
 
 
+def get_recent_odds_results(days_back: int = 14) -> list[dict]:
+    """
+    [ADAUGAT Sprint 0 — Stabilizare, Etapa 2] Citire READ-ONLY din
+    `odds_api_recent_results` — a doua sursă de rezultate reale pentru
+    `sync/sync_results.py` (owner canonic al `match_history.actual_*`,
+    ADR-036). Completează football-data.org (care nu acoperă Romania
+    SuperLiga/MLS/Conference League — vezi `mappings.FD_COMPETITIONS`) cu
+    ce a sincronizat deja Sync Layer în `odds_api_recent_results`
+    (`sync/sync_odds_recent_results.py`, R-Sync-6).
+
+    Nu scrie nimic — owner-ul de scriere al acestui tabel rămâne exclusiv
+    `sync_odds_recent_results.py` (upsert_odds_recent_result, de mai sus).
+    Doar rânduri cu scor complet (home_score/away_score ambele non-null) —
+    un rând incomplet nu poate produce un `actual_result` valid.
+    """
+    client = get_client()
+    if client is None:
+        return []
+    from datetime import date, timedelta
+    date_from = (date.today() - timedelta(days=days_back)).isoformat()
+    try:
+        res = (
+            client.table("odds_api_recent_results")
+            .select("home_team_canonical,away_team_canonical,kickoff_date,league,home_score,away_score")
+            .not_.is_("home_score", "null")
+            .not_.is_("away_score", "null")
+            .gte("kickoff_date", date_from)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Queries] get_recent_odds_results failed: %s", exc)
+        return []
+
+
 def upsert_scheduled_fixture(
     home_team: str, away_team: str, kickoff_date: str, provider_id: str,
     league: str | None = None, kickoff_utc: str | None = None, venue_city: str | None = None,
@@ -1253,3 +1288,43 @@ def should_retrain_ml(min_new_matches: int = 20) -> bool:
     except Exception as exc:
         logger.error("[Queries] should_retrain_ml failed: %s", exc)
         return False
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PREDICTION EVALUATION (Sprint 0 — Stabilizare, Etapa 3)
+# ════════════════════════════════════════════════════════════════════════════
+
+def get_predictions_with_results(days_back: int | None = None) -> list[dict]:
+    """
+    [ADAUGAT Sprint 0 — Stabilizare, Etapa 3] Citire READ-ONLY — rânduri din
+    `match_history` cu ATÂT predicție (prob_home_pred/prob_draw_pred/
+    prob_away_pred) CÂT ȘI rezultat real (actual_result). Identitatea
+    canonică e deja garantată de owner-ul unic per coloană (ADR-036) —
+    aceste două grupuri de coloane sunt scrise de procese diferite
+    (`_cache_prediction`/oracle_engine pentru predicții, `sync_results`
+    pentru `actual_*`), dar pe ACELAȘI rând, deci join-ul e implicit prin
+    identitatea rândului, nu prin vreo cheie separată.
+
+    Sursa exclusivă de citire pentru `prediction_evaluation.py` (raportul
+    de acuratețe/log-loss/Brier/calibrare) — nicio scriere aici.
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        query = (
+            client.table("match_history")
+            .select("league,kickoff_date,home_team,away_team,fixture_id,"
+                    "prob_home_pred,prob_draw_pred,prob_away_pred,actual_result")
+            .not_.is_("prob_home_pred", "null")
+            .not_.is_("actual_result", "null")
+        )
+        if days_back is not None:
+            from datetime import date, timedelta
+            date_from = (date.today() - timedelta(days=days_back)).isoformat()
+            query = query.gte("kickoff_date", date_from)
+        res = query.execute()
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Queries] get_predictions_with_results failed: %s", exc)
+        return []

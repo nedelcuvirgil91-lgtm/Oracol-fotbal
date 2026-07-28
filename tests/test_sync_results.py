@@ -141,3 +141,104 @@ def test_recalibrate_for_result_skips_when_no_predicted_xg():
          "home_goals": 1, "away_goals": 0, "kickoff_date": "2026-01-01"}
     # nu ar trebui sa arunce nicio exceptie (nu atinge deloc supabase_client)
     sr._recalibrate_for_result({"fixture_id": "no-xg"}, r)
+
+
+# ── fetch_results_from_odds_api_recent (Sprint 0 — Stabilizare, Etapa 2) ──
+
+def test_fetch_results_from_odds_api_recent_transforms_rows(monkeypatch):
+    import database.queries as q
+
+    rows = [
+        {"home_team_canonical": "Portland Timbers", "away_team_canonical": "Real Salt Lake",
+         "kickoff_date": "2026-07-26", "league": "MLS", "home_score": 2, "away_score": 1},
+        {"home_team_canonical": "San Jose Earthquakes", "away_team_canonical": "LA Galaxy",
+         "kickoff_date": "2026-07-26", "league": "MLS", "home_score": 1, "away_score": 1},
+    ]
+    monkeypatch.setattr(q, "get_recent_odds_results", lambda days_back=14: rows)
+
+    results = sr.fetch_results_from_odds_api_recent()
+
+    assert len(results) == 2
+    assert results[0]["home_team"] == "Portland Timbers"
+    assert results[0]["away_team"] == "Real Salt Lake"
+    assert results[0]["league"] == "MLS"
+    assert results[0]["kickoff_date"] == "2026-07-26"
+    assert results[0]["home_goals"] == 2
+    assert results[0]["away_goals"] == 1
+    assert results[0]["actual_result"] == "H"
+    assert results[0]["fd_id"] is None
+    assert results[1]["actual_result"] == "D"
+
+
+def test_fetch_results_from_odds_api_recent_skips_incomplete_scores(monkeypatch):
+    import database.queries as q
+
+    rows = [{"home_team_canonical": "A", "away_team_canonical": "B",
+             "kickoff_date": "2026-07-26", "league": "MLS", "home_score": None, "away_score": 1}]
+    monkeypatch.setattr(q, "get_recent_odds_results", lambda days_back=14: rows)
+
+    assert sr.fetch_results_from_odds_api_recent() == []
+
+
+def test_fetch_results_from_odds_api_recent_returns_empty_on_exception(monkeypatch):
+    import database.queries as q
+
+    def _boom(days_back=14):
+        raise RuntimeError("simulated failure")
+
+    monkeypatch.setattr(q, "get_recent_odds_results", _boom)
+    assert sr.fetch_results_from_odds_api_recent() == []
+
+
+def test_sync_yesterday_results_combines_both_sources(monkeypatch):
+    """[Sprint 0 — Stabilizare, Etapa 2] football-data.org SI
+    odds_api_recent_results trebuie combinate INTR-O SINGURA cale de
+    scriere (update_results_in_supabase) — nu doua cai separate."""
+    fd_results = [{"fd_id": 1, "home_team": "A", "away_team": "B", "league": "Premier League",
+                   "kickoff_date": "2026-07-26", "home_goals": 1, "away_goals": 0, "actual_result": "H"}]
+    odds_results = [{"fd_id": None, "home_team": "C", "away_team": "D", "league": "MLS",
+                      "kickoff_date": "2026-07-26", "home_goals": 2, "away_goals": 2, "actual_result": "D"}]
+
+    monkeypatch.setattr(sr, "fetch_yesterday_results", lambda: fd_results)
+    monkeypatch.setattr(sr, "fetch_results_from_odds_api_recent", lambda: odds_results)
+
+    captured = {}
+
+    def fake_update(results):
+        captured["results"] = results
+        return len(results), 0
+
+    monkeypatch.setattr(sr, "update_results_in_supabase", fake_update)
+
+    result = sr.sync_yesterday_results()
+
+    assert captured["results"] == fd_results + odds_results
+    assert result["updated"] == 2
+
+
+def test_sync_yesterday_results_survives_odds_bridge_failure(monkeypatch):
+    """Un esec al bridge-ului Odds API nu trebuie sa opreasca fluxul
+    principal (football-data.org) — degradare gratioasa, ca restul
+    modulului."""
+    fd_results = [{"fd_id": 1, "home_team": "A", "away_team": "B", "league": "Premier League",
+                   "kickoff_date": "2026-07-26", "home_goals": 1, "away_goals": 0, "actual_result": "H"}]
+
+    monkeypatch.setattr(sr, "fetch_yesterday_results", lambda: fd_results)
+
+    def _boom():
+        raise RuntimeError("simulated failure")
+
+    monkeypatch.setattr(sr, "fetch_results_from_odds_api_recent", _boom)
+
+    captured = {}
+
+    def fake_update(results):
+        captured["results"] = results
+        return len(results), 0
+
+    monkeypatch.setattr(sr, "update_results_in_supabase", fake_update)
+
+    result = sr.sync_yesterday_results()
+
+    assert captured["results"] == fd_results
+    assert result["updated"] == 1
