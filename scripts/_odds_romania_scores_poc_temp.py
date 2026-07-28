@@ -1,7 +1,8 @@
 """
-POC izolat, temporar — verifică live dacă Odds API `/scores` are date pentru
-`soccer_romania_1_liga`, folosind exact codul de producție
-(FootballOracleAPI.get_recent_completed_matches_raw()), nu un apel brut.
+POC izolat, temporar, runda 2 — verifică live dacă Soccer Football Info
+`matches/view/full` (deja folosit de match_statistics) conține și scorul
+final (nu doar statistici), pentru un meci real, deja verificat
+(Dinamo București 5-1 Universitatea Craiova, 2026-07-25).
 
 Se șterge din cod după închiderea investigației (dovada rămâne în
 istoricul rulării GitHub Actions + commit message).
@@ -18,21 +19,42 @@ if str(root) not in sys.path:
 
 
 if __name__ == "__main__":
-    from oracle_api import FootballOracleAPI
+    from soccerfootballinfo_event_resolver import get_soccerfootballinfo_event_resolver
+    from soccerfootballinfo_client import get_soccerfootballinfo_client
 
-    api = FootballOracleAPI()
+    resolver = get_soccerfootballinfo_event_resolver()
+    match_id = resolver.resolve(
+        home_team="Din. Bucuresti", away_team="Universitatea Craiova",
+        kickoff_date="2026-07-25", league="Romania SuperLiga",
+    )
+    print(f"match_id rezolvat: {match_id!r}")
+    if not match_id:
+        print("Nu s-a putut rezolva match_id - nu pot continua verificarea.")
+        sys.exit(0)
 
-    print("--- Odds API /scores, soccer_romania_1_liga, days_back=3 (cale de productie) ---")
-    romania = api.get_recent_completed_matches_raw("soccer_romania_1_liga", days_back=3)
-    print(f"Meciuri intoarse: {len(romania)}")
-    print(json.dumps(romania, indent=2, ensure_ascii=False))
+    client = get_soccerfootballinfo_client()
+    detail = client.get_match_detail(match_id)
+    if not detail:
+        print("get_match_detail a intors gol.")
+        sys.exit(0)
 
-    print("\n--- Control: Odds API /scores, soccer_usa_mls, days_back=3 (cunoscut ca functioneaza) ---")
-    mls = api.get_recent_completed_matches_raw("soccer_usa_mls", days_back=3)
-    print(f"Meciuri intoarse: {len(mls)}")
-    print(json.dumps(mls[:3], indent=2, ensure_ascii=False))
+    print("--- Chei de nivel 1 in payload-ul detaliat ---")
+    print(sorted(detail.keys()))
 
-    print("\n--- Odds API /scores, soccer_romania_1_liga, days_back=10 (fereastra mai larga) ---")
-    romania_wide = api.get_recent_completed_matches_raw("soccer_romania_1_liga", days_back=10)
-    print(f"Meciuri intoarse: {len(romania_wide)}")
-    print(json.dumps(romania_wide, indent=2, ensure_ascii=False))
+    print("\n--- Cautare campuri de scor (recursiv, pe chei ce contin 'score'/'goal') ---")
+    def _find_score_fields(obj, path=""):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                p = f"{path}.{k}" if path else k
+                if "score" in k.lower() or "goal" in k.lower():
+                    print(f"  {p} = {v!r}")
+                _find_score_fields(v, p)
+        elif isinstance(obj, list):
+            for i, v in enumerate(obj[:2]):
+                _find_score_fields(v, f"{path}[{i}]")
+
+    _find_score_fields(detail)
+
+    print("\n--- teamA/teamB, chei de nivel 1 ---")
+    print("teamA:", sorted((detail.get("teamA") or {}).keys()))
+    print("teamB:", sorted((detail.get("teamB") or {}).keys()))
