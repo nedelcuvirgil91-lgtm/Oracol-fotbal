@@ -24,6 +24,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # [ADAUGAT Sprint 2, Etapa C — Data Quality] Sincronizare ELO echipe
+      # naționale (eloratings.net, R-Sync-4) — fără concept de cotă zilnică,
+      # frecvență WEEKLY conform planului aprobat (Sprint 2, Pasul 2).
+      - name: Sync National Team ELO
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python -m sync.sync_national_team_elo
+
       - name: Retrain ML model
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
