@@ -1,11 +1,11 @@
 {
-  "run_at": "2026-07-28T22:54:17.044486+00:00",
-  "target_url": "https://www.flashscore.com/football/romania/liga-i/",
-  "http_status": 404,
-  "latency_ms": 1033.0,
-  "page_title": "",
-  "content_length_chars": 10913,
-  "looks_like_cloudflare_challenge": false,
+  "run_at": "2026-07-28T22:58:34.905212+00:00",
+  "target_url": "https://www.flashscore.com/football/romania/superliga/",
+  "http_status": 200,
+  "latency_ms": 1686.6,
+  "page_title": "Superliga 2026/2027 live scores, results, Football Romania - Flashscore",
+  "content_length_chars": 1292453,
+  "looks_like_cloudflare_challenge": true,
   "match_rows_found": 0,
   "screenshot_saved": true
 }
