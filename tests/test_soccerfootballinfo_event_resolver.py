@@ -76,11 +76,13 @@ def test_resolve_uses_generic_cache_category():
 
 
 def test_resolve_returns_none_when_league_has_no_championship_id():
-    """Ligă fără mapare Soccer Football Info (ex. Premier League, nu are
-    provider_ids["soccerfootballinfo"]) — niciodată aproximat (Regula #8)."""
+    """Ligă fără mapare Soccer Football Info (necunoscută lui
+    LEAGUE_PROVIDERS — toate cele 11 ligi cunoscute au acum
+    provider_ids["soccerfootballinfo"], Sprint 3 Prioritatea 1) —
+    niciodată aproximat (Regula #8)."""
     client = _FakeClient(_day_payload())
     resolver = mod.SoccerFootballInfoEventResolver(client=client, cache=_FakeCache())
-    result = resolver.resolve("Arsenal", "Chelsea", "2026-01-01", "Premier League")
+    result = resolver.resolve("Arsenal", "Chelsea", "2026-01-01", "Liga Necunoscuta")
     assert result is None
     assert len(client.calls) == 0  # nici măcar nu apelează clientul fără championship_id
 
