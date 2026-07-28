@@ -1,0 +1,75 @@
+name: Football Oracle — Sprint 0 Feedback Loop Validation (temporar)
+
+# [ADAUGAT Sprint 0 — Stabilizare] Unealtă de validare/catch-up pentru
+# Etapa 2 — FOOTBALL_DATA_KEY a lipsit din daily.yml pana la Etapa 1 a
+# acestui sprint, deci fetch_yesterday_results() (fereastra implicita de
+# 7 zile) n-a rulat niciodata cu autentificare reala pana acum. Rezultatele
+# World Cup 2026 (ultimul kickoff cunoscut: 2026-07-19) au cazut in afara
+# ferestrei implicite de 7 zile fata de "azi". Acest catch-up unic
+# largeste fereastra la 21 de zile — o singura rulare manuala, NU o
+# schimbare a comportamentului automat din daily.yml (care ramane la 7
+# zile, neatins). Foloseste STRICT functii deja existente
+# (fetch_yesterday_results(days_back=N), update_results_in_supabase(),
+# prediction_evaluation.build_evaluation_report()) — nicio logica noua.
+#
+# Trigger pe push, acelasi tipar ca sprint2_sync_validation.yml. Se sterge
+# dupa validare.
+
+on:
+  push:
+    branches:
+      - claude/sprint0-stabilizare-feedback-loop
+    paths:
+      - .github/workflows/sprint0_catchup_validation.yml
+
+jobs:
+  catchup-and-evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Catch-up rezultate (fereastra 21 zile, one-off) + raport evaluare
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          RAPIDAPI_KEY_FREELIVEFOOTBALL: ${{ secrets.RAPIDAPI_KEY_FREELIVEFOOTBALL }}
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from sync.sync_results import fetch_yesterday_results, fetch_results_from_odds_api_recent, update_results_in_supabase
+
+          fd_results = fetch_yesterday_results(days_back=21)
+          print(f'football-data.org: {len(fd_results)} rezultate gasite (fereastra 21 zile)')
+          odds_results = fetch_results_from_odds_api_recent(days_back=21)
+          print(f'odds_api_recent_results: {len(odds_results)} rezultate gasite')
+
+          all_results = fd_results + odds_results
+          updated, not_found = update_results_in_supabase(all_results)
+          print(f'Actualizate: {updated} | Negasite: {not_found}')
+
+          from prediction_evaluation import build_evaluation_report
+          report = build_evaluation_report()
+          print('=' * 60)
+          print(f\"Randuri predictie+rezultat: {report['n_total_rows']}\")
+          print(f\"Overall: {report['overall']}\")
+          for league, m in report['per_league'].items():
+              if m.n > 0:
+                  print(f'  {league}: {m}')
+          "
