@@ -94,6 +94,12 @@ PIPELINE_STEPS: tuple[PipelineStep, ...] = (
     # statice sau derivate din discovery live, nu din alte PIPELINE_STEPS).
     PipelineStep("team_form_footballdata"),
     PipelineStep("weather_forecast"),
+    # [ADAUGAT Sprint 2, Etapa C — Data Quality] Team Health (API-Football
+    # injuries+coaches) — echipe cu meciuri in urmatoarele 48h
+    # (days_ahead=2, deja implicit in sync_team_health.py), consumatorul
+    # real de cota API-Football (audit §5), activat ultimul dintre cele
+    # ieftine/gratuite conform ordinii aprobate.
+    PipelineStep("team_health"),
     PipelineStep("feature_update", depends_on=("history_sync",)),
     PipelineStep("shadow_evaluation", depends_on=("feature_update",)),
     PipelineStep("odds_persistence"),
@@ -343,6 +349,26 @@ def run(
         except Exception as exc:
             logger.error("[DailySync] sync_weather_forecast failed: %s", exc)
             print(f"  ⚠️  Eroare la sync prognoză meteo: {exc}")
+
+    # ── (PIPELINE_STEPS: "team_health") ──────────────────────────────────────
+    # [ADAUGAT Sprint 2, Etapa C — Data Quality] Owner nou (API-Football
+    # injuries+coaches) pentru team_health_snapshot — adaptor deja construit
+    # (R-Sync-2), niciodată programat până acum. Scope deja restrâns la
+    # echipe cu meciuri în următoarele 48h (days_ahead=2, implicit) —
+    # consumatorul real de cotă API-Football, activat ultimul dintre cele
+    # cinci sync-uri ieftine/gratuite, conform ordinii aprobate.
+    print("\n▶  Sincronizare stare sănătate echipe (API-Football)...")
+    if dry_run:
+        print("  ℹ️  Sărit (dry run)")
+    else:
+        try:
+            from sync.sync_team_health import run as run_team_health
+            team_health_results = run_team_health()
+            ran = sum(1 for r in team_health_results if r.ran)
+            print(f"  ✅ {ran}/{len(team_health_results)} echipe sincronizate")
+        except Exception as exc:
+            logger.error("[DailySync] sync_team_health failed: %s", exc)
+            print(f"  ⚠️  Eroare la sync stare sănătate echipe: {exc}")
 
     # ── Pasul 3 (PIPELINE_STEPS: "feature_update", depends_on="history_sync") ──
     # [ADAUGAT — ADR-014] Completează implementarea ADR-004 ("Toate

@@ -65,6 +65,13 @@ def test_weather_forecast_step_declared_with_no_dependencies():
     assert names["weather_forecast"].depends_on == ()
 
 
+def test_team_health_step_declared_with_no_dependencies():
+    """[ADAUGAT Sprint 2, Etapa C — Data Quality]"""
+    names = {s.name: s for s in run_daily.PIPELINE_STEPS}
+    assert "team_health" in names
+    assert names["team_health"].depends_on == ()
+
+
 def test_validate_rejects_forward_reference():
     step = run_daily.PipelineStep
     bad = (step("a", depends_on=("b",)), step("b"))
@@ -168,6 +175,18 @@ def test_dry_run_includes_weather_forecast_step_and_skips_it():
     out = buf.getvalue()
     assert "Sincronizare prognoză meteo" in out
     section = out.split("Sincronizare prognoză meteo")[1]
+    assert "Sărit (dry run)" in section
+
+
+def test_dry_run_includes_team_health_step_and_skips_it():
+    """[ADAUGAT Sprint 2, Etapa C — Data Quality] dry_run sare sincronizarea,
+    fara apel real la API-Football."""
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        run_daily.run(dry_run=True)
+    out = buf.getvalue()
+    assert "Sincronizare stare sănătate echipe" in out
+    section = out.split("Sincronizare stare sănătate echipe")[1]
     assert "Sărit (dry run)" in section
 
 
