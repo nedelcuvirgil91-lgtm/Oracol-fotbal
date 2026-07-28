@@ -1,0 +1,63 @@
+{
+  "run_at": "2026-07-28T23:14:02.314905+00:00",
+  "log": [
+    {
+      "tag": "superliga-results-hub",
+      "http_status": 200,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-results-hub",
+      "http_status": 200,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-1-summary",
+      "http_status": 200,
+      "protection_check": "clean"
+    }
+  ],
+  "discovery": {
+    "superliga": {
+      "hub_url": "https://www.flashscore.com/football/romania/superliga/",
+      "attempts": [
+        {
+          "source": "results",
+          "url": "https://www.flashscore.com/football/romania/superliga/results/",
+          "http_status": 200,
+          "links_found": 43
+        }
+      ],
+      "matches": [
+        "https://www.flashscore.com/match/football/fc-botosani-GjY1JjUS/rapid-bucuresti-YFCpigVG/?mid=EeqI7WJc",
+        "https://www.flashscore.com/match/football/cfr-cluj-4KfIhq7B/voluntari-WIoSeFi4/?mid=631P5AlA",
+        "https://www.flashscore.com/match/football/fcsb-Gv2kjDpN/miercurea-ciuc-A5gTQ7pG/?mid=IPgBd6Bd",
+        "https://www.flashscore.com/match/football/sepsi-IDsPIcMA/universitatea-cluj-Us6gkXaT/?mid=vHaX3lJM",
+        "https://www.flashscore.com/match/football/dinamo-bucuresti-rBgMi3MH/univ-craiova-bsd9fGaK/?mid=AJtcK933"
+      ],
+      "source_used": "results"
+    },
+    "ucl": {
+      "hub_url": "https://www.flashscore.com/football/europe/champions-league/",
+      "attempts": [
+        {
+          "source": "results",
+          "url": "https://www.flashscore.com/football/europe/champions-league/results/",
+          "http_status": 200,
+          "links_found": 75
+        }
+      ],
+      "matches": [
+        "https://www.flashscore.com/match/football/ararat-armenia-xlT9cL89/shamrock-rovers-KIN6lmnH/?mid=f9yUru7s",
+        "https://www.flashscore.com/match/football/hearts-0rGrwwNc/sturm-graz-zsktjfsD/?mid=0M0wdHSH",
+        "https://www.flashscore.com/match/football/celje-SpbURe4O/kf-egnatia-CjYs7BO9/?mid=WxPrLDQE",
+        "https://www.flashscore.com/match/football/din-zagreb-8G5ufQTg/thun-4WElAd9p/?mid=rqFko0Ea",
+        "https://www.flashscore.com/match/football/lincoln-red-imps-bHbMply6/mjallby-S0XtXM1E/?mid=4CbLusAN"
+      ],
+      "source_used": "results"
+    }
+  },
+  "matches": [],
+  "stopped_due_to_protection": "superliga-1-Lineups: marker gasit in continut -> 'recaptcha/api'",
+  "total_matches_tested": 0
+}
