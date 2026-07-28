@@ -25,7 +25,7 @@ from pathlib import Path
 EVIDENCE_DIR = Path(__file__).parent.parent / "docs" / "06_UDAL" / "poc_evidence"
 EVIDENCE_DIR.mkdir(parents=True, exist_ok=True)
 
-TARGET_URL = "https://www.flashscore.com/football/romania/liga-i/"
+TARGET_URL = "https://www.flashscore.com/football/romania/superliga/"
 
 
 def main() -> dict:
