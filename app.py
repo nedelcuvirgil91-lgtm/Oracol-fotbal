@@ -1008,6 +1008,53 @@ elif nav == "settings":
             st.caption("Fără raport încă — apasă butonul de mai sus.")
 
         st.markdown("---")
+        st.markdown('<span class="sub-label">🎯 Evaluare predicții — Accuracy/Log-loss/Brier/Calibrare (Sprint 0, Stabilizare)</span>', unsafe_allow_html=True)
+        # [ADAUGAT Sprint 0 — Stabilizare, Etapa 3] Singurul mod de a
+        # confirma, cu date reale, dacă predicțiile emise sunt bune sau
+        # rele — citește exclusiv match_history (prob_*_pred + actual_result,
+        # deja pe același rând, identitate canonică garantată de ADR-036),
+        # nimic nu se scrie aici, nicio formulă din Selection Engine nu e
+        # atinsă. Gated după buton, ca la Provider Health de mai sus.
+        st.caption("Compară predicțiile emise cu rezultatele reale — Accuracy, Log-loss, Brier Score, calibrare, per ligă. Nu scrie nimic în match_history.")
+        if st.button("🎯 Calculează raportul de evaluare"):
+            from prediction_evaluation import build_evaluation_report
+            with st.spinner("Citesc match_history și calculez metricile..."):
+                st.session_state["prediction_evaluation_report"] = build_evaluation_report()
+
+        eval_report = st.session_state.get("prediction_evaluation_report")
+        if eval_report:
+            overall = eval_report["overall"]
+            if overall.n == 0:
+                st.warning("Încă nicio predicție cu rezultat real asociat — bucla de feedback nu a produs date suficiente pentru evaluare.")
+            else:
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Predicții evaluate", overall.n)
+                c2.metric("Accuracy", f"{overall.accuracy * 100:.1f}%" if overall.accuracy is not None else "—")
+                c3.metric("Log-loss", f"{overall.log_loss:.4f}" if overall.log_loss is not None else "—")
+                c4.metric("Brier Score", f"{overall.brier_score:.4f}" if overall.brier_score is not None else "—")
+
+                per_league_rows = [
+                    {"Ligă": league, "N": m.n,
+                     "Accuracy": f"{m.accuracy * 100:.1f}%" if m.accuracy is not None else "—",
+                     "Log-loss": f"{m.log_loss:.4f}" if m.log_loss is not None else "—",
+                     "Brier": f"{m.brier_score:.4f}" if m.brier_score is not None else "—"}
+                    for league, m in eval_report["per_league"].items()
+                ]
+                st.markdown("**Metrici per ligă**")
+                st.dataframe(pd.DataFrame(per_league_rows), use_container_width=True, hide_index=True)
+
+                calib_rows = [
+                    {"Rezultat": b.outcome, "Interval": f"{b.bin_low:.1f}–{b.bin_high:.1f}", "N": b.n,
+                     "Prob. medie prezisă": b.mean_predicted, "Frecvență observată": b.observed_frequency}
+                    for b in eval_report["calibration"] if b.n > 0
+                ]
+                if calib_rows:
+                    st.markdown("**Calibrare** (prob. medie prezisă vs. frecvență reală observată, per interval)")
+                    st.dataframe(pd.DataFrame(calib_rows), use_container_width=True, hide_index=True)
+        else:
+            st.caption("Fără raport încă — apasă butonul de mai sus.")
+
+        st.markdown("---")
         st.markdown('<span class="sub-label">Performanță — ultima rulare Value Bets</span>', unsafe_allow_html=True)
         # [ADAUGAT] Mini audit de performanță (nefuncțional pentru utilizator,
         # doar informativ) — populat de view-ul VALUE BETS la fiecare rulare.
