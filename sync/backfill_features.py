@@ -148,6 +148,11 @@ def fetch_all_matches(league: str | None = None) -> list[dict]:
                     "home_fouls,away_fouls,"
                     + ",".join(FEATURE_COLUMNS))
             .not_.is_("actual_result", "null")
+            # [ADAUGAT] Exclude rândurile superseded (ADR-025) — fără asta,
+            # ELOTracker/FormTracker/H2HTracker procesau același meci real de
+            # două ori (rândul canonic + duplicatul istoric Kaggle), pentru
+            # ~3.500 meciuri (2023-2025, 5 ligi majore) — confirmat live.
+            .is_("superseded_by", "null")
             .order("kickoff_date", desc=False)
             .order("id", desc=False)
         )

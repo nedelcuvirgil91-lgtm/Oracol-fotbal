@@ -210,6 +210,7 @@ def count_matches_with_result() -> int:
             client.table("match_history")
             .select("id", count="exact")
             .not_.is_("actual_result", "null")
+            .is_("superseded_by", "null")
             .execute()
         )
         return res.count or 0
@@ -261,6 +262,7 @@ def get_finished_matches_missing_stats(
             client.table("match_history")
             .select("home_team,away_team,kickoff_date,league")
             .not_.is_("actual_home_goals", "null")
+            .is_("superseded_by", "null")
             .gte("kickoff_date", date_from)
         )
         query = query.is_("referee", "null") if require_referee else query.is_("home_possession", "null")
@@ -475,6 +477,7 @@ def get_latest_team_elo(team: str, lookback: int = 5) -> int | None:
             .select("home_team,away_team,home_elo_after,away_elo_after,kickoff_date")
             .or_(f"home_team.eq.{team},away_team.eq.{team}")
             .not_.is_("actual_result", "null")
+            .is_("superseded_by", "null")
             .order("kickoff_date", desc=True)
             .order("id", desc=True)
             .limit(lookback)
@@ -539,6 +542,7 @@ def get_h2h_from_history(home: str, away: str, last_n: int = 10) -> list[dict]:
             .or_(f"and(home_team.eq.{home},away_team.eq.{away}),"
                  f"and(home_team.eq.{away},away_team.eq.{home})")
             .not_.is_("actual_result", "null")
+            .is_("superseded_by", "null")
             .order("kickoff_date", desc=True)
             .order("id", desc=True)
             .limit(last_n)
@@ -1318,6 +1322,7 @@ def get_predictions_with_results(days_back: int | None = None) -> list[dict]:
                     "prob_home_pred,prob_draw_pred,prob_away_pred,actual_result")
             .not_.is_("prob_home_pred", "null")
             .not_.is_("actual_result", "null")
+            .is_("superseded_by", "null")
         )
         if days_back is not None:
             from datetime import date, timedelta
