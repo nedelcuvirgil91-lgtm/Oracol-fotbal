@@ -133,9 +133,11 @@ Cheile API sunt tratate ca infrastructură critică — nu ca detalii de configu
 
 ## Goluri cunoscute, active azi (nu ascunse, de tratat cu prioritate)
 
-- `oracle_api.py` conține 3 chei API hardcodate (`ODDS_API_KEY`, `WEATHER_API_KEY`, `RAPIDAPI_KEY`) — cunoscut, documentat în `CHANGELOG.md` ca „neurgent, repo privat", dar tratat ca risc real, nu ignorat.
-- `sync/sync_results.py` apelează încă necondiționat recalibrarea legacy (`_recalibrate_for_result`), contrazicând flag-ul `auto_recalibration_enabled` promis de ADR-004 dar niciodată implementat.
-- Cache nivel 2 (ADR-003, Supabase comun între instanțe) — proiectat, neimplementat.
+**Notă**: secțiunea a fost re-verificată prin citire directă de cod (Sprint 2, Etapa C — Data Quality, Pasul 4) — 3 intrări vechi s-au dovedit false (rezolvate între timp, fără actualizare aici) și au fost eliminate: cheile API hardcodate din `oracle_api.py` (eliminate la R4.1), recalibrarea necondiționată din `sync/sync_results.py` (gatată azi de `auto_recalibration_enabled`, verificat), Cache nivel 2/ADR-003 (implementat complet, `cache_manager.py` `get()`/`set()` citesc și scriu prin `supabase_client.get_cached_response()`/`set_cached_response()`).
+
+- **R-Sync-6a, neînceput**: `freelf_form_adapter.py` reproduce fidel un bug preexistent — `get_freelf_standings()` nu copiază niciodată câmpul `"form"` din răspunsul brut FreeLF, deci `freelf_team_form_snapshot.form` e mereu gol. Confirmat prin citire de cod, nu presupus; verificarea payload-ului live rămâne task separat.
+- **Cotă FreeLF/RapidAPI (`freelivefootball`) cronic epuizată** — confirmat live (Sprint 2, validare `sync_team_form_freelf`): endpoint `football-get-matches-by-date` cu zeci de eșecuri consecutive, `football-get-standing-all` niciodată reușit. Sync-ul rămâne activ în pipeline (degradare corectă via `RateLimitManager`), dar `freelf_team_form_snapshot` nu se populează până la recuperarea cotei sau schimbare de strategie de consum (deliberat neinvestigat încă, la cererea proprietarului produsului).
+- **Descoperirea meciurilor (calea ESPN, `oracle_api.get_matches_for_week()`) nu populează `venue_city` pentru majoritatea meciurilor** — confirmat live (Sprint 2, validare `sync_weather_forecast`): din perechile (oraș, dată) identificate într-o rulare reală, majoritatea au fost excluse de `WeatherForecastAdapter.validate()` din lipsă de oraș. `weather_forecast_cache` se populează doar pentru meciurile unde ESPN întoarce efectiv orașul stadionului. Migrarea completă a descoperirii meciurilor la Supabase (R-Sync-7) ar putea rezolva asta ca efect secundar, dar rămâne în afara scopului actual.
 
 ## Comenzi de bază
 
