@@ -112,7 +112,7 @@ Cheile API sunt tratate ca infrastructură critică — nu ca detalii de configu
 
 ## Regulile testelor
 
-- `pytest tests/` trebuie să rămână verde — 82 de teste confirmate, fără dependință de rețea.
+- `pytest tests/` trebuie să rămână verde — 1576 de teste confirmate (2026-07-28, `pytest tests/ --collect-only -q`; numărul crește cu fiecare migrare Database-First), fără dependință de rețea.
 - Orice schimbare în calea de predicție (`oracle_engine.py`) se verifică funcțional (rulare reală pe fixture-uri cunoscute), nu doar prin teste unitare.
 
 ## Regulile Champion vs. Challenger (Learning Core)
