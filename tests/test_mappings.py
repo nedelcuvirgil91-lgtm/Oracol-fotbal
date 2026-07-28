@@ -141,3 +141,18 @@ def test_normalize_team_name_hamkam_unified():
     Csíkszereda - "HamKam" (fara cratima) vs. "Ham-Kam"."""
     assert normalize_team_name("HamKam") == "Ham-Kam"
     assert normalize_team_name("Ham-Kam") == "Ham-Kam"
+
+
+def test_normalize_team_name_romania_superliga_full_roster_unified():
+    """Regresie directa: audit Sprint 3, 2026-07-28, al doilea val -
+    verificare sistematica pe toate cele 16 echipe curente SuperLiga a
+    gasit inca 3 dedublari reale, acelasi tipar ca Csíkszereda (nume vechi
+    din import istoric vs. nume nou folosit de discovery/TSDB azi)."""
+    assert normalize_team_name("FC Arges") == "Argeș Pitești"
+    assert normalize_team_name("Argeș Pitești") == "Argeș Pitești"
+    assert normalize_team_name("Otelul") == "Oțelul Galați"
+    assert normalize_team_name("Oțelul Galați") == "Oțelul Galați"
+    assert normalize_team_name("Sepsi Sf. Gheorghe") == "Sepsi OSK"
+    assert normalize_team_name("Sepsi OSK") == "Sepsi OSK"
+    assert normalize_team_name("U. Cluj") == "Universitatea Cluj"
+    assert normalize_team_name("Universitatea Cluj") == "Universitatea Cluj"
