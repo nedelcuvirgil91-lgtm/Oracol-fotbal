@@ -85,6 +85,15 @@ PIPELINE_STEPS: tuple[PipelineStep, ...] = (
     PipelineStep("results"),
     PipelineStep("match_statistics", depends_on=("results",)),
     PipelineStep("history_sync"),
+    # [ADAUGAT Sprint 3, Prioritatea 2] Descoperire meciuri Database-First
+    # (R-Sync-7a, `sync/sync_scheduled_fixtures.py`) — cei 6 adaptori
+    # existau deja, `scheduled_fixtures` era 0 rânduri (verificat live) —
+    # niciodată programat în orchestrarea zilnică. Rulează STRICT în
+    # PARALEL cu calea live veche (`oracle_api.get_matches_for_week()`,
+    # neatinsă) — Oracle Engine NU citește încă de aici (R-Sync-7b, separat,
+    # neînceput). Fără dependințe reale (surse externe, nu alte pipeline
+    # steps).
+    PipelineStep("scheduled_fixtures"),
     # [ADAUGAT Sprint 2, Etapa C — Data Quality] Team Form FreeLF — fara
     # dependinte reale (ligi statice, mappings.FREE_LF_LEAGUE_IDS), plasat
     # aici doar ca ordine de citire, nu ca dependinta declarata.
@@ -298,6 +307,22 @@ def run(
         ]
 
     _print_sync_report(sync_reports)
+
+    # ── (PIPELINE_STEPS: "scheduled_fixtures") ──────────────────────────────
+    # [ADAUGAT Sprint 3, Prioritatea 2] Vezi comentariul din PIPELINE_STEPS —
+    # rulează în PARALEL cu calea live veche, Oracle Engine neatins aici.
+    print("\n▶  Descoperire meciuri Database-First (scheduled_fixtures, paralel cu calea live)...")
+    if dry_run:
+        print("  ℹ️  Sărit (dry run)")
+    else:
+        try:
+            from sync.sync_scheduled_fixtures import run as run_scheduled_fixtures
+            fixtures_results = run_scheduled_fixtures()
+            ran = sum(1 for r in fixtures_results if r.ran)
+            print(f"  ✅ {ran}/{len(fixtures_results)} task-uri de descoperire executate")
+        except Exception as exc:
+            logger.error("[DailySync] sync_scheduled_fixtures failed: %s", exc)
+            print(f"  ⚠️  Eroare la descoperire meciuri: {exc}")
 
     # ── (PIPELINE_STEPS: "team_form_freelf") ────────────────────────────────
     # [ADAUGAT Sprint 2, Etapa C — Data Quality] Owner nou (FreeLF standings)
