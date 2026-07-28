@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      SYNC_MODULE: sync_team_health
+      SYNC_MODULE: sync_odds_recent_results
 
     steps:
       - name: Checkout repository
