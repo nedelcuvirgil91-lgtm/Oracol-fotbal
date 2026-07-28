@@ -5,6 +5,7 @@ on:
     branches: [claude/sprint0-stabilizare-feedback-loop]
     paths:
       - ".github/workflows/ucl_discovery_poc_temp.yml"
+      - "scripts/_ucl_discovery_poc_temp.py"
 
 jobs:
   ucl-discovery-poc:
