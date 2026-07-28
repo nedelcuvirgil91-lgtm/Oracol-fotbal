@@ -145,18 +145,23 @@ class InjuryManager:
         is_home:   bool,        # ← SEMNĂTURĂ NOUĂ: bool, nu string league
     ) -> TeamInjuryReport:
         """
-        Fetch lineup prin oracle_api.get_lineup() (Free Live Football) și
-        returnează absenții. Delegăm fetch-ul propriu-zis către oracle_api.py
-        — acolo se gestionează deja URL-ul, cheia RapidAPI, caching-ul în
-        memorie, și fallback-ul pe forma de răspuns ("lineup" sau "response").
+        [NEAPELATĂ din oracle_engine.py — R-Sync-10, ADR-039] Fetch lineup
+        prin oracle_api.get_lineup() (Free Live Football) și returnează
+        absenții. Rămâne definită (Sync Layer/scripturi standalone o pot
+        folosi în continuare) — dar calea live de servire citește azi
+        STRICT din Supabase (`database.queries.get_freelf_lineup_snapshot()`
+        + `build_injury_report_from_raw_lineup()` de mai jos), niciodată
+        prin această metodă. Delegăm fetch-ul propriu-zis către
+        oracle_api.py — acolo se gestionează deja URL-ul, cheia RapidAPI,
+        caching-ul în memorie, și fallback-ul pe forma de răspuns
+        ("lineup" sau "response").
 
         get_lineup() întoarce deja normalizat:
           {confirmed, formation, unavailable: [{id, name, position,
                                                  market_value, unavailability}]}
         """
-        report = TeamInjuryReport(team_name=team_name, team_id=team_id)
-
         if not self._api or not event_id:
+            report = TeamInjuryReport(team_name=team_name, team_id=team_id)
             report.data_quality = "unavailable"
             report.summary      = "⚠️ Date lineup indisponibile (no API/event_id)"
             return report
@@ -177,6 +182,30 @@ class InjuryManager:
                         self._cache.set("lineups", cache_key, raw)
             except Exception as exc:
                 logger.warning("[InjuryManager] Lineup fetch failed: %s", exc)
+
+        return self.build_injury_report_from_raw_lineup(lineup_data, team_id, team_name)
+
+    # ── PARSE LINEUP (pură, fără I/O) — R-Sync-10 ─────────────────────────
+    def build_injury_report_from_raw_lineup(
+        self,
+        lineup_data: dict | None,
+        team_id:     int | str,
+        team_name:   str,
+    ) -> TeamInjuryReport:
+        """
+        Logica de calcul a penalizării (impact per jucător, agregare,
+        etichete) EXTRASĂ identic din fostul `get_lineup_absences()` —
+        „no defect, no rewrite" (ADR-038). Singurul apelant de producție
+        rămâne `oracle_engine.py` (Database-First, R-Sync-10) — primește
+        `lineup_data` deja normalizat, exact forma întoarsă de
+        `oracle_api.get_lineup()` / persistată de
+        `freelf_lineup_adapter.py`
+        ({confirmed, formation, unavailable: [{id, name, position,
+        market_value, unavailability}]}), niciodată printr-un apel live.
+
+        Funcție pură — zero I/O, testabilă izolat.
+        """
+        report = TeamInjuryReport(team_name=team_name, team_id=team_id)
 
         if not lineup_data:
             report.data_quality = "unavailable"

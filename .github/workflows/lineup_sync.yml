@@ -1,0 +1,45 @@
+name: Football Oracle — Lineup Sync (Free Live Football)
+
+# [ADAUGAT Sprint 3, R-Sync-10] Cadență DEDICATĂ, separată de daily.yml —
+# aliniamentele FreeLF se confirmă aproape de kickoff, nu o dată/zi e prea
+# rar. La fiecare 15 minute, script-ul interoghează doar fixture-urile din
+# fereastra apropiată de kickoff (scheduled_fixtures.freelf_event_id,
+# R-Sync-7a) — o rulare fără fixture-uri în fereastră termină instant, fără
+# cost. Vezi sync/sync_lineup_freelf.py pentru detalii arhitecturale
+# complete și motivul ferestrei generoase (T-15min..T+240min).
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+    inputs:
+      window_minutes:
+        description: "Fereastră (minute) înainte de kickoff pentru care se sincronizează"
+        required: false
+        default: "240"
+
+jobs:
+  lineup-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sync.sync_lineup_freelf
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          RAPIDAPI_KEY_FREELIVEFOOTBALL: ${{ secrets.RAPIDAPI_KEY_FREELIVEFOOTBALL }}
+        run: |
+          python -m sync.sync_lineup_freelf --window-minutes "${{ github.event.inputs.window_minutes || '240' }}"

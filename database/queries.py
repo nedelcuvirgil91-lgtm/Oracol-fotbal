@@ -1392,6 +1392,119 @@ def upsert_freelf_h2h_snapshot(
         return False
 
 
+def get_upcoming_freelf_fixtures_for_lineup(window_minutes_ahead: int = 240) -> list[dict]:
+    """
+    [ADAUGAT Sprint 3, R-Sync-10] Meciuri cu `freelf_event_id` cunoscut
+    (`scheduled_fixtures`, R-Sync-7a) al căror kickoff cade într-o fereastră
+    generoasă în jurul „acum" — sursa unică pentru Sync Layer
+    (`sync/sync_lineup_freelf.py`). Fereastra e DELIBERAT largă (implicit
+    240 minute înainte de kickoff, plus 15 minute după) — momentul real de
+    publicare a aliniamentelor FreeLF nu e cunoscut empiric încă (cota
+    cronic epuizată blochează verificarea live, Sprint 3 audit) — o
+    fereastră îngustă ar risca să rateze publicarea reală. Instrumentarea
+    `*_first_available_at` (migrare 030) acumulează dovada reală în timp;
+    fereastra se poate îngusta ulterior, pe bază de date, nu presupunere.
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        from datetime import datetime, timedelta, timezone as _tz
+        now = datetime.now(_tz.utc)
+        window_from = (now - timedelta(minutes=15)).isoformat()
+        window_to = (now + timedelta(minutes=window_minutes_ahead)).isoformat()
+        res = (
+            client.table("scheduled_fixtures")
+            .select("home_team_canonical,away_team_canonical,kickoff_date,kickoff_utc,freelf_event_id")
+            .gte("kickoff_utc", window_from)
+            .lte("kickoff_utc", window_to)
+            .not_.is_("freelf_event_id", "null")
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.error("[Queries] get_upcoming_freelf_fixtures_for_lineup failed: %s", exc)
+        return []
+
+
+def get_freelf_lineup_snapshot(home_team: str, away_team: str, kickoff_date: str) -> dict | None:
+    """
+    Sursa canonică pentru aliniamente + absențe confirmate Free Live
+    Football (`oracle_engine.evaluate_match()`, Database-First, R-Sync-10)
+    — ADR-039. Înlocuiește apelul live
+    `injury_manager.get_lineup_absences()` → `oracle_api.get_lineup()` —
+    citire STRICT din Supabase, populată separat de Sync Layer
+    (`sync/sync_lineup_freelf.py`), niciodată direct de aici.
+
+    Un singur rând per meci (ambele părți, home+away) — identitate prin
+    (home_team_canonical, away_team_canonical, kickoff_date), la fel ca
+    `scheduled_fixtures`/`odds_api_recent_results`.
+
+    Întoarce None dacă meciul nu a fost încă sincronizat — Regula #8,
+    tratat de apelant ca „necunoscut", niciodată motiv de fallback live
+    către provider.
+    """
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("freelf_lineup_snapshot")
+            .select("*")
+            .eq("home_team_canonical", home_team)
+            .eq("away_team_canonical", away_team)
+            .eq("kickoff_date", kickoff_date)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning(
+            "[Queries] get_freelf_lineup_snapshot failed pentru %s vs %s: %s",
+            home_team, away_team, exc,
+        )
+        return None
+
+
+def upsert_freelf_lineup_snapshot(
+    home_team: str, away_team: str, kickoff_date: str, freelf_event_id: str,
+    home_confirmed: bool, home_formation: str, home_unavailable: list[dict],
+    away_confirmed: bool, away_formation: str, away_unavailable: list[dict],
+) -> bool:
+    """
+    Owner unic de scriere pentru `freelf_lineup_snapshot` (disciplina
+    ADR-036) — exclusiv Sync Layer (`sync/sync_lineup_freelf.py`),
+    niciodată Oracle Engine. Întreaga logică de merge (COALESCE pe
+    `*_first_available_at`, niciodată suprascris) trăiește în RPC-ul
+    `upsert_freelf_lineup_snapshot_merge` (migrare 030) — funcția de față
+    e un wrapper subțire.
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.rpc("upsert_freelf_lineup_snapshot_merge", {
+            "p_home_team_canonical": home_team,
+            "p_away_team_canonical": away_team,
+            "p_kickoff_date": kickoff_date,
+            "p_freelf_event_id": freelf_event_id,
+            "p_home_confirmed": home_confirmed,
+            "p_home_formation": home_formation,
+            "p_home_unavailable": home_unavailable,
+            "p_away_confirmed": away_confirmed,
+            "p_away_formation": away_formation,
+            "p_away_unavailable": away_unavailable,
+        }).execute()
+        return True
+    except Exception as exc:
+        logger.warning(
+            "[Queries] upsert_freelf_lineup_snapshot failed pentru %s vs %s: %s",
+            home_team, away_team, exc,
+        )
+        return False
+
+
 def upsert_equivalence_evaluation(
     gate_key: str, entity: str, window_from: str, window_to: str,
     live_count: int, scheduled_count: int, matched_count: int,

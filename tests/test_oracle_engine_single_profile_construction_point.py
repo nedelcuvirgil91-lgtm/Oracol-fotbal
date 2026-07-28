@@ -255,3 +255,57 @@ def test_get_h2h_live_never_called_from_oracle_engine():
         t = ast.parse(p.read_text(encoding="utf-8"), filename=fname)
         lines = _calls_matching(t, {"get_h2h"})
         assert not lines, f"{fname} apelează direct H2H live la liniile {lines}"
+
+
+def test_get_lineup_absences_never_called_from_oracle_engine():
+    """[ADĂUGAT — ADR-039 R-Sync-10] `injury_manager.get_lineup_absences()`
+    (fetch live FreeLF) nu mai are voie să fie apelată din oracle_engine.py
+    — era ULTIMUL loc din fișier care modifica efectiv predicția servită
+    pe baza unui apel live (nu doar shadow/discovery). Penalizarea de
+    accidentări citește azi STRICT din Supabase
+    (`get_freelf_lineup_snapshot()` +
+    `build_injury_report_from_raw_lineup()`, funcție pură), vezi testul de
+    mai jos. Singurul apelant de producție al `get_lineup_absences()`
+    rămâne, teoretic, orice script Sync Layer viitor — azi niciunul (nici
+    `freelf_lineup_adapter.py` nu o folosește, apelează
+    `oracle_api.get_lineup()` direct)."""
+    path = ROOT / "oracle_engine.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename="oracle_engine.py")
+    lines = _calls_matching(tree, {"get_lineup_absences"})
+    assert not lines, (
+        f"oracle_engine.py apelează încă get_lineup_absences() (live FreeLF) "
+        f"la liniile {lines} — eliminat în R-Sync-10, ADR-039."
+    )
+
+    for fname in PRODUCTION_FILES:
+        if fname in ("oracle_engine.py", "injury_manager.py"):
+            continue
+        p = ROOT / fname
+        if not p.exists():
+            continue
+        t = ast.parse(p.read_text(encoding="utf-8"), filename=fname)
+        lines = _calls_matching(t, {"get_lineup_absences"})
+        assert not lines, f"{fname} apelează direct lineup live la liniile {lines}"
+
+
+def test_injury_penalty_db_first_only_called_from_evaluate_match():
+    """[ADĂUGAT — ADR-039 R-Sync-10] `get_freelf_lineup_snapshot()`
+    (citire Database-First) trebuie apelată dintr-un singur loc de
+    producție — `evaluate_match()` — exact tiparul deja impus pentru
+    celelalte niveluri Database-First (footballdata, TSDB, FreeLF H2H)."""
+    path = ROOT / "oracle_engine.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename="oracle_engine.py")
+
+    calls_by_function: dict[str, list[int]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            lines = _calls_matching(node, {"get_freelf_lineup_snapshot"})
+            if lines:
+                calls_by_function[node.name] = lines
+
+    assert calls_by_function == {"evaluate_match": calls_by_function.get("evaluate_match", [])}, (
+        f"get_freelf_lineup_snapshot apelată din afara evaluate_match(): "
+        f"{calls_by_function} — cale paralelă către penalizarea de "
+        f"accidentări, ocolește ordinea Database-First (ADR-039 R-Sync-10)."
+    )
+    assert "evaluate_match" in calls_by_function
