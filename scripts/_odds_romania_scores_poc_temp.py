@@ -1,11 +1,9 @@
 """
-POC izolat, temporar, runda 2 — verifică live dacă Soccer Football Info
-`matches/view/full` (deja folosit de match_statistics) conține și scorul
-final (nu doar statistici), pentru un meci real, deja verificat
-(Dinamo București 5-1 Universitatea Craiova, 2026-07-25).
+POC izolat, temporar, runda 3 — bypass resolver/cache, cauta direct in
+matches/day/full pentru 2026-07-25 orice meci cu "craiova" sau "dinamo"
+in nume, sa vad numele brute SFI si campurile de scor disponibile.
 
-Se șterge din cod după închiderea investigației (dovada rămâne în
-istoricul rulării GitHub Actions + commit message).
+Se șterge din cod după închiderea investigației.
 """
 from __future__ import annotations
 
@@ -19,42 +17,21 @@ if str(root) not in sys.path:
 
 
 if __name__ == "__main__":
-    from soccerfootballinfo_event_resolver import get_soccerfootballinfo_event_resolver
     from soccerfootballinfo_client import get_soccerfootballinfo_client
 
-    resolver = get_soccerfootballinfo_event_resolver()
-    match_id = resolver.resolve(
-        home_team="Din. Bucuresti", away_team="Universitatea Craiova",
-        kickoff_date="2026-07-25", league="Romania SuperLiga",
-    )
-    print(f"match_id rezolvat: {match_id!r}")
-    if not match_id:
-        print("Nu s-a putut rezolva match_id - nu pot continua verificarea.")
-        sys.exit(0)
-
     client = get_soccerfootballinfo_client()
-    detail = client.get_match_detail(match_id)
-    if not detail:
-        print("get_match_detail a intors gol.")
-        sys.exit(0)
 
-    print("--- Chei de nivel 1 in payload-ul detaliat ---")
-    print(sorted(detail.keys()))
+    for date_iso in ("2026-07-24", "2026-07-25", "2026-07-26"):
+        payload = client.get_matches_for_day(date_iso)
+        matches = (payload or {}).get("result") or []
+        print(f"--- {date_iso}: {len(matches)} meciuri globale ---")
+        for m in matches:
+            ta = (m.get("teamA") or {}).get("name", "")
+            tb = (m.get("teamB") or {}).get("name", "")
+            if "craiova" in ta.lower() or "craiova" in tb.lower() or "dinamo" in ta.lower() or "dinamo" in tb.lower():
+                champ = m.get("championship") or {}
+                print(f"  GASIT: id={m.get('id')} champ={champ.get('name')!r} "
+                      f"{ta!r} vs {tb!r} status={m.get('status')} date={m.get('date')}")
+                print(f"  chei nivel1 meci: {sorted(m.keys())}")
 
-    print("\n--- Cautare campuri de scor (recursiv, pe chei ce contin 'score'/'goal') ---")
-    def _find_score_fields(obj, path=""):
-        if isinstance(obj, dict):
-            for k, v in obj.items():
-                p = f"{path}.{k}" if path else k
-                if "score" in k.lower() or "goal" in k.lower():
-                    print(f"  {p} = {v!r}")
-                _find_score_fields(v, p)
-        elif isinstance(obj, list):
-            for i, v in enumerate(obj[:2]):
-                _find_score_fields(v, f"{path}[{i}]")
-
-    _find_score_fields(detail)
-
-    print("\n--- teamA/teamB, chei de nivel 1 ---")
-    print("teamA:", sorted((detail.get("teamA") or {}).keys()))
-    print("teamB:", sorted((detail.get("teamB") or {}).keys()))
+    print("\n--- verificare directa match_id + detail, daca s-a gasit ceva mai sus ---")
