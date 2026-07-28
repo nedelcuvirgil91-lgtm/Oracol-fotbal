@@ -12,10 +12,26 @@ from scraper_registry import (
 )
 
 
-def test_scrapers_registry_is_empty_in_phase_0():
-    """[UDAL Faza 0] Deliberat gol - nicio tinta reala de scraping nu
-    exista inca, decizie explicita a proprietarului produsului."""
-    assert dict(SCRAPERS) == {}
+def test_scrapers_registry_has_exactly_one_pilot_entry_in_phase_1():
+    """[UDAL Faza 1] O singura intrare - pilotul generic, tos_reviewed=False.
+    Regresie directa: nicio a doua sursa nu se adauga fara aprobare
+    explicita separata (decizia proprietarului produsului)."""
+    assert set(SCRAPERS.keys()) == {"udal_pilot_generic_html_stats"}
+
+
+def test_pilot_scraper_tos_not_reviewed():
+    """[UDAL Faza 1] Regresie critica - pilotul ramane tos_reviewed=False
+    pana la POC_SCRAPER_SOURCE_01 + aprobare separata."""
+    cap = get_capability("udal_pilot_generic_html_stats")
+    assert cap.tos_reviewed is False
+    assert cap.tos_reviewed_by is None
+    assert cap.tos_reviewed_at is None
+
+
+def test_pilot_scraper_is_not_runnable_yet():
+    """Consecinta directa a tos_reviewed=False - is_runnable() trebuie sa
+    ramana False pentru pilot, chiar daca e inregistrat."""
+    assert is_runnable("udal_pilot_generic_html_stats") is False
 
 
 def test_scrapers_is_immutable_mapping():

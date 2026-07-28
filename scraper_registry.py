@@ -15,12 +15,18 @@ Scraper Registry descrie DOAR ce POATE tehnic o sursă de scraping — la fel
 ca la Capability Registry, „ce poate" e separat de „unde funcționează azi"
 (acela ar fi League Mapping, neatins aici).
 
-[UDAL Faza 0] Acest registry e intenționat GOL de intrări reale — Faza 0
-implementează exclusiv infrastructura (enum, contracte, tabele, flag-uri),
-NU scraping efectiv (ADR-042, decizia proprietarului produsului, "În
-această fază nu implementăm scraping"). Prima intrare reală apare abia în
-Faza 1 (țintă pilot unică, shadow-only — statistici Romania SuperLiga, per
-planul de migrare).
+[UDAL Faza 0] Acest registry a fost intenționat GOL de intrări reale în
+Faza 0 — doar infrastructura (enum, contracte, tabele, flag-uri).
+
+[UDAL Faza 1] O singură intrare, PILOT, GENERICĂ — `udal_pilot_generic_html_stats`.
+Decizie explicită a proprietarului produsului: pilotul NU se proiectează
+pentru un anumit site ("Nu vreau o sursă hardcodată... Pilotul nu trebuie
+proiectat pentru un anumit site") — `target_url_template` e un placeholder
+needereferențiat, `tos_reviewed=False` (rămâne așa până la
+`POC_SCRAPER_SOURCE_01`, pas separat, după validarea pilotului — vezi
+`docs/06_UDAL/SCRAPER_SOURCE_EVALUATION.md`). Pilotul rulează exclusiv
+contra unui fixture HTML local (`docs/06_UDAL/fixtures/pilot_match_statistics.html`),
+niciodată contra acestui URL placeholder.
 
 `tos_reviewed` e un câmp BLOCANT, nu informativ: nicio sursă cu
 `tos_reviewed=False` nu are voie să ruleze, nici măcar în shadow mode —
@@ -68,8 +74,23 @@ class ScraperCapability:
         object.__setattr__(self, "data_types", frozenset(self.data_types))
 
 
-# [UDAL Faza 0] Gol deliberat — vezi docstring-ul modulului.
-_SCRAPERS: dict[str, ScraperCapability] = {}
+# [UDAL Faza 1] O singură intrare, pilot, generică — vezi docstring-ul
+# modulului. `tos_reviewed=False` — rămâne așa până la `POC_SCRAPER_SOURCE_01`
+# + aprobare separată, explicită, a proprietarului produsului.
+_SCRAPERS: dict[str, ScraperCapability] = {
+    "udal_pilot_generic_html_stats": ScraperCapability(
+        scraper_id="udal_pilot_generic_html_stats", version=1,
+        tier=AcquisitionTier.HTTP_SCRAPER,
+        data_types=frozenset({DataType.STATISTICS}),
+        # Placeholder needereferențiat — niciun cod nu are voie să facă
+        # request real către acest URL (adaptorul Fazei 1 citește exclusiv
+        # fixture-ul local, vezi generic_html_stats_scraper_adapter.py).
+        target_url_template="https://neconfirmat.example.invalid/{league}/{season}/stats",
+        selector_map_ref="udal_pilot_generic_html_stats-v1",
+        politeness_policy_ref="udal_pilot_generic_html_stats-politeness-v1",
+        tos_reviewed=False, tos_reviewed_by=None, tos_reviewed_at=None,
+    ),
+}
 
 SCRAPERS: Mapping[str, ScraperCapability] = MappingProxyType(_SCRAPERS)
 
