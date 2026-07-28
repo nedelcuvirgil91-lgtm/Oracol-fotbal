@@ -1,5 +1,13 @@
 # ADR-041 — Extinderea Selection Engine-ului (ADR-034) către Sync Layer
 
+**[ACTUALIZAT 2026-07-28]** Faza 1 (inclusiv acest document) e deja pe `main`
+— verificat direct (`git show origin/main:...`, conținut identic, commit
+`384c545` „Close Sprint 1 Faza 1: ADR-041 + real orchestrator wiring for
+Soccer Football Info"). Rândul de status de mai jos, scris la data redactării
+ADR-ului, e depășit — păstrat neschimbat ca parte a documentului Frozen,
+corectat aici doar ca notă de trasabilitate, per aceeași regulă aplicată
+`ARCHITECTURE_STATE.md`/`ADR037_DEPLOYMENT_PLAN.md`.
+
 **Status**: FROZEN — Faza 1 implementată, testată (1318 teste verzi, vezi
 raportul de închidere Sprint 1), pe branch `claude/continua-faza-1-adr5-o52jat`,
 nemerge-uit încă în `main`. Faza 2 rămâne document de referință, aprobată ca

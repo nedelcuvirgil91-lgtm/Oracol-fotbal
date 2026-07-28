@@ -16,20 +16,20 @@ from types import SimpleNamespace
 import oracle_engine
 
 
-def _engine(freelf_h2h=None):
+def _engine():
     eng = oracle_engine.FootballOracleEngine.__new__(oracle_engine.FootballOracleEngine)
     eng.weights = {}
     eng.config = {}
-    eng.api = SimpleNamespace(
-        get_h2h=lambda eid, h, a: freelf_h2h,
-    )
+    eng.api = SimpleNamespace()
     return eng
 
 
-def _use_db(monkeypatch, rows):
+def _use_db(monkeypatch, rows, freelf_h2h=None):
     monkeypatch.setattr(oracle_engine, "DB_QUERIES_MODULE_AVAILABLE", True, raising=False)
     monkeypatch.setattr(oracle_engine, "get_h2h_from_history",
                         lambda home, away, last_n=10: list(rows), raising=False)
+    monkeypatch.setattr(oracle_engine, "get_freelf_h2h_snapshot",
+                        lambda home, away: freelf_h2h, raising=False)
 
 
 # 4 confruntări TeamA(gazdă curentă) vs TeamB, ambele orientări, ordine desc.
@@ -67,15 +67,16 @@ def test_h2h_comes_from_db_when_enough_meetings(monkeypatch):
 
 
 def test_db_beats_freelf_provider(monkeypatch):
-    """Principiul de proiectare: DB are prioritate — chiar dacă FreeLF ar
-    întoarce un H2H, DB câștigă când are ≥3 confruntări."""
-    _use_db(monkeypatch, DB_ROWS)
+    """Principiul de proiectare: DB are prioritate — chiar dacă FreeLF
+    (Database-First, R-Sync-9) ar întoarce un H2H, DB câștigă când are
+    ≥3 confruntări."""
     freelf = {"meetings": 9, "home_wins": 9, "draws": 0, "away_wins": 0,
               "home_goals_avg": 3.0, "away_goals_avg": 0.0, "last_5": ["H"] * 5,
               "h2h_modifier": 0.15, "summary": "FREELF"}
-    eng = _engine(freelf_h2h=freelf)
+    _use_db(monkeypatch, DB_ROWS, freelf_h2h=freelf)
+    eng = _engine()
 
-    h = eng._build_h2h("TeamA", "TeamB", {**_match(), "_freelf_event_id": 123})
+    h = eng._build_h2h("TeamA", "TeamB", _match())
 
     assert h.meetings == 4          # din DB, nu 9 din FreeLF
     assert h.summary != "FREELF"

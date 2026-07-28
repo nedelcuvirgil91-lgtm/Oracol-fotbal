@@ -5,10 +5,11 @@ R-Sync-6: Oracle Engine nu mai are voie să apeleze
 
 Oglindă directă a gărzilor echivalente de la R-Sync-2/3/4/5.
 
-Notă de scope, explicită: `self.api.get_h2h()` (FreeLF, event_id-based)
-rămâne DELIBERAT neatinsă — cuplată structural la Match Discovery
-(§6c/§6d, dovedit la audit R-Sync-6), migrarea ei e R-Sync-8, alături de
-TheSportsDB team stats. Acest test NU o interzice."""
+[ACTUALIZAT — ADR-039 R-Sync-9] `self.api.get_h2h()` (FreeLF, event_id-based)
+a fost migrată la Database-First (`database.queries.get_freelf_h2h_snapshot()`)
+— nu mai e apelată din oracle_engine.py, sub nicio formă. Nota de scope
+veche ("deferred la R-Sync-8") nu mai e valabilă; păstrată doar ca istoric
+în mesajul testului de mai jos, acum inversat."""
 from __future__ import annotations
 
 import ast
@@ -41,19 +42,22 @@ def test_oracle_engine_never_calls_migrated_freelf_odds_methods():
             )
 
 
-def test_oracle_engine_still_calls_freelf_h2h_deliberately():
-    """Pozitiv, opusul testului de mai sus: `get_h2h` (FreeLF, event_id)
-    TREBUIE să rămână apelată — dovadă că nu a fost eliminată accidental,
-    nu doar că restul a fost migrat corect. Deferred explicit la R-Sync-8."""
+def test_oracle_engine_never_calls_freelf_h2h_live():
+    """[ACTUALIZAT — ADR-039 R-Sync-9] `self.api.get_h2h()` (FreeLF,
+    event_id-based) NU mai are voie să fie apelată — migrată la
+    Database-First (`get_freelf_h2h_snapshot`, vezi
+    test_oracle_engine_single_profile_construction_point.py pentru garda
+    completă). Fostul test pozitiv ("trebuie să rămână apelată") e acum
+    inversat — R-Sync-9 a închis exact acest gol."""
     path = ROOT / "oracle_engine.py"
     tree = _parse(path)
-    found = any(
-        isinstance(node, ast.Attribute) and node.attr == "get_h2h"
-        for node in ast.walk(tree)
-    )
-    assert found, (
-        "oracle_engine.py trebuie să apeleze încă self.api.get_h2h() "
-        "(FreeLF H2H, event_id-based) — migrarea ei e R-Sync-8, nu R-Sync-6."
+    offenders = [
+        node.lineno for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and node.attr == "get_h2h"
+    ]
+    assert not offenders, (
+        f"oracle_engine.py apelează încă self.api.get_h2h() (FreeLF H2H, "
+        f"live) la liniile {offenders} — eliminat în R-Sync-9, ADR-039."
     )
 
 
@@ -85,4 +89,8 @@ def test_oracle_engine_reads_odds_form_and_h2h_only_via_database_queries():
     assert "get_h2h_from_odds_recent" in imported, (
         "oracle_engine.py trebuie să importe get_h2h_from_odds_recent "
         "din database.queries (R-Sync-6)."
+    )
+    assert "get_freelf_h2h_snapshot" in imported, (
+        "oracle_engine.py trebuie să importe get_freelf_h2h_snapshot "
+        "din database.queries (R-Sync-9)."
     )

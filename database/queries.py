@@ -210,6 +210,7 @@ def count_matches_with_result() -> int:
             client.table("match_history")
             .select("id", count="exact")
             .not_.is_("actual_result", "null")
+            .is_("superseded_by", "null")
             .execute()
         )
         return res.count or 0
@@ -261,6 +262,7 @@ def get_finished_matches_missing_stats(
             client.table("match_history")
             .select("home_team,away_team,kickoff_date,league")
             .not_.is_("actual_home_goals", "null")
+            .is_("superseded_by", "null")
             .gte("kickoff_date", date_from)
         )
         query = query.is_("referee", "null") if require_referee else query.is_("home_possession", "null")
@@ -277,6 +279,43 @@ def get_finished_matches_missing_stats(
         return res.data or []
     except Exception as exc:
         logger.error("[Queries] get_finished_matches_missing_stats failed: %s", exc)
+        return []
+
+
+def get_matches_missing_results(days_back: int = 60, limit: int = 200) -> list[dict]:
+    """
+    [ADAUGAT Sprint 3, Pasul 1 — închidere retroactivă Feedback Loop]
+    Meciuri din trecut (kickoff_date < azi) fără NICIUN rezultat real încă
+    (`actual_result IS NULL`) — indiferent dacă au sau nu predicție salvată
+    (`prob_home_pred`), fiindcă orice rând fără rezultat blochează
+    permanent bucla Prediction → Result → Evaluation pentru acel meci.
+    Ținta reală a `sync/sync_results.py:fetch_results_from_
+    soccerfootballinfo()` — a treia sursă de rezultate reale, după
+    football-data.org și odds_api_recent_results, pentru ligile acoperite
+    de League Mapping v2 Soccer Football Info (Sprint 3, Prioritatea 1).
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        from datetime import date, timedelta
+        today = date.today()
+        date_from = (today - timedelta(days=days_back)).isoformat()
+        date_to = today.isoformat()
+        res = (
+            client.table("match_history")
+            .select("id,home_team,away_team,league,kickoff_date")
+            .is_("actual_result", "null")
+            .is_("superseded_by", "null")
+            .gte("kickoff_date", date_from)
+            .lt("kickoff_date", date_to)
+            .order("kickoff_date", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.error("[Queries] get_matches_missing_results failed: %s", exc)
         return []
 
 
@@ -475,6 +514,7 @@ def get_latest_team_elo(team: str, lookback: int = 5) -> int | None:
             .select("home_team,away_team,home_elo_after,away_elo_after,kickoff_date")
             .or_(f"home_team.eq.{team},away_team.eq.{team}")
             .not_.is_("actual_result", "null")
+            .is_("superseded_by", "null")
             .order("kickoff_date", desc=True)
             .order("id", desc=True)
             .limit(lookback)
@@ -539,6 +579,7 @@ def get_h2h_from_history(home: str, away: str, last_n: int = 10) -> list[dict]:
             .or_(f"and(home_team.eq.{home},away_team.eq.{away}),"
                  f"and(home_team.eq.{away},away_team.eq.{home})")
             .not_.is_("actual_result", "null")
+            .is_("superseded_by", "null")
             .order("kickoff_date", desc=True)
             .order("id", desc=True)
             .limit(last_n)
@@ -972,6 +1013,41 @@ def upsert_odds_recent_result(
         return False
 
 
+def get_recent_odds_results(days_back: int = 14) -> list[dict]:
+    """
+    [ADAUGAT Sprint 0 — Stabilizare, Etapa 2] Citire READ-ONLY din
+    `odds_api_recent_results` — a doua sursă de rezultate reale pentru
+    `sync/sync_results.py` (owner canonic al `match_history.actual_*`,
+    ADR-036). Completează football-data.org (care nu acoperă Romania
+    SuperLiga/MLS/Conference League — vezi `mappings.FD_COMPETITIONS`) cu
+    ce a sincronizat deja Sync Layer în `odds_api_recent_results`
+    (`sync/sync_odds_recent_results.py`, R-Sync-6).
+
+    Nu scrie nimic — owner-ul de scriere al acestui tabel rămâne exclusiv
+    `sync_odds_recent_results.py` (upsert_odds_recent_result, de mai sus).
+    Doar rânduri cu scor complet (home_score/away_score ambele non-null) —
+    un rând incomplet nu poate produce un `actual_result` valid.
+    """
+    client = get_client()
+    if client is None:
+        return []
+    from datetime import date, timedelta
+    date_from = (date.today() - timedelta(days=days_back)).isoformat()
+    try:
+        res = (
+            client.table("odds_api_recent_results")
+            .select("home_team_canonical,away_team_canonical,kickoff_date,league,home_score,away_score")
+            .not_.is_("home_score", "null")
+            .not_.is_("away_score", "null")
+            .gte("kickoff_date", date_from)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Queries] get_recent_odds_results failed: %s", exc)
+        return []
+
+
 def upsert_scheduled_fixture(
     home_team: str, away_team: str, kickoff_date: str, provider_id: str,
     league: str | None = None, kickoff_utc: str | None = None, venue_city: str | None = None,
@@ -1101,6 +1177,332 @@ def list_scheduled_fixtures(kickoff_date_from: str, kickoff_date_to: str) -> lis
             kickoff_date_from, kickoff_date_to, exc,
         )
         return []
+
+
+def get_teams_with_tsdb_id(days_ahead: int = 14) -> list[dict]:
+    """
+    [ADAUGAT Sprint 3, R-Sync-8] Echipe cu meci programat în următoarele
+    `days_ahead` zile care AU un `tsdb_*_team_id` cunoscut — sursa unică
+    pentru Sync Layer (`sync/sync_team_stats_tsdb.py`), citită din
+    `scheduled_fixtures` (populată de `TsdbFixtureAdapter`, R-Sync-7a; vezi
+    comentariul din `tsdb_fixture_adapter.py`: "Singurul adaptor care
+    furnizează tsdb_home_team_id/tsdb_away_team_id — cheia care deblochează
+    TheSportsDB team stats la R-Sync-8"). NU se mai caută team_id prin
+    apel live de căutare — vine deja din discovery, deja persistat.
+
+    Distinct pe `team_name_canonical` — o echipă poate apărea de mai multe
+    ori (acasă/oaspete, meciuri multiple) în fereastră; se ia primul
+    tsdb_team_id găsit.
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        from datetime import date, timedelta
+        today = date.today()
+        date_to = (today + timedelta(days=days_ahead)).isoformat()
+        res = (
+            client.table("scheduled_fixtures")
+            .select("home_team_canonical,away_team_canonical,tsdb_home_team_id,tsdb_away_team_id")
+            .gte("kickoff_date", today.isoformat())
+            .lte("kickoff_date", date_to)
+            .or_("tsdb_home_team_id.not.is.null,tsdb_away_team_id.not.is.null")
+            .execute()
+        )
+        rows = res.data or []
+    except Exception as exc:
+        logger.error("[Queries] get_teams_with_tsdb_id failed: %s", exc)
+        return []
+
+    teams: dict[str, str] = {}
+    for row in rows:
+        home = row.get("home_team_canonical")
+        away = row.get("away_team_canonical")
+        home_id = row.get("tsdb_home_team_id")
+        away_id = row.get("tsdb_away_team_id")
+        if home and home_id and home not in teams:
+            teams[home] = home_id
+        if away and away_id and away not in teams:
+            teams[away] = away_id
+    return [{"team_name": name, "tsdb_team_id": tid} for name, tid in teams.items()]
+
+
+def get_team_stats_tsdb(team: str) -> list[dict]:
+    """
+    Sursa canonică pentru ultimele evenimente TheSportsDB ale unei echipe
+    (`oracle_engine._build_profile()`, Level 4) — ADR-039, R-Sync-8.
+    Înlocuiește apelul live `oracle_api.get_team_stats(team_id, league)` —
+    citire STRICT din Supabase, populată separat de Sync Layer
+    (`sync/sync_team_stats_tsdb.py`), niciodată direct de aici.
+
+    Identitate canonică prin nume normalizat (ADR-039 Principiul 7) — `team`
+    trebuie deja trecut prin `normalize_team_name()` de apelant, exact ca la
+    `get_team_form_footballdata()`.
+
+    Întoarce listă goală dacă echipa nu a fost încă sincronizată — Regula
+    #8, tratat de apelant ca „necunoscut" (cade pe nivelul următor din
+    cascadă), niciodată motiv de fallback live către provider.
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("tsdb_team_stats_snapshot")
+            .select("events")
+            .eq("team_name_canonical", team)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if not rows:
+            return []
+        return rows[0].get("events") or []
+    except Exception as exc:
+        logger.warning("[Queries] get_team_stats_tsdb failed pentru %s: %s", team, exc)
+        return []
+
+
+def upsert_team_stats_tsdb(team: str, tsdb_team_id: str, events: list[dict]) -> bool:
+    """
+    Owner unic de scriere pentru `tsdb_team_stats_snapshot` (disciplina
+    ADR-036) — exclusiv Sync Layer (`sync/sync_team_stats_tsdb.py`),
+    niciodată Oracle Engine.
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("tsdb_team_stats_snapshot").upsert({
+            "team_name_canonical": team,
+            "tsdb_team_id": tsdb_team_id,
+            "events": events,
+            "source_provider": "thesportsdb",
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="team_name_canonical").execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Queries] upsert_team_stats_tsdb failed pentru %s: %s", team, exc)
+        return False
+
+
+def get_freelf_fixtures_needing_h2h(days_ahead: int = 14) -> list[dict]:
+    """
+    [ADAUGAT Sprint 3, R-Sync-9] Meciuri viitoare descoperite de FreeLF
+    (`scheduled_fixtures.freelf_event_id` populat, R-Sync-7a) — sursa unică
+    pentru Sync Layer (`sync/sync_h2h_freelf.py`). NU se mai caută
+    `event_id` live — vine deja din discovery, deja persistat.
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        from datetime import date, timedelta
+        today = date.today()
+        date_to = (today + timedelta(days=days_ahead)).isoformat()
+        res = (
+            client.table("scheduled_fixtures")
+            .select("home_team_canonical,away_team_canonical,freelf_event_id")
+            .gte("kickoff_date", today.isoformat())
+            .lte("kickoff_date", date_to)
+            .not_.is_("freelf_event_id", "null")
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.error("[Queries] get_freelf_fixtures_needing_h2h failed: %s", exc)
+        return []
+
+
+def get_freelf_h2h_snapshot(home_team: str, away_team: str) -> dict | None:
+    """
+    Sursa canonică pentru H2H Free Live Football (`oracle_engine._build_h2h()`,
+    fallback după Level DB) — ADR-039, R-Sync-9. Înlocuiește apelul live
+    `oracle_api.get_h2h(event_id, home_name, away_name)` — citire STRICT
+    din Supabase, populată separat de Sync Layer
+    (`sync/sync_h2h_freelf.py`), niciodată direct de aici.
+
+    Identitate ORIENTATĂ (home/away, nu simetrică) prin nume normalizate —
+    `home_team`/`away_team` trebuie deja trecute prin
+    `normalize_team_name()` de apelant.
+
+    Întoarce None dacă perechea nu a fost încă sincronizată — Regula #8,
+    tratat de apelant ca „necunoscut" (cade pe nivelul următor din
+    cascadă), niciodată motiv de fallback live către provider.
+    """
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("freelf_h2h_snapshot")
+            .select("*")
+            .eq("home_team_canonical", home_team)
+            .eq("away_team_canonical", away_team)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning(
+            "[Queries] get_freelf_h2h_snapshot failed pentru %s vs %s: %s",
+            home_team, away_team, exc,
+        )
+        return None
+
+
+def upsert_freelf_h2h_snapshot(
+    home_team: str, away_team: str, freelf_event_id: str,
+    meetings: int, home_wins: int, draws: int, away_wins: int,
+    home_goals_avg: float, away_goals_avg: float, last_5: list[str],
+    h2h_modifier: float, summary: str,
+) -> bool:
+    """
+    Owner unic de scriere pentru `freelf_h2h_snapshot` (disciplina ADR-036)
+    — exclusiv Sync Layer (`sync/sync_h2h_freelf.py`), niciodată Oracle
+    Engine.
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("freelf_h2h_snapshot").upsert({
+            "home_team_canonical": home_team,
+            "away_team_canonical": away_team,
+            "freelf_event_id": freelf_event_id,
+            "meetings": meetings,
+            "home_wins": home_wins,
+            "draws": draws,
+            "away_wins": away_wins,
+            "home_goals_avg": home_goals_avg,
+            "away_goals_avg": away_goals_avg,
+            "last_5": last_5,
+            "h2h_modifier": h2h_modifier,
+            "summary": summary,
+            "source_provider": "freelivefootball",
+            "synced_at": datetime.now(timezone.utc).isoformat(),
+        }, on_conflict="home_team_canonical,away_team_canonical").execute()
+        return True
+    except Exception as exc:
+        logger.warning(
+            "[Queries] upsert_freelf_h2h_snapshot failed pentru %s vs %s: %s",
+            home_team, away_team, exc,
+        )
+        return False
+
+
+def get_upcoming_freelf_fixtures_for_lineup(window_minutes_ahead: int = 240) -> list[dict]:
+    """
+    [ADAUGAT Sprint 3, R-Sync-10] Meciuri cu `freelf_event_id` cunoscut
+    (`scheduled_fixtures`, R-Sync-7a) al căror kickoff cade într-o fereastră
+    generoasă în jurul „acum" — sursa unică pentru Sync Layer
+    (`sync/sync_lineup_freelf.py`). Fereastra e DELIBERAT largă (implicit
+    240 minute înainte de kickoff, plus 15 minute după) — momentul real de
+    publicare a aliniamentelor FreeLF nu e cunoscut empiric încă (cota
+    cronic epuizată blochează verificarea live, Sprint 3 audit) — o
+    fereastră îngustă ar risca să rateze publicarea reală. Instrumentarea
+    `*_first_available_at` (migrare 030) acumulează dovada reală în timp;
+    fereastra se poate îngusta ulterior, pe bază de date, nu presupunere.
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        from datetime import datetime, timedelta, timezone as _tz
+        now = datetime.now(_tz.utc)
+        window_from = (now - timedelta(minutes=15)).isoformat()
+        window_to = (now + timedelta(minutes=window_minutes_ahead)).isoformat()
+        res = (
+            client.table("scheduled_fixtures")
+            .select("home_team_canonical,away_team_canonical,kickoff_date,kickoff_utc,freelf_event_id")
+            .gte("kickoff_utc", window_from)
+            .lte("kickoff_utc", window_to)
+            .not_.is_("freelf_event_id", "null")
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.error("[Queries] get_upcoming_freelf_fixtures_for_lineup failed: %s", exc)
+        return []
+
+
+def get_freelf_lineup_snapshot(home_team: str, away_team: str, kickoff_date: str) -> dict | None:
+    """
+    Sursa canonică pentru aliniamente + absențe confirmate Free Live
+    Football (`oracle_engine.evaluate_match()`, Database-First, R-Sync-10)
+    — ADR-039. Înlocuiește apelul live
+    `injury_manager.get_lineup_absences()` → `oracle_api.get_lineup()` —
+    citire STRICT din Supabase, populată separat de Sync Layer
+    (`sync/sync_lineup_freelf.py`), niciodată direct de aici.
+
+    Un singur rând per meci (ambele părți, home+away) — identitate prin
+    (home_team_canonical, away_team_canonical, kickoff_date), la fel ca
+    `scheduled_fixtures`/`odds_api_recent_results`.
+
+    Întoarce None dacă meciul nu a fost încă sincronizat — Regula #8,
+    tratat de apelant ca „necunoscut", niciodată motiv de fallback live
+    către provider.
+    """
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("freelf_lineup_snapshot")
+            .select("*")
+            .eq("home_team_canonical", home_team)
+            .eq("away_team_canonical", away_team)
+            .eq("kickoff_date", kickoff_date)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning(
+            "[Queries] get_freelf_lineup_snapshot failed pentru %s vs %s: %s",
+            home_team, away_team, exc,
+        )
+        return None
+
+
+def upsert_freelf_lineup_snapshot(
+    home_team: str, away_team: str, kickoff_date: str, freelf_event_id: str,
+    home_confirmed: bool, home_formation: str, home_unavailable: list[dict],
+    away_confirmed: bool, away_formation: str, away_unavailable: list[dict],
+) -> bool:
+    """
+    Owner unic de scriere pentru `freelf_lineup_snapshot` (disciplina
+    ADR-036) — exclusiv Sync Layer (`sync/sync_lineup_freelf.py`),
+    niciodată Oracle Engine. Întreaga logică de merge (COALESCE pe
+    `*_first_available_at`, niciodată suprascris) trăiește în RPC-ul
+    `upsert_freelf_lineup_snapshot_merge` (migrare 030) — funcția de față
+    e un wrapper subțire.
+    """
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.rpc("upsert_freelf_lineup_snapshot_merge", {
+            "p_home_team_canonical": home_team,
+            "p_away_team_canonical": away_team,
+            "p_kickoff_date": kickoff_date,
+            "p_freelf_event_id": freelf_event_id,
+            "p_home_confirmed": home_confirmed,
+            "p_home_formation": home_formation,
+            "p_home_unavailable": home_unavailable,
+            "p_away_confirmed": away_confirmed,
+            "p_away_formation": away_formation,
+            "p_away_unavailable": away_unavailable,
+        }).execute()
+        return True
+    except Exception as exc:
+        logger.warning(
+            "[Queries] upsert_freelf_lineup_snapshot failed pentru %s vs %s: %s",
+            home_team, away_team, exc,
+        )
+        return False
 
 
 def upsert_equivalence_evaluation(
@@ -1253,3 +1655,44 @@ def should_retrain_ml(min_new_matches: int = 20) -> bool:
     except Exception as exc:
         logger.error("[Queries] should_retrain_ml failed: %s", exc)
         return False
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# PREDICTION EVALUATION (Sprint 0 — Stabilizare, Etapa 3)
+# ════════════════════════════════════════════════════════════════════════════
+
+def get_predictions_with_results(days_back: int | None = None) -> list[dict]:
+    """
+    [ADAUGAT Sprint 0 — Stabilizare, Etapa 3] Citire READ-ONLY — rânduri din
+    `match_history` cu ATÂT predicție (prob_home_pred/prob_draw_pred/
+    prob_away_pred) CÂT ȘI rezultat real (actual_result). Identitatea
+    canonică e deja garantată de owner-ul unic per coloană (ADR-036) —
+    aceste două grupuri de coloane sunt scrise de procese diferite
+    (`_cache_prediction`/oracle_engine pentru predicții, `sync_results`
+    pentru `actual_*`), dar pe ACELAȘI rând, deci join-ul e implicit prin
+    identitatea rândului, nu prin vreo cheie separată.
+
+    Sursa exclusivă de citire pentru `prediction_evaluation.py` (raportul
+    de acuratețe/log-loss/Brier/calibrare) — nicio scriere aici.
+    """
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        query = (
+            client.table("match_history")
+            .select("league,kickoff_date,home_team,away_team,fixture_id,"
+                    "prob_home_pred,prob_draw_pred,prob_away_pred,actual_result")
+            .not_.is_("prob_home_pred", "null")
+            .not_.is_("actual_result", "null")
+            .is_("superseded_by", "null")
+        )
+        if days_back is not None:
+            from datetime import date, timedelta
+            date_from = (date.today() - timedelta(days=days_back)).isoformat()
+            query = query.gte("kickoff_date", date_from)
+        res = query.execute()
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Queries] get_predictions_with_results failed: %s", exc)
+        return []

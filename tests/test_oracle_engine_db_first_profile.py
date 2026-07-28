@@ -15,20 +15,26 @@ from types import SimpleNamespace
 import oracle_engine
 
 
-def _fake_api(tsdb_stats: list[dict] | None = None):
-    """Stub minimal pentru FootballOracleAPI — doar metodele atinse de
-    _build_profile(), fiecare inertă (fără rețea)."""
-    return SimpleNamespace(
-        get_team_stats=lambda tid, league: list(tsdb_stats or []),
-    )
-
-
-def _engine(tsdb_stats: list[dict] | None = None) -> oracle_engine.FootballOracleEngine:
+def _engine() -> oracle_engine.FootballOracleEngine:
+    """Stub minimal pentru FootballOracleEngine — `_build_profile()` nu mai
+    citește TSDB prin `self.api` (R-Sync-8, ADR-039) — Level 4 citește azi
+    STRICT din Supabase (`get_team_stats_tsdb`, monkeypatch-uit per test)."""
     eng = oracle_engine.FootballOracleEngine.__new__(oracle_engine.FootballOracleEngine)
     eng.weights = {}
     eng.config = {}
-    eng.api = _fake_api(tsdb_stats)
+    eng.api = SimpleNamespace()
     return eng
+
+
+def _stub_tsdb_level4(monkeypatch, tsdb_stats: list[dict] | None):
+    """Monkeypatch pentru Level 4 (TheSportsDB, Database-First, R-Sync-8) —
+    echivalentul modern al fostului `self.api.get_team_stats()`."""
+    monkeypatch.setattr(oracle_engine, "DB_QUERIES_MODULE_AVAILABLE", True, raising=False)
+    monkeypatch.setattr(
+        oracle_engine, "get_team_stats_tsdb",
+        lambda team: list(tsdb_stats or []),
+        raising=False,
+    )
 
 
 def _fake_sb(monkeypatch, recent_results: list[dict]):
@@ -66,7 +72,8 @@ def test_profile_comes_from_match_history_when_db_has_enough_matches(monkeypatch
     """Cazul central al auditului: cu istoric suficient în DB, profilul NU
     mai vine de la TSDB (1 meci), ci din match_history."""
     _fake_sb(monkeypatch, DB_ROWS_PETROLUL)
-    eng = _engine(tsdb_stats=TSDB_ONE_MATCH)
+    _stub_tsdb_level4(monkeypatch, TSDB_ONE_MATCH)
+    eng = _engine()
 
     p = eng._build_profile("tsdb_134398", PETROLUL, "Romania SuperLiga")
 
@@ -84,7 +91,8 @@ def test_falls_back_to_provider_cascade_when_db_insufficient(monkeypatch):
     """Sub pragul minim (3 meciuri), cascada veche rămâne neatinsă —
     TSDB e folosit exact ca înainte de D1."""
     _fake_sb(monkeypatch, DB_ROWS_PETROLUL[:2])  # doar 2 meciuri
-    eng = _engine(tsdb_stats=TSDB_ONE_MATCH)
+    _stub_tsdb_level4(monkeypatch, TSDB_ONE_MATCH)
+    eng = _engine()
 
     p = eng._build_profile("tsdb_134398", PETROLUL, "Romania SuperLiga")
 
@@ -93,10 +101,13 @@ def test_falls_back_to_provider_cascade_when_db_insufficient(monkeypatch):
 
 
 def test_falls_back_when_supabase_module_unavailable(monkeypatch):
-    """Fără modulul Supabase, comportamentul pre-D1 e identic — nicio
-    dependință nouă obligatorie."""
+    """Fără modulul Supabase (SUPABASE_MODULE_AVAILABLE=False), Level DB
+    (match_history) e sărit — dar Level 4 (TSDB, Database-First prin
+    database.queries, independent de `supabase_client`) rămâne accesibil,
+    la fel ca înainte de D1."""
     monkeypatch.setattr(oracle_engine, "SUPABASE_MODULE_AVAILABLE", False, raising=False)
-    eng = _engine(tsdb_stats=TSDB_ONE_MATCH)
+    _stub_tsdb_level4(monkeypatch, TSDB_ONE_MATCH)
+    eng = _engine()
 
     p = eng._build_profile("tsdb_134398", PETROLUL, "Romania SuperLiga")
 
@@ -115,7 +126,8 @@ def test_db_level_ignores_rows_with_missing_goals_or_result(monkeypatch):
          "actual_away_goals": 0, "actual_result": "H", "kickoff_date": "2026-04-10"},
     ]
     _fake_sb(monkeypatch, dirty)
-    eng = _engine(tsdb_stats=TSDB_ONE_MATCH)
+    _stub_tsdb_level4(monkeypatch, TSDB_ONE_MATCH)
+    eng = _engine()
 
     p = eng._build_profile("tsdb_134398", PETROLUL, "Romania SuperLiga")
 

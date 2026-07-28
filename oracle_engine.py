@@ -88,6 +88,7 @@ try:
         get_latest_team_elo, get_h2h_from_history, get_team_health,
         get_team_form_footballdata, get_national_team_elo, get_weather_forecast,
         get_team_form_freelf_snapshot, get_team_recent_form_oddsapi, get_h2h_from_odds_recent,
+        get_team_stats_tsdb, get_freelf_h2h_snapshot, get_freelf_lineup_snapshot,
     )
     DB_QUERIES_MODULE_AVAILABLE = True
 except ModuleNotFoundError:
@@ -617,15 +618,23 @@ class FootballOracleEngine:
                             home_c, away_c, db_h2h.meetings)
                 return db_h2h
 
-        event_id = match.get("_freelf_event_id")
-
-        if event_id:
+        # ── FreeLF H2H (ADR-039, R-Sync-9) ──────────────────────────────────
+        # Sync Layer only — citire STRICT din Supabase (freelf_h2h_snapshot,
+        # populată de sync/sync_h2h_freelf.py), niciodată apel live către
+        # provider. Identitate ORIENTATĂ prin nume canonice normalizate — nu
+        # mai necesită `_freelf_event_id` la citire (gate-ul vechi, eliminat
+        # — depindea de identificatorul de provider al meciului curent;
+        # sincronizarea folosește azi event_id-urile deja descoperite în
+        # scheduled_fixtures, R-Sync-7a).
+        if DB_QUERIES_MODULE_AVAILABLE:
+            home_c = normalize_team_name(home_name)
+            away_c = normalize_team_name(away_name)
             try:
-                freelf_h2h = self.api.get_h2h(int(event_id), home_name, away_name)
+                freelf_h2h = get_freelf_h2h_snapshot(home_c, away_c)
                 if freelf_h2h and freelf_h2h.get("meetings", 0) >= 1:
                     return H2HRecord(
-                        home_team      = normalize_team_name(home_name),
-                        away_team      = normalize_team_name(away_name),
+                        home_team      = home_c,
+                        away_team      = away_c,
                         meetings       = freelf_h2h["meetings"],
                         home_wins      = freelf_h2h["home_wins"],
                         draws          = freelf_h2h["draws"],
@@ -637,7 +646,7 @@ class FootballOracleEngine:
                         summary        = freelf_h2h["summary"],
                     )
             except Exception as exc:
-                logger.warning("[H2H] FreeLF failed for event %s: %s", event_id, exc)
+                logger.warning("[H2H] FreeLF Supabase read failed for %s vs %s: %s", home_c, away_c, exc)
 
         # ── Odds API meciuri recente (ADR-039, R-Sync-6) ───────────────────
         # Sync Layer only — citire STRICT din Supabase
@@ -778,7 +787,7 @@ class FootballOracleEngine:
            0+1. FreeLF standings+formă (Supabase) (get_team_form_freelf_snapshot) — fallback, ADR-039 R-Sync-6
            2. Odds API meciuri recente (Supabase) (get_team_recent_form_oddsapi) — fallback, ADR-039 R-Sync-6
            3. fd.org standings (Supabase)  (get_team_form_footballdata) — fallback, ADR-039 R-Sync-3
-           4. TheSportsDB events           (get_team_stats)          — fallback
+           4. TheSportsDB events (Supabase) (get_team_stats_tsdb)     — fallback, ADR-039 R-Sync-8
            5. ELO sigmoid                  (întotdeauna blended)
            6. Neutral defaults
 
@@ -984,15 +993,23 @@ class FootballOracleEngine:
             except Exception as exc:
                 logger.warning("[Profile] footballdata form read failed for %s: %s", canonical, exc)
 
-        # ── Level 4: TheSportsDB ──────────────────────────────────────────
-        if not stats and team_id and team_id.startswith("tsdb_"):
+        # ── Level 4: TheSportsDB (ADR-039, R-Sync-8) ────────────────────────
+        # Sync Layer only — citire STRICT din Supabase
+        # (tsdb_team_stats_snapshot, populată de
+        # sync/sync_team_stats_tsdb.py), niciodată apel live către provider.
+        # Identitate prin nume canonic normalizat (ADR-039 Principiul 7) —
+        # NU mai necesită team_id prefixat "tsdb_" la citire (gate-ul vechi,
+        # eliminat — depindea de identificatorul de provider al meciului
+        # curent; sincronizarea folosește azi tsdb_team_id-urile deja
+        # descoperite în scheduled_fixtures, R-Sync-7a).
+        if not stats and DB_QUERIES_MODULE_AVAILABLE:
             try:
-                tsdb_stats = self.api.get_team_stats(team_id, league)
+                tsdb_stats = get_team_stats_tsdb(canonical)
                 if tsdb_stats:
                     stats        = tsdb_stats
                     data_source  = "thesportsdb"
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("[Profile] TheSportsDB Supabase read failed for %s: %s", canonical, exc)
 
         # ── Compute ratings din stats ─────────────────────────────────────
         if stats:
@@ -1350,36 +1367,55 @@ class FootballOracleEngine:
 
         home_xg, away_xg = self._calibrate_xg(home_p, away_p, league, w_pen, h2h)
 
-        # ── Injury penalty ────────────────────────────────────────────────
+        # ── Injury penalty — Database-First (R-Sync-10, ADR-039) ────────────
+        # [ACTUALIZAT Sprint 3, audit complet] Fostul apel live
+        # (injury_manager.get_lineup_absences() -> oracle_api.get_lineup())
+        # era ULTIMUL loc din oracle_engine.py care modifica efectiv
+        # predicția servită pe baza unui apel live la provider — găsit la
+        # audit, nu ascuns. Citește azi STRICT din Supabase
+        # (freelf_lineup_snapshot, populată de sync/sync_lineup_freelf.py,
+        # cadență dedicată 15 min — vezi .github/workflows/lineup_sync.yml),
+        # niciodată apel live. Logica de calcul a penalizării e IDENTICĂ,
+        # neschimbată — extrasă din injury_manager.get_lineup_absences() în
+        # injury_manager.build_injury_report_from_raw_lineup() (funcție
+        # pură), doar sursa datelor brute s-a mutat.
         home_xg_pre        = home_xg
         away_xg_pre        = away_xg
         injury_note        = "ℹ️ Date accidentări indisponibile"
         home_injury_report = None
         away_injury_report = None
-        event_id           = match.get("_freelf_event_id")
 
-        if self.injury_manager and event_id:
+        if self.injury_manager and DB_QUERIES_MODULE_AVAILABLE:
             try:
-                home_injury_report = self.injury_manager.get_lineup_absences(
-                    event_id  = event_id,
-                    team_id   = match.get("_freelf_home_id", ""),
-                    team_name = home_name,
-                    is_home   = True,
+                lineup_snapshot = get_freelf_lineup_snapshot(
+                    normalize_team_name(home_name), normalize_team_name(away_name),
+                    match.get("kickoff_date", ""),
                 )
-                away_injury_report = self.injury_manager.get_lineup_absences(
-                    event_id  = event_id,
-                    team_id   = match.get("_freelf_away_id", ""),
-                    team_name = away_name,
-                    is_home   = False,
-                )
-                home_xg, away_xg, injury_note = self.injury_manager.apply_injury_penalty(
-                    home_xg, away_xg, home_injury_report, away_injury_report,
-                )
-                if (home_injury_report and home_injury_report.has_key_absences) or \
-                   (away_injury_report and away_injury_report.has_key_absences):
-                    logger.warning("[Injuries] Key absences! %s", injury_note)
+                if lineup_snapshot:
+                    home_lineup_raw = {
+                        "confirmed":   lineup_snapshot.get("home_confirmed", False),
+                        "formation":   lineup_snapshot.get("home_formation", ""),
+                        "unavailable": lineup_snapshot.get("home_unavailable") or [],
+                    }
+                    away_lineup_raw = {
+                        "confirmed":   lineup_snapshot.get("away_confirmed", False),
+                        "formation":   lineup_snapshot.get("away_formation", ""),
+                        "unavailable": lineup_snapshot.get("away_unavailable") or [],
+                    }
+                    home_injury_report = self.injury_manager.build_injury_report_from_raw_lineup(
+                        home_lineup_raw, match.get("_freelf_home_id", ""), home_name,
+                    )
+                    away_injury_report = self.injury_manager.build_injury_report_from_raw_lineup(
+                        away_lineup_raw, match.get("_freelf_away_id", ""), away_name,
+                    )
+                    home_xg, away_xg, injury_note = self.injury_manager.apply_injury_penalty(
+                        home_xg, away_xg, home_injury_report, away_injury_report,
+                    )
+                    if (home_injury_report and home_injury_report.has_key_absences) or \
+                       (away_injury_report and away_injury_report.has_key_absences):
+                        logger.warning("[Injuries] Key absences! %s", injury_note)
             except Exception as exc:
-                logger.warning("[Injuries] Failed for event %s: %s", event_id, exc)
+                logger.warning("[Injuries] Supabase read failed for %s vs %s: %s", home_name, away_name, exc)
 
         logger.info(
             "[xG after injuries] home=%.3f (was %.3f)  away=%.3f (was %.3f)",

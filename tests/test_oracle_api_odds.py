@@ -38,6 +38,11 @@ def _api(session: _FakeSession) -> oracle_api.FootballOracleAPI:
     api._ttl = 30
     api._cache_mgr = None
     api._dead_keys = set()
+    # [ACTUALIZAT Sprint 3, Pasul 4] Validarea Odds API e azi lazy
+    # (_ensure_odds_keys_validated()), nu în __init__ — bypass explicit aici,
+    # ca înainte, ca să nu declanșeze o cerere de rețea reală în testele
+    # unitare pentru _fetch_odds() în sine.
+    api._odds_keys_validated = True
     # [ADAUGAT R4.1] _fetch_market() citește acum cheia Odds API prin
     # self._key_manager (nu mai există constanta hardcodată ODDS_API_KEY,
     # migrată la key_manager.py — vezi audit §13, Step 1).

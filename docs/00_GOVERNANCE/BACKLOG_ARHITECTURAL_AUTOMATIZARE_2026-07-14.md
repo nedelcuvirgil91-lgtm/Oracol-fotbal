@@ -1,15 +1,22 @@
 # BACKLOG_ARHITECTURAL_AUTOMATIZARE_2026-07-14.md — Football Oracle
 
-**Status**: Backlog clasificat, neimplementat. Ținta declarată: zero intervenții manuale pentru funcționarea normală a aplicației — butoanele/workflow-urile manuale rămân doar pentru debugging, administrare și excepții.
+**Status**: Backlog clasificat. Ținta declarată: zero intervenții manuale pentru funcționarea normală a aplicației — butoanele/workflow-urile manuale rămân doar pentru debugging, administrare și excepții.
 
-Fiecare proces manual identificat (Task 5, `docs/03_ENGINE/...` — sesiunea de audit din 2026-07-14) e clasificat aici cu întrebarea standard: **De ce e manual? Poate fi automatizat? Risc? Cost? Ce schimbări arhitecturale? În ce sprint?** Nimic din acest document nu e implementat — e doar prioritizare.
+**[ACTUALIZAT 2026-07-28]** Itemul 1.1 e implementat — verificat direct în cod:
+`sync/run_daily.py` apelează `backfill_features.run_backfill(dry_run=False)`
+ca parte a pipeline-ului zilnic (`PipelineStep("feature_update",
+depends_on="history_sync")`, linia ~493), exact planul descris mai jos.
+Restul itemilor din document rămân neimplementate — corectat aici doar
+itemul verificat fals, nu tot documentul.
+
+Fiecare proces manual identificat (Task 5, `docs/03_ENGINE/...` — sesiunea de audit din 2026-07-14) e clasificat aici cu întrebarea standard: **De ce e manual? Poate fi automatizat? Risc? Cost? Ce schimbări arhitecturale? În ce sprint?**
 
 ---
 
 ## Nivel 1 (critic) — sincronizare date, baze istorice, pipeline ML, shadow testing, promotion, deploy
 
-### 1.1 Actualizare feature-uri/dataset după meci terminat (`sync/backfill_features.py`)
-- **De ce e manual**: `backfill.yml` e exclusiv `workflow_dispatch`, fără `cron`.
+### 1.1 Actualizare feature-uri/dataset după meci terminat (`sync/backfill_features.py`) — **[IMPLEMENTAT, vezi nota din Status]**
+- **De ce era manual** (istoric, la data redactării): `backfill.yml` e exclusiv `workflow_dispatch`, fără `cron`. `backfill.yml` rămâne el însuși manual (canal de backfill ad-hoc pe tot dataset-ul), dar `run_backfill()` rulează acum și automat, zilnic, din `sync/run_daily.py`.
 - **Poate fi automatizat**: Da — funcția `run_backfill()` e deja idempotentă, non-destructivă (gating per-coloană), sigură de rulat zilnic pe tot dataset-ul fără cost de corectitudine.
 - **Risc**: Scăzut — comportament deja testat (252+ teste), pattern-ul non-destructiv elimină riscul de suprascriere.
 - **Cost**: Scăzut — reutilizare 100% cod existent, doar un apel nou în `run_daily.py`.

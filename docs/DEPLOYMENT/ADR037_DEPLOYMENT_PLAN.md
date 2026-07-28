@@ -4,6 +4,8 @@
 
 **Status la redactare**: R1 (Rollback Engine) + R2 (Champion Guardian) + R3 (Orchestrare, R3.0-R3.7) — cod complet, testat (868+ teste verzi), **nemerge-uit pe `main`**. Acest document e precondiția explicită pentru merge, cerută de arhitect.
 
+**[ACTUALIZAT 2026-07-28]** Etapa 1 (merge pe `main`) descrisă la §4 s-a produs între timp — verificat direct, `git show origin/main:learning_core/champion_guardian.py` și restul artefactelor R1-R3 sunt toate pe `main` azi. Etapele 2-5 de mai jos rămân valabile ca procedură — §3 (feature flag-urile) și §4 (Etapa 2, activare `champion_guardian_enabled`) sunt încă neexecutate, verificat live (`model_config`: ambele flag-uri `False`). Stare curentă completă: `docs/00_GOVERNANCE/ARCHITECTURE_STATE.md` §3.
+
 ---
 
 ## 1. Production Topology Audit — ce rulează azi, verificat live (R3.5)

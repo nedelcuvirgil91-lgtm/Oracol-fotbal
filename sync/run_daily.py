@@ -85,6 +85,28 @@ PIPELINE_STEPS: tuple[PipelineStep, ...] = (
     PipelineStep("results"),
     PipelineStep("match_statistics", depends_on=("results",)),
     PipelineStep("history_sync"),
+    # [ADAUGAT Sprint 3, Prioritatea 2] Descoperire meciuri Database-First
+    # (R-Sync-7a, `sync/sync_scheduled_fixtures.py`) — cei 6 adaptori
+    # existau deja, `scheduled_fixtures` era 0 rânduri (verificat live) —
+    # niciodată programat în orchestrarea zilnică. Rulează STRICT în
+    # PARALEL cu calea live veche (`oracle_api.get_matches_for_week()`,
+    # neatinsă) — Oracle Engine NU citește încă de aici (R-Sync-7b, separat,
+    # neînceput). Fără dependințe reale (surse externe, nu alte pipeline
+    # steps).
+    PipelineStep("scheduled_fixtures"),
+    # [ADAUGAT Sprint 3, Pasul 3 — R-Sync-8] Team Stats TheSportsDB —
+    # inlocuieste Level 4 live din oracle_engine._build_profile()
+    # (self.api.get_team_stats()). Depinde REAL de "scheduled_fixtures"
+    # (pasul de mai sus): tsdb_home_team_id/tsdb_away_team_id, cheia care
+    # deblocheaza acest sync, sunt scrise DOAR de TsdbFixtureAdapter, in
+    # acel pas.
+    PipelineStep("team_stats_tsdb", depends_on=("scheduled_fixtures",)),
+    # [ADAUGAT Sprint 3, Pasul 3 — R-Sync-9] H2H Free Live Football —
+    # inlocuieste ultimul apel live ramas, eliminabil, din
+    # oracle_engine._build_h2h() (self.api.get_h2h()). Depinde REAL de
+    # "scheduled_fixtures": freelf_event_id, cheia care deblocheaza acest
+    # sync, e scris DOAR de FreelfFixtureAdapter, in acel pas.
+    PipelineStep("h2h_freelf", depends_on=("scheduled_fixtures",)),
     # [ADAUGAT Sprint 2, Etapa C — Data Quality] Team Form FreeLF — fara
     # dependinte reale (ligi statice, mappings.FREE_LF_LEAGUE_IDS), plasat
     # aici doar ca ordine de citire, nu ca dependinta declarata.
@@ -298,6 +320,60 @@ def run(
         ]
 
     _print_sync_report(sync_reports)
+
+    # ── (PIPELINE_STEPS: "scheduled_fixtures") ──────────────────────────────
+    # [ADAUGAT Sprint 3, Prioritatea 2] Vezi comentariul din PIPELINE_STEPS —
+    # rulează în PARALEL cu calea live veche, Oracle Engine neatins aici.
+    print("\n▶  Descoperire meciuri Database-First (scheduled_fixtures, paralel cu calea live)...")
+    if dry_run:
+        print("  ℹ️  Sărit (dry run)")
+    else:
+        try:
+            from sync.sync_scheduled_fixtures import run as run_scheduled_fixtures
+            fixtures_results = run_scheduled_fixtures()
+            ran = sum(1 for r in fixtures_results if r.ran)
+            print(f"  ✅ {ran}/{len(fixtures_results)} task-uri de descoperire executate")
+        except Exception as exc:
+            logger.error("[DailySync] sync_scheduled_fixtures failed: %s", exc)
+            print(f"  ⚠️  Eroare la descoperire meciuri: {exc}")
+
+    # ── (PIPELINE_STEPS: "team_stats_tsdb") ─────────────────────────────────
+    # [ADAUGAT Sprint 3, Pasul 3 — R-Sync-8] Owner nou (TheSportsDB events)
+    # pentru tsdb_team_stats_snapshot — înlocuiește Level 4 live din
+    # oracle_engine._build_profile(). Rulează DUPĂ "scheduled_fixtures" —
+    # citește echipele de sincronizat din tsdb_home_team_id/
+    # tsdb_away_team_id, scrise de acel pas.
+    print("\n▶  Sincronizare team stats — TheSportsDB...")
+    if dry_run:
+        print("  ℹ️  Sărit (dry run)")
+    else:
+        try:
+            from sync.sync_team_stats_tsdb import run as run_team_stats_tsdb
+            team_stats_tsdb_results = run_team_stats_tsdb()
+            ran = sum(1 for r in team_stats_tsdb_results if r.ran)
+            print(f"  ✅ {ran}/{len(team_stats_tsdb_results)} echipe sincronizate (TheSportsDB)")
+        except Exception as exc:
+            logger.error("[DailySync] sync_team_stats_tsdb failed: %s", exc)
+            print(f"  ⚠️  Eroare la sync team stats (TheSportsDB): {exc}")
+
+    # ── (PIPELINE_STEPS: "h2h_freelf") ───────────────────────────────────────
+    # [ADAUGAT Sprint 3, Pasul 3 — R-Sync-9] Owner nou (Free Live Football
+    # H2H) pentru freelf_h2h_snapshot — înlocuiește ultimul apel live rămas,
+    # eliminabil, din oracle_engine._build_h2h(). Rulează DUPĂ
+    # "scheduled_fixtures" — citește fixture-urile de sincronizat din
+    # freelf_event_id, scris de acel pas.
+    print("\n▶  Sincronizare H2H — Free Live Football...")
+    if dry_run:
+        print("  ℹ️  Sărit (dry run)")
+    else:
+        try:
+            from sync.sync_h2h_freelf import run as run_h2h_freelf
+            h2h_freelf_results = run_h2h_freelf()
+            ran = sum(1 for r in h2h_freelf_results if r.ran)
+            print(f"  ✅ {ran}/{len(h2h_freelf_results)} fixture-uri sincronizate (FreeLF H2H)")
+        except Exception as exc:
+            logger.error("[DailySync] sync_h2h_freelf failed: %s", exc)
+            print(f"  ⚠️  Eroare la sync H2H (FreeLF): {exc}")
 
     # ── (PIPELINE_STEPS: "team_form_freelf") ────────────────────────────────
     # [ADAUGAT Sprint 2, Etapa C — Data Quality] Owner nou (FreeLF standings)

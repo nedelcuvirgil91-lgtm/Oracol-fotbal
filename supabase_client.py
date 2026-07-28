@@ -316,7 +316,12 @@ def get_training_data(only_with_results: bool = True) -> list[dict]:
     start = 0
     try:
         while True:
-            q = client.table("match_history").select("*")
+            # [ADAUGAT] Exclude rândurile marcate superseded (ADR-025) — meciuri
+            # reale deja reprezentate de un rând canonic separat (același meci,
+            # id diferit). Fără acest filtru, ~3.500 meciuri (Premier League/
+            # La Liga/Serie A/Bundesliga/Ligue 1, 2023-2025) erau numărate de
+            # două ori la antrenare — confirmat live, Supabase `Prediction`.
+            q = client.table("match_history").select("*").is_("superseded_by", "null")
             if only_with_results:
                 q = q.not_.is_("actual_result", "null")
             q = q.order("fixture_id").range(start, start + page_size - 1)

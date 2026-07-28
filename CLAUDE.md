@@ -52,7 +52,7 @@ Guvernanța (ADR-uri, documente Frozen, promovare manuală) e tratată ca avanta
 | `ml_predictor.py` | Model XGBoost, antrenat pe `match_history`, walk-forward validation (expanding window). | `supabase_client.py` | `oracle_engine.py`, `sync/run_daily.py` |
 | `recalibration.py` | Funcție pură de ajustare a ponderilor per ligă, fără I/O. | (niciuna) | `oracle_engine.py`, `sync/sync_results.py` |
 | `shadow_testing.py` | Infrastructură generică de shadow testing + Statistics Engine, independentă de `oracle_engine.py`. | `supabase_client.py` | `oracle_engine.py` (gated), `sync/run_daily.py` |
-| `feature_engine.py` | Calcul formă, H2H, rest days (existent, neapelat — vezi `REST_DAYS_VALIDATION.md`). | (date brute) | `oracle_engine.py` |
+| `feature_engine.py` | Calcul formă, H2H, ELO→multiplicatori of./def., calibrare xG, Poisson, ponderi per ligă, off/def rating — 8 din 9 funcții active. Excepție: `rest_days_modifier` rămâne neapelat, DELIBERAT (respins explicit prin test de ablație pe 53.409 meciuri reale, vezi `REST_DAYS_VALIDATION.md` — nicio îmbunătățire măsurabilă). | (date brute) | `oracle_engine.py`, `sync/backfill_features.py` |
 | `mappings.py` | Sursă canonică unică pentru ligi/provideri (`LEAGUE_PROVIDERS`, ADR-001). | (niciuna) | `oracle_api.py`, `sync/sync_results.py` |
 | `supabase_client.py` | Client Supabase + query-uri de nivel înalt (weights, config, ML status). | Supabase (proiect `Prediction`) | `oracle_engine.py`, `ml_predictor.py`, `sync/*` |
 | `database/queries.py` | Interogări structurate pentru match_history, ELO canonic (D2), H2H canonic (D3), sync status. | Supabase | `sync/*`, `oracle_engine.py` (servire live — ELO/H2H Database-First) |
@@ -112,7 +112,7 @@ Cheile API sunt tratate ca infrastructură critică — nu ca detalii de configu
 
 ## Regulile testelor
 
-- `pytest tests/` trebuie să rămână verde — 82 de teste confirmate, fără dependință de rețea.
+- `pytest tests/` trebuie să rămână verde — 1576 de teste confirmate (2026-07-28, `pytest tests/ --collect-only -q`; numărul crește cu fiecare migrare Database-First), fără dependință de rețea.
 - Orice schimbare în calea de predicție (`oracle_engine.py`) se verifică funcțional (rulare reală pe fixture-uri cunoscute), nu doar prin teste unitare.
 
 ## Regulile Champion vs. Challenger (Learning Core)

@@ -7,14 +7,17 @@ post-meci, owner NOU (FreeLF `get_match_statistics()`, `oracle_api.py:534`,
 zero apelanți până acum — motivul real al golului 0% populare, `home/
 away_possession`/`home/away_xg_actual`, confirmat live pe Supabase).
 
-Scope explicit, aprobat (Sprint 1 — „foarte solid, nu foarte mare"):
-  - Scrie DOAR `home/away_possession` + `home/away_xg_actual`.
-  - NU scrie `big_chance` (coloană inexistentă azi, P2 — sprint separat).
-  - NU scrie `home/away_shots_on_target` — owner PRIMAR rămâne mirror-ul
-    football_data_co_uk (`sync/backfill_match_stats.py`, deja P0, deja
-    6,5% populat); FreeLF ca fallback pentru acel câmp specific e o
-    extindere viitoare, neaprobată acum (ar amesteca două domenii de
-    ownership într-un singur sprint).
+Scope inițial, Sprint 1 („foarte solid, nu foarte mare"): DOAR
+`home/away_possession` + `home/away_xg_actual`. [EXTINS Sprint 3,
+Prioritatea 1, Regula 4 — „nu accepta implementări parțiale, completează
+adaptorul existent"] `get_match_statistics()` întoarce deja, verificat prin
+citire de cod, `home/away_shots_ot` — scris acum ca
+`home/away_shots_on_target`, COALESCE-only (ADR-036): owner-ul PRIMAR
+rămâne mirror-ul football_data_co_uk (`sync/backfill_match_stats.py`), care
+scrie primul dacă rulează primul; FreeLF completează DOAR rândurile încă
+NULL, niciodată nu suprascrie. `big_chance` rămâne neatins — coloană
+inexistentă azi în `match_history`, scriere ar necesita o migrare de schemă
+neaprobată în acest pas.
 
 Rezoluția `event_id` NU trăiește aici — deleagă la
 `freelf_event_resolver.FreelfEventResolver` (componentă reutilizabilă Sync
@@ -68,9 +71,10 @@ class MatchStatisticsAdapter(SyncAdapter):
         }
 
     def normalize(self, raw_payload: dict | None) -> list[dict]:
-        """Mapează câmpurile brute (`home_xg`/`home_possession`, tiparul
-        deja folosit de `get_match_statistics()`) pe numele canonice din
-        `match_history` — DOAR cele 4 din scope-ul aprobat."""
+        """Mapează câmpurile brute (`home_xg`/`home_possession`/
+        `home_shots_ot`, tiparul deja folosit de `get_match_statistics()`)
+        pe numele canonice din `match_history`. [EXTINS Sprint 3] +
+        `home/away_shots_on_target` — vezi docstring-ul modulului."""
         if not raw_payload:
             return []
         from mappings import normalize_team_name
@@ -84,20 +88,23 @@ class MatchStatisticsAdapter(SyncAdapter):
             "away_possession": raw_payload.get("away_possession"),
             "home_xg_actual": raw_payload.get("home_xg"),
             "away_xg_actual": raw_payload.get("away_xg"),
+            "home_shots_on_target": raw_payload.get("home_shots_ot"),
+            "away_shots_on_target": raw_payload.get("away_shots_ot"),
             "stats_source": "freelivefootball",
         }]
 
     def validate(self, records: list[dict]) -> list[dict]:
         """Exclude, nu aruncă excepție (Regula #8). Respinge rânduri fără
         cheia naturală (home/away/kickoff_date) SAU fără nicio valoare utilă
-        (ambele possession/xg lipsă — nimic de scris)."""
+        (toate cele 6 câmpuri lipsă — nimic de scris)."""
         valid: list[dict] = []
         for r in records:
             if not r.get("home_team") or not r.get("away_team") or not r.get("kickoff_date"):
                 logger.warning("[MatchStatisticsAdapter] rând fără cheie naturală, exclus: %r", r)
                 continue
             has_value = any(r.get(k) is not None for k in
-                             ("home_possession", "away_possession", "home_xg_actual", "away_xg_actual"))
+                             ("home_possession", "away_possession", "home_xg_actual", "away_xg_actual",
+                              "home_shots_on_target", "away_shots_on_target"))
             if not has_value:
                 logger.debug("[MatchStatisticsAdapter] rând fără nicio valoare utilă, exclus: %r", r)
                 continue

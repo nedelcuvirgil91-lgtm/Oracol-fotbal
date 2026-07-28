@@ -28,6 +28,16 @@ class _FakeSelectQuery:
     def limit(self, *a, **kw):
         self._calls.append(("limit", a, kw)); return self
 
+    def gte(self, *a, **kw):
+        self._calls.append(("gte", a, kw)); return self
+
+    @property
+    def not_(self):
+        return self
+
+    def is_(self, *a, **kw):
+        self._calls.append(("is_", a, kw)); return self
+
     def execute(self):
         return _FakeResult(self._rows)
 
@@ -137,3 +147,38 @@ def test_upsert_odds_recent_result_degrades_gracefully_on_exception(monkeypatch)
 
     monkeypatch.setattr(q, "get_client", lambda: _Boom())
     assert q.upsert_odds_recent_result("Arsenal", "Chelsea", "2026-08-01", "PL", 2, 1) is False
+
+
+# ── get_recent_odds_results (Sprint 0 — Stabilizare, Etapa 2) ──────────────
+
+def test_get_recent_odds_results_returns_rows(monkeypatch):
+    rows = [{"home_team_canonical": "Portland Timbers", "away_team_canonical": "Real Salt Lake",
+             "kickoff_date": "2026-07-26", "league": "MLS", "home_score": 2, "away_score": 1}]
+    fake = _FakeClient(rows=rows)
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    assert q.get_recent_odds_results() == rows
+
+
+def test_get_recent_odds_results_returns_empty_when_client_unavailable(monkeypatch):
+    monkeypatch.setattr(q, "get_client", lambda: None)
+    assert q.get_recent_odds_results() == []
+
+
+def test_get_recent_odds_results_degrades_gracefully_on_exception(monkeypatch):
+    class _Boom:
+        def table(self, name):
+            raise RuntimeError("simulated network failure")
+
+    monkeypatch.setattr(q, "get_client", lambda: _Boom())
+    assert q.get_recent_odds_results() == []
+
+
+def test_get_recent_odds_results_filters_out_incomplete_scores():
+    """Doar rânduri cu scor complet — un rând fără home_score/away_score
+    nu poate produce actual_result valid, filtrat la sursă (query-ul
+    Supabase, nu la apelant)."""
+    import inspect
+
+    source = inspect.getsource(q.get_recent_odds_results)
+    assert 'not_.is_("home_score", "null")' in source
+    assert 'not_.is_("away_score", "null")' in source

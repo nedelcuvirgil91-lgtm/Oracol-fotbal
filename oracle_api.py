@@ -159,7 +159,17 @@ class FootballOracleAPI:
         # din acest fișier (Odds API, football-data.org, ESPN, TheSportsDB,
         # eloratings.net, Weather) rămân neatinși, scope strict FreeLF aici.
         self._request_manager = get_request_manager()
-        self._validate_api_keys()
+        # [ACTUALIZAT Sprint 3, Pasul 4 — GĂSIT LA AUDIT] _validate_api_keys()
+        # rula necondiționat aici, la FIECARE construcție de FootballOracleAPI()
+        # — inclusiv din adaptoare Sync Layer care nu ating niciodată Odds API
+        # (ex. TsdbTeamStatsAdapter, FreelfH2hAdapter), confirmat live prin
+        # provider_call_log: 100% din cele 94 apeluri Odds API logate erau
+        # /sports (validarea), 0% cerere reală de odds/events/scores.
+        # Constructorul rămâne acum side-effect free — validarea se mută lazy,
+        # la primul punct real de consum Odds API (vezi
+        # _ensure_odds_keys_validated(), apelat din _fetch_events_odds_api(),
+        # _fetch_scores_odds_api(), _fetch_odds()).
+        self._odds_keys_validated: bool = False
         logger.info("FootballOracleAPI v2.3 initialised.")
 
     # ── Cache — L1 (disc) + L2 (Supabase), prin CacheManager ──────────────
@@ -355,7 +365,19 @@ class FootballOracleAPI:
         finally:
             self._request_manager.release_inflight(provider, ram_category, ram_key)
 
-    # ── Startup validation ────────────────────────────────────────────────
+    # ── Startup validation (lazy, Sprint 3 Pasul 4) ────────────────────────
+    def _ensure_odds_keys_validated(self) -> None:
+        """Punct unic de intrare pentru validarea cheii Odds API — apelat
+        DOAR din metodele care chiar consumă Odds API
+        (_fetch_events_odds_api, _fetch_scores_odds_api, _fetch_odds),
+        niciodată din __init__. Idempotent per-instanță (optimizare
+        secundară, nu obiectivul principal) — a doua metodă Odds API
+        apelată pe aceeași instanță nu mai repetă cererea /sports."""
+        if self._odds_keys_validated:
+            return
+        self._odds_keys_validated = True
+        self._validate_api_keys()
+
     def _validate_api_keys(self) -> None:
         data = self._get(f"{ODDS_API_URL}/sports",
                          params={"apiKey": self._key_manager.get_api_key_param("oddsapi"), "all": "true"})
@@ -616,15 +638,33 @@ class FootballOracleAPI:
         if not data:
             self._cset(cache_key, None); return None
         stats = data.get("statistics") or data.get("response") or {}
+        home_raw = stats.get("home") or {}
+        away_raw = stats.get("away") or {}
+
+        # [REPARAT Sprint 3, Prioritatea 1, Regula 5 — "nu aproxima, nu
+        # hardcoda"] Versiunea anterioară folosea `or 0`/`or 50` — un câmp
+        # REALMENTE lipsă din payload (None) devenea silențios 0 (xG/shots)
+        # sau 50 (possession, valoarea NEUTRĂ folosită și de cascada de
+        # fallback din oracle_engine._build_profile()), indistingibil de o
+        # valoare reală. `_num_or_none()` propagă None explicit — Regula #8,
+        # CLAUDE.md: nicio stare necunoscută nu se aproximează.
+        def _num_or_none(value, cast):
+            if value is None:
+                return None
+            try:
+                return cast(value)
+            except (TypeError, ValueError):
+                return None
+
         result = {
-            "home_xg":         float((stats.get("home") or {}).get("expected_goals") or 0),
-            "away_xg":         float((stats.get("away") or {}).get("expected_goals") or 0),
-            "home_possession": float((stats.get("home") or {}).get("BallPossession") or 50),
-            "away_possession": float((stats.get("away") or {}).get("BallPossession") or 50),
-            "home_shots_ot":   int((stats.get("home") or {}).get("ShotsOnTarget") or 0),
-            "away_shots_ot":   int((stats.get("away") or {}).get("ShotsOnTarget") or 0),
-            "home_big_chance": int((stats.get("home") or {}).get("big_chance") or 0),
-            "away_big_chance": int((stats.get("away") or {}).get("big_chance") or 0),
+            "home_xg":         _num_or_none(home_raw.get("expected_goals"), float),
+            "away_xg":         _num_or_none(away_raw.get("expected_goals"), float),
+            "home_possession": _num_or_none(home_raw.get("BallPossession"), float),
+            "away_possession": _num_or_none(away_raw.get("BallPossession"), float),
+            "home_shots_ot":   _num_or_none(home_raw.get("ShotsOnTarget"), int),
+            "away_shots_ot":   _num_or_none(away_raw.get("ShotsOnTarget"), int),
+            "home_big_chance": _num_or_none(home_raw.get("big_chance"), int),
+            "away_big_chance": _num_or_none(away_raw.get("big_chance"), int),
             "source": "freelivefootball-statistics",
         }
         self._cset(cache_key, result)
@@ -721,6 +761,7 @@ class FootballOracleAPI:
 
     # ── Odds API — events ─────────────────────────────────────────────────
     def _fetch_events_odds_api(self, sport_key: str, days_ahead: int = 7) -> list[dict]:
+        self._ensure_odds_keys_validated()
         if sport_key in self._dead_keys: return []
         cache_key = f"events_{sport_key}_{days_ahead}"
         cached = self._cget(cache_key)
@@ -759,6 +800,7 @@ class FootballOracleAPI:
 
     # ── Odds API — scores (formă recentă fallback) ────────────────────────
     def _fetch_scores_odds_api(self, sport_key: str, days_back: int = 3) -> list[dict]:
+        self._ensure_odds_keys_validated()
         if sport_key in self._dead_keys: return []
         # [REPARAT] Ocolea complet CacheManager, folosind doar un fisier disc
         # separat (scores_cache.json) - gasit prin audit final, dupa deploy.
@@ -1213,6 +1255,7 @@ class FootballOracleAPI:
         )
 
     def _fetch_odds(self, sport_key: str) -> dict[str, dict]:
+        self._ensure_odds_keys_validated()
         if sport_key in self._dead_keys: return {}
         cache_key = f"odds_{sport_key}"
         cached = self._cget(cache_key)

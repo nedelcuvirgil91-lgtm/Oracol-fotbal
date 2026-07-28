@@ -396,6 +396,139 @@ def update_results_in_supabase(results: list[dict]) -> tuple[int, int]:
     return updated, not_found
 
 
+def fetch_results_from_odds_api_recent(days_back: int = 14) -> list[dict]:
+    """
+    [ADAUGAT Sprint 0 — Stabilizare, Etapa 2] A DOUA sursă de rezultate
+    reale pentru update_results_in_supabase() — completează
+    football-data.org (care nu acoperă Romania SuperLiga/MLS/Conference
+    League, vezi FD_COMPETITIONS) cu ce a sincronizat deja Sync Layer în
+    `odds_api_recent_results` (sync/sync_odds_recent_results.py, R-Sync-6).
+
+    Citire STRICT din Supabase (database.queries.get_recent_odds_results,
+    read-only) — niciun apel live nou către Odds API din acest modul.
+    Acest fișier rămâne singurul writer canonic al `actual_*` (ADR-036);
+    citirea/scrierea sursei brute `odds_api_recent_results` rămâne,
+    neschimbat, responsabilitatea exclusivă a sync_odds_recent_results.py.
+
+    Întoarce EXACT același contract ca fetch_yesterday_results() (listă de
+    dict-uri home_team/away_team/league/kickoff_date/home_goals/away_goals/
+    actual_result) — consumat identic de update_results_in_supabase(), o
+    singură cale de scriere pentru actual_*, indiferent de sursă.
+    """
+    try:
+        from database.queries import get_recent_odds_results
+        rows = get_recent_odds_results(days_back=days_back)
+    except Exception as exc:
+        logger.warning("[SyncResults] fetch_results_from_odds_api_recent eșuat: %s", exc)
+        return []
+
+    results: list[dict] = []
+    for row in rows:
+        home_score = row.get("home_score")
+        away_score = row.get("away_score")
+        if home_score is None or away_score is None:
+            continue
+        actual_result = (
+            "H" if home_score > away_score
+            else "A" if home_score < away_score
+            else "D"
+        )
+        results.append({
+            "fd_id":         None,
+            "home_team":     row.get("home_team_canonical", ""),
+            "away_team":     row.get("away_team_canonical", ""),
+            "league":        row.get("league", ""),
+            "kickoff_date":  row.get("kickoff_date", ""),
+            "home_goals":    home_score,
+            "away_goals":    away_score,
+            "actual_result": actual_result,
+        })
+
+    logger.info("[SyncResults] %d rezultate din odds_api_recent_results (bridge Sprint 0, Etapa 2)",
+                len(results))
+    return results
+
+
+def fetch_results_from_soccerfootballinfo(days_back: int = 60) -> list[dict]:
+    """
+    [ADAUGAT Sprint 3, Pasul 1] A TREIA sursă de rezultate reale — închide
+    retroactiv meciuri cu rezultat lipsă pentru ligile acoperite de League
+    Mapping v2 Soccer Football Info (Sprint 3, Prioritatea 1) — inclusiv
+    World Cup 2026 și Romania SuperLiga, unde football-data.org și
+    odds_api_recent_results nu au acoperire/fereastră suficientă (Sprint 0,
+    Etapa 2 — cauza reală documentată a golului "0 predicții cu rezultat").
+
+    Reutilizează EXACT resolver-ul și clientul deja construite pentru Match
+    Statistics (`soccerfootballinfo_event_resolver.py`,
+    `soccerfootballinfo_client.py`) — nicio logică HTTP nouă. Ligile fără
+    `championship_id` mapat (`mappings.LEAGUE_PROVIDERS`) sunt sărite
+    gratuit — resolver-ul verifică asta intern, fără niciun apel HTTP.
+
+    Întoarce EXACT același contract ca `fetch_yesterday_results()`,
+    consumat identic de `update_results_in_supabase()` — owner unic
+    `actual_*` rămâne `sync_results` (ADR-036), niciun scriitor nou.
+    """
+    try:
+        from database.queries import get_matches_missing_results
+        from soccerfootballinfo_event_resolver import get_soccerfootballinfo_event_resolver
+        from soccerfootballinfo_client import get_soccerfootballinfo_client
+        rows = get_matches_missing_results(days_back=days_back)
+    except Exception as exc:
+        logger.warning("[SyncResults] fetch_results_from_soccerfootballinfo eșuat: %s", exc)
+        return []
+
+    resolver = get_soccerfootballinfo_event_resolver()
+    client = get_soccerfootballinfo_client()
+
+    results: list[dict] = []
+    for row in rows:
+        home_team = row.get("home_team", "")
+        away_team = row.get("away_team", "")
+        league = row.get("league", "")
+        kickoff_date = row.get("kickoff_date", "")
+        if not home_team or not away_team or not kickoff_date:
+            continue
+        try:
+            match_id = resolver.resolve(home_team, away_team, kickoff_date, league)
+            if match_id is None:
+                continue
+            detail = client.get_match_detail(match_id)
+            if not detail or detail.get("status") != "ENDED":
+                continue
+            team_a = detail.get("teamA") or {}
+            team_b = detail.get("teamB") or {}
+            home_goals = (team_a.get("score") or {}).get("f")
+            away_goals = (team_b.get("score") or {}).get("f")
+            if home_goals is None or away_goals is None:
+                continue
+            home_goals = int(home_goals)
+            away_goals = int(away_goals)
+            actual_result = (
+                "H" if home_goals > away_goals
+                else "A" if home_goals < away_goals
+                else "D"
+            )
+            results.append({
+                "fd_id":         None,
+                "home_team":     home_team,
+                "away_team":     away_team,
+                "league":        league,
+                "kickoff_date":  kickoff_date,
+                "home_goals":    home_goals,
+                "away_goals":    away_goals,
+                "actual_result": actual_result,
+            })
+        except Exception as exc:
+            logger.debug("[SyncResults] SFI eroare pentru %s vs %s: %s", home_team, away_team, exc)
+            continue
+
+    logger.info(
+        "[SyncResults] %d rezultate din Soccer Football Info (închidere retroactivă, Sprint 3 Pasul 1)",
+        len(results),
+    )
+    return results
+
+
 def sync_yesterday_results() -> dict:
     """
     Funcția principală — descarcă și salvează rezultatele din ultimele zile
@@ -403,12 +536,37 @@ def sync_yesterday_results() -> dict:
     Numele funcției a rămas neschimbat (run_daily.py o importă exact așa),
     deși acum acoperă mai mult decât "ieri" — vezi ADR-004.
     Apelată din run_daily.py.
+
+    [ADAUGAT Sprint 0 — Stabilizare, Etapa 2] Combină DOUĂ surse înainte de
+    scriere — football-data.org (fetch_yesterday_results) și
+    odds_api_recent_results (fetch_results_from_odds_api_recent) — ambele
+    trec prin ACEEAȘI cale unică de scriere (update_results_in_supabase).
+    Zero risc de scriere dublă: căutarea e mereu gatată pe
+    `actual_result IS NULL`, deci fiecare sursă e idempotentă independent
+    de ordine sau de suprapunere.
+
+    [ADAUGAT Sprint 3, Pasul 1] A TREIA sursă — Soccer Football Info
+    (`fetch_results_from_soccerfootballinfo`), pentru ligile League Mapping
+    v2 (World Cup 2026, Romania SuperLiga, etc.) neacoperite de celelalte
+    două. Aceeași cale unică de scriere, același gating idempotent.
     """
     results = fetch_yesterday_results()
-    if not results:
+    try:
+        odds_results = fetch_results_from_odds_api_recent()
+    except Exception as exc:
+        logger.warning("[SyncResults] fetch_results_from_odds_api_recent eșuat: %s", exc)
+        odds_results = []
+    try:
+        sfi_results = fetch_results_from_soccerfootballinfo()
+    except Exception as exc:
+        logger.warning("[SyncResults] fetch_results_from_soccerfootballinfo eșuat: %s", exc)
+        sfi_results = []
+
+    all_results = results + odds_results + sfi_results
+    if not all_results:
         return {"status": "ok", "updated": 0, "not_found": 0, "message": "Niciun meci ieri"}
 
-    updated, not_found = update_results_in_supabase(results)
+    updated, not_found = update_results_in_supabase(all_results)
 
     # Dacă s-au actualizat meciuri, rulăm backfill pentru ele
     if updated > 0:

@@ -55,26 +55,27 @@ def test_teamprofile_constructed_in_exactly_one_place():
     assert list(hits.keys()) == ["oracle_engine.py"]
 
 
-def test_tsdb_team_stats_only_called_from_build_profile():
+def test_get_team_stats_tsdb_never_called_live_from_oracle_engine():
+    """[ACTUALIZAT — ADR-039 R-Sync-8] `get_team_stats`/
+    `get_team_last_events_tsdb` (apeluri live TheSportsDB) nu mai au voie să
+    fie apelate din oracle_engine.py, sub nicio formă — Level 4 din
+    `_build_profile()` citește azi STRICT din Supabase
+    (`database.queries.get_team_stats_tsdb()`, vezi testul de mai jos).
+    Singurul apelant de producție al funcțiilor live rămâne Sync Layer
+    (`tsdb_team_stats_adapter.py`, prin `sync/sync_team_stats_tsdb.py`) —
+    exact tiparul deja stabilit de `test_get_elo_rating_never_called_from_
+    oracle_engine` (R-Sync-4)."""
     path = ROOT / "oracle_engine.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename="oracle_engine.py")
-
-    calls_by_function: dict[str, list[int]] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef):
-            lines = _calls_matching(node, {"get_team_stats", "get_team_last_events_tsdb"})
-            if lines:
-                calls_by_function[node.name] = lines
-
-    assert calls_by_function == {"_build_profile": calls_by_function.get("_build_profile", [])}, (
-        f"get_team_stats/get_team_last_events_tsdb apelate din afara "
-        f"_build_profile(): {calls_by_function} — cale paralelă către TSDB, "
-        f"ocolește Level DB (ADR-035/D1)."
+    lines = _calls_matching(tree, {"get_team_stats", "get_team_last_events_tsdb"})
+    assert not lines, (
+        f"oracle_engine.py apelează încă TSDB live la liniile {lines} — "
+        f"eliminat în R-Sync-8, ADR-039 (Level 4 citit STRICT din Supabase, "
+        f"database.queries.get_team_stats_tsdb())."
     )
-    assert "_build_profile" in calls_by_function
 
-    # Verificare separată: nicio altă locație din PRODUCTION_FILES (in afara
-    # oracle_api.py, unde functiile sunt DEFINITE, nu apelate) nu le apelează.
+    # Nicio altă locație din PRODUCTION_FILES (in afara oracle_api.py, unde
+    # funcțiile sunt DEFINITE, nu apelate) nu le apelează.
     for fname in PRODUCTION_FILES:
         if fname in ("oracle_engine.py", "oracle_api.py"):
             continue
@@ -84,6 +85,39 @@ def test_tsdb_team_stats_only_called_from_build_profile():
         t = ast.parse(p.read_text(encoding="utf-8"), filename=fname)
         lines = _calls_matching(t, {"get_team_stats", "get_team_last_events_tsdb"})
         assert not lines, f"{fname} apelează direct TSDB team-stats la liniile {lines}"
+
+
+def test_tsdb_team_stats_db_first_only_called_from_build_profile():
+    """[ADĂUGAT — ADR-039 R-Sync-8] `get_team_stats_tsdb()` (citire
+    Database-First, Level 4) trebuie apelată DINTR-UN SINGUR loc de
+    producție — `_build_profile()` — la fel ca restul nivelurilor cascadei
+    (footballdata, odds API, FreeLF)."""
+    path = ROOT / "oracle_engine.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename="oracle_engine.py")
+
+    calls_by_function: dict[str, list[int]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            lines = _calls_matching(node, {"get_team_stats_tsdb"})
+            if lines:
+                calls_by_function[node.name] = lines
+
+    assert calls_by_function == {"_build_profile": calls_by_function.get("_build_profile", [])}, (
+        f"get_team_stats_tsdb apelată din afara _build_profile(): "
+        f"{calls_by_function} — cale paralelă către Level 4, ocolește "
+        f"ordinea Database-First (ADR-039 R-Sync-8)."
+    )
+    assert "_build_profile" in calls_by_function
+
+    for fname in PRODUCTION_FILES:
+        if fname in ("oracle_engine.py", "database/queries.py"):
+            continue
+        p = ROOT / fname
+        if not p.exists():
+            continue
+        t = ast.parse(p.read_text(encoding="utf-8"), filename=fname)
+        lines = _calls_matching(t, {"get_team_stats_tsdb"})
+        assert not lines, f"{fname} apelează direct get_team_stats_tsdb la liniile {lines}"
 
 
 def test_elo_read_only_called_from_build_profile():
@@ -151,12 +185,12 @@ def test_get_elo_rating_never_called_from_oracle_engine():
 
 
 def test_h2h_read_only_called_from_build_h2h():
-    """ADR-035 D3: get_h2h() (provider FreeLF) și get_h2h_from_history()
-    (sursa canonică, match_history) trebuie apelate DINTR-UN SINGUR loc de
-    producție — _build_h2h(). O a doua cale ar putea citi H2H fără să
-    respecte ordinea Database-First (DB întâi, prag ≥3, provider doar ca
-    fallback)."""
-    names = {"get_h2h", "get_h2h_from_history"}
+    """[ACTUALIZAT — ADR-039 R-Sync-9] `get_h2h_from_history()` (sursa
+    canonică, match_history) și `get_freelf_h2h_snapshot()` (Database-First,
+    R-Sync-9) trebuie apelate DINTR-UN SINGUR loc de producție —
+    _build_h2h(). O a doua cale ar putea citi H2H fără să respecte ordinea
+    Database-First (DB întâi, prag ≥3, snapshot FreeLF doar ca fallback)."""
+    names = {"get_h2h_from_history", "get_freelf_h2h_snapshot"}
     path = ROOT / "oracle_engine.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename="oracle_engine.py")
 
@@ -168,15 +202,15 @@ def test_h2h_read_only_called_from_build_h2h():
                 calls_by_function[node.name] = lines
 
     assert calls_by_function == {"_build_h2h": calls_by_function.get("_build_h2h", [])}, (
-        f"get_h2h/get_h2h_from_history apelate din afara _build_h2h(): "
-        f"{calls_by_function} — cale paralelă către sursa H2H, ocolește "
-        f"ordinea Database-First (ADR-035 D3)."
+        f"get_h2h_from_history/get_freelf_h2h_snapshot apelate din afara "
+        f"_build_h2h(): {calls_by_function} — cale paralelă către sursa "
+        f"H2H, ocolește ordinea Database-First (ADR-035 D3 / ADR-039 R-Sync-9)."
     )
     assert "_build_h2h" in calls_by_function
     assert len(calls_by_function["_build_h2h"]) == 2, (
         f"Așteptam exact 2 apeluri în _build_h2h() — get_h2h_from_history "
-        f"(primar) și get_h2h (fallback FreeLF) — găsit "
-        f"{calls_by_function['_build_h2h']}."
+        f"(primar) și get_freelf_h2h_snapshot (fallback FreeLF, "
+        f"Database-First) — găsit {calls_by_function['_build_h2h']}."
     )
 
     # Nicio altă locație din PRODUCTION_FILES (în afara oracle_api.py și
@@ -191,3 +225,87 @@ def test_h2h_read_only_called_from_build_h2h():
         t = ast.parse(p.read_text(encoding="utf-8"), filename=fname)
         lines = _calls_matching(t, names)
         assert not lines, f"{fname} apelează direct sursa H2H la liniile {lines}"
+
+
+def test_get_h2h_live_never_called_from_oracle_engine():
+    """[ADĂUGAT — ADR-039 R-Sync-9] `get_h2h()` (apel live FreeLF, provider)
+    nu mai are voie să fie apelat din oracle_engine.py, sub nicio formă —
+    fallback-ul FreeLF din `_build_h2h()` citește azi STRICT din Supabase
+    (`get_freelf_h2h_snapshot()`, vezi testul de mai sus). Singurul apelant
+    de producție al funcției live rămâne Sync Layer
+    (`freelf_h2h_adapter.py`, prin `sync/sync_h2h_freelf.py`) — exact
+    tiparul deja stabilit de `test_get_team_stats_tsdb_never_called_live_
+    from_oracle_engine` (R-Sync-8) și `test_get_elo_rating_never_called_
+    from_oracle_engine` (R-Sync-4)."""
+    path = ROOT / "oracle_engine.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename="oracle_engine.py")
+    lines = _calls_matching(tree, {"get_h2h"})
+    assert not lines, (
+        f"oracle_engine.py apelează încă get_h2h() (live FreeLF) la liniile "
+        f"{lines} — eliminat în R-Sync-9, ADR-039 (fallback citit STRICT din "
+        f"Supabase, database.queries.get_freelf_h2h_snapshot())."
+    )
+
+    for fname in PRODUCTION_FILES:
+        if fname in ("oracle_engine.py", "oracle_api.py"):
+            continue
+        p = ROOT / fname
+        if not p.exists():
+            continue
+        t = ast.parse(p.read_text(encoding="utf-8"), filename=fname)
+        lines = _calls_matching(t, {"get_h2h"})
+        assert not lines, f"{fname} apelează direct H2H live la liniile {lines}"
+
+
+def test_get_lineup_absences_never_called_from_oracle_engine():
+    """[ADĂUGAT — ADR-039 R-Sync-10] `injury_manager.get_lineup_absences()`
+    (fetch live FreeLF) nu mai are voie să fie apelată din oracle_engine.py
+    — era ULTIMUL loc din fișier care modifica efectiv predicția servită
+    pe baza unui apel live (nu doar shadow/discovery). Penalizarea de
+    accidentări citește azi STRICT din Supabase
+    (`get_freelf_lineup_snapshot()` +
+    `build_injury_report_from_raw_lineup()`, funcție pură), vezi testul de
+    mai jos. Singurul apelant de producție al `get_lineup_absences()`
+    rămâne, teoretic, orice script Sync Layer viitor — azi niciunul (nici
+    `freelf_lineup_adapter.py` nu o folosește, apelează
+    `oracle_api.get_lineup()` direct)."""
+    path = ROOT / "oracle_engine.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename="oracle_engine.py")
+    lines = _calls_matching(tree, {"get_lineup_absences"})
+    assert not lines, (
+        f"oracle_engine.py apelează încă get_lineup_absences() (live FreeLF) "
+        f"la liniile {lines} — eliminat în R-Sync-10, ADR-039."
+    )
+
+    for fname in PRODUCTION_FILES:
+        if fname in ("oracle_engine.py", "injury_manager.py"):
+            continue
+        p = ROOT / fname
+        if not p.exists():
+            continue
+        t = ast.parse(p.read_text(encoding="utf-8"), filename=fname)
+        lines = _calls_matching(t, {"get_lineup_absences"})
+        assert not lines, f"{fname} apelează direct lineup live la liniile {lines}"
+
+
+def test_injury_penalty_db_first_only_called_from_evaluate_match():
+    """[ADĂUGAT — ADR-039 R-Sync-10] `get_freelf_lineup_snapshot()`
+    (citire Database-First) trebuie apelată dintr-un singur loc de
+    producție — `evaluate_match()` — exact tiparul deja impus pentru
+    celelalte niveluri Database-First (footballdata, TSDB, FreeLF H2H)."""
+    path = ROOT / "oracle_engine.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename="oracle_engine.py")
+
+    calls_by_function: dict[str, list[int]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef):
+            lines = _calls_matching(node, {"get_freelf_lineup_snapshot"})
+            if lines:
+                calls_by_function[node.name] = lines
+
+    assert calls_by_function == {"evaluate_match": calls_by_function.get("evaluate_match", [])}, (
+        f"get_freelf_lineup_snapshot apelată din afara evaluate_match(): "
+        f"{calls_by_function} — cale paralelă către penalizarea de "
+        f"accidentări, ocolește ordinea Database-First (ADR-039 R-Sync-10)."
+    )
+    assert "evaluate_match" in calls_by_function

@@ -371,45 +371,80 @@ class LeagueDefinition:
 LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
     "Premier League": LeagueDefinition(
         name="Premier League",
+        # [ADAUGAT Sprint 3, Prioritatea 1] soccerfootballinfo="eb57e70ef2e7077e"
+        # ("England Premier League") — VERIFICAT LIVE 2026-07-28 (POC izolat,
+        # sters dupa test, sync/poc_sfi_league_discovery.py — matches/day/full
+        # pe 2026-05-24, meciuri reale de sezon).
         provider_ids={"football_data": "PL", "espn": "eng.1", "tsdb": "4328",
-                       "odds": "soccer_epl", "freelf": 47, "api_football": None},
+                       "odds": "soccer_epl", "freelf": 47, "api_football": None,
+                       "soccerfootballinfo": "eb57e70ef2e7077e"},
         supported={"football_data": True, "espn": True, "tsdb": True,
-                    "odds": True, "freelf": True, "api_football": "necunoscut"},
+                    "odds": True, "freelf": True, "api_football": "necunoscut",
+                    "soccerfootballinfo": True},
     ),
     "La Liga": LeagueDefinition(
         name="La Liga",
+        # [ADAUGAT Sprint 3, Prioritatea 1] soccerfootballinfo="4809e54e02cc5630"
+        # ("Spain La Liga") — VERIFICAT LIVE 2026-07-28 (POC izolat, sters
+        # dupa test, matches/day/full pe 2026-05-24).
         provider_ids={"football_data": "PD", "espn": "esp.1", "tsdb": "4335",
-                       "odds": "soccer_spain_la_liga", "freelf": 87, "api_football": None},
+                       "odds": "soccer_spain_la_liga", "freelf": 87, "api_football": None,
+                       "soccerfootballinfo": "4809e54e02cc5630"},
         supported={"football_data": True, "espn": True, "tsdb": True,
-                    "odds": True, "freelf": True, "api_football": "necunoscut"},
+                    "odds": True, "freelf": True, "api_football": "necunoscut",
+                    "soccerfootballinfo": True},
     ),
     "Serie A": LeagueDefinition(
         name="Serie A",
+        # [ADAUGAT Sprint 3, Prioritatea 1] soccerfootballinfo="52df5453a0628c0a"
+        # ("Italy Serie A") — VERIFICAT LIVE 2026-07-28 (POC izolat, sters
+        # dupa test, matches/day/full pe 2026-05-24).
         provider_ids={"football_data": "SA", "espn": "ita.1", "tsdb": "4332",
-                       "odds": "soccer_italy_serie_a", "freelf": 55, "api_football": None},
+                       "odds": "soccer_italy_serie_a", "freelf": 55, "api_football": None,
+                       "soccerfootballinfo": "52df5453a0628c0a"},
         supported={"football_data": True, "espn": True, "tsdb": True,
-                    "odds": True, "freelf": True, "api_football": "necunoscut"},
+                    "odds": True, "freelf": True, "api_football": "necunoscut",
+                    "soccerfootballinfo": True},
     ),
     "Bundesliga": LeagueDefinition(
         name="Bundesliga",
+        # [ADAUGAT Sprint 3, Prioritatea 1] soccerfootballinfo="a0d28d6b99d45e79"
+        # ("Germany Bundesliga I" — top-flight; distinct de "Bundesliga II"/
+        # "Bundesliga U19"/"Bundesliga Women", verificate separat si excluse
+        # explicit) — VERIFICAT LIVE 2026-07-28 (POC izolat, sters dupa test,
+        # matches/day/full pe 2026-05-09/05-16, dupa ce 05-17/05-24 nu au
+        # prins nicio etapa Bundesliga in fereastra de descoperire).
         provider_ids={"football_data": "BL1", "espn": "ger.1", "tsdb": "4331",
-                       "odds": "soccer_germany_bundesliga", "freelf": 54, "api_football": None},
+                       "odds": "soccer_germany_bundesliga", "freelf": 54, "api_football": None,
+                       "soccerfootballinfo": "a0d28d6b99d45e79"},
         supported={"football_data": True, "espn": True, "tsdb": True,
-                    "odds": True, "freelf": True, "api_football": "necunoscut"},
+                    "odds": True, "freelf": True, "api_football": "necunoscut",
+                    "soccerfootballinfo": True},
     ),
     "Ligue 1": LeagueDefinition(
         name="Ligue 1",
+        # [ADAUGAT Sprint 3, Prioritatea 1] soccerfootballinfo="f0644ed72e7c6a5c"
+        # ("France Ligue 1") — VERIFICAT LIVE 2026-07-28 (POC izolat, sters
+        # dupa test, matches/day/full pe 2026-05-17).
         provider_ids={"football_data": "FL1", "espn": "fra.1", "tsdb": "4334",
-                       "odds": "soccer_france_ligue_one", "freelf": 53, "api_football": None},
+                       "odds": "soccer_france_ligue_one", "freelf": 53, "api_football": None,
+                       "soccerfootballinfo": "f0644ed72e7c6a5c"},
         supported={"football_data": True, "espn": True, "tsdb": True,
-                    "odds": True, "freelf": True, "api_football": "necunoscut"},
+                    "odds": True, "freelf": True, "api_football": "necunoscut",
+                    "soccerfootballinfo": True},
     ),
     "Champions League": LeagueDefinition(
         name="Champions League",
+        # [ADAUGAT Sprint 3, Prioritatea 1] soccerfootballinfo="3f2c3ee6eba0dd06"
+        # ("UEFA Champions League") — VERIFICAT LIVE 2026-07-28 (POC izolat,
+        # sters dupa test, matches/day/full pe 2026-05-30, finala reala
+        # 2025/26 — 05-20/05-27 nu au prins nicio etapa UCL).
         provider_ids={"football_data": "CL", "espn": "uefa.champions", "tsdb": "4480",
-                       "odds": "soccer_uefa_champs_league", "freelf": 42, "api_football": None},
+                       "odds": "soccer_uefa_champs_league", "freelf": 42, "api_football": None,
+                       "soccerfootballinfo": "3f2c3ee6eba0dd06"},
         supported={"football_data": True, "espn": True, "tsdb": True,
-                    "odds": True, "freelf": True, "api_football": "necunoscut"},
+                    "odds": True, "freelf": True, "api_football": "necunoscut",
+                    "soccerfootballinfo": True},
     ),
     "Europa League": LeagueDefinition(
         name="Europa League",
@@ -417,10 +452,15 @@ LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
         # ramane "necunoscut" - codul EL exista in catalogul general al
         # providerului, dar planul gratuit documentat public (12 competitii)
         # nu-l listeaza explicit - de verificat cu cheia reala a proiectului.
+        # [ADAUGAT Sprint 3, Prioritatea 1] soccerfootballinfo="88fae57d60cc4c4c"
+        # ("UEFA Europa League") — VERIFICAT LIVE 2026-07-28 (POC izolat,
+        # sters dupa test, matches/day/full pe 2026-05-20).
         provider_ids={"football_data": "EL", "espn": "uefa.europa", "tsdb": "4481",
-                       "odds": "soccer_uefa_europa_league", "freelf": 73, "api_football": None},
+                       "odds": "soccer_uefa_europa_league", "freelf": 73, "api_football": None,
+                       "soccerfootballinfo": "88fae57d60cc4c4c"},
         supported={"football_data": "necunoscut", "espn": True, "tsdb": True,
-                    "odds": True, "freelf": True, "api_football": "necunoscut"},
+                    "odds": True, "freelf": True, "api_football": "necunoscut",
+                    "soccerfootballinfo": True},
     ),
     "Romania SuperLiga": LeagueDefinition(
         name="Romania SuperLiga",
@@ -485,20 +525,31 @@ LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
     ),
     "World Cup 2026": LeagueDefinition(
         name="World Cup 2026",
+        # [ADAUGAT Sprint 3, Prioritatea 1] soccerfootballinfo="5085a3cde16c822b"
+        # ("World Cup 2026") — VERIFICAT LIVE 2026-07-28 (POC izolat, sters
+        # dupa test, matches/day/full pe 2026-07-12/07-19, semifinale+finala
+        # reale).
         provider_ids={"football_data": "WC", "espn": "fifa.world", "tsdb": "4429",
-                       "odds": "soccer_fifa_world_cup", "freelf": 77, "api_football": None},
+                       "odds": "soccer_fifa_world_cup", "freelf": 77, "api_football": None,
+                       "soccerfootballinfo": "5085a3cde16c822b"},
         supported={"football_data": True, "espn": True, "tsdb": True,
-                    "odds": True, "freelf": True, "api_football": "necunoscut"},
+                    "odds": True, "freelf": True, "api_football": "necunoscut",
+                    "soccerfootballinfo": True},
     ),
     "MLS": LeagueDefinition(
         name="MLS",
         # MLS ramane exclus din BOOTSTRAP_LEAGUES (decizie deliberata,
         # aplicatia nu prevede acest campionat) - prezent aici doar pt
         # normalizare generala de nume, consistent cu LEAGUE_ALIASES.
+        # [ADAUGAT Sprint 3, Prioritatea 1] soccerfootballinfo="bdc26311f38963da"
+        # ("USA MLS") — VERIFICAT LIVE 2026-07-28 (POC izolat, sters dupa
+        # test, matches/day/full pe 2026-07-27, sezon in curs).
         provider_ids={"football_data": None, "espn": "usa.1", "tsdb": "4346",
-                       "odds": "soccer_usa_mls", "freelf": None, "api_football": None},
+                       "odds": "soccer_usa_mls", "freelf": None, "api_football": None,
+                       "soccerfootballinfo": "bdc26311f38963da"},
         supported={"football_data": False, "espn": True, "tsdb": True,
-                    "odds": True, "freelf": False, "api_football": "necunoscut"},
+                    "odds": True, "freelf": False, "api_football": "necunoscut",
+                    "soccerfootballinfo": True},
     ),
     "Conference League": LeagueDefinition(
         name="Conference League",
@@ -507,12 +558,17 @@ LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
         # odds: competitia exista confirmat la provider ("Soccer: UEFA Europa
         # Conference League" listata explicit), dar codul exact sport_key
         # nu a putut fi confirmat din surse publice - "necunoscut", nu inventat.
+        # [ADAUGAT Sprint 3, Prioritatea 1] soccerfootballinfo="3673da7836270326"
+        # ("UEFA Conference League") — VERIFICAT LIVE 2026-07-28 (POC izolat,
+        # sters dupa test, matches/day/full pe 2026-05-20).
         provider_ids={"football_data": None, "espn": "uefa.europa.conf", "tsdb": "5071",
-                       "odds": None, "freelf": None, "api_football": None},
+                       "odds": None, "freelf": None, "api_football": None,
+                       "soccerfootballinfo": "3673da7836270326"},
         supported={
             "football_data": False,  # acelasi motiv ca Romania - nu e in cele 12 competitii gratuite
             "espn": True, "tsdb": True,
             "odds": "necunoscut", "freelf": "necunoscut", "api_football": "necunoscut",
+            "soccerfootballinfo": True,
         },
     ),
 }
