@@ -1,0 +1,35 @@
+name: Football Oracle — POC SFI League Discovery (temporar)
+
+# Discovery izolat, Sprint 3 Prioritatea 1 — vezi sync/poc_sfi_league_discovery.py.
+# Se șterge după ce descoperirea e închisă (dovada rămâne în istoricul rulării).
+
+on:
+  push:
+    branches:
+      - claude/sprint0-stabilizare-feedback-loop
+    paths:
+      - .github/workflows/poc_sfi_league_discovery.yml
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run SFI league discovery POC
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          RAPIDAPI_KEY_FREELIVEFOOTBALL: ${{ secrets.RAPIDAPI_KEY_FREELIVEFOOTBALL }}
+        run: python -m sync.poc_sfi_league_discovery
