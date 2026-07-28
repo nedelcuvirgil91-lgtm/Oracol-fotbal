@@ -7,6 +7,9 @@ on:
       - ".github/workflows/statsbomb_dataset_poc_temp.yml"
       - "scripts/_statsbomb_dataset_poc_temp.py"
 
+permissions:
+  contents: write
+
 jobs:
   statsbomb-inspect-poc:
     runs-on: ubuntu-latest
@@ -30,4 +33,17 @@ jobs:
           KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
           KAGGLE_TOKEN: ${{ secrets.KAGGLE_TOKEN }}
         run: |
-          python scripts/_statsbomb_dataset_poc_temp.py
+          python scripts/_statsbomb_dataset_poc_temp.py || true
+
+      - name: Commit POC output (evidence, log download blocked in dev env)
+        if: always()
+        run: |
+          if [ -f scripts/_statsbomb_poc_output_temp.txt ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add scripts/_statsbomb_poc_output_temp.txt
+            git commit -m "POC temp: statsbomb dataset inspection output" || echo "nimic de comis"
+            git push
+          else
+            echo "Fisierul de output nu a fost creat - scriptul a esuat inainte de a scrie."
+          fi
