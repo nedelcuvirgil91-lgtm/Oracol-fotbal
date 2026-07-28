@@ -159,7 +159,17 @@ class FootballOracleAPI:
         # din acest fișier (Odds API, football-data.org, ESPN, TheSportsDB,
         # eloratings.net, Weather) rămân neatinși, scope strict FreeLF aici.
         self._request_manager = get_request_manager()
-        self._validate_api_keys()
+        # [ACTUALIZAT Sprint 3, Pasul 4 — GĂSIT LA AUDIT] _validate_api_keys()
+        # rula necondiționat aici, la FIECARE construcție de FootballOracleAPI()
+        # — inclusiv din adaptoare Sync Layer care nu ating niciodată Odds API
+        # (ex. TsdbTeamStatsAdapter, FreelfH2hAdapter), confirmat live prin
+        # provider_call_log: 100% din cele 94 apeluri Odds API logate erau
+        # /sports (validarea), 0% cerere reală de odds/events/scores.
+        # Constructorul rămâne acum side-effect free — validarea se mută lazy,
+        # la primul punct real de consum Odds API (vezi
+        # _ensure_odds_keys_validated(), apelat din _fetch_events_odds_api(),
+        # _fetch_scores_odds_api(), _fetch_odds()).
+        self._odds_keys_validated: bool = False
         logger.info("FootballOracleAPI v2.3 initialised.")
 
     # ── Cache — L1 (disc) + L2 (Supabase), prin CacheManager ──────────────
@@ -355,7 +365,19 @@ class FootballOracleAPI:
         finally:
             self._request_manager.release_inflight(provider, ram_category, ram_key)
 
-    # ── Startup validation ────────────────────────────────────────────────
+    # ── Startup validation (lazy, Sprint 3 Pasul 4) ────────────────────────
+    def _ensure_odds_keys_validated(self) -> None:
+        """Punct unic de intrare pentru validarea cheii Odds API — apelat
+        DOAR din metodele care chiar consumă Odds API
+        (_fetch_events_odds_api, _fetch_scores_odds_api, _fetch_odds),
+        niciodată din __init__. Idempotent per-instanță (optimizare
+        secundară, nu obiectivul principal) — a doua metodă Odds API
+        apelată pe aceeași instanță nu mai repetă cererea /sports."""
+        if self._odds_keys_validated:
+            return
+        self._odds_keys_validated = True
+        self._validate_api_keys()
+
     def _validate_api_keys(self) -> None:
         data = self._get(f"{ODDS_API_URL}/sports",
                          params={"apiKey": self._key_manager.get_api_key_param("oddsapi"), "all": "true"})
@@ -739,6 +761,7 @@ class FootballOracleAPI:
 
     # ── Odds API — events ─────────────────────────────────────────────────
     def _fetch_events_odds_api(self, sport_key: str, days_ahead: int = 7) -> list[dict]:
+        self._ensure_odds_keys_validated()
         if sport_key in self._dead_keys: return []
         cache_key = f"events_{sport_key}_{days_ahead}"
         cached = self._cget(cache_key)
@@ -777,6 +800,7 @@ class FootballOracleAPI:
 
     # ── Odds API — scores (formă recentă fallback) ────────────────────────
     def _fetch_scores_odds_api(self, sport_key: str, days_back: int = 3) -> list[dict]:
+        self._ensure_odds_keys_validated()
         if sport_key in self._dead_keys: return []
         # [REPARAT] Ocolea complet CacheManager, folosind doar un fisier disc
         # separat (scores_cache.json) - gasit prin audit final, dupa deploy.
@@ -1231,6 +1255,7 @@ class FootballOracleAPI:
         )
 
     def _fetch_odds(self, sport_key: str) -> dict[str, dict]:
+        self._ensure_odds_keys_validated()
         if sport_key in self._dead_keys: return {}
         cache_key = f"odds_{sport_key}"
         cached = self._cget(cache_key)

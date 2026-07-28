@@ -1,0 +1,33 @@
+name: Sprint 3 Pasul 4 — lazy Odds API validation proof (temporar)
+
+on:
+  push:
+    branches: [claude/sprint0-stabilizare-feedback-loop]
+    paths:
+      - ".github/workflows/sprint3_pasul4_lazy_odds_run.yml"
+
+jobs:
+  run-h2h-freelf-again:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sync.sync_h2h_freelf (same script as R-Sync-9 proof run — before/after lazy-validation fix)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          RAPIDAPI_KEY_FREELIVEFOOTBALL: ${{ secrets.RAPIDAPI_KEY_FREELIVEFOOTBALL }}
+        run: |
+          python -m sync.sync_h2h_freelf --days-ahead 35
