@@ -3,6 +3,7 @@ starea reală a key_manager.py printr-un fake, urmând tiparul deja folosit în
 test_football_providers.py (_FakeKeyManagerNoKey)."""
 from __future__ import annotations
 
+from acquisition_tier import AcquisitionTier
 from provider_registry import ProviderRegistry, ProviderRecord, get_provider_registry
 
 
@@ -198,6 +199,24 @@ def test_key_manager_not_imported_at_module_load_time():
     'get_key_manager' nu exista in namespace-ul modulului la nivel de top."""
     import provider_registry
     assert "get_key_manager" not in vars(provider_registry)
+
+
+def test_provider_record_defaults_to_api_tier():
+    """[UDAL Faza 0, ADR-042] Aditiv — un ProviderRecord fara tier explicit
+    ramane AcquisitionTier.API, zero schimbare de comportament pt cod
+    existent."""
+    record = ProviderRecord("alpha", "Alpha Provider", requires_credentials=True)
+    assert record.tier is AcquisitionTier.API
+
+
+def test_real_registry_all_providers_are_api_tier():
+    """[UDAL Faza 0] Niciun provider din registry-ul real nu e azi un
+    scraper sau target Playwright - toti raman AcquisitionTier.API."""
+    reg = ProviderRegistry()
+    for record in reg.list_providers():
+        assert record.tier is AcquisitionTier.API, (
+            f"{record.provider_id!r} nu e AcquisitionTier.API - regresie neasteptata"
+        )
 
 
 def test_real_registry_credentialed_providers_are_consistent_with_key_manager():

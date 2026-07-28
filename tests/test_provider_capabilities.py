@@ -4,6 +4,7 @@ from __future__ import annotations
 import pytest
 from types import MappingProxyType
 
+from acquisition_tier import AcquisitionTier
 from provider_capabilities import (
     CAPABILITIES, CostClass, DataType, ProviderCapability,
     get_capability, supports,
@@ -92,6 +93,15 @@ def test_supports_false_for_unknown_provider():
 
 def test_get_capability_returns_none_for_unknown_provider():
     assert get_capability("flashscore-inca-neadaugat") is None
+
+
+def test_every_capability_defaults_to_api_tier():
+    """[UDAL Faza 0, ADR-042] Aditiv - toti cei 9 provideri existenti
+    raman AcquisitionTier.API, zero schimbare de comportament."""
+    for provider_id, cap in CAPABILITIES.items():
+        assert cap.tier is AcquisitionTier.API, (
+            f"{provider_id!r} nu e AcquisitionTier.API - regresie neasteptata"
+        )
 
 
 def test_weatherapi_registered_with_empty_data_types_not_omitted():

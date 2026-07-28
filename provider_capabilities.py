@@ -33,6 +33,8 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Mapping
 
+from acquisition_tier import AcquisitionTier
+
 
 class DataType(Enum):
     FIXTURES = "fixtures"
@@ -63,6 +65,12 @@ class ProviderCapability:
     data_types: frozenset[DataType]
     cost_class: CostClass
     cache_ttl_hours: Mapping[DataType, int]  # contract public — Mapping, nu MappingProxyType
+    # [ADAUGAT UDAL Faza 0, ADR-042] Aditiv, cu default — toți cei 9
+    # provideri existenți rămân AcquisitionTier.API fără să fie atinși
+    # individual. Niciun provider din acest registry nu e azi un scraper
+    # sau un target Playwright — câmpul există doar ca UDAL să poată grupa
+    # candidații pe tier fără un al doilea registry paralel.
+    tier: AcquisitionTier = AcquisitionTier.API
 
     def __post_init__(self):
         # frozen=True tot permite mutatie pe un dict mutabil primit ca arg -
