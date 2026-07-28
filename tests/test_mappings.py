@@ -125,3 +125,19 @@ def test_league_baselines_and_elo_fallback_untouched():
     assert len(LEAGUE_BASELINES) >= 10
     assert len(ELO_RATINGS_FALLBACK) >= 60
     assert LEAGUE_BASELINES.get("Premier League") == 1.35
+
+
+def test_normalize_team_name_csikszereda_unified():
+    """Regresie directa: audit Sprint 3, 2026-07-28 - "Csikszereda M. Ciuc"
+    (import istoric) si "Csíkszereda Miercurea Ciuc" (TSDB, forma noua) erau
+    doi identificatori diferiti pentru acelasi club, ascunzand 15+ meciuri
+    reale din _build_profile()."""
+    assert normalize_team_name("Csikszereda M. Ciuc") == "Csíkszereda Miercurea Ciuc"
+    assert normalize_team_name("Csíkszereda Miercurea Ciuc") == "Csíkszereda Miercurea Ciuc"
+
+
+def test_normalize_team_name_hamkam_unified():
+    """Regresie directa: gasit prin verificarea sistemica declansata de
+    Csíkszereda - "HamKam" (fara cratima) vs. "Ham-Kam"."""
+    assert normalize_team_name("HamKam") == "Ham-Kam"
+    assert normalize_team_name("Ham-Kam") == "Ham-Kam"
