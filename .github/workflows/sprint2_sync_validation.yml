@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      SYNC_MODULE: sync_weather_forecast
+      SYNC_MODULE: sync_national_team_elo
 
     steps:
       - name: Checkout repository
