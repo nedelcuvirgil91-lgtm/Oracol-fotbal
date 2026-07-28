@@ -6,9 +6,15 @@ name: Football Oracle — Sprint 0 Feedback Loop Validation (temporar)
 # 7 zile) n-a rulat niciodata cu autentificare reala pana acum. Rezultatele
 # World Cup 2026 (ultimul kickoff cunoscut: 2026-07-19) au cazut in afara
 # ferestrei implicite de 7 zile fata de "azi". Acest catch-up unic
-# largeste fereastra la 21 de zile — o singura rulare manuala, NU o
-# schimbare a comportamentului automat din daily.yml (care ramane la 7
-# zile, neatins). Foloseste STRICT functii deja existente
+# largeste fereastra — o singura rulare manuala, NU o schimbare a
+# comportamentului automat din daily.yml (care ramane la 7 zile, neatins).
+#
+# [GASIT LIVE, prima incercare cu days_back=21] football-data.org
+# /v4/matches intoarce HTTP 400 peste o anumita fereastra (confirmat live —
+# planul gratuit limiteaza probabil intervalul dateFrom/dateTo la 10 zile).
+# Redus la days_back=10, inca suficient pentru finala World Cup 2026.
+#
+# Foloseste STRICT functii deja existente
 # (fetch_yesterday_results(days_back=N), update_results_in_supabase(),
 # prediction_evaluation.build_evaluation_report()) — nicio logica noua.
 #
@@ -55,8 +61,8 @@ jobs:
           sys.path.insert(0, '.')
           from sync.sync_results import fetch_yesterday_results, fetch_results_from_odds_api_recent, update_results_in_supabase
 
-          fd_results = fetch_yesterday_results(days_back=21)
-          print(f'football-data.org: {len(fd_results)} rezultate gasite (fereastra 21 zile)')
+          fd_results = fetch_yesterday_results(days_back=10)
+          print(f'football-data.org: {len(fd_results)} rezultate gasite (fereastra 10 zile)')
           odds_results = fetch_results_from_odds_api_recent(days_back=21)
           print(f'odds_api_recent_results: {len(odds_results)} rezultate gasite')
 
