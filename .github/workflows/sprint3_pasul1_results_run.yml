@@ -1,0 +1,45 @@
+name: Football Oracle — Sprint 3 Pasul 1 Results Catch-up (temporar)
+
+# Rulare reala sync_yesterday_results() cu a treia sursa noua
+# (fetch_results_from_soccerfootballinfo) - inchide retroactiv rezultate
+# pentru cele 37 de predictii existente (World Cup 2026, Romania SuperLiga
+# etc.) unde football-data.org si odds_api_recent_results nu au acoperire.
+# Se sterge dupa confirmare (dovada ramane in istoricul rularii + SQL).
+
+on:
+  push:
+    branches:
+      - claude/sprint0-stabilizare-feedback-loop
+    paths:
+      - .github/workflows/sprint3_pasul1_results_run.yml
+
+jobs:
+  run-results-catchup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sync_yesterday_results (3 sources, incl. SFI retroactive)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          RAPIDAPI_KEY_FREELIVEFOOTBALL: ${{ secrets.RAPIDAPI_KEY_FREELIVEFOOTBALL }}
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+        run: |
+          python -c "
+          import logging
+          logging.basicConfig(level=logging.INFO)
+          from sync.sync_results import sync_yesterday_results
+          print(sync_yesterday_results())
+          "
