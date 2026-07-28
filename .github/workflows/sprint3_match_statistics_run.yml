@@ -1,0 +1,40 @@
+name: Football Oracle — Sprint 3 Match Statistics Catch-up Run (temporar)
+
+# Rulare reala (nu POC) a sync/sync_match_statistics.py cu --days-back extins,
+# ca sa acopere ultimul sezon complet (majoritatea ligilor mari sunt azi in
+# off-season, ultimul meci cu rezultat e 2026-06-01 — confirmat live,
+# Supabase). require_referee=True + League Mapping v2 extinsa (Sprint 3,
+# Prioritatea 1) intra in efect abia acum, la aceasta rulare. Se sterge dupa
+# ce rezultatul e confirmat (dovada ramane in istoricul rularii + raportul
+# SQL de coverage).
+
+on:
+  push:
+    branches:
+      - claude/sprint0-stabilizare-feedback-loop
+    paths:
+      - .github/workflows/sprint3_match_statistics_run.yml
+
+jobs:
+  run-match-statistics:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sync_match_statistics (days-back 365)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          RAPIDAPI_KEY_FREELIVEFOOTBALL: ${{ secrets.RAPIDAPI_KEY_FREELIVEFOOTBALL }}
+        run: python -m sync.sync_match_statistics --days-back 365
