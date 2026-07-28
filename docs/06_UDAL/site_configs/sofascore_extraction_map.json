@@ -1,0 +1,79 @@
+{
+  "extraction_type": "json_path",
+  "match": {
+    "match_id": "event.id",
+    "league": "event.tournament.name",
+    "season": "event.tournament.season",
+    "round": "event.tournament.round",
+    "kickoff": "event.startTimestamp",
+    "venue": "event.venue",
+    "referee": "event.referee",
+    "status": "event.status"
+  },
+  "teams": {
+    "home_team": "teams.home",
+    "away_team": "teams.away"
+  },
+  "score": {
+    "ht_home": "score.home.ht",
+    "ht_away": "score.away.ht",
+    "ft_home": "score.home.ft",
+    "ft_away": "score.away.ft"
+  },
+  "statistics": {
+    "home_possession": "statistics.home.possession",
+    "away_possession": "statistics.away.possession",
+    "home_shots": "statistics.home.shots",
+    "away_shots": "statistics.away.shots",
+    "home_shots_on_target": "statistics.home.shots_on_target",
+    "away_shots_on_target": "statistics.away.shots_on_target",
+    "home_corners": "statistics.home.corners",
+    "away_corners": "statistics.away.corners",
+    "home_fouls": "statistics.home.fouls",
+    "away_fouls": "statistics.away.fouls",
+    "home_yellow_cards": "statistics.home.yellow_cards",
+    "away_yellow_cards": "statistics.away.yellow_cards",
+    "home_red_cards": "statistics.home.red_cards",
+    "away_red_cards": "statistics.away.red_cards",
+    "home_offsides": "statistics.home.offsides",
+    "away_offsides": "statistics.away.offsides",
+    "home_saves": "statistics.home.saves",
+    "away_saves": "statistics.away.saves",
+    "home_passes": "statistics.home.passes",
+    "away_passes": "statistics.away.passes",
+    "home_pass_accuracy": "statistics.home.pass_accuracy",
+    "away_pass_accuracy": "statistics.away.pass_accuracy"
+  },
+  "advanced_statistics": {
+    "home_xg": "advanced_statistics.home.xg",
+    "away_xg": "advanced_statistics.away.xg",
+    "home_xga": "advanced_statistics.home.xga",
+    "away_xga": "advanced_statistics.away.xga",
+    "home_big_chances": "advanced_statistics.home.big_chances",
+    "away_big_chances": "advanced_statistics.away.big_chances",
+    "home_big_chances_missed": "advanced_statistics.home.big_chances_missed",
+    "away_big_chances_missed": "advanced_statistics.away.big_chances_missed",
+    "home_ppda": "advanced_statistics.home.ppda",
+    "away_ppda": "advanced_statistics.away.ppda",
+    "home_dangerous_attacks": "advanced_statistics.home.dangerous_attacks",
+    "away_dangerous_attacks": "advanced_statistics.away.dangerous_attacks"
+  },
+  "lineups": {
+    "home_formation": "lineups.home.formation",
+    "away_formation": "lineups.away.formation",
+    "home_captain": "lineups.home.captain",
+    "away_captain": "lineups.away.captain",
+    "home_starting_xi": {"list": "lineups.home.starting_xi", "item": {"name": "name", "number": "number", "position": "position"}},
+    "home_bench": {"list": "lineups.home.bench", "item": {"name": "name", "number": "number", "position": "position"}},
+    "away_starting_xi": {"list": "lineups.away.starting_xi", "item": {"name": "name", "number": "number", "position": "position"}},
+    "away_bench": {"list": "lineups.away.bench", "item": {"name": "name", "number": "number", "position": "position"}}
+  },
+  "player_statistics": {
+    "list": "player_statistics",
+    "item": {
+      "name": "name", "team": "team", "minutes": "minutes", "goals": "goals",
+      "assists": "assists", "shots": "shots", "key_passes": "key_passes",
+      "tackles": "tackles", "interceptions": "interceptions", "rating": "rating"
+    }
+  }
+}

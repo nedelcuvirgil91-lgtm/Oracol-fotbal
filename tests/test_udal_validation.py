@@ -1,7 +1,7 @@
 """Teste pentru udal_validation.py (UDAL Faza 1, ADR-042) — fără rețea."""
 from __future__ import annotations
 
-from udal_validation import validate_records, check_conflicts_with_match_history
+from udal_validation import validate_records, validate_identity_only, check_conflicts_with_match_history
 
 
 def _valid_record(**overrides):
@@ -79,6 +79,27 @@ def test_validation_rate_computed_correctly():
 def test_validation_rate_zero_for_empty_input():
     result = validate_records([], source_tier="http_scraper", source_id="pilot")
     assert result.validation_rate == 0.0
+
+
+def test_validate_identity_only_accepts_record_with_both_teams():
+    record = {"teams": {"home_team": "Echipa A", "away_team": "Echipa B"}, "score": {"ft_home": "1"}}
+    result = validate_identity_only([record], source_tier="http_scraper", source_id="site-x")
+    assert len(result.valid) == 1
+    assert result.valid[0]["_provenance"]["source_id"] == "site-x"
+    assert result.valid[0]["score"] == {"ft_home": "1"}  # restul recordului ramane neatins
+
+
+def test_validate_identity_only_rejects_missing_home_team():
+    record = {"teams": {"home_team": None, "away_team": "Echipa B"}}
+    result = validate_identity_only([record], source_tier="http_scraper", source_id="site-x")
+    assert len(result.valid) == 0
+    assert result.rejected[0].reason == "missing_team_identity"
+
+
+def test_validate_identity_only_rejects_missing_teams_group_entirely():
+    result = validate_identity_only([{}], source_tier="http_scraper", source_id="site-x")
+    assert len(result.valid) == 0
+    assert result.rejected[0].reason == "missing_team_identity"
 
 
 def test_check_conflicts_graceful_without_supabase():

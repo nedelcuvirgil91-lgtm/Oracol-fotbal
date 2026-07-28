@@ -122,6 +122,36 @@ def validate_records(
     return result
 
 
+def validate_identity_only(
+    records: list[dict], source_tier: str, source_id: str,
+    confidence: str = "SCRAPED_UNVERIFIED",
+) -> ValidationResult:
+    """[UDAL Faza 1.5] Validare MINIMALĂ pentru recorduri IERARHICE, bogate
+    (`udal_extraction.extract()` — grupuri `match`/`teams`/`score`/
+    `statistics`/`lineups`/etc., nu forma plată din Faza 1). Verifică DOAR
+    identitatea (`teams.home_team`/`teams.away_team` prezente) — NU
+    reimplementă regulile de schemă/plajă din `validate_records()` (acelea
+    rămân specifice formei plate de statistici de meci, Faza 1). Scopul
+    Fazei 1.5 e completitudinea pe categorii (Compatibility Matrix), nu
+    respingerea strictă de rânduri — calculul de completitudine se face
+    separat, în raport, nu aici."""
+    result = ValidationResult()
+    for record in records:
+        teams = record.get("teams") or {}
+        if not teams.get("home_team") or not teams.get("away_team"):
+            result.rejected.append(RejectedRecord(record, "missing_team_identity"))
+            continue
+        provenanced = dict(record)
+        provenanced["_provenance"] = {
+            "source_tier": source_tier,
+            "source_id": source_id,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "confidence": confidence,
+        }
+        result.valid.append(provenanced)
+    return result
+
+
 def check_conflicts_with_match_history(records: list[dict]) -> list[dict]:
     """[Faza 1, read-only, NU parte din validate_records()] Verifică dacă
     cheia naturală (home_team, away_team, kickoff_date) a unui rând VALID

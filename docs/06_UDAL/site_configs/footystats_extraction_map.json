@@ -1,0 +1,33 @@
+{
+  "extraction_type": "css",
+  "match": {
+    "league": ".match-header .competition",
+    "season": ".match-header .season",
+    "date": ".match-header .match-date"
+  },
+  "teams": {
+    "home_team": ".team-block .home-name",
+    "away_team": ".team-block .away-name"
+  },
+  "score": {
+    "ft_home": ".score-block .ft-home-score",
+    "ft_away": ".score-block .ft-away-score"
+  },
+  "statistics": {
+    "home_corners": ".stat-corners-home",
+    "away_corners": ".stat-corners-away",
+    "home_yellow_cards": ".stat-cards-home",
+    "away_yellow_cards": ".stat-cards-away",
+    "home_possession": ".stat-possession-home",
+    "away_possession": ".stat-possession-away"
+  },
+  "odds": {
+    "home_odds": ".odds-home",
+    "draw_odds": ".odds-draw",
+    "away_odds": ".odds-away",
+    "over_2_5": ".odds-over25",
+    "under_2_5": ".odds-under25",
+    "btts_yes": ".odds-btts-yes",
+    "btts_no": ".odds-btts-no"
+  }
+}

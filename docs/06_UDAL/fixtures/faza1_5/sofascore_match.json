@@ -1,0 +1,50 @@
+{
+  "_comment": "UDAL Faza 1.5 - fixture REPREZENTATIV, NU capturat live. Forma structurala reflecta descrieri publice, din comunitate (WebSearch: proiecte GitHub/Apify confirma un API JSON neoficial la sofascore.com/api/v1/..., incarcat de front-end-ul JS al site-ului) - NU un raspuns real copiat. Echipele/jucatorii sunt placeholder.",
+  "event": {
+    "id": "pilot-evt-001",
+    "tournament": {"name": "Romania Liga 1", "season": "2025/2026", "round": 24},
+    "startTimestamp": "2026-03-01T18:00:00Z",
+    "venue": "Stadion Pilot Nord",
+    "referee": "R. Arbitrescu",
+    "status": "FT"
+  },
+  "teams": {"home": "FC Pilot Nord", "away": "FC Pilot Sud"},
+  "score": {
+    "home": {"ht": 1, "ft": 2},
+    "away": {"ht": 0, "ft": 1}
+  },
+  "statistics": {
+    "home": {"possession": 58, "shots": 14, "shots_on_target": 6, "corners": 6, "fouls": 11, "yellow_cards": 2, "red_cards": 0, "offsides": 2, "saves": 3, "passes": 402, "pass_accuracy": 86},
+    "away": {"possession": 42, "shots": 9, "shots_on_target": 3, "corners": 4, "fouls": 14, "yellow_cards": 3, "red_cards": 0, "offsides": 1, "saves": 4, "passes": 288, "pass_accuracy": 79}
+  },
+  "advanced_statistics": {
+    "home": {"xg": 1.8, "xga": 0.7, "big_chances": 3, "big_chances_missed": 1, "ppda": 8.2, "dangerous_attacks": 45},
+    "away": {"xg": 0.9, "xga": 1.8, "big_chances": 1, "big_chances_missed": 0, "ppda": 11.4, "dangerous_attacks": 31}
+  },
+  "lineups": {
+    "home": {
+      "formation": "4-3-3", "captain": "A. Pilotescu",
+      "starting_xi": [
+        {"name": "A. Pilotescu", "number": 10, "position": "MF"},
+        {"name": "D. Nordeanu", "number": 1, "position": "GK"}
+      ],
+      "bench": [
+        {"name": "E. Rezerva", "number": 17, "position": "FW"}
+      ]
+    },
+    "away": {
+      "formation": "4-4-2", "captain": "B. Testeanu",
+      "starting_xi": [
+        {"name": "B. Testeanu", "number": 9, "position": "FW"},
+        {"name": "F. Sudeanu", "number": 1, "position": "GK"}
+      ],
+      "bench": [
+        {"name": "G. Banca", "number": 22, "position": "DF"}
+      ]
+    }
+  },
+  "player_statistics": [
+    {"name": "A. Pilotescu", "team": "home", "minutes": 90, "goals": 1, "assists": 1, "shots": 3, "key_passes": 4, "tackles": 2, "interceptions": 1, "rating": 8.2},
+    {"name": "B. Testeanu", "team": "away", "minutes": 90, "goals": 1, "assists": 0, "shots": 4, "key_passes": 1, "tackles": 1, "interceptions": 0, "rating": 7.1}
+  ]
+}

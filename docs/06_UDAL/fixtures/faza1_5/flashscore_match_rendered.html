@@ -1,0 +1,43 @@
+<!--
+UDAL Faza 1.5 — fixture REPREZENTATIV, NU capturat live. IMPORTANT: acest
+fisier reprezinta DOM-ul POST-RANDARE (ce ar produce un browser dupa
+executia JS), NU un raspuns HTTP brut real - cercetarea (WebSearch,
+proiectul community "gustavofariaa/FlashscoreScraping") confirma ca
+Flashscore e o aplicatie JS (SPA) fara API oficial, scrapuita azi exclusiv
+prin automatizare de browser (Puppeteer) - un HTTP GET simplu NU ar
+returna niciodata acest continut. Echipele sunt placeholder.
+-->
+<html><body>
+<div class="duelParticipant">
+  <span class="tournamentHeader__country">Romania: Liga 1</span>
+  <span class="tournamentHeader__season">2025/2026</span>
+  <span class="duelParticipant__home">FC Pilot Mare</span>
+  <span class="duelParticipant__away">FC Pilot Deal</span>
+  <span class="detailScore__home">3</span>
+  <span class="detailScore__away">2</span>
+  <span class="duelParticipant__startTime">2026-03-02 20:00</span>
+</div>
+<div class="section statisticsTab">
+  <div class="stat-row" data-stat="possession"><span class="home">55</span><span class="away">45</span></div>
+  <div class="stat-row" data-stat="shots"><span class="home">16</span><span class="away">10</span></div>
+  <div class="stat-row" data-stat="corners"><span class="home">7</span><span class="away">3</span></div>
+  <div class="stat-row" data-stat="yellowCards"><span class="home">1</span><span class="away">4</span></div>
+</div>
+<div class="lineups">
+  <span class="lineups__formation--home">4-2-3-1</span>
+  <span class="lineups__formation--away">5-3-2</span>
+  <div class="lineups__player lineups__player--home">
+    <span class="lineups__playerName">H. Marescu</span>
+    <span class="lineups__playerNumber">7</span>
+  </div>
+  <div class="lineups__player lineups__player--away">
+    <span class="lineups__playerName">I. Dealescu</span>
+    <span class="lineups__playerNumber">11</span>
+  </div>
+</div>
+<div class="odds">
+  <span class="oddsCell home">1.90</span>
+  <span class="oddsCell draw">3.40</span>
+  <span class="oddsCell away">4.10</span>
+</div>
+</body></html>
