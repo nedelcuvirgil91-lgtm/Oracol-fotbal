@@ -151,6 +151,17 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "Farul Constanța": ["FC Farul Constanța","Farul","Farul Constanta"],
     "Petrolul Ploiești": ["FC Petrolul Ploiești","Petrolul"],
     "Din. Bucuresti": ["Dinamo Bucuresti", "Dinamo București", "FC Dinamo București"],
+    # [ADAUGAT — audit Sprint 3, 2026-07-28] "Csikszereda M. Ciuc" (formă
+    # scurtă, folosită de import-ul istoric) și "Csíkszereda Miercurea Ciuc"
+    # (formă completă, cu diacritice, folosită azi de TSDB — deja canonică
+    # în TSDB_TEAM_IDS) erau tratate ca DOI identificatori diferiți —
+    # confirmat live, 15+ meciuri reale (ian-mai 2026) invizibile din
+    # _build_profile() pentru echipa nouă. Unificate sub forma completă.
+    "Csíkszereda Miercurea Ciuc": ["Csikszereda M. Ciuc"],
+    # [ADAUGAT — audit Sprint 3, 2026-07-28] "HamKam" (fără cratimă) vs.
+    # "Ham-Kam" — găsit prin verificare sistemică pentru dedublări similare
+    # Csíkszereda; "Ham-Kam" e forma majoritară (50 vs. 34 rânduri).
+    "Ham-Kam": ["HamKam"],
     "UTA Arad": ["FC UTA Arad","UTA"],
     "Inter Miami": ["Inter Miami CF","Club Internacional de Fútbol Miami"],
     "LA Galaxy": ["Los Angeles Galaxy"],
