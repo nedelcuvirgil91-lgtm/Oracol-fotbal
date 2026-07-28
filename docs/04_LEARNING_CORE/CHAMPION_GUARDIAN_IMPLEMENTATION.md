@@ -367,7 +367,9 @@ Migrarea 015 a fost aplicată prin **Supabase SQL Editor**, nu prin `apply_migra
 
 ---
 
-## 17. Stare de implementare — R3 (Orchestrare) — cod complet, activare controlată, nemerge-uit pe `main`
+## 17. Stare de implementare — R3 (Orchestrare) — cod complet, MERGE-UIT pe `main` (2026-07-28), activare de flag controlată, în desfășurare
+
+**[ACTUALIZAT 2026-07-28]** Merge-ul pe `main` menționat mai jos ca „lipsă" s-a produs între timp — verificat direct (`git show origin/main:learning_core/champion_guardian.py` și restul artefactelor R1-R3, toate prezente pe `main`). Ce rămâne necorectat aici: doar activarea flag-urilor (`champion_guardian_enabled`/`champion_guardian_proposals_enabled`), încă `False` în `model_config`, verificat live — vezi `docs/00_GOVERNANCE/ARCHITECTURE_STATE.md` §3 pentru starea curentă, sursa de adevăr actualizată.
 
 Consemnare a realității livrate (cod + teste), R3.1-R3.7. Normativ față de capitolele 1-15 la orice divergență inline. Detaliile de execuție (task-uri, ordine reală, divergențe față de plan) sunt în `R3_IMPLEMENTATION_CHECKLIST.md`, reconciliat. Planul de deployment (ce/cum/când se activează) e în `docs/DEPLOYMENT/ADR037_DEPLOYMENT_PLAN.md`.
 

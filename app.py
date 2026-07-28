@@ -526,7 +526,7 @@ if nav == "matches":
     # Fetch all
     if "all_matches" not in st.session_state or st.session_state.get("force_reload"):
         with st.spinner("📡 Se încarcă meciurile..."):
-            all_matches = engine.api.get_matches_for_week(
+            all_matches = engine.get_week_matches(
                 days_ahead=7,
                 competitions=[c["key"] for c in COMPETITIONS_META]
             )
@@ -622,7 +622,7 @@ elif nav == "value_bets":
     # sesiune — un singur fetch live per sesiune, nu unul separat per ecran.
     if "all_matches" not in st.session_state:
         with st.spinner("📡 Se încarcă meciurile..."):
-            all_matches = engine.api.get_matches_for_week(
+            all_matches = engine.get_week_matches(
                 days_ahead=7, competitions=[c["key"] for c in COMPETITIONS_META]
             )
         st.session_state["all_matches"] = all_matches
