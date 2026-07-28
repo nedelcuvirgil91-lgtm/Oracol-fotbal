@@ -7,6 +7,11 @@ name: Football Oracle — Sprint 3 Match Statistics Catch-up Run (temporar)
 # Prioritatea 1) intra in efect abia acum, la aceasta rulare. Se sterge dupa
 # ce rezultatul e confirmat (dovada ramane in istoricul rularii + raportul
 # SQL de coverage).
+#
+# Rulare 2 - dupa fix-ul bug-ului real de parsare (team["stats"] imbricat,
+# nu team direct) - vezi commit 3427afa. Payload-urile sunt deja cache-uite
+# (TTL 720h), deci aceasta rulare NU repeta apelurile HTTP catre SFI, doar
+# re-parseaza si scrie corect din cache.
 
 on:
   push:
