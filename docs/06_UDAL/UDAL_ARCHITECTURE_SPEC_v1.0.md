@@ -12,6 +12,18 @@ fost creat odată cu acest document.
 
 ---
 
+## 0.a Vision [ADAUGAT 2026-07-28, după Faza 1.5]
+
+> UDAL nu mai este doar un scraper. UDAL devine: **Universal Football
+> Knowledge Acquisition Layer.** Scopul este să poată integra orice
+> sursă relevantă pentru Football Oracle.
+
+Decizie explicită a proprietarului produsului — acronimul (UDAL) și tot
+codul existent rămân neschimbate; extinderea e de scop pe termen lung.
+Clasificarea de surse (Primary/Secondary/Premium) și „Future Providers"
+(Transfermarkt, FBref) trăiesc în `docs/06_UDAL/UDAL_SOURCE_CLASSIFICATION.md`,
+nu duplicate aici.
+
 ## 0. Poziționare — ce e UDAL, ce nu e
 
 UDAL **nu e un sistem nou, paralel cu Sync Layer-ul** — e Sync Layer-ul

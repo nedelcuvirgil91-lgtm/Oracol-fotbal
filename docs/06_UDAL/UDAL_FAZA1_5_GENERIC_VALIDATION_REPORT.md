@@ -118,6 +118,13 @@ raport de meci). Rămâne o investigație separată, viitoare.
 
 ## 5. Recommendation
 
+**[NOTĂ 2026-07-28]** Clasificarea de mai jos e păstrată neschimbată ca
+înregistrare istorică a analizei tehnice din Faza 1.5. Clasificarea
+FINALĂ, aprobată de proprietarul produsului (Primary/Secondary/**Premium**
+— FlashScore NU mai e „Emergency"), trăiește exclusiv în
+`docs/06_UDAL/UDAL_SOURCE_CLASSIFICATION.md`.
+
+
 **Primary Scraper** (cele mai stabile, gata de `POC_SCRAPER_SOURCE_01`
 fără cod nou, doar selector map):
 - **worldfootball.net** — cel mai simplu, cel mai stabil, acoperă exact

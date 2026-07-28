@@ -1,5 +1,15 @@
 # ADR-042 — Universal Data Acquisition Layer (UDAL)
 
+**[ACTUALIZAT 2026-07-28, după Faza 1.5]** Proprietarul produsului a
+extins conceptual viziunea UDAL: „UDAL nu mai este doar un scraper. UDAL
+devine: **Universal Football Knowledge Acquisition Layer**." Acronimul
+(UDAL) și codul rămân neschimbate — actualizarea e de scop pe termen
+lung (integrare a zeci de surse viitoare), nu o redenumire de contract.
+Detalii, clasificare de surse (Primary/Secondary/Premium) și „Future
+Providers" (Transfermarkt, FBref — proiectate, neimplementate) în
+`docs/06_UDAL/UDAL_SOURCE_CLASSIFICATION.md`. Restul acestui document
+rămâne normativ, neschimbat.
+
 **Status**: PROPUS — document de arhitectură, redactat la cerere explicită
 ("Rolul tău: Principal Software Architect... Misiunea ta este EXCLUSIV
 proiectarea noului subsistem"). **Nu implementat, nu aprobat pentru
