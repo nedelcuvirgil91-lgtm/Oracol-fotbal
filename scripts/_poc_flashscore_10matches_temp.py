@@ -38,9 +38,18 @@ POLITENESS_DELAY_S = 2.0
 
 PROTECTION_MARKERS = (
     "checking your browser", "cf-browser-verification", "attention required",
-    "captcha-delivery", "hcaptcha.com", "recaptcha/api", "access denied",
-    "ray id", "sorry, you have been blocked", "just a moment...",
+    "captcha-delivery", "access denied", "ray id",
+    "sorry, you have been blocked", "just a moment...",
+    "verify you are human", "unusual traffic from your computer",
+    "please verify you are a human", "detected unusual activity",
 )
+# NOTA: "recaptcha/api"/"hcaptcha.com" scoase deliberat din lista - verificat
+# manual (grep pe evidenta bruta) ca "google.com/recaptcha/api2/aframe" e un
+# iframe invizibil de la Google Ads (adtrafficquality.google/sodar), incarcat
+# async pe ORICE pagina cu reclame Google (inclusiv hub-urile /results/,
+# fara nicio legatura cu meciul/tab-ul vizitat) - nu e un semnal de blocare
+# reala, doar prezenta lui ar fi produs un fals-pozitiv identic cu cel din
+# testul cu 1 pagina (poc_flashscore_playwright_temp.py).
 
 # Etichete text vizibile pe pagina de meci, folosite pentru navigare intre
 # taburi (nu presupunem selectori CSS ficsi - descoperim structura live).
