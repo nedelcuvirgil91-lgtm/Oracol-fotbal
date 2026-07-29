@@ -67,6 +67,8 @@ def test_persist_match_foundation_data_full_orchestration(monkeypatch, full_tabs
     monkeypatch.setattr(
         "providers.flashscore.persistence.upsert_match_context", _mk("match_context", True),
     )
+    events_mock = MagicMock(return_value=True)
+    monkeypatch.setattr("providers.flashscore.persistence.upsert_match_events", events_mock)
     standings_mock = MagicMock(return_value=True)
     monkeypatch.setattr("providers.flashscore.persistence.upsert_standings_snapshot", standings_mock)
 
@@ -76,9 +78,14 @@ def test_persist_match_foundation_data_full_orchestration(monkeypatch, full_tabs
     assert report["ok"] is True
     assert report["steps"] == {
         "match_history": True, "match_statistics_extended": True, "player_roster": True,
-        "player_match_stats_extended": True, "match_context": True, "standings_snapshot": True,
+        "player_match_stats_extended": True, "match_context": True, "match_events": True,
+        "standings_snapshot": True,
     }
     assert "match_history" in calls
+
+    # 21 evenimente reale (timeline complet Summary) propagate cu match_id corect.
+    assert events_mock.call_args[0][0] == 123
+    assert len(events_mock.call_args[0][1]) == 21
 
     # match_id (123) propagat corect la statisticile extinse.
     extended_call_args = extended_mock.call_args
@@ -107,6 +114,8 @@ def test_persist_match_foundation_data_propagates_season_when_provided(monkeypat
     monkeypatch.setattr("providers.flashscore.persistence.upsert_player_match_stats_extended", player_ext_mock)
     context_mock = MagicMock(return_value=True)
     monkeypatch.setattr("providers.flashscore.persistence.upsert_match_context", context_mock)
+    events_mock = MagicMock(return_value=True)
+    monkeypatch.setattr("providers.flashscore.persistence.upsert_match_events", events_mock)
     standings_mock = MagicMock(return_value=True)
     monkeypatch.setattr("providers.flashscore.persistence.upsert_standings_snapshot", standings_mock)
 
@@ -117,6 +126,7 @@ def test_persist_match_foundation_data_propagates_season_when_provided(monkeypat
     assert roster_mock.call_args[1]["season"] == "2026-2027"
     assert player_ext_mock.call_args[1]["season"] == "2026-2027"
     assert all(r["season"] == "2026-2027" for r in context_mock.call_args[0][0])
+    assert events_mock.call_args[1]["season"] == "2026-2027"
     assert all(r["season"] == "2026-2027" for r in standings_mock.call_args[0][0])
 
 
@@ -126,6 +136,7 @@ def test_persist_match_foundation_data_no_competition_skips_standings(monkeypatc
     monkeypatch.setattr("providers.flashscore.persistence.upsert_player_roster", lambda *a, **kw: True)
     monkeypatch.setattr("providers.flashscore.persistence.upsert_player_match_stats_extended", lambda *a, **kw: True)
     monkeypatch.setattr("providers.flashscore.persistence.upsert_match_context", lambda *a, **kw: True)
+    monkeypatch.setattr("providers.flashscore.persistence.upsert_match_events", lambda *a, **kw: True)
     standings_mock = MagicMock(return_value=True)
     monkeypatch.setattr("providers.flashscore.persistence.upsert_standings_snapshot", standings_mock)
 
@@ -149,6 +160,7 @@ def test_persist_match_foundation_data_reports_partial_failure(monkeypatch, full
     monkeypatch.setattr("providers.flashscore.persistence.upsert_player_roster", lambda *a, **kw: True)
     monkeypatch.setattr("providers.flashscore.persistence.upsert_player_match_stats_extended", lambda *a, **kw: True)
     monkeypatch.setattr("providers.flashscore.persistence.upsert_match_context", lambda *a, **kw: True)
+    monkeypatch.setattr("providers.flashscore.persistence.upsert_match_events", lambda *a, **kw: True)
     monkeypatch.setattr("providers.flashscore.persistence.upsert_standings_snapshot", lambda *a, **kw: True)
 
     report = persist_match_foundation_data(full_tabs_pages, competition=None)
@@ -174,10 +186,11 @@ def test_raw_snapshot_by_tab_has_no_match_id_yet(full_tabs_pages):
     """RAW e independent de rezolvarea canonica - context_match_id ramane
     None in snapshot, nu aproximat (North Star #8)."""
     snap = _raw_snapshot_by_tab(full_tabs_pages, competition="SuperLiga")
-    assert set(snap) == {"stats", "player_stats", "h2h", "standings", "odds"}
+    assert set(snap) == {"stats", "events", "player_stats", "h2h", "standings", "odds"}
     assert snap["h2h"][0]["context_match_id"] is None
     assert snap["stats"]["home_team"] == "Dinamo Bucuresti"
     assert len(snap["odds"]) == 3
+    assert len(snap["events"]) == 21
 
 
 def test_raw_snapshot_by_tab_skips_standings_without_competition(full_tabs_pages):
@@ -205,9 +218,9 @@ def test_data_trust_layer_valid_record_writes_raw_and_canonical(monkeypatch, ful
     assert report["validation_errors"] is None
     assert report["match_id"] == 123
     assert report["ok"] is True
-    # RAW scris pentru toate cele 5 tab-uri disponibile (stats/player_stats/h2h/standings/odds).
+    # RAW scris pentru toate cele 6 categorii disponibile (stats/events/player_stats/h2h/standings/odds).
     tab_names = {c[1] for c in raw_calls}
-    assert tab_names == {"stats", "player_stats", "h2h", "standings", "odds"}
+    assert tab_names == {"stats", "events", "player_stats", "h2h", "standings", "odds"}
     for _, _, kw in raw_calls:
         assert kw["validation_status"] == "valid"
         assert kw["canonical_written"] is True

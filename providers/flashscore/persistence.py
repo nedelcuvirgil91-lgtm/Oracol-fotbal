@@ -33,6 +33,7 @@ from database.queries import (
     upsert_data_completeness,
     upsert_match_and_get_id,
     upsert_match_context,
+    upsert_match_events,
     upsert_match_statistics_extended,
     upsert_player_match_stats_extended,
     upsert_player_roster,
@@ -43,6 +44,7 @@ from udal_validation import validate_flat_identity
 
 from .normalizer import (
     normalize_match_context,
+    normalize_match_events,
     normalize_match_statistics,
     normalize_match_statistics_extended,
     normalize_odds,
@@ -131,6 +133,9 @@ def persist_match_foundation_data(
         row["season"] = season
     steps["match_context"] = upsert_match_context(context_rows)
 
+    event_rows = normalize_match_events(pages, match_id)
+    steps["match_events"] = upsert_match_events(match_id, event_rows, season=season)
+
     if competition:
         standings_rows = normalize_standings(pages, competition)
         for row in standings_rows:
@@ -152,6 +157,8 @@ def _raw_snapshot_by_tab(pages: dict[str, str], competition: str | None) -> dict
     aici (North Star #8)."""
     base = normalize_match_statistics(pages)
     snapshot: dict[str, Any] = {"stats": base}
+    if pages.get("summary"):
+        snapshot["events"] = normalize_match_events(pages, None)
     if pages.get("player_stats"):
         snapshot["player_stats"] = normalize_player_match_stats_table(pages)
     if pages.get("h2h"):

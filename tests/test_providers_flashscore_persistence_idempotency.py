@@ -103,6 +103,8 @@ def test_persist_match_foundation_data_idempotent_across_reruns(monkeypatch, ful
     assert fake_db.table("flashscore_match_context").row_count == 15
     # 16 echipe in clasament.
     assert fake_db.table("flashscore_standings_snapshot").row_count == 16
+    # 21 evenimente reale (timeline complet Summary - goluri/cartonase/schimbari/VAR).
+    assert fake_db.table("match_events").row_count == 21
 
 
 def test_persist_match_foundation_data_ids_stable_across_reruns(monkeypatch, full_tabs_pages):

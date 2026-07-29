@@ -1921,6 +1921,38 @@ def upsert_standings_snapshot(rows: list[dict]) -> bool:
         return False
 
 
+def upsert_match_events(match_id: int, events: list[dict], season: str | None = None) -> bool:
+    """`match_events` (migratia 032/033/039) - timeline complet (goluri/
+    cartonase/schimbari/VAR), nu doar substitutii. `on_conflict` pe cheia
+    naturala extinsa (`match_id,team,minute,event_type,player_name,
+    detail`) - `detail` intra in cheie tocmai ca sa disambiguizeze
+    evenimente VAR fara jucator (player_name='' sentinel, migratia 039).
+    `season` (migratia 039) - DOAR daca oferit explicit."""
+    if not events:
+        return True
+    client = get_client()
+    if client is None:
+        return False
+    payload = [
+        {
+            "match_id": match_id, "team": e["team"], "minute": e["minute"],
+            "event_type": e["event_type"], "player_name": e["player_name"],
+            "related_player_name": e.get("related_player_name"),
+            "detail": e.get("detail", ""), "source": e.get("source", "flashscore"),
+            "season": season,
+        }
+        for e in events
+    ]
+    try:
+        client.table("match_events").upsert(
+            payload, on_conflict="match_id,team,minute,event_type,player_name,detail",
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.error("[Queries] upsert_match_events failed: %s", exc)
+        return False
+
+
 def get_predictions_with_results(days_back: int | None = None) -> list[dict]:
     """
     [ADAUGAT Sprint 0 — Stabilizare, Etapa 3] Citire READ-ONLY — rânduri din
