@@ -511,6 +511,46 @@ def _render_match_card(match: dict, engine) -> None:
     if pred.h2h and pred.h2h.meetings > 0:
         st.markdown(f'<div style="padding:.3rem 1.5rem;"><span class="sub-label">Head to Head</span><div style="font-size:.78rem;color:var(--t2);background:var(--card);border:1px solid var(--border);border-radius:6px;padding:.45rem .75rem;">{pred.h2h.summary}</div></div>', unsafe_allow_html=True)
 
+    # ── Team DNA Flashscore (Faza 2, ADR-044 §5) — context suplimentar,
+    # nu atinge Team DNA/OFF/DEF de mai sus. "—" doar unde Flashscore
+    # chiar n-a colectat încă date pentru acea echipă, niciodată aproximat.
+    hdna, adna = pred.home_flashscore_dna, pred.away_flashscore_dna
+    if hdna or adna:
+        with st.expander("🛰 Statistici avansate (Flashscore)"):
+            def _v(x, fmt="{:.1f}"):
+                return fmt.format(x) if x is not None else "—"
+
+            hadv = (hdna or {}).get("advanced") or {}
+            aadv = (adna or {}).get("advanced") or {}
+            hstd = (hdna or {}).get("standings") or {}
+            astd = (adna or {}).get("standings") or {}
+            hrat = (hdna or {}).get("player_ratings") or {}
+            arat = (adna or {}).get("player_ratings") or {}
+            core_rows = [
+                ("xG real/meci", _v(hadv.get("avg_xg")), _v(aadv.get("avg_xg"))),
+                ("Posesie reală %", _v(hadv.get("avg_possession")), _v(aadv.get("avg_possession"))),
+                ("Offside/meci", _v(hadv.get("avg_offsides")), _v(aadv.get("avg_offsides"))),
+                ("Apărări portar/meci", _v(hadv.get("avg_goalkeeper_saves")), _v(aadv.get("avg_goalkeeper_saves"))),
+                ("Cartonașe roșii/meci", _v(hadv.get("avg_red_cards")), _v(aadv.get("avg_red_cards"))),
+                ("Rating mediu jucători", _v(hrat.get("avg_player_rating")), _v(arat.get("avg_player_rating"))),
+                ("Clasament", _v(hstd.get("rank"), "{:.0f}") if hstd.get("rank") is not None else "—",
+                 _v(astd.get("rank"), "{:.0f}") if astd.get("rank") is not None else "—"),
+            ]
+            st.dataframe(
+                pd.DataFrame(core_rows, columns=["Statistică", home, away]),
+                use_container_width=True, hide_index=True,
+            )
+            hext = (hdna or {}).get("extended_stats") or {}
+            aext = (adna or {}).get("extended_stats") or {}
+            ext_keys = sorted(set(hext.keys()) | set(aext.keys()))
+            if ext_keys:
+                ext_rows = [(k, _v(hext.get(k)), _v(aext.get(k))) for k in ext_keys]
+                st.caption("Statistici extinse (EAV — pase/dueluri/tackle-uri/etc.)")
+                st.dataframe(
+                    pd.DataFrame(ext_rows, columns=["Statistică", home, away]),
+                    use_container_width=True, hide_index=True,
+                )
+
     # ── Vreme ─────────────────────────────────────────────────────────────
     if pred.weather_penalty > 0:
         st.warning(f"🌧️ {pred.weather_note}")

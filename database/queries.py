@@ -2019,11 +2019,11 @@ def upsert_match_events(match_id: int, events: list[dict], season: str | None = 
 # ════════════════════════════════════════════════════════════════════════════
 # FLASHSCORE FOUNDATION DATA LAYER — citire READ-ONLY (UI diagnostics, Streamlit)
 # ════════════════════════════════════════════════════════════════════════════
-# Funcțiile de mai jos NU sunt consumate de Oracle Engine/Predictor/ML
-# (North Star #10 — nicio dependință "în sus" a servirii live către
-# infrastructura de Foundation Data Layer). Singurul consumator e o
-# secțiune read-only din app.py — diagnostic/vizibilitate asupra a ce a
-# colectat Flashscore, nimic mai mult.
+# Funcțiile de mai jos rămân per-meci, folosite de secțiunea diagnostic
+# din app.py (tab-ul Flashscore). Consumul lor de către Oracle Engine
+# (agregare rolling per echipă, nu per meci) trăiește separat, în
+# secțiunea "Team DNA" de mai jos — nu aici, ca să nu amestece cele două
+# forme de citire (per-meci vs. per-echipă/rolling).
 
 def get_recent_flashscore_matches(limit: int = 30) -> list[dict]:
     """Ultimele meciuri cu date Foundation Data Layer, prin
@@ -2220,6 +2220,148 @@ def get_match_core_stats(match_id: int) -> dict | None:
     except Exception as exc:
         logger.warning("[Queries] get_match_core_stats failed pentru match_id=%s: %s", match_id, exc)
         return None
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# FLASHSCORE FOUNDATION DATA LAYER — Team DNA (Faza 2, consumat de Oracle
+# Engine, ADR-044 §5: "activarea citirii e un task separat, ulterior" —
+# acesta e acel task, comisionat explicit de proprietarul produsului.
+# Doar EXTINDE contextul (câmpuri noi, aditive) — nu ating avg_possession/
+# avg_shots_ot din TeamProfile (deja parametri ai compute_team_offdef_
+# rating(), deci ai blending-ului) și nu ating FEATURE_COLUMNS.
+# ════════════════════════════════════════════════════════════════════════════
+
+def get_team_recent_advanced_stats(team: str, league: str, last_n: int = 5) -> list[dict]:
+    """xG real/posesie/offside/apărări portar/cartonașe roșii + scor, per
+    ultimele `last_n` meciuri TERMINATE ale echipei — extensie a
+    get_team_recent_match_events() (aceleași coloane core `match_history`,
+    populate de Flashscore prin persist_match_foundation_data), pentru
+    Team DNA Flashscore. `id` inclus — ancoră pentru join-ul Python cu
+    match_statistics_extended/player_match_stats de mai jos (PostgREST nu
+    suportă join direct, aceeași limitare documentată la
+    get_recent_flashscore_matches)."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("match_history")
+            .select("id,home_team,away_team,home_possession,away_possession,"
+                    "home_xg_actual,away_xg_actual,home_offsides,away_offsides,"
+                    "home_goalkeeper_saves,away_goalkeeper_saves,"
+                    "home_red_cards,away_red_cards,"
+                    "actual_home_goals,actual_away_goals,kickoff_date")
+            .eq("league", league)
+            .or_(f"home_team.eq.{team},away_team.eq.{team}")
+            .not_.is_("actual_result", "null")
+            .order("kickoff_date", desc=True)
+            .limit(last_n)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Queries] get_team_recent_advanced_stats failed pentru %s/%s: %s", team, league, exc)
+        return []
+
+
+def _recent_match_side_map(client, team: str, league: str, last_n: int) -> dict[int, str]:
+    """Ultimele `last_n` meciuri terminate ale echipei -> {match_id: 'home'|'away'}.
+    Helper comun pentru join-ul Python cu tabelele EAV (fără coloană de
+    echipă nativă), reutilizat de get_team_recent_statistics_extended și
+    get_team_recent_player_ratings."""
+    matches = (
+        client.table("match_history")
+        .select("id,home_team,away_team,kickoff_date")
+        .eq("league", league)
+        .or_(f"home_team.eq.{team},away_team.eq.{team}")
+        .not_.is_("actual_result", "null")
+        .order("kickoff_date", desc=True)
+        .limit(last_n)
+        .execute()
+    )
+    rows = matches.data or []
+    return {
+        r["id"]: ("home" if r.get("home_team") == team else "away")
+        for r in rows if r.get("id") is not None
+    }
+
+
+def get_team_recent_statistics_extended(team: str, league: str, last_n: int = 5) -> list[dict]:
+    """Rânduri EAV (`match_statistics_extended` — passes/duels/tackles/
+    big_chances/etc., orice etichetă fără coloană dedicată) pentru
+    ultimele `last_n` meciuri terminate ale echipei, rezolvate la partea
+    (home/away) corectă în Python — EAV-ul nu are coloană de echipă,
+    doar home_value_numeric/away_value_numeric."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        side_by_id = _recent_match_side_map(client, team, league, last_n)
+        if not side_by_id:
+            return []
+        stats = (
+            client.table("match_statistics_extended")
+            .select("match_id,stat_key,home_value_numeric,away_value_numeric")
+            .in_("match_id", list(side_by_id.keys()))
+            .execute()
+        )
+        out = []
+        for s in (stats.data or []):
+            side = side_by_id.get(s.get("match_id"))
+            if side is None:
+                continue
+            value = s.get(f"{side}_value_numeric")
+            if value is None:
+                continue
+            out.append({"match_id": s["match_id"], "stat_key": s["stat_key"], "value": value})
+        return out
+    except Exception as exc:
+        logger.warning("[Queries] get_team_recent_statistics_extended failed pentru %s/%s: %s", team, league, exc)
+        return []
+
+
+def get_team_recent_player_ratings(team: str, league: str, last_n: int = 5) -> list[dict]:
+    """Rating mediu per jucător (`player_match_stats.rating`) pentru
+    ultimele `last_n` meciuri terminate ale echipei — coloana `team` din
+    `player_match_stats` e 'home'/'away' (nu numele echipei), rezolvată
+    la fel ca get_team_recent_statistics_extended()."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        side_by_id = _recent_match_side_map(client, team, league, last_n)
+        if not side_by_id:
+            return []
+        players = (
+            client.table("player_match_stats")
+            .select("match_id,team,player_name,rating,minutes_played")
+            .in_("match_id", list(side_by_id.keys()))
+            .execute()
+        )
+        out = []
+        for p in (players.data or []):
+            side = side_by_id.get(p.get("match_id"))
+            if side is None or p.get("team") != side:
+                continue
+            if p.get("rating") is None:
+                continue
+            out.append({
+                "match_id": p["match_id"], "player_name": p.get("player_name"),
+                "rating": p.get("rating"), "minutes_played": p.get("minutes_played"),
+            })
+        return out
+    except Exception as exc:
+        logger.warning("[Queries] get_team_recent_player_ratings failed pentru %s/%s: %s", team, league, exc)
+        return []
+
+
+def get_team_standings_row(team: str, competition: str) -> dict | None:
+    """Rândul de clasament al unei echipe, dintr-un snapshot deja citit —
+    wrapper subțire peste get_standings_snapshot(), filtrat pe echipă."""
+    for row in get_standings_snapshot(competition):
+        if row.get("team") == team:
+            return row
+    return None
 
 
 def get_predictions_with_results(days_back: int | None = None) -> list[dict]:

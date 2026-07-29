@@ -89,10 +89,18 @@ try:
         get_team_form_footballdata, get_national_team_elo, get_weather_forecast,
         get_team_form_freelf_snapshot, get_team_recent_form_oddsapi, get_h2h_from_odds_recent,
         get_team_stats_tsdb, get_freelf_h2h_snapshot, get_freelf_lineup_snapshot,
+        get_team_recent_advanced_stats, get_team_recent_statistics_extended,
+        get_team_recent_player_ratings, get_team_standings_row,
     )
     DB_QUERIES_MODULE_AVAILABLE = True
 except ModuleNotFoundError:
     DB_QUERIES_MODULE_AVAILABLE = False
+
+try:
+    from flashscore_team_dna import build_team_dna
+    FLASHSCORE_TEAM_DNA_AVAILABLE = True
+except ModuleNotFoundError:
+    FLASHSCORE_TEAM_DNA_AVAILABLE = False
 
 try:
     from ml_predictor import MLPredictorEngine, blend_predictions
@@ -366,6 +374,15 @@ class MatchPrediction:
     # ieșiri brute (blend_predictions() neschimbat) — nu execută niciun
     # motor suplimentar.
     raw_predictions:          list  = field(default_factory=list)
+    # ── Flashscore Team DNA (Faza 2, ADR-044 §5) ──────────────────────────
+    # Context SUPLIMENTAR, aditiv — xG real/posesie reală/pase/dueluri/
+    # tackle-uri/apărări/rating jucători/clasament, din Foundation Data
+    # Layer. NU alimentează home_profile/away_profile/blend_predictions -
+    # doar informativ, ca H2H/injury_report de mai sus. None dacă
+    # Flashscore n-a colectat încă date pentru acea echipă (nu se
+    # aproximează).
+    home_flashscore_dna:      dict | None = None
+    away_flashscore_dna:      dict | None = None
 
 
 def build_raw_predictions(
@@ -784,6 +801,31 @@ class FootballOracleEngine:
             "avg_yellow_cards": sum(yellows) / len(yellows) if yellows else None,
             "avg_ht_goals": sum(ht_goals) / len(ht_goals) if ht_goals else None,
         }
+
+    @staticmethod
+    def _build_flashscore_dna(canonical: str, league: str, last_n: int = 5) -> dict | None:
+        """
+        Team DNA Flashscore (Faza 2, ADR-044 §5) — xG real, posesie reală,
+        offside, apărări portar, cartonașe roșii, statistici EAV (pase/
+        dueluri/tackle-uri), rating mediu jucători, clasament curent.
+        Context SUPLIMENTAR, pur informativ — NU intră în TeamProfile, NU
+        atinge compute_team_offdef_rating()/FEATURE_COLUMNS/blend_predictions.
+
+        Returnează None dacă modulele necesare lipsesc (degradare identică
+        cu restul cascadei _build_profile) — apelantul afișează "—",
+        niciodată nu aproximează.
+        """
+        if not (DB_QUERIES_MODULE_AVAILABLE and FLASHSCORE_TEAM_DNA_AVAILABLE):
+            return None
+        try:
+            advanced_rows = get_team_recent_advanced_stats(canonical, league, last_n=last_n)
+            extended_rows = get_team_recent_statistics_extended(canonical, league, last_n=last_n)
+            player_rows = get_team_recent_player_ratings(canonical, league, last_n=last_n)
+            standings_row = get_team_standings_row(canonical, league)
+            return build_team_dna(advanced_rows, extended_rows, player_rows, standings_row, canonical)
+        except Exception as exc:
+            logger.warning("[OracleEngine] _build_flashscore_dna failed pentru %s/%s: %s", canonical, league, exc)
+            return None
 
     def _build_profile(self, team_id: str, team_name: str, league: str) -> TeamProfile:
         """
@@ -1351,6 +1393,12 @@ class FootballOracleEngine:
 
         h2h = self._build_h2h(home_name, away_name, match)
 
+        # [Faza 2, ADR-044 §5] Context suplimentar, pur informativ — NU
+        # intră în home_p/away_p/h2h de mai sus, deci nu poate atinge
+        # blend_predictions()/confidence.
+        home_flashscore_dna = self._build_flashscore_dna(home_name, league)
+        away_flashscore_dna = self._build_flashscore_dna(away_name, league)
+
         # [ADR-039, R-Sync-5] Citire STRICT din Supabase
         # (weather_forecast_cache, populată de Sync Layer,
         # sync/sync_weather_forecast.py) — niciodată apel live către
@@ -1582,6 +1630,7 @@ class FootballOracleEngine:
             ml_confidence=ml_confidence, ml_blend_label=ml_blend_label,
             ml_samples_used=ml_samples_used,
             raw_predictions=raw_predictions,
+            home_flashscore_dna=home_flashscore_dna, away_flashscore_dna=away_flashscore_dna,
         )
         self._cache_prediction(pred, home_p, away_p, h2h, w_pen, mc)
 
