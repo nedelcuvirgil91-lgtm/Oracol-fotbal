@@ -73,7 +73,22 @@ def run(leagues: list[str] | None, limit_per_league: int | None, dry_run: bool) 
     fail_count = len(reports) - ok_count
     for r in reports:
         m = r.get("match")
-        status = "OK" if r.get("ok") else f"ESUAT ({r.get('error') or r.get('validation_errors')})"
+        if r.get("ok"):
+            status = "OK"
+        elif r.get("error"):
+            status = f"ESUAT ({r['error']})"
+        elif r.get("validation_errors"):
+            status = f"ESUAT (validare identitate: {r['validation_errors']})"
+        else:
+            # [FIX — gasit prin testare live, "ESUAT (None)" neinformativ]
+            # fetch/normalize/validate au trecut, dar cel putin un pas din
+            # persist_match_foundation_data() a esuat (steps["ceva"]=False) -
+            # motivul exact al esecului acelui pas e deja logat separat de
+            # database/queries.py (logger.error, cu numele functiei
+            # upsert_*), dar fara asta CLI-ul nu spunea NIMIC util. Arata
+            # match_ref + steps, ca sa se poata corela direct cu acel log.
+            failed_steps = [k for k, v in (r.get("steps") or {}).items() if not v]
+            status = f"ESUAT (match_ref={r.get('match_ref')}, pași eșuați: {failed_steps or 'necunoscut'})"
         print(f"  [{m.league if m else '?'}] mid={m.mid if m else '?'} -> {status}")
 
     print()
