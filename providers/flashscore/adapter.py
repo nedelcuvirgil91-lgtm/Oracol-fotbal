@@ -40,6 +40,7 @@ unui ✅ verificat direct în rapoartele POC, fiecare `False` unui ❌/⚠️.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Any
 
@@ -95,6 +96,12 @@ _MATCH_TAB_SUFFIXES: dict[str, str] = {
 
 NAV_TIMEOUT_MS = 30000
 POST_LOAD_WAIT_MS = 3500
+
+# Optional - unele medii (containere cu Chromium pre-instalat la o cale
+# fixa, non-standard pentru Playwright) au nevoie de un executable_path
+# explicit in loc de auto-detectia default a Playwright. Implicit None ->
+# comportament identic celui de dinainte (auto-detect).
+_CHROMIUM_EXECUTABLE_PATH = os.environ.get("FLASHSCORE_CHROMIUM_EXECUTABLE") or None
 
 # Identic cu markerii verificati in toate POC-urile acestei sesiuni -
 # oprire imediata la orice semn de protectie, nu ghicit.
@@ -171,7 +178,7 @@ class FlashscoreAdapter(ScraperAdapterBase):
 
         pages: dict[str, str] = {}
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True, executable_path=_CHROMIUM_EXECUTABLE_PATH)
             page = browser.new_page()
             try:
                 for tab_name, suffix in _MATCH_TAB_SUFFIXES.items():

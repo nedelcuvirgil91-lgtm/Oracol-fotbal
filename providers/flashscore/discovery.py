@@ -47,6 +47,7 @@ politețe/rată implementată azi (`politeness_policy_ref` din
 from __future__ import annotations
 
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -55,6 +56,9 @@ logger = logging.getLogger("FootballOracle.Flashscore.Discovery")
 
 NAV_TIMEOUT_MS = 30000
 POST_LOAD_WAIT_MS = 3500
+
+# Vezi adapter.py - acelasi mecanism opțional de executable_path explicit.
+_CHROMIUM_EXECUTABLE_PATH = os.environ.get("FLASHSCORE_CHROMIUM_EXECUTABLE") or None
 
 # Unica disciplina de politete/rata implementata azi - delay minim intre
 # doua navigari succesive (hub->hub, sau meci->meci in orchestrare).
@@ -189,7 +193,7 @@ def discover_matches(
 
     results: list[DiscoveredMatch] = []
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
+        browser = p.chromium.launch(headless=True, executable_path=_CHROMIUM_EXECUTABLE_PATH)
         page = browser.new_page()
         try:
             for i, league in enumerate(targets):
