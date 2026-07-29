@@ -1953,6 +1953,180 @@ def upsert_match_events(match_id: int, events: list[dict], season: str | None = 
         return False
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# FLASHSCORE FOUNDATION DATA LAYER — citire READ-ONLY (UI diagnostics, Streamlit)
+# ════════════════════════════════════════════════════════════════════════════
+# Funcțiile de mai jos NU sunt consumate de Oracle Engine/Predictor/ML
+# (North Star #10 — nicio dependință "în sus" a servirii live către
+# infrastructura de Foundation Data Layer). Singurul consumator e o
+# secțiune read-only din app.py — diagnostic/vizibilitate asupra a ce a
+# colectat Flashscore, nimic mai mult.
+
+def get_recent_flashscore_matches(limit: int = 30) -> list[dict]:
+    """Ultimele meciuri cu date Foundation Data Layer, prin
+    `flashscore_data_completeness` (un rând per meci procesat, indiferent
+    de rezultatul validării) join-at manual cu `match_history` pentru
+    echipe/dată/ligă — PostgREST nu suportă join direct pe FK opțional
+    (`match_id` poate fi NULL la validare eșuată), deci rezolvat în Python."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        completeness_res = (
+            client.table("flashscore_data_completeness")
+            .select("match_ref,match_id,coverage_percent,has_summary,has_stats,"
+                    "has_lineups,has_player_stats,has_odds,has_h2h,has_standings,"
+                    "season,computed_at")
+            .order("computed_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        rows = completeness_res.data or []
+        match_ids = [r["match_id"] for r in rows if r.get("match_id") is not None]
+        matches_by_id: dict[int, dict] = {}
+        if match_ids:
+            matches_res = (
+                client.table("match_history")
+                .select("id,home_team,away_team,kickoff_date,league,"
+                        "actual_home_goals,actual_away_goals")
+                .in_("id", match_ids)
+                .execute()
+            )
+            matches_by_id = {m["id"]: m for m in (matches_res.data or [])}
+        for row in rows:
+            row["match"] = matches_by_id.get(row.get("match_id"))
+        return rows
+    except Exception as exc:
+        logger.warning("[Queries] get_recent_flashscore_matches failed: %s", exc)
+        return []
+
+
+def get_data_completeness(match_ref: str) -> dict | None:
+    """Un singur rand `flashscore_data_completeness`, dupa `match_ref`
+    (identitate stabila pre-canonica, nu `match_id`, care poate fi NULL)."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("flashscore_data_completeness")
+            .select("*")
+            .eq("match_ref", match_ref)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Queries] get_data_completeness failed pentru %s: %s", match_ref, exc)
+        return None
+
+
+def get_match_events(match_id: int) -> list[dict]:
+    """Timeline complet (goluri/cartonase/schimbari/VAR) pentru un meci,
+    ordonat cronologic - `match_events`, migratia 039."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("match_events")
+            .select("team,minute,event_type,player_name,related_player_name,detail")
+            .eq("match_id", match_id)
+            .order("minute")
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Queries] get_match_events failed pentru match_id=%s: %s", match_id, exc)
+        return []
+
+
+def get_match_statistics_extended(match_id: int) -> list[dict]:
+    """Cele ~26 categorii de statistici EAV fara coloana dedicata
+    (xGOT, duels, tackles, etc.) - `match_statistics_extended`, migratia 035."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("match_statistics_extended")
+            .select("stat_key,stat_label,home_value_raw,away_value_raw,"
+                    "home_value_numeric,away_value_numeric")
+            .eq("match_id", match_id)
+            .order("stat_key")
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Queries] get_match_statistics_extended failed pentru match_id=%s: %s", match_id, exc)
+        return []
+
+
+def get_player_match_stats(match_id: int) -> list[dict]:
+    """Roster + rating/pozitie per jucator - `player_match_stats`,
+    migratia 032/035."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("player_match_stats")
+            .select("team,player_name,shirt_number,position,is_starting,"
+                    "minutes_played,rating,goals,assists,yellow_cards,red_cards")
+            .eq("match_id", match_id)
+            .order("team")
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Queries] get_player_match_stats failed pentru match_id=%s: %s", match_id, exc)
+        return []
+
+
+def get_match_context(match_id: int) -> list[dict]:
+    """H2H + forma recenta, segmentate (h2h_overall/recent_form_home/
+    recent_form_away) - `flashscore_match_context`, migratia 035."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("flashscore_match_context")
+            .select("category,meeting_order,meeting_date,competition_code,"
+                    "home_team,away_team,home_score,away_score")
+            .eq("context_match_id", match_id)
+            .order("category")
+            .order("meeting_order")
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Queries] get_match_context failed pentru match_id=%s: %s", match_id, exc)
+        return []
+
+
+def get_standings_snapshot(competition: str) -> list[dict]:
+    """Clasament curent per competitie (snapshot, nu istoric) -
+    `flashscore_standings_snapshot`, migratia 035."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("flashscore_standings_snapshot")
+            .select("team,rank,played,won,drawn,lost,goals_for,goals_against,"
+                    "goal_diff,points,captured_at")
+            .eq("competition", competition)
+            .order("rank")
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Queries] get_standings_snapshot failed pentru %s: %s", competition, exc)
+        return []
+
+
 def get_predictions_with_results(days_back: int | None = None) -> list[dict]:
     """
     [ADAUGAT Sprint 0 — Stabilizare, Etapa 3] Citire READ-ONLY — rânduri din
