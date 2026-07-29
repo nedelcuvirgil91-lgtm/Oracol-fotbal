@@ -542,3 +542,9 @@ Regula de precedență (§1: dacă API/Open Data au deja completat un câmp, Fla
 - Niciun Weight Manager Predictor/ML — confirmat, neintrodus.
 - `tos_reviewed` neschimbat — Night Sync-ul real rămâne, la fel ca Bootstrap-ul, blocat de același gate (§12.0) până la o decizie separată.
 - Planul de Stage 2 (§12) rămâne valabil neschimbat — integrarea de programare (§13.2) e o decizie de arhitectură pentru un Stage viitor (worker-ul de execuție), nu pentru mecanica cozii deja planificată acolo.
+
+---
+
+## 14. [R-ML-GATE-01, 2026-07-29] Activation Gate — pointer
+
+Predictorul/ML/blending-ul rămân complet înghețate cât timp acest document e activ — nicio schimbare de acest fel nu face parte din roadmap-ul Flashscore. Condiții și stare curentă: `docs/00_GOVERNANCE/ML_ACTIVATION_GATE.md`. Prioritatea de dezvoltare, confirmată explicit: (1) provider Flashscore, (2) validare extractibilitate, (3) integrare pipeline, (4) colectare automată/populare bază, (5) monitorizare sincronizări — Stage 2 (§12) rămâne următorul pas concret, neschimbat, în așteptare de aprobare.

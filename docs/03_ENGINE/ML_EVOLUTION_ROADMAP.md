@@ -1,5 +1,9 @@
 # ML_EVOLUTION_ROADMAP.md — Football Oracle
 
+## ⚠ Activation Gate — Predictor + ML Blending (R-ML-GATE-01, 2026-07-29)
+
+Blending-ul Predictor+ML în producție rămâne **oprit** (`model_config.ml_blending_enabled = False`, R-ARCH-REVIEW-01) — activarea lui **nu** e un pas automat al niciunui experiment de mai jos, indiferent de rezultat. Condițiile complete + starea curentă: `docs/00_GOVERNANCE/ML_ACTIVATION_GATE.md`. Rezumat: bootstrap SuperLiga complet + date reale suficiente din sezonul curent + validare de performanță ML pe date reale + aprobare explicită Product Owner — toate patru, simultan, înainte de orice schimbare de `ml_blending_enabled`.
+
 ## Scop
 
 Registru **viu** de experimente pentru evoluția modelului ML, deschis după închiderea studiului de ablație (ADR-020) și a auditului tehnic de performanță (2026-07-14). Nu e un document static de intenții — e actualizat după fiecare experiment, cu statusul lui real. Peste șase luni, acest fișier trebuie să răspundă singur la întrebarea „ce s-a încercat, și cu ce rezultat?", fără să fie nevoie de arheologie în conversații vechi.
