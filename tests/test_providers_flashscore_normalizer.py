@@ -14,20 +14,20 @@ from providers.flashscore.normalizer import (
 
 FIXTURE_DIR = Path(__file__).parent.parent / "docs" / "06_UDAL" / "poc_evidence" / "flashscore_10matches"
 
-SUPERLIGA_1_PREFIX = "superliga_1_rapid-bucuresti-YFCpigVG_?mid=EeqI7WJc"
-UCL_6_PREFIX = "ucl_6_shamrock-rovers-KIN6lmnH_?mid=f9yUru7s"
+SUPERLIGA_1_PREFIX = "superliga_1_rapid-bucuresti-YFCpigVG_mid=EeqI7WJc"
+UCL_6_PREFIX = "ucl_6_shamrock-rovers-KIN6lmnH_mid=f9yUru7s"
 
 ALL_10_PREFIXES = [
-    "superliga_1_rapid-bucuresti-YFCpigVG_?mid=EeqI7WJc",
-    "superliga_2_voluntari-WIoSeFi4_?mid=631P5AlA",
-    "superliga_3_miercurea-ciuc-A5gTQ7pG_?mid=IPgBd6Bd",
-    "superliga_4_universitatea-cluj-Us6gkXaT_?mid=vHaX3lJM",
-    "superliga_5_univ-craiova-bsd9fGaK_?mid=AJtcK933",
-    "ucl_6_shamrock-rovers-KIN6lmnH_?mid=f9yUru7s",
-    "ucl_7_sturm-graz-zsktjfsD_?mid=0M0wdHSH",
-    "ucl_8_kf-egnatia-CjYs7BO9_?mid=WxPrLDQE",
-    "ucl_9_thun-4WElAd9p_?mid=rqFko0Ea",
-    "ucl_10_mjallby-S0XtXM1E_?mid=4CbLusAN",
+    "superliga_1_rapid-bucuresti-YFCpigVG_mid=EeqI7WJc",
+    "superliga_2_voluntari-WIoSeFi4_mid=631P5AlA",
+    "superliga_3_miercurea-ciuc-A5gTQ7pG_mid=IPgBd6Bd",
+    "superliga_4_universitatea-cluj-Us6gkXaT_mid=vHaX3lJM",
+    "superliga_5_univ-craiova-bsd9fGaK_mid=AJtcK933",
+    "ucl_6_shamrock-rovers-KIN6lmnH_mid=f9yUru7s",
+    "ucl_7_sturm-graz-zsktjfsD_mid=0M0wdHSH",
+    "ucl_8_kf-egnatia-CjYs7BO9_mid=WxPrLDQE",
+    "ucl_9_thun-4WElAd9p_mid=rqFko0Ea",
+    "ucl_10_mjallby-S0XtXM1E_mid=4CbLusAN",
 ]
 
 
