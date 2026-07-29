@@ -16,9 +16,13 @@ Prioritatea de dezvoltare a întregului proiect, declarată oficial: `M0 → M1 
 
 Scope-ul M0 s-a extins oficial (decizie Product Owner) de la statistici de bază la un **Foundation Data Layer** complet — vezi `docs/00_GOVERNANCE/ADR-044-flashscore-foundation-data-layer.md`. **Implementat, testat, NEMERGE-UIT pe `main`** (pe branch, cod complet + teste, `tos_reviewed=False` neatins, nicio scriere live):
 
-- Schema: migrațiile 035 (5 tabele noi + `attendance`/`capacity`) și 036 (fix gol RPC — `goalkeeper_saves`/`attendance`/`capacity` nu erau scrise de `upsert_match_canonical`, aplicate live, `Prediction`).
+- Schema: migrațiile 035 (5 tabele noi + `attendance`/`capacity`), 036 (fix gol RPC — `goalkeeper_saves`/`attendance`/`capacity` nu erau scrise de `upsert_match_canonical`), 037 (`flashscore_data_completeness`), 038 (coloana `season` pe `match_history` + toate cele 7 tabele FDL) — toate aplicate live, `Prediction`.
 - Persist layer complet, idempotent (verificat 1/2/10 rulări): `providers/flashscore/persistence.py`, extensii `database/queries.py`.
 - Data Trust Layer (RAW → VALIDATED → CANONICAL) funcțional: `persist_match_with_data_trust_layer()`, `udal_validation.validate_flat_identity()`.
+- **Odds** (`normalize_odds()`) — gol închis, tab confirmat în POC, extras acum, inclus în stratul RAW. Scrierea canonică în `odds_fallback_flashscore` (ADR-043) rămâne deliberat neimplementată — necesită rezolvarea `fixture_id` cross-provider, task separat.
+- **Data Completeness Score** (`flashscore_data_completeness`, migrația 037) — calculat și scris per meci, **neconsumat de Oracle Engine azi** (regulă 7, TASK APROBAT M1).
+- **Model de sezon** (`season`, migrația 038) — DOAR dacă providerul îl oferă explicit, niciodată dedus din reguli calendaristice; Flashscore nu îl expune robust azi (verificat pe fixture) — coloana există, pregătită pentru ponderare Oracle/ML pe sezon (neimplementată).
+- **Season Cleanup** (`providers/flashscore/season_cleanup.py`) — DOAR Discovery + Cleanup Report (dry-run), `delete_executed` mereu `False`. Scope explicit restrâns la tabelele Foundation Data Layer — NU `match_history`/`match_events`/`player_match_stats` de bază, NU `odds_history` (Frozen). Ștergerea reală rămâne neimplementată, viitoare, cu propriul flag/aprobare.
 - Oracle Engine/ML rămân neatinse — niciun consumator nu citește încă din tabelele noi (secțiunea 5, ADR-044).
 - Următorul pas pe Critical Path rămâne M1 (primul meci descoperit live) — Foundation Data Layer pregătește DESTINAȚIA scrierii, nu înlocuiește pașii M1-M4.
 

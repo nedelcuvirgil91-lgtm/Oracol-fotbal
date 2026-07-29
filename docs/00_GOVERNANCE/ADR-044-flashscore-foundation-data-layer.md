@@ -93,3 +93,42 @@ Acest ADR **nu modifică** `oracle_engine.py`, `ml_predictor.py`, sau vreun flux
 - **Coloane fixe noi per statistică în `match_history`** — respinsă: contrazice explicit filosofia proiectului declarată de proprietarul produsului (colectare o singură dată, fără migrări repetate pe măsură ce apar statistici noi).
 - **Reutilizarea directă a `validate_records()`** — respinsă: schema lui fixă ar respinge fals-negativ orice rând real Flashscore (vezi secțiunea 2).
 - **Citire directă Oracle Engine → Flashscore** (bypass complet al Data Trust Layer-ului) — respinsă explicit de proprietarul produsului: „Oracle Engine NU citește niciodată din Flashscore direct”.
+
+---
+
+## Addendum (2026-07-29) — „TASK APROBAT — Flashscore Foundation Data Layer (M1)” + „Răspuns oficial — clarificări finale”
+
+Extensie aprobată explicit peste decizia inițială de mai sus, aceeași sesiune. Status: **implementat, testat, nemerge-uit pe `main`**, aceleași garanții (scriere live neactivată, `tos_reviewed=False`).
+
+### A1. Flashscore rămâne sursa principală pentru Foundation Data Layer
+
+Reconfirmă explicit secțiunea „Decizie” §1: providerii API existenți deservesc Discovery Layer și sincronizarea meciurilor; Flashscore e sursa principală pentru **îmbogățirea** bazei de date (statistici extinse, context, clasament, cote).
+
+### A2. Odds — gol închis
+
+`normalize_odds()` (nou) extrage cota curentă 1X2 per bookmaker din tab-ul dedicat, structură verificată pe fixture (`.oddsCell__bookmakerPart`/`.oddsCell__odd`, ordine confirmată prin `data-analytics-label`, nu presupusă din poziție DOM). Inclus în stratul RAW (`flashscore_raw_extraction`). **Scrierea CANONICĂ în `odds_fallback_flashscore` (ADR-043) rămâne deliberat neimplementată** — necesită rezolvarea identității `fixture_id` cross-provider (aceeași valoare folosită de The Odds API/alți provideri), un task separat, documentat deja de ADR-043 ca „ulterior”; scrierea cu o cheie greșită ar rupe silențios regula de fallback a Predictorului (ar scrie rânduri pe care Predictorul nu le-ar găsi niciodată).
+
+### A3. `flashscore_match_context.competition_code` — gol închis
+
+Populat acum din elementul real `.h2h__event` (text scurt, ex. „SL” pentru SuperLiga) — verificat direct pe fixture, era documentat explicit ca gol de populare în raportul anterior.
+
+### A4. Data Completeness Score (regulă nouă, persistat, neconsumat)
+
+Tabelă nouă `flashscore_data_completeness` (migrația 037) — 7 flag-uri boolean (unul per tab confirmat în POC: Summary/Statistics/Lineups/PlayerStats/Odds/H2H/Standings) + `coverage_percent`. Calculat de `compute_data_completeness()` la nivel de FETCH (pagina a fost adusă sau nu), nu la nivel de succes al extracției — definiție simplă, robustă, verificabilă direct din `pages`. Scris **indiferent** de rezultatul validării Data Trust Layer (proprietate a colectării, nu a validării). **Nu e citit de Oracle Engine azi** — doar persistat pentru folosire viitoare, exact cum a cerut proprietarul produsului.
+
+### A5. Modelul de sezon (migrația 038)
+
+Coloană nouă `season` (TEXT, nullable) pe `match_history` și toate cele 7 tabele Foundation Data Layer. Regulă strictă, neechivocă: **`season` se scrie DOAR dacă providerul apelant îl oferă explicit — niciodată dedus din reguli calendaristice proprii.** Verificat direct pe fixture: Flashscore nu expune un sezon robust în niciunul din cele 7 tab-uri confirmate azi (breadcrumbs au doar „Superliga - Round 2”, fără an) — `normalize_*()` rămân neschimbate; `season` e parametru explicit la `persist_match_foundation_data()`/`persist_match_with_data_trust_layer()`, propagat uniform la toate scrierile FK-dependente ale unui meci, niciodată derivat în interiorul modulului. O tabelă de configurare per competiție (calendarul real per ligă) rămâne un task viitor, separat, neînceput.
+
+Motivația explicită a proprietarului produsului: Oracle și ML vor pondera istoricul pe sezon (ex. sezon curent 100%, precedent 70%, acum doi ani 40%) — logică **neimplementată acă**, dar coloana trebuie să existe din Foundation Data Layer ca fundația să nu ceară un al doilea val de migrări.
+
+### A6. Season Cleanup — infrastructură DOAR, fără ștergere
+
+Fluxul oficial complet: `Discovery → Validation → Cleanup Report → Backup → Delete → Integrity Check → Final Report`. **În această etapă se implementează DOAR primii doi pași** (`providers/flashscore/season_cleanup.py`):
+
+- `discover_seasons()` — pură, calculează candidații de cleanup sub politica de retenție (**6 sezoane: curent + 5 istorice**), sortare lexicală pe formatul `"YYYY-YYYY"` (coincide cu ordinea cronologică). Rândurile fără sezon (`NULL`) sunt raportate separat, niciodată tratate ca sezon real.
+- `build_cleanup_dry_run_report()` — interoghează Supabase, agregă pe cele 6 tabele din scope.
+
+**Scope explicit, restrâns** (răspunsul proprietarului produsului la întrebarea de clarificare): **EXCLUSIV** tabelele Foundation Data Layer (`match_statistics_extended`, `player_match_stats_extended`, `flashscore_match_context`, `flashscore_standings_snapshot`, `flashscore_raw_extraction`, `flashscore_data_completeness`). **NU** `match_history`/`match_events`/`player_match_stats` de bază (ar afecta direct istoricul ML, `used_for_training`, și North Star #9). **NU** `odds_history` — document Frozen (ADR-005/006/010), orice atingere cere ADR dedicat, nu poate intra tacit în scope-ul acestui job.
+
+**Garanție explicită, verificabilă direct în cod**: `delete_executed` e mereu `False` — acest modul nu conține nicio operație `DELETE`, niciun cron, nicio activare automată. Ștergerea reală (pașii Backup/Delete/Integrity Check/Final Report) rămâne neimplementată, activabilă ulterior printr-un flag dedicat, separat, cu propria aprobare explicită.
