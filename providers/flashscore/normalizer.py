@@ -305,15 +305,35 @@ def normalize_match_statistics(pages: dict[str, str]) -> dict[str, Any]:
     summary_html = pages.get("summary")
     summary_soup = BeautifulSoup(summary_html, "html.parser") if summary_html else None
     info = _extract_labeled_info_pairs(summary_soup) if summary_soup else {}
-    # [REZOLVAT — ADR-044 Addendum 4] actual_home_goals/actual_away_goals:
-    # sync/sync_results.py ramane owner-ul PRIMAR (garda AST,
-    # test_sync_results_remains_owner_of_actual_columns); Flashscore e acum
-    # writer SECUNDAR autorizat explicit (garda AST pozitiva,
+    # [REZOLVAT — ADR-044 Addendum 4, REVIZUIT Addendum 5] actual_home_goals/
+    # actual_away_goals/actual_result: sync/sync_results.py ramane owner-ul
+    # PRIMAR (garda AST, test_sync_results_remains_owner_of_actual_columns);
+    # Flashscore e writer SECUNDAR autorizat explicit (garda AST pozitiva,
     # test_flashscore_normalizer_is_authorized_secondary_writer_of_actual_
     # columns) - scrierea trece prin acelasi RPC COALESCE-safe +
     # hard-conflict ca restul match_history, deci nu suprascrie niciodata
     # silentios un rezultat deja scris de sync_results.py.
+    #
+    # [FIX — audit live Faza 2, gasit real: actual_result NULL pe 17/17
+    # meciuri Flashscore colectate, desi actual_home_goals/away_goals ERAU
+    # populate] Addendum 4 restrangea `actual_result` EXCLUSIV la
+    # sync_results.py - dar acel pipeline nu acopera azi Romania SuperLiga
+    # (gol documentat, CLAUDE.md) si nici calificarile UEFA - exact ligile
+    # pentru care Flashscore exista. Rezultatul: gate-ul `actual_result IS
+    # NOT NULL`, folosit de FIECARE query Team DNA (get_team_recent_*), nu
+    # se satisface NICIODATA pentru meciurile Flashscore, chiar daca toate
+    # datele reale exista deja in rand. Derivarea e identica, determinista,
+    # FARA nicio ambiguitate (exact formula sync_results.py, linie cu
+    # linie) - scrisa DOAR daca ambele goluri sunt prezente, niciodata
+    # ghicita partial.
     actual_home_goals, actual_away_goals = _extract_final_score(summary_soup) if summary_soup else (None, None)
+    actual_result = (
+        ("H" if actual_home_goals > actual_away_goals
+         else "A" if actual_home_goals < actual_away_goals
+         else "D")
+        if actual_home_goals is not None and actual_away_goals is not None
+        else None
+    )
     home_ht_goals, away_ht_goals = _extract_half_time_score(summary_soup) if summary_soup else (None, None)
 
     result: dict[str, Any] = {
@@ -327,6 +347,7 @@ def normalize_match_statistics(pages: dict[str, str]) -> dict[str, Any]:
         "capacity": _parse_int_loose(info.get("Capacity:")),
         "actual_home_goals": actual_home_goals,
         "actual_away_goals": actual_away_goals,
+        "actual_result": actual_result,
         "home_ht_goals": home_ht_goals,
         "away_ht_goals": away_ht_goals,
         "stats_source": "flashscore",

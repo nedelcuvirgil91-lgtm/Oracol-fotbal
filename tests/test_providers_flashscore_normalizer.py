@@ -103,6 +103,35 @@ def test_normalize_match_statistics_final_and_half_time_score(superliga_1_pages)
     assert result["actual_away_goals"] == 1
     assert result["home_ht_goals"] == 0
     assert result["away_ht_goals"] == 1
+    # [FIX — audit live Faza 2] actual_result derivat identic cu
+    # sync_results.py (H/A/D din perechea de goluri) - 1-1 -> "D".
+    assert result["actual_result"] == "D"
+
+
+def test_normalize_match_statistics_actual_result_derivation_is_deterministic(monkeypatch, superliga_1_pages):
+    """actual_result se calculeaza DOAR din perechea de goluri deja
+    extrasa, identic cu formula sync/sync_results.py (H daca home>away,
+    A daca home<away, D daca egal) - nicio ambiguitate, nicio ghicire.
+    `_extract_final_score` mock-uit direct, ca sa izoleze testul de
+    selectorul real (deja acoperit separat de test_normalize_match_
+    statistics_final_and_half_time_score) de logica de derivare H/A/D."""
+    import providers.flashscore.normalizer as normalizer_module
+
+    for home, away, expected in [(2, 0, "H"), (0, 2, "A"), (1, 1, "D")]:
+        monkeypatch.setattr(normalizer_module, "_extract_final_score", lambda soup, h=home, a=away: (h, a))
+        result = normalize_match_statistics(superliga_1_pages)
+        assert result["actual_home_goals"] == home
+        assert result["actual_away_goals"] == away
+        assert result["actual_result"] == expected
+
+
+def test_normalize_match_statistics_actual_result_none_without_both_goals():
+    """Nicio stare partiala aproximata - fara ambele goluri, actual_result
+    ramane None, niciodata ghicit."""
+    result = normalize_match_statistics({"stats": "<html></html>"})
+    assert result["actual_home_goals"] is None
+    assert result["actual_away_goals"] is None
+    assert result["actual_result"] is None
 
 
 def test_normalize_match_statistics_no_fabricated_fields(superliga_1_pages):
