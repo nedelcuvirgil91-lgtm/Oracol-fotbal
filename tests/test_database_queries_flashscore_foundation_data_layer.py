@@ -308,3 +308,52 @@ def test_upsert_data_completeness_handles_none_match_id(monkeypatch):
 def test_upsert_data_completeness_degrades_gracefully(monkeypatch):
     monkeypatch.setattr(q, "get_client", lambda: _BoomClient())
     assert q.upsert_data_completeness("ref", 1, {"coverage_percent": 0.0}) is False
+
+
+# ════════════════════════════════════════════════════════════════════════
+# season (migratia 038) - propagat DOAR daca e furnizat explicit, niciodata
+# dedus - "Raspuns oficial - Foundation Data Layer (clarificari finale)"
+# ════════════════════════════════════════════════════════════════════════
+
+def test_upsert_player_roster_includes_season_when_given(monkeypatch):
+    fake = _FakeClient()
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    roster = [{"team": "home", "player_name": "Pop A.", "shirt_number": 7}]
+    q.upsert_player_roster(999, roster, season="2026-2027")
+    call = next(c for c in fake.calls if c[0] == "player_match_stats")
+    assert call[2][0]["season"] == "2026-2027"
+
+
+def test_upsert_player_roster_season_defaults_to_none(monkeypatch):
+    fake = _FakeClient()
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    roster = [{"team": "home", "player_name": "Pop A.", "shirt_number": 7}]
+    q.upsert_player_roster(999, roster)
+    call = next(c for c in fake.calls if c[0] == "player_match_stats")
+    assert call[2][0]["season"] is None
+
+
+def test_upsert_player_match_stats_extended_includes_season_when_given(monkeypatch):
+    fake = _FakeClient()
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    q.upsert_player_match_stats_extended(999, [_stat_row()], season="2026-2027")
+    enrich_call = next(c for c in fake.calls if c[0] == "player_match_stats")
+    assert enrich_call[2]["season"] == "2026-2027"
+    eav_call = next(c for c in fake.calls if c[0] == "player_match_stats_extended")
+    assert eav_call[2][0]["season"] == "2026-2027"
+
+
+def test_upsert_raw_extraction_includes_season_when_given(monkeypatch):
+    fake = _FakeClient()
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    q.upsert_raw_extraction("ref", "stats", {"home_team": "A"}, season="2026-2027")
+    call = next(c for c in fake.calls if c[0] == "flashscore_raw_extraction")
+    assert call[2]["season"] == "2026-2027"
+
+
+def test_upsert_data_completeness_includes_season_when_given(monkeypatch):
+    fake = _FakeClient()
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    q.upsert_data_completeness("ref", 1, {"coverage_percent": 100.0}, season="2026-2027")
+    call = next(c for c in fake.calls if c[0] == "flashscore_data_completeness")
+    assert call[2]["season"] == "2026-2027"

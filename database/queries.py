@@ -1664,7 +1664,7 @@ def should_retrain_ml(min_new_matches: int = 20) -> bool:
 def upsert_raw_extraction(
     match_ref: str, tab_name: str, raw_extracted: Any,
     validation_status: str = "pending", validation_errors: list | None = None,
-    canonical_written: bool = False,
+    canonical_written: bool = False, season: str | None = None,
 ) -> bool:
     """`flashscore_raw_extraction` - stratul RAW al Data Trust Layer-ului
     (RAW -> VALIDATED -> CANONICAL, ADR-044). Scrie output-ul `normalize_
@@ -1673,7 +1673,8 @@ def upsert_raw_extraction(
     decide `validation_status`/`canonical_written` DUPA ce a rulat
     validarea, dar randul RAW exista chiar si pentru meciuri respinse.
     `on_conflict="match_ref,tab_name"` - snapshot curent, nu istoric
-    acumulat (schema, migratia 035)."""
+    acumulat (schema, migratia 035). `season` (migratia 038) - DOAR daca
+    providerul il ofera, niciodata dedus (Raspuns oficial 2026-07-29)."""
     if not raw_extracted:
         return True
     client = get_client()
@@ -1682,7 +1683,7 @@ def upsert_raw_extraction(
     payload = {
         "match_ref": match_ref, "tab_name": tab_name, "raw_extracted": raw_extracted,
         "validation_status": validation_status, "validation_errors": validation_errors,
-        "canonical_written": canonical_written,
+        "canonical_written": canonical_written, "season": season,
     }
     try:
         client.table("flashscore_raw_extraction").upsert(
@@ -1694,19 +1695,22 @@ def upsert_raw_extraction(
         return False
 
 
-def upsert_data_completeness(match_ref: str, match_id: int | None, completeness: dict) -> bool:
+def upsert_data_completeness(
+    match_ref: str, match_id: int | None, completeness: dict, season: str | None = None,
+) -> bool:
     """`flashscore_data_completeness` (migratia 037, regula 7 - TASK
     APROBAT M1) - scor persistat, NEconsumat de Oracle Engine/ML azi.
     `completeness`: dict cu cele 7 chei de tab (`summary`/`stats`/
     `lineups`/`player_stats`/`odds`/`h2h`/`standings`, boolean) +
     `coverage_percent` - vezi `providers.flashscore.persistence.
     compute_data_completeness()`. `on_conflict="match_ref"` -
-    idempotent, snapshot curent per meci."""
+    idempotent, snapshot curent per meci. `season` (migratia 038) - DOAR
+    daca providerul il ofera, niciodata dedus."""
     client = get_client()
     if client is None:
         return False
     payload = {
-        "match_ref": match_ref, "match_id": match_id,
+        "match_ref": match_ref, "match_id": match_id, "season": season,
         "has_summary": completeness.get("summary", False),
         "has_stats": completeness.get("stats", False),
         "has_lineups": completeness.get("lineups", False),
@@ -1775,14 +1779,15 @@ def upsert_match_statistics_extended(match_id: int, rows: list[dict]) -> bool:
         return False
 
 
-def upsert_player_roster(match_id: int, roster_rows: list[dict]) -> bool:
+def upsert_player_roster(match_id: int, roster_rows: list[dict], season: str | None = None) -> bool:
     """`player_match_stats` - randurile BRUTE de roster (nume/numar/echipa,
     din tab-ul Lineups), FARA rating/pozitie (scrise separat, vezi
     `upsert_player_match_stats_extended` mai jos) - `on_conflict=
     "match_id,team,player_name"`, cheia UNIQUE existenta (migratia 032).
     Payload-ul include DOAR coloanele cunoscute aici - un upsert ulterior
     de imbogatire (rating/pozitie) nu le suprascrie cu NULL (PostgREST
-    genereaza SET doar pentru coloanele prezente in cerere)."""
+    genereaza SET doar pentru coloanele prezente in cerere). `season`
+    (migratia 038) - DOAR daca providerul il ofera, niciodata dedus."""
     if not roster_rows:
         return True
     client = get_client()
@@ -1792,6 +1797,7 @@ def upsert_player_roster(match_id: int, roster_rows: list[dict]) -> bool:
         {
             "match_id": match_id, "team": r["team"], "player_name": r["player_name"],
             "shirt_number": r.get("shirt_number"), "source": r.get("source", "flashscore"),
+            "season": season,
         }
         for r in roster_rows
     ]
@@ -1805,14 +1811,18 @@ def upsert_player_roster(match_id: int, roster_rows: list[dict]) -> bool:
         return False
 
 
-def upsert_player_match_stats_extended(match_id: int, stats_rows: list[dict]) -> bool:
+def upsert_player_match_stats_extended(
+    match_id: int, stats_rows: list[dict], season: str | None = None,
+) -> bool:
     """`player_match_stats_extended` (EAV per jucator) - `stats_rows`:
     randuri din `normalize_player_match_stats_table()`, deja imbinate cu
     roster-ul (team rezolvat) de apelant (`providers/flashscore/
     persistence.py`) - nu se rezolva echipa aici. Fiecare rand scrie
     intai imbogatirea `player_match_stats` (position/rating), citeste
     id-ul rezultat, apoi scrie cele 7 statistici avansate EAV cu acel FK.
-    Randuri fara `team` rezolvat sunt EXCLUSE (nu se ghiceste echipa)."""
+    Randuri fara `team` rezolvat sunt EXCLUSE (nu se ghiceste echipa).
+    `season` (migratia 038) - DOAR daca providerul il ofera, niciodata
+    dedus."""
     if not stats_rows:
         return True
     client = get_client()
@@ -1831,7 +1841,7 @@ def upsert_player_match_stats_extended(match_id: int, stats_rows: list[dict]) ->
         enrich_payload = {
             "match_id": match_id, "team": team, "player_name": row["player_name"],
             "position": row.get("position"), "rating": row.get("rating"),
-            "source": "flashscore",
+            "source": "flashscore", "season": season,
         }
         try:
             res = client.table("player_match_stats").upsert(
@@ -1857,6 +1867,7 @@ def upsert_player_match_stats_extended(match_id: int, stats_rows: list[dict]) ->
                 "player_match_stats_id": pms_id, "stat_key": e["stat_key"],
                 "stat_label": e["stat_label"], "value_raw": e.get("value_raw"),
                 "value_numeric": e.get("value_numeric"), "source": "flashscore",
+                "season": season,
             }
             for e in extended
         ]

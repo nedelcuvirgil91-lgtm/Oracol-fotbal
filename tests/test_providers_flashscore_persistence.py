@@ -92,6 +92,34 @@ def test_persist_match_foundation_data_full_orchestration(monkeypatch, full_tabs
     assert standings_mock.call_args[0][0][0]["competition"] == "SuperLiga"
 
 
+def test_persist_match_foundation_data_propagates_season_when_provided(monkeypatch, full_tabs_pages):
+    """[TASK APROBAT M1, Raspuns oficial] season se propaga uniform la
+    toate scrierile FK-dependente ale meciului - NU e derivat aici, doar
+    transmis de la apelant (Flashscore nu il ofera robust azi, verificat
+    pe fixture - vezi normalize_odds/normalize_match_context docstrings)."""
+    match_history_mock = MagicMock(return_value=123)
+    monkeypatch.setattr("providers.flashscore.persistence.upsert_match_and_get_id", match_history_mock)
+    extended_mock = MagicMock(return_value=True)
+    monkeypatch.setattr("providers.flashscore.persistence.upsert_match_statistics_extended", extended_mock)
+    roster_mock = MagicMock(return_value=True)
+    monkeypatch.setattr("providers.flashscore.persistence.upsert_player_roster", roster_mock)
+    player_ext_mock = MagicMock(return_value=True)
+    monkeypatch.setattr("providers.flashscore.persistence.upsert_player_match_stats_extended", player_ext_mock)
+    context_mock = MagicMock(return_value=True)
+    monkeypatch.setattr("providers.flashscore.persistence.upsert_match_context", context_mock)
+    standings_mock = MagicMock(return_value=True)
+    monkeypatch.setattr("providers.flashscore.persistence.upsert_standings_snapshot", standings_mock)
+
+    persist_match_foundation_data(full_tabs_pages, competition="SuperLiga", season="2026-2027")
+
+    assert match_history_mock.call_args[0][0]["season"] == "2026-2027"
+    assert all(r["season"] == "2026-2027" for r in extended_mock.call_args[0][1])
+    assert roster_mock.call_args[1]["season"] == "2026-2027"
+    assert player_ext_mock.call_args[1]["season"] == "2026-2027"
+    assert all(r["season"] == "2026-2027" for r in context_mock.call_args[0][0])
+    assert all(r["season"] == "2026-2027" for r in standings_mock.call_args[0][0])
+
+
 def test_persist_match_foundation_data_no_competition_skips_standings(monkeypatch, full_tabs_pages):
     monkeypatch.setattr("providers.flashscore.persistence.upsert_match_and_get_id", lambda *a, **kw: 123)
     monkeypatch.setattr("providers.flashscore.persistence.upsert_match_statistics_extended", lambda *a, **kw: True)
@@ -165,7 +193,7 @@ def test_data_trust_layer_valid_record_writes_raw_and_canonical(monkeypatch, ful
     )
     monkeypatch.setattr(
         "providers.flashscore.persistence.persist_match_foundation_data",
-        lambda pages, competition=None: {"match_id": 123, "ok": True, "steps": {"match_history": True}},
+        lambda pages, competition=None, season=None: {"match_id": 123, "ok": True, "steps": {"match_history": True}},
     )
     completeness_mock = MagicMock(return_value=True)
     monkeypatch.setattr("providers.flashscore.persistence.upsert_data_completeness", completeness_mock)

@@ -86,19 +86,24 @@ def _join_player_stats_with_roster(
 
 
 def persist_match_foundation_data(
-    pages: dict[str, str], competition: str | None = None,
+    pages: dict[str, str], competition: str | None = None, season: str | None = None,
 ) -> dict[str, Any]:
     """Punct de intrare unic pentru persistarea completa a unui meci
     Flashscore (Foundation Data Layer). Returneaza un raport
     `{"match_id": int | None, "ok": bool, "steps": {...}}` - niciodata
     doar True/False, ca eșecul parțial să fie vizibil (North Star #9,
-    trasabilitate completa)."""
+    trasabilitate completa). `season` (migratia 038, "Raspuns oficial"
+    2026-07-29) - DOAR daca providerul apelant il ofera explicit -
+    normalizer-ul NU il deriva (Flashscore nu il expune robust in
+    tab-urile confirmate azi, verificat direct pe fixture) - niciodata
+    dedus din reguli calendaristice proprii."""
     steps: dict[str, bool] = {}
 
     base = normalize_match_statistics(pages)
     if not base.get("home_team") or not base.get("away_team") or not base.get("kickoff_date"):
         logger.error("[Flashscore.Persistence] cheie naturala lipsa, abandonez: %r", base)
         return {"match_id": None, "ok": False, "steps": steps}
+    base["season"] = season
 
     match_id = upsert_match_and_get_id(base)
     steps["match_history"] = match_id is not None
@@ -106,22 +111,30 @@ def persist_match_foundation_data(
         return {"match_id": None, "ok": False, "steps": steps}
 
     extended_stats = normalize_match_statistics_extended(pages, match_id)
+    for row in extended_stats:
+        row["season"] = season
     steps["match_statistics_extended"] = upsert_match_statistics_extended(match_id, extended_stats)
 
     roster_rows = normalize_player_match_stats(pages, match_id)
-    steps["player_roster"] = upsert_player_roster(match_id, roster_rows)
+    steps["player_roster"] = upsert_player_roster(match_id, roster_rows, season=season)
 
     stats_table_rows = normalize_player_match_stats_table(pages)
     joined_rows = _join_player_stats_with_roster(stats_table_rows, roster_rows)
-    steps["player_match_stats_extended"] = upsert_player_match_stats_extended(match_id, joined_rows)
+    steps["player_match_stats_extended"] = upsert_player_match_stats_extended(
+        match_id, joined_rows, season=season,
+    )
 
     context_rows = normalize_match_context(
         pages, match_id, base.get("home_team"), base.get("away_team"),
     )
+    for row in context_rows:
+        row["season"] = season
     steps["match_context"] = upsert_match_context(context_rows)
 
     if competition:
         standings_rows = normalize_standings(pages, competition)
+        for row in standings_rows:
+            row["season"] = season
         steps["standings_snapshot"] = upsert_standings_snapshot(standings_rows)
     else:
         steps["standings_snapshot"] = True
@@ -165,7 +178,7 @@ def compute_data_completeness(pages: dict[str, str]) -> dict[str, Any]:
 
 
 def persist_match_with_data_trust_layer(
-    pages: dict[str, str], match_ref: str, competition: str | None = None,
+    pages: dict[str, str], match_ref: str, competition: str | None = None, season: str | None = None,
 ) -> dict[str, Any]:
     """Punct de intrare Data Trust Layer (RAW -> VALIDATED -> CANONICAL,
     ADR-044 - "Nu exista bypass"): scrierea CANONICAL
@@ -175,7 +188,8 @@ def persist_match_with_data_trust_layer(
     dovada de audit completa chiar si pentru meciuri respinse (North
     Star #9, trasabilitate completa). `match_ref` e identitatea stabila
     PRE-canonica (ex. URL/mid Flashscore) - furnizata de apelant
-    (`adapter.py`), nu derivata aici."""
+    (`adapter.py`), nu derivata aici. `season` (migratia 038) - DOAR
+    daca apelantul il ofera explicit, niciodata dedus aici."""
     raw_snapshot = _raw_snapshot_by_tab(pages, competition)
     base = raw_snapshot.get("stats", {})
 
@@ -185,7 +199,7 @@ def persist_match_with_data_trust_layer(
 
     canonical_report: dict[str, Any] = {"match_id": None, "ok": False, "steps": {}}
     if is_valid:
-        canonical_report = persist_match_foundation_data(pages, competition=competition)
+        canonical_report = persist_match_foundation_data(pages, competition=competition, season=season)
     else:
         logger.warning(
             "[Flashscore.Persistence] validare esuata pentru %s, scriere CANONICAL sarita: %s",
@@ -200,10 +214,11 @@ def persist_match_with_data_trust_layer(
             validation_status=validation_status,
             validation_errors=errors,
             canonical_written=canonical_written,
+            season=season,
         )
 
     completeness = compute_data_completeness(pages)
-    upsert_data_completeness(match_ref, canonical_report.get("match_id"), completeness)
+    upsert_data_completeness(match_ref, canonical_report.get("match_id"), completeness, season=season)
 
     return {
         **canonical_report,
