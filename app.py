@@ -1272,10 +1272,32 @@ elif nav == "settings":
                 else:
                     st.caption("Nicio statistică de bază înregistrată pentru acest meci.")
 
+                events = fdl_queries.get_match_events(match_id)
+
+                st.markdown("**Marcatori**")
+                goal_events = sorted(
+                    (e for e in events if e.get("event_type") in ("goal", "penalty_goal", "own_goal")),
+                    key=lambda e: e["minute"],
+                )
+                if goal_events:
+                    goal_rows = []
+                    for e in goal_events:
+                        suffix = {
+                            "own_goal": " (autogol)", "penalty_goal": " (penalty)",
+                        }.get(e["event_type"], "")
+                        goal_rows.append({
+                            "Minut": e["minute"],
+                            "Echipă": "Acasă" if e["team"] == "home" else "Oaspeți",
+                            "Marcator": (e.get("player_name") or "—") + suffix,
+                            "Assist": e.get("related_player_name") or "—",
+                        })
+                    st.dataframe(pd.DataFrame(goal_rows), use_container_width=True, hide_index=True)
+                else:
+                    st.caption("Niciun gol înregistrat în timeline pentru acest meci.")
+
                 dt1, dt2 = st.columns(2)
                 with dt1:
                     st.markdown("**Timeline evenimente**")
-                    events = fdl_queries.get_match_events(match_id)
                     if events:
                         st.dataframe(pd.DataFrame(events), use_container_width=True, hide_index=True)
                     else:
