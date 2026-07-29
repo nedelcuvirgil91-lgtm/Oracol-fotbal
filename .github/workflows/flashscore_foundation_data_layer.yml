@@ -1,0 +1,84 @@
+name: Football Oracle — Flashscore Foundation Data Layer
+
+# [ADR-044] Discovery + fetch/normalize/validate/persist pentru
+# competițiile urmărite (providers/flashscore/discovery.py,
+# FLASHSCORE_TRACKED_COMPETITIONS) — Tier 2 Playwright, SEPARAT de
+# daily.yml (Tier 1 API providers, cadență/natură diferită) — la fel cum
+# lineup_sync.yml e separat de daily.yml pentru același motiv.
+# tos_reviewed=True aprobat explicit de proprietarul produsului
+# (2026-07-29, "DA. Activează acum.") înainte ca acest workflow să existe.
+#
+# --limit-per-league mărginește durata unei rulări — NU există încă un
+# mecanism de "sări meciurile deja colectate": cheia canonică
+# (match_ref, din nume echipe + dată) se rezolvă abia DUPĂ fetch, nu
+# există azi un index pe `mid`-ul Flashscore (identitatea cunoscută
+# ÎNAINTE de fetch) în flashscore_data_completeness. Limitare cunoscută,
+# documentată explicit, nu ascunsă — rerulările pe meciuri deja
+# colectate rămân sigure (persistență idempotentă, verificată), doar
+# ineficiente (re-fetch inutil). Îmbunătățire posibilă pe viitor, nu
+# blochează activarea de azi.
+
+on:
+  schedule:
+    # Zilnic, dupa ce majoritatea meciurilor serii europene s-au incheiat.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+    inputs:
+      leagues:
+        description: "Competiții (separate prin virgulă; gol = toate din FLASHSCORE_TRACKED_COMPETITIONS)"
+        required: false
+        default: ""
+      limit_per_league:
+        description: "Limită meciuri descoperite per competiție"
+        required: false
+        default: "8"
+      dry_run:
+        description: "Doar Discovery — fără fetch/persist"
+        required: false
+        default: "false"
+        type: boolean
+
+jobs:
+  flashscore-foundation-data-layer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Run Flashscore Foundation Data Layer
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then DRY_RUN_FLAG="--dry-run"; fi
+
+          LEAGUES_ARG=()
+          if [ -n "${{ github.event.inputs.leagues }}" ]; then
+            IFS=',' read -ra LEAGUES_ARG <<< "${{ github.event.inputs.leagues }}"
+          fi
+
+          if [ ${#LEAGUES_ARG[@]} -gt 0 ]; then
+            python -m providers.flashscore.run_foundation_data_layer \
+              --leagues "${LEAGUES_ARG[@]}" \
+              --limit-per-league "${{ github.event.inputs.limit_per_league || '8' }}" \
+              $DRY_RUN_FLAG
+          else
+            python -m providers.flashscore.run_foundation_data_layer \
+              --limit-per-league "${{ github.event.inputs.limit_per_league || '8' }}" \
+              $DRY_RUN_FLAG
+          fi
