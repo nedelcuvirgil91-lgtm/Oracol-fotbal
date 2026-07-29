@@ -13,5 +13,6 @@
     "h2h_weight": 0.15,
     "h2h_lookback_days": 1095,
     "monte_carlo_simulations": 10000,
-    "ml_blend_weight": 0.35
+    "ml_blend_weight": 0.35,
+    "ml_blending_enabled": false
 }
