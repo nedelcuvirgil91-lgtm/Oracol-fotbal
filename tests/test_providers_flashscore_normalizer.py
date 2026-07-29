@@ -68,6 +68,17 @@ def test_normalize_match_statistics_kickoff_iso(superliga_1_pages):
     assert result["kickoff_date"] == "2026-07-27T18:30:00"
 
 
+def test_normalize_match_statistics_fixture_id_from_mid(superliga_1_pages, ucl_6_pages):
+    """[FIX live] Regresie directa - primul run live real a esuat cu
+    'null value in column "fixture_id"' (NOT NULL, migratia 008) pentru
+    orice meci nou descoperit de Flashscore Discovery. fixture_id se
+    deriva din `mid`-ul Flashscore (og:url, identic pe toate tab-urile),
+    convenție `{provider}_{id}` deja folosita de sync/sources/football_data.py
+    (`fd_{match_id}`)."""
+    assert normalize_match_statistics(superliga_1_pages)["fixture_id"] == "flashscore_EeqI7WJc"
+    assert normalize_match_statistics(ucl_6_pages)["fixture_id"] == "flashscore_f9yUru7s"
+
+
 def test_normalize_match_statistics_real_values(superliga_1_pages):
     """Fiecare valoare verificata manual, direct pe fixture (vezi sesiunea
     de verificare) - nu presupusa."""

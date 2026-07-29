@@ -68,6 +68,36 @@ def test_normalize_match_statistics_prefers_dedicated_stats_tab(full_tabs_pages)
     assert result["away_goalkeeper_saves"] == 2.0
 
 
+def test_normalize_match_statistics_integer_stat_fields_are_int_not_float(full_tabs_pages):
+    """[FIX live, gasit la al doilea run live real] upsert_match_and_get_id
+    a esuat cu 'invalid input syntax for type integer: "12.0"' - RPC-ul
+    face `(payload->>'home_shots')::integer` (cast DIRECT text->integer,
+    migratiile 008/026/032), care respinge text cu zecimale chiar daca
+    valoarea e intreaga. Doar home/away_xg_actual si home/away_possession
+    sunt coloane `numeric` (accepta text cu zecimale) - restul din
+    STAT_LABEL_TO_FIELDS trebuie sa fie `int` Python, nu `float`."""
+    result = normalize_match_statistics(full_tabs_pages)
+    for field in (
+        "home_shots", "away_shots", "home_shots_on_target", "away_shots_on_target",
+        "home_corners", "away_corners", "home_fouls", "away_fouls",
+        "home_yellow_cards", "away_yellow_cards", "home_red_cards", "away_red_cards",
+        "home_offsides", "away_offsides", "home_goalkeeper_saves", "away_goalkeeper_saves",
+    ):
+        assert isinstance(result[field], int), f"{field} should be int, got {type(result[field])}"
+    assert isinstance(result["home_possession"], float)
+    assert isinstance(result["home_xg_actual"], float)
+
+
+def test_normalize_match_statistics_fixture_id_from_mid(full_tabs_pages):
+    """[FIX live, gasit la primul run live real] match_history.fixture_id
+    e NOT NULL - orice meci nou descoperit de Flashscore Discovery
+    (nevazut inca de niciun provider API) esua la INSERT fara el. Derivat
+    din `mid`-ul Flashscore (og:url, identic pe toate tab-urile), aceeasi
+    conventie `{provider}_{id}` deja folosita de
+    sync/sources/football_data.py (`fd_{match_id}`)."""
+    assert normalize_match_statistics(full_tabs_pages)["fixture_id"] == "flashscore_AJtcK933"
+
+
 def test_normalize_match_statistics_final_and_half_time_score(full_tabs_pages):
     """[TASK APROBAT - corectie oversight] Scor final si scor la pauza -
     .detailScore__wrapper si perechea "1st Half"/valoare - coloane

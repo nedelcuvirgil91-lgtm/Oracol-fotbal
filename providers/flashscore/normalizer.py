@@ -140,6 +140,24 @@ def _parse_numeric_loose(raw: str | None) -> float | None:
         return None
 
 
+_MID_RE = re.compile(r"[?&]mid=([^&\"']+)")
+
+
+def _extract_mid(soup: BeautifulSoup) -> str | None:
+    """`mid`-ul Flashscore al meciului, din `<meta property="og:url">` -
+    prezent identic pe TOATE tab-urile (verificat pe fixture-uri reale,
+    summary/stats/lineups/player_stats/odds/h2h/standings), niciodata
+    doar pe unul. Sursa PREFERATA fata de a cere `mid`-ul ca parametru
+    separat - pastreaza `normalize_match_statistics()` pur (doar `pages`
+    in intrare, fara stare externa ceruta de apelant)."""
+    meta = soup.find("meta", attrs={"property": "og:url"})
+    content = meta.get("content") if meta else None
+    if not content:
+        return None
+    m = _MID_RE.search(content)
+    return m.group(1) if m else None
+
+
 def _parse_int_loose(raw: str | None) -> int | None:
     """Pentru valori intregi cu spatii/spatii-fixe ca separator de mii
     (ex. "7 128" pentru attendance) - verificat real pe fixture."""
@@ -273,6 +291,16 @@ def normalize_match_statistics(pages: dict[str, str]) -> dict[str, Any]:
     home_team, away_team = _extract_team_names(stats_soup)
     kickoff_date = _extract_kickoff_iso(stats_soup)
     stats = _extract_labeled_stat_pairs(stats_soup)
+    # [FIX live, gasit la al 2-lea run real] match_history.fixture_id e
+    # NOT NULL - INSERT-ul canonic (upsert_match_canonical, migratia 008)
+    # esueaza pentru orice meci genuin nou (nevazut inca de niciun provider
+    # API), care e exact cazul meciurilor descoperite de Flashscore Discovery.
+    # Convenție deja existentă in codebase (sync/sources/football_data.py:
+    # `f"fd_{match_id}"`) - prefix per provider + id-ul lui intern. `mid`-ul
+    # Flashscore vine din `og:url`, prezent identic pe toate tab-urile -
+    # pastreaza functia pura (fara parametru nou cerut de la apelant).
+    mid = _extract_mid(stats_soup)
+    fixture_id = f"flashscore_{mid}" if mid else None
 
     summary_html = pages.get("summary")
     summary_soup = BeautifulSoup(summary_html, "html.parser") if summary_html else None
@@ -289,6 +317,7 @@ def normalize_match_statistics(pages: dict[str, str]) -> dict[str, Any]:
     home_ht_goals, away_ht_goals = _extract_half_time_score(summary_soup) if summary_soup else (None, None)
 
     result: dict[str, Any] = {
+        "fixture_id": fixture_id,
         "home_team": home_team,
         "away_team": away_team,
         "kickoff_date": kickoff_date,
