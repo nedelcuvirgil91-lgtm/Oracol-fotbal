@@ -90,11 +90,14 @@ _SCRAPERS: dict[str, ScraperCapability] = {
         politeness_policy_ref="udal_pilot_generic_html_stats-politeness-v1",
         tos_reviewed=False, tos_reviewed_by=None, tos_reviewed_at=None,
     ),
-    # [R-Sync-FLASH-01] Design-only — vezi docs/06_UDAL/R-SYNC-FLASH-01_DESIGN.md.
-    # Provider AUXILIAR (nu primary), Tier 2 Playwright. `tos_reviewed=False`
-    # blochează `is_runnable()`; `providers.flashscore.adapter.FlashscoreAdapter.
-    # fetch()` ridică independent `PlaywrightNotImplementedError` — dublu gate,
-    # niciun cod din acest repo poate porni o cerere reală azi.
+    # [ADR-044, Foundation Data Layer] Provider Tier 2 Playwright.
+    # `providers.flashscore.adapter.FlashscoreAdapter.fetch()` are acum
+    # implementare REALĂ (Playwright, pattern verificat în POC-uri) — dar
+    # `tos_reviewed=False` blochează `is_runnable()`, verificat de
+    # `preflight()` (apelat explicit de orice orchestrator ÎNAINTE de
+    # `fetch()`) — gate UNIC, blocant, neatins. Activarea live rămâne o
+    # decizie legală/de produs explicită, separată, NEACOPERITĂ de niciun
+    # ADR — vezi docs/00_GOVERNANCE/ADR-044-flashscore-foundation-data-layer.md.
     "flashscore_match_enrichment": ScraperCapability(
         scraper_id="flashscore_match_enrichment", version=1,
         tier=AcquisitionTier.PLAYWRIGHT,
