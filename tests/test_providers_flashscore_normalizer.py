@@ -84,14 +84,19 @@ def test_normalize_match_statistics_real_values(superliga_1_pages):
 
 
 def test_normalize_match_statistics_no_fabricated_fields(superliga_1_pages):
-    """Camp fara dovada directa (corners/fouls/cards/offsides/saves/
-    attendance) NU trebuie sa apara deloc in rezultat - scope M0 explicit
-    (vezi docstring normalizer.py) - nicio stare necunoscuta aproximata."""
+    """[Foundation Data Layer] Aceste 5 perechi au acum mapare reala in
+    STAT_LABEL_TO_FIELDS (confirmate pe tab-ul dedicat "stats") - dar
+    fixture-ul superliga_1 (POC initial, 10 meciuri) NU are tab "stats"
+    capturat, doar "summary" (widget restrans, 5 categorii, fara acestea).
+    Cheile TREBUIE sa apara (mapare reala, nu ascunsa), dar valoarea
+    trebuie sa fie None - nicio stare necunoscuta aproximata cu 0 sau alta
+    valoare."""
     result = normalize_match_statistics(superliga_1_pages)
-    for forbidden in ("home_corners", "away_corners", "home_fouls", "away_fouls",
-                       "home_yellow_cards", "away_yellow_cards", "home_offsides",
-                       "away_offsides", "home_goalkeeper_saves", "away_goalkeeper_saves"):
-        assert forbidden not in result
+    for field in ("home_corners", "away_corners", "home_fouls", "away_fouls",
+                  "home_yellow_cards", "away_yellow_cards", "home_offsides",
+                  "away_offsides", "home_goalkeeper_saves", "away_goalkeeper_saves"):
+        assert field in result
+        assert result[field] is None
 
 
 def test_normalize_match_statistics_missing_widget_returns_none_not_zero(ucl_6_pages):

@@ -1661,6 +1661,190 @@ def should_retrain_ml(min_new_matches: int = 20) -> bool:
 # PREDICTION EVALUATION (Sprint 0 — Stabilizare, Etapa 3)
 # ════════════════════════════════════════════════════════════════════════════
 
+def upsert_match_and_get_id(row: dict) -> int | None:
+    """Ca `upsert_match()`, dar returneaza id-ul canonic rezolvat (insert
+    SAU update) - necesar pentru scrierile FK-dependente ale Foundation
+    Data Layer (`match_statistics_extended`, `player_match_stats`,
+    `flashscore_match_context`), care au nevoie de `match_history.id`
+    pentru a-l lega, nu doar de confirmarea ca s-a scris."""
+    client = get_client()
+    if client is None:
+        return None
+    payload = _strip_none_values(_normalize_team_fields(row))
+    try:
+        res = client.rpc("upsert_match_canonical", {"p_payload": payload}).execute()
+        if not _rpc_write_ok(res, payload, "upsert_match_and_get_id"):
+            return None
+        data = getattr(res, "data", None) or {}
+        return data.get("id") if isinstance(data, dict) else None
+    except Exception as exc:
+        logger.error("[Queries] upsert_match_and_get_id failed: %s", exc)
+        return None
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# FLASHSCORE FOUNDATION DATA LAYER (migratia 035/036)
+# ════════════════════════════════════════════════════════════════════════════
+# Owner de scriere: exclusiv Flashscore (Night Sync) - vezi providers/
+# flashscore/persistence.py pentru orchestrarea completa per meci.
+# Idempotenta garantata la nivel Postgres prin ON CONFLICT DO UPDATE pe
+# exact constrangerea UNIQUE din migratia 035 - rerun-uri repetate produc
+# acelasi rand, niciodata un duplicat nou.
+
+def upsert_match_statistics_extended(match_id: int, rows: list[dict]) -> bool:
+    """`match_statistics_extended` (EAV) - `on_conflict="match_id,stat_key"`,
+    exact cheia UNIQUE a tabelei (migratia 035)."""
+    if not rows:
+        return True
+    client = get_client()
+    if client is None:
+        return False
+    payload = [{**r, "match_id": match_id} for r in rows]
+    try:
+        client.table("match_statistics_extended").upsert(
+            payload, on_conflict="match_id,stat_key",
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.error("[Queries] upsert_match_statistics_extended failed: %s", exc)
+        return False
+
+
+def upsert_player_roster(match_id: int, roster_rows: list[dict]) -> bool:
+    """`player_match_stats` - randurile BRUTE de roster (nume/numar/echipa,
+    din tab-ul Lineups), FARA rating/pozitie (scrise separat, vezi
+    `upsert_player_match_stats_extended` mai jos) - `on_conflict=
+    "match_id,team,player_name"`, cheia UNIQUE existenta (migratia 032).
+    Payload-ul include DOAR coloanele cunoscute aici - un upsert ulterior
+    de imbogatire (rating/pozitie) nu le suprascrie cu NULL (PostgREST
+    genereaza SET doar pentru coloanele prezente in cerere)."""
+    if not roster_rows:
+        return True
+    client = get_client()
+    if client is None:
+        return False
+    payload = [
+        {
+            "match_id": match_id, "team": r["team"], "player_name": r["player_name"],
+            "shirt_number": r.get("shirt_number"), "source": r.get("source", "flashscore"),
+        }
+        for r in roster_rows
+    ]
+    try:
+        client.table("player_match_stats").upsert(
+            payload, on_conflict="match_id,team,player_name",
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.error("[Queries] upsert_player_roster failed: %s", exc)
+        return False
+
+
+def upsert_player_match_stats_extended(match_id: int, stats_rows: list[dict]) -> bool:
+    """`player_match_stats_extended` (EAV per jucator) - `stats_rows`:
+    randuri din `normalize_player_match_stats_table()`, deja imbinate cu
+    roster-ul (team rezolvat) de apelant (`providers/flashscore/
+    persistence.py`) - nu se rezolva echipa aici. Fiecare rand scrie
+    intai imbogatirea `player_match_stats` (position/rating), citeste
+    id-ul rezultat, apoi scrie cele 7 statistici avansate EAV cu acel FK.
+    Randuri fara `team` rezolvat sunt EXCLUSE (nu se ghiceste echipa)."""
+    if not stats_rows:
+        return True
+    client = get_client()
+    if client is None:
+        return False
+    ok = True
+    for row in stats_rows:
+        team = row.get("team")
+        if not team:
+            logger.warning(
+                "[Queries] player_match_stats_extended: '%s' fara echipa rezolvata, exclus",
+                row.get("player_name"),
+            )
+            ok = False
+            continue
+        enrich_payload = {
+            "match_id": match_id, "team": team, "player_name": row["player_name"],
+            "position": row.get("position"), "rating": row.get("rating"),
+            "source": "flashscore",
+        }
+        try:
+            res = client.table("player_match_stats").upsert(
+                enrich_payload, on_conflict="match_id,team,player_name",
+            ).execute()
+            data = getattr(res, "data", None) or []
+            pms_id = data[0]["id"] if data else None
+        except Exception as exc:
+            logger.error("[Queries] player_match_stats enrichment failed pentru %s: %s",
+                         row.get("player_name"), exc)
+            ok = False
+            continue
+        if pms_id is None:
+            logger.warning("[Queries] player_match_stats enrichment fara id rezolvat pentru %s",
+                           row.get("player_name"))
+            ok = False
+            continue
+        extended = row.get("extended_stats") or []
+        if not extended:
+            continue
+        ext_payload = [
+            {
+                "player_match_stats_id": pms_id, "stat_key": e["stat_key"],
+                "stat_label": e["stat_label"], "value_raw": e.get("value_raw"),
+                "value_numeric": e.get("value_numeric"), "source": "flashscore",
+            }
+            for e in extended
+        ]
+        try:
+            client.table("player_match_stats_extended").upsert(
+                ext_payload, on_conflict="player_match_stats_id,stat_key",
+            ).execute()
+        except Exception as exc:
+            logger.error("[Queries] player_match_stats_extended failed pentru %s: %s",
+                         row.get("player_name"), exc)
+            ok = False
+    return ok
+
+
+def upsert_match_context(rows: list[dict]) -> bool:
+    """`flashscore_match_context` (H2H + forma recenta, segmentate) -
+    `on_conflict="context_match_id,category,meeting_order"`, cheia
+    UNIQUE existenta (migratia 035)."""
+    if not rows:
+        return True
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("flashscore_match_context").upsert(
+            rows, on_conflict="context_match_id,category,meeting_order",
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.error("[Queries] upsert_match_context failed: %s", exc)
+        return False
+
+
+def upsert_standings_snapshot(rows: list[dict]) -> bool:
+    """`flashscore_standings_snapshot` (clasament curent) -
+    `on_conflict="competition,team"`, cheia UNIQUE existenta
+    (migratia 035) - rerun ACTUALIZEAZA snapshot-ul (rand curent), nu
+    acumuleaza istoric."""
+    if not rows:
+        return True
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("flashscore_standings_snapshot").upsert(
+            rows, on_conflict="competition,team",
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.error("[Queries] upsert_standings_snapshot failed: %s", exc)
+        return False
+
+
 def get_predictions_with_results(days_back: int | None = None) -> list[dict]:
     """
     [ADAUGAT Sprint 0 — Stabilizare, Etapa 3] Citire READ-ONLY — rânduri din

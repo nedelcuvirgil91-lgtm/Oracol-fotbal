@@ -44,15 +44,68 @@ from typing import Any
 
 from bs4 import BeautifulSoup
 
-# Eticheta reala (verificata pe fixture) -> perechea de coloane canonice
-# match_history (migratiile 008/026/032). Doar campuri cu dovada directa.
+# Eticheta reala (verificata pe fixture-ul din tab-ul "Statistici",
+# /summary/stats/) -> perechea de coloane canonice match_history
+# (migratiile 008/026/032). Doar campuri cu dovada directa - extins la
+# Foundation Data Layer (2026-07-29) cu cele 7 campuri gasite reale pe
+# tab-ul dedicat, niciodata vizitat pana acum (corners/fouls/cards/
+# offsides/saves/shots_on_target - toate au deja coloana in match_history).
 STAT_LABEL_TO_FIELDS: dict[str, tuple[str, str]] = {
     "Expected goals (xG)": ("home_xg_actual", "away_xg_actual"),
     "Ball possession": ("home_possession", "away_possession"),
     "Total shots": ("home_shots", "away_shots"),
+    "Shots on target": ("home_shots_on_target", "away_shots_on_target"),
+    "Corner kicks": ("home_corners", "away_corners"),
+    "Fouls": ("home_fouls", "away_fouls"),
+    "Yellow cards": ("home_yellow_cards", "away_yellow_cards"),
+    "Red cards": ("home_red_cards", "away_red_cards"),
+    "Offsides": ("home_offsides", "away_offsides"),
+    "Goalkeeper saves": ("home_goalkeeper_saves", "away_goalkeeper_saves"),
 }
 
 _DATETIME_RE = re.compile(r"(\d{2})\.(\d{2})\.(\d{4}) (\d{2}):(\d{2})")
+_H2H_DATE_RE = re.compile(r"(\d{2})\.(\d{2})\.(\d{2})$")
+_LEADING_NUMBER_RE = re.compile(r"-?\d+(?:\.\d+)?")
+
+# Vocabular REAL de pozitii Flashscore (verificat pe fixture, tab "Statistici
+# jucatori" - 32 randuri, ambele echipe) - gasit prin testare directa,
+# NU presupus: regex-ul initial `^(.+?\.)\s+(.+)$` presupunea ca numele
+# jucatorului se termina mereu cu "X." (ca "Pop A."), dar 2 din 32 randuri
+# reale au nume NEabreviate, fara punct ("Teles Wingback", "Heriberto
+# Tavares Forward") - eșuau silentios sa se desparta de pozitie, ceea ce
+# rupea join-ul cu roster-ul la persist() (gasit prin testul de
+# idempotenta, nu prin citire de cod). Potrivire pe SUFIX cunoscut
+# (nu pe punct) - mai lung intai (ordinea conteaza: "Attacking
+# midfielder" trebuie verificat inaintea lui "Midfielder", altfel
+# sufixul mai scurt s-ar potrivi gresit primul). Pozitie noua,
+# neintalnita aici -> name ramane textul intreg, position None (fallback
+# onest "necunoscut", nu crash, nu ghicit - North Star #8).
+_KNOWN_POSITION_LABELS: tuple[str, ...] = tuple(sorted((
+    "Goalkeeper", "Defender", "Centre back", "Fullback", "Wingback",
+    "Winger", "Midfielder", "Attacking midfielder", "Forward", "Striker",
+), key=len, reverse=True))
+
+
+def _split_player_name_position(text: str) -> tuple[str, str | None]:
+    for label in _KNOWN_POSITION_LABELS:
+        if text == label:
+            return "", label
+        suffix = " " + label
+        if text.endswith(suffix):
+            return text[: -len(suffix)].strip(), label
+    return text, None
+
+# Cele 8 coloane reale ale tabelului "Statistici jucatori" (dupa Rating) -
+# verificate pe fixture: header + un rand real, ordine confirmata.
+PLAYER_TABLE_EXTENDED_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("total_shots", "Total shots"),
+    ("xg", "Expected goals (xG)"),
+    ("accurate_passes", "Accurate passes"),
+    ("touches", "Touches"),
+    ("touches_in_opposition_box", "Touches in opposition box"),
+    ("successful_dribbles", "Successful dribbles"),
+    ("duels", "Duels"),
+)
 
 
 def _parse_numeric(raw: str | None) -> float | None:
@@ -63,6 +116,34 @@ def _parse_numeric(raw: str | None) -> float | None:
         return float(cleaned)
     except ValueError:
         return None
+
+
+def _parse_numeric_loose(raw: str | None) -> float | None:
+    """Ia primul numar gasit la inceputul stringului - acopera valori
+    compuse reale gasite pe tab-ul de statistici ("85% (314/371)" -> 85.0,
+    "12/17 (71%)" -> 12.0) si valori lipsa ("-" -> None)."""
+    if raw is None:
+        return None
+    m = _LEADING_NUMBER_RE.match(raw.strip())
+    if not m:
+        return None
+    try:
+        return float(m.group(0))
+    except ValueError:
+        return None
+
+
+def _parse_int_loose(raw: str | None) -> int | None:
+    """Pentru valori intregi cu spatii/spatii-fixe ca separator de mii
+    (ex. "7 128" pentru attendance) - verificat real pe fixture."""
+    if raw is None:
+        return None
+    cleaned = re.sub(r"[^\d]", "", raw)
+    return int(cleaned) if cleaned else None
+
+
+def _slugify(label: str) -> str:
+    return re.sub(r"[^\w]+", "_", label.strip().lower()).strip("_")
 
 
 def _extract_team_names(soup: BeautifulSoup) -> tuple[str | None, str | None]:
@@ -133,17 +214,27 @@ def _extract_labeled_info_pairs(soup: BeautifulSoup) -> dict[str, str | None]:
 
 
 def normalize_match_statistics(pages: dict[str, str]) -> dict[str, Any]:
-    """Forma acceptata de `upsert_match_canonical` (subset COALESCE-safe,
-    scope M0 - vezi docstring modul)."""
-    summary_html = pages.get("summary")
-    if not summary_html:
-        return {}
-    soup = BeautifulSoup(summary_html, "html.parser")
+    """Forma acceptata de `upsert_match_canonical` (subset COALESCE-safe).
 
-    home_team, away_team = _extract_team_names(soup)
-    kickoff_date = _extract_kickoff_iso(soup)
-    info = _extract_labeled_info_pairs(soup)
-    stats = _extract_labeled_stat_pairs(soup)
+    [ACTUALIZAT Foundation Data Layer] Preferat: tab-ul dedicat "stats"
+    (/summary/stats/, 36 categorii reale) - fallback pe "summary" (5
+    categorii din widget-ul restrans) daca "stats" nu e in pages (pastreaza
+    compatibilitatea cu cele 9 fixture-uri din primul POC, care nu au tab
+    "stats" capturat). Echipe/data raman pe orice pagina disponibila -
+    verificat, header-ul e comun tuturor tab-urilor. Referee/Venue/
+    Attendance/Capacity raman EXCLUSIV pe "summary" (verificat - absente
+    din "stats")."""
+    stats_page_html = pages.get("stats") or pages.get("summary")
+    if not stats_page_html:
+        return {}
+    stats_soup = BeautifulSoup(stats_page_html, "html.parser")
+
+    home_team, away_team = _extract_team_names(stats_soup)
+    kickoff_date = _extract_kickoff_iso(stats_soup)
+    stats = _extract_labeled_stat_pairs(stats_soup)
+
+    summary_html = pages.get("summary")
+    info = _extract_labeled_info_pairs(BeautifulSoup(summary_html, "html.parser")) if summary_html else {}
 
     result: dict[str, Any] = {
         "home_team": home_team,
@@ -151,6 +242,8 @@ def normalize_match_statistics(pages: dict[str, str]) -> dict[str, Any]:
         "kickoff_date": kickoff_date,
         "referee": info.get("Referee:"),
         "stadium": info.get("Venue:"),
+        "attendance": _parse_int_loose(info.get("Attendance:")),
+        "capacity": _parse_int_loose(info.get("Capacity:")),
         "stats_source": "flashscore",
     }
     for label, (home_field, away_field) in STAT_LABEL_TO_FIELDS.items():
@@ -164,6 +257,33 @@ def normalize_match_statistics(pages: dict[str, str]) -> dict[str, Any]:
         result["home_lineup"], result["away_lineup"] = _extract_lineups(lineup_soup)
 
     return result
+
+
+def normalize_match_statistics_extended(pages: dict[str, str], match_id: int) -> list[dict[str, Any]]:
+    """Randuri `match_statistics_extended` (EAV, migratia 035) - toate
+    categoriile reale din tab-ul "stats" FARA coloana dedicata in
+    match_history (nu duplica STAT_LABEL_TO_FIELDS). ~26 categorii reale
+    verificate pe fixture (xGOT, blocked shots, duels won, tackles, etc.)."""
+    stats_page_html = pages.get("stats") or pages.get("summary")
+    if not stats_page_html:
+        return []
+    soup = BeautifulSoup(stats_page_html, "html.parser")
+    stats = _extract_labeled_stat_pairs(soup)
+    rows: list[dict[str, Any]] = []
+    for label, (home_raw, away_raw) in stats.items():
+        if label in STAT_LABEL_TO_FIELDS:
+            continue
+        rows.append({
+            "match_id": match_id,
+            "stat_key": _slugify(label),
+            "stat_label": label,
+            "home_value_raw": home_raw,
+            "away_value_raw": away_raw,
+            "home_value_numeric": _parse_numeric_loose(home_raw),
+            "away_value_numeric": _parse_numeric_loose(away_raw),
+            "source": "flashscore",
+        })
+    return rows
 
 
 def _extract_roster_rows(soup: BeautifulSoup) -> list[dict[str, Any]]:
@@ -266,6 +386,153 @@ def normalize_match_events(pages: dict[str, str], match_id: int) -> list[dict[st
                 "source": "flashscore",
             })
     return events
+
+
+def normalize_player_match_stats_table(pages: dict[str, str]) -> list[dict[str, Any]]:
+    """Randuri brute din tab-ul "Statistici jucatori" (/summary/player-
+    stats/) - nume, pozitie, rating + 7 statistici avansate (EAV). Tabelul
+    combina ambele echipe FARA coloana de echipa - team se rezolva la
+    persist(), prin join dupa nume cu roster-ul din `_extract_roster_rows`
+    (acelasi meci) - nu aici, ca sa nu amestecam extractia cu rezolvarea
+    de identitate. Verificat pe fixture: 32 randuri, 9 coloane
+    (nume+pozitie, rating, + cele 7 din PLAYER_TABLE_EXTENDED_COLUMNS)."""
+    html = pages.get("player_stats")
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "html.parser")
+    rows_out: list[dict[str, Any]] = []
+    for row in soup.select("[data-testid='wcl-tableBodyRow']"):
+        cells = row.select("[data-testid='wcl-tableBodyCell']")
+        if len(cells) < 2 + len(PLAYER_TABLE_EXTENDED_COLUMNS):
+            continue
+        name_pos_text = cells[0].get_text(" ", strip=True)
+        name, position = _split_player_name_position(name_pos_text)
+        if not name:
+            continue
+        extended = []
+        for (key, label), cell in zip(PLAYER_TABLE_EXTENDED_COLUMNS, cells[2:]):
+            raw = cell.get_text(strip=True)
+            extended.append({
+                "stat_key": key, "stat_label": label,
+                "value_raw": raw, "value_numeric": _parse_numeric_loose(raw),
+            })
+        rows_out.append({
+            "player_name": name,
+            "position": position,
+            "rating": _parse_numeric_loose(cells[1].get_text(strip=True)),
+            "extended_stats": extended,
+        })
+    return rows_out
+
+
+def normalize_match_context(
+    pages: dict[str, str], match_id: int, home_team: str | None, away_team: str | None,
+) -> list[dict[str, Any]]:
+    """Randuri `flashscore_match_context` (migratia 035) - segmentate pe 3
+    categorii REALE (verificate live, `wcl-headerSection-text`):
+    "Head-to-head matches" (h2h_overall), "Last matches: <echipa acasa>"
+    (recent_form_home), "Last matches: <echipa oaspete>" (recent_form_away).
+    NU amestecate intr-un flux nediferentiat - fiecare rand real cu data
+    (DD.MM.YY -> ISO), competitie, echipe, scor, dintr-un singur <a
+    class="h2h__row"> auto-continut per meci istoric."""
+    html = pages.get("h2h")
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "html.parser")
+    rows_out: list[dict[str, Any]] = []
+    for header in soup.select("[data-testid='wcl-headerSection-text']"):
+        header_text = header.get_text(strip=True)
+        category: str | None = None
+        if header_text.startswith("Head-to-head"):
+            category = "h2h_overall"
+        elif header_text.startswith("Last matches:"):
+            team_name = header_text.split(":", 1)[1].strip()
+            if home_team and team_name == home_team:
+                category = "recent_form_home"
+            elif away_team and team_name == away_team:
+                category = "recent_form_away"
+        if category is None:
+            continue
+        section = header.find_parent(class_="h2h__section")
+        if section is None:
+            continue
+        for order, link in enumerate(section.select("a[href*='/match/']")):
+            date_el = link.select_one("[data-testid='wcl-stageTime']")
+            participants = link.select("[data-testid='wcl-matchRow-participant']")
+            scores = link.select("[data-testid='wcl-tableScore']")
+            if len(participants) < 2 or len(scores) < 2:
+                continue
+            rows_out.append({
+                "context_match_id": match_id,
+                "category": category,
+                "meeting_order": order,
+                "meeting_date": _parse_h2h_date(date_el.get_text(strip=True) if date_el else None),
+                "home_team": participants[0].get_text(strip=True),
+                "away_team": participants[1].get_text(strip=True),
+                "home_score": _parse_int_loose(scores[0].get_text(strip=True)),
+                "away_score": _parse_int_loose(scores[1].get_text(strip=True)),
+                "source": "flashscore",
+            })
+    return rows_out
+
+
+def _parse_h2h_date(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    m = _H2H_DATE_RE.search(raw.strip())
+    if not m:
+        return None
+    day, month, yy = m.groups()
+    try:
+        return datetime(2000 + int(yy), int(month), int(day)).date().isoformat()
+    except ValueError:
+        return None
+
+
+def normalize_standings(pages: dict[str, str], competition: str) -> list[dict[str, Any]]:
+    """Randuri `flashscore_standings_snapshot` (migratia 035) - clasament
+    curent. NOTA de robustete (raportata explicit): structura foloseste
+    clase CSS (`.ui-table__row`, `.tableCellParticipant__name`), NU
+    `data-testid` standard ca restul site-ului - mai fragil potential la
+    schimbari viitoare de build decat restul extractorilor. P/W/D/L
+    identificate pozitional (primele 4 `.table__cell--value` din rand,
+    dupa convenția standard confirmată pe fixture) - Scor/GD/Puncte au
+    clase specifice, mai robuste."""
+    html = pages.get("standings")
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "html.parser")
+    rows_out: list[dict[str, Any]] = []
+    for row in soup.select(".ui-table__row"):
+        team_el = row.select_one("a.tableCellParticipant__name")
+        if team_el is None:
+            continue
+        rank_el = row.select_one(".tableCellRank")
+        values = row.select(".table__cell--value")
+        score_el = row.select_one(".table__cell--score")
+        gd_el = row.select_one(".table__cell--goalsForAgainstDiff")
+        points_el = row.select_one(".table__cell--points")
+        goals_for = goals_against = None
+        if score_el is not None:
+            parts = score_el.get_text(strip=True).split(":")
+            if len(parts) == 2:
+                goals_for = _parse_int_loose(parts[0])
+                goals_against = _parse_int_loose(parts[1])
+        rows_out.append({
+            "competition": competition,
+            "team": team_el.get_text(strip=True),
+            "rank": _parse_int_loose(rank_el.get_text(strip=True)) if rank_el else None,
+            "played": _parse_int_loose(values[0].get_text(strip=True)) if len(values) > 0 else None,
+            "won": _parse_int_loose(values[1].get_text(strip=True)) if len(values) > 1 else None,
+            "drawn": _parse_int_loose(values[2].get_text(strip=True)) if len(values) > 2 else None,
+            "lost": _parse_int_loose(values[3].get_text(strip=True)) if len(values) > 3 else None,
+            "goals_for": goals_for,
+            "goals_against": goals_against,
+            "goal_diff": _parse_int_loose(gd_el.get_text(strip=True)) if gd_el else None,
+            "points": _parse_int_loose(points_el.get_text(strip=True)) if points_el else None,
+            "source": "flashscore",
+        })
+    return rows_out
 
 
 def normalize_upcoming_match(raw_record: dict) -> dict[str, Any]:
