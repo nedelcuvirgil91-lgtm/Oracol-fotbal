@@ -1,10 +1,11 @@
 name: Football Oracle — Daily Sync
 
 on:
-  schedule:
-    # Rulează zilnic la 03:00 UTC
-    - cron: "0 3 * * *"
-  # Permite și rulare manuală din GitHub Actions UI
+  # [Faza 2 — consolidare, aprobare explicită proprietar produs] cron-ul
+  # nocturn a fost mutat în night_sync.yml (sync/run_night.py, care apelează
+  # acest run() ca prima etapă) — a păstra un cron aici ÎN PLUS ar rula
+  # sync/run_daily.py de două ori pe noapte. Rămâne workflow_dispatch —
+  # rulare manuală izolată, pentru depanare/validare, oricând.
   workflow_dispatch:
     inputs:
       skip_features:

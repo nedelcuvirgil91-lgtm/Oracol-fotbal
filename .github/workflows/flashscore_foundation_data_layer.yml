@@ -19,9 +19,11 @@ name: Football Oracle — Flashscore Foundation Data Layer
 # blochează activarea de azi.
 
 on:
-  schedule:
-    # Zilnic, dupa ce majoritatea meciurilor serii europene s-au incheiat.
-    - cron: "0 6 * * *"
+  # [Faza 2 — consolidare, aprobare explicita proprietar produs] cron-ul
+  # nocturn a fost mutat in night_sync.yml (sync/run_night.py, care
+  # apeleaza acest run() ca etapa 2) - a pastra un cron aici IN PLUS ar
+  # rula Flashscore (Playwright) de doua ori pe noapte. Ramane
+  # workflow_dispatch - rulare manuala izolata, pentru depanare/validare.
   workflow_dispatch:
     inputs:
       leagues:

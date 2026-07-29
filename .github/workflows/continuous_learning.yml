@@ -6,11 +6,11 @@ name: Football Oracle — Continuous Learning (ADR-030)
 # (run_cycle() întoarce {"enabled": False} și iese imediat).
 
 on:
-  schedule:
-    # O dată pe zi, la o oră diferită de daily.yml (03:00 UTC) — evită
-    # coliziunea directă; concurrency de mai jos previne suprapunerea la
-    # rulări manuale declanșate în paralel.
-    - cron: "0 6 * * *"
+  # [Faza 2 — consolidare, aprobare explicită proprietar produs] cron-ul
+  # nocturn a fost mutat în night_sync.yml (sync/run_night.py, care
+  # apelează acest main() ca etapa 8, "ML Refresh") — a păstra un cron
+  # aici ÎN PLUS ar rula Continuous Learning de două ori pe noapte.
+  # Rămâne workflow_dispatch — rulare manuală izolată, pentru depanare.
   workflow_dispatch: {}
 
 concurrency:

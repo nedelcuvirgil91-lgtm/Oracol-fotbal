@@ -7,15 +7,19 @@ name: Football Oracle — Night Sync (Faza 2)
 # fiecarei etape (unele ruleaza live, nu batch; Backup e neimplementat,
 # ADR-044 Addendum A6, decizie explicita).
 #
-# DOAR workflow_dispatch deocamdata — daily.yml (0 3 UTC),
-# flashscore_foundation_data_layer.yml (0 6 UTC) si continuous_learning.yml
-# (0 6 UTC) raman active si separate, ca sa nu se ruleze de doua ori acelasi
-# provider/Flashscore/Continuous Learning in aceeasi noapte (dublu consum
-# de cota API, doua rulari Playwright). Consolidarea intr-un singur cron
-# nocturn (dezactivand cele 3 separate) e o decizie operationala separata,
-# semnalata explicit proprietarului produsului, nu luata unilateral aici.
+# [Faza 2 — consolidare, aprobare explicita proprietar produs, "Nu vreau
+# joburi automate care executa aceleasi functii in paralel"] Acesta e
+# ACUM singurul workflow AUTOMAT nocturn - daily.yml,
+# flashscore_foundation_data_layer.yml si continuous_learning.yml au
+# ramas doar workflow_dispatch (rulare manuala/depanare), cron-ul lor a
+# fost eliminat explicit ca sa nu se ruleze de doua ori aceeasi noapte
+# aceiasi provideri/Flashscore/Continuous Learning.
 
 on:
+  schedule:
+    # Preia slotul original al daily.yml - prima etapa a Night Sync e
+    # exact sync/run_daily.py.
+    - cron: "0 3 * * *"
   workflow_dispatch: {}
 
 jobs:

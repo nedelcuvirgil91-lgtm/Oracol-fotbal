@@ -1,0 +1,48 @@
+name: Football Oracle — Live Sync (Faza 2, schelet)
+
+# Nivelul USOR de sincronizare (sync/run_live.py) - discovery/scoruri/
+# cote/statistici/lineups/player stats/H2H/standings, FARA Team DNA/
+# Oracle Refresh/Feature Engineering (acelea raman in Night Sync).
+#
+# DOAR workflow_dispatch - proprietarul produsului a confirmat explicit
+# ca e in regula daca Live Sync nu ruleaza inca automat pe un cron ("e in
+# regula daca Live Sync nu este inca complet implementat... important e
+# ca structura sa fie pregatita"). Nicio cadenta de cron nu a fost
+# specificata explicit - nu s-a inventat una aici (risc real de consum de
+# cota API daca ar fi prea agresiva); cadenta ramane o decizie separata,
+# ulterioara.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  live-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Run Live Sync
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          RAPIDAPI_KEY_FREELIVEFOOTBALL: ${{ secrets.RAPIDAPI_KEY_FREELIVEFOOTBALL }}
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: python -m sync.run_live
