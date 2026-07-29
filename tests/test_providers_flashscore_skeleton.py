@@ -24,9 +24,12 @@ def test_flashscore_capabilities_match_poc_findings():
         "yellow_cards", "red_cards", "offsides", "goalkeeper_saves",
         "lineups_starting_xi", "player_ratings", "substitution_events",
         "referee", "attendance", "stadium",
+        # [R-Sync-FLASH-01 §10.7, ADR-043 PROPUS] fallback temporar, nu
+        # sursa principala - vezi odds_fallback_flashscore in design.
+        "odds_snapshot",
     }
     confirmed_false = {
-        "odds_snapshot", "xg", "weather", "h2h_history_rows",
+        "xg", "weather", "h2h_history_rows",
         "coach_name", "bench_full_list",
     }
     assert set(FLASH_PROVIDER_CAPABILITIES) == confirmed_true | confirmed_false

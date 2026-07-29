@@ -2,6 +2,7 @@
 
 **Status**: DESIGN, neimplementat. Nu s-a rulat niciun scraping live, nu s-a aplicat nicio migrare Supabase, `tos_reviewed` rămâne `False`.
 **Cerut**: "R-SYNC-FLASH-01 — Flashscore as Auxiliary UDAL Provider" (după POC-ul cu 10 meciuri, `UDAL_FLASHSCORE_POC_10MATCHES_REPORT.md`, recomandare B — sursă auxiliară).
+**[ACTUALIZAT 2026-07-29]** — "Direction Update (Architecture Decision)": bootstrap incremental (nu bulk), scope redus (ultimul sezon complet, nu tot istoricul), ordine explicită de bootstrap, cote ca fallback temporar, robustness (checkpoint/queue/resume). Vezi §10 — secțiunile 1-9 rămân valabile ca fundație, neînlocuite, doar extinse. Status rămâne DESIGN — „Nu implementa imediat" respectat identic.
 
 ## 0. Corecție arhitecturală față de propunerea inițială (surprinsă înainte de implementare, nu după)
 
@@ -283,3 +284,133 @@ Bază reală: latența măsurată în POC (medie 829ms/navigare inițială, 10 m
 3. Implementare reală `providers/flashscore/{adapter,extractor,normalizer}.py` (înlocuiește scheletul).
 4. `POC_SCRAPER_SOURCE_02` — validare live, volum mic, monitorizat (§7) — separat de `tos_reviewed=True`, care rămâne decizia finală, explicită, a proprietarului produsului.
 5. Abia după (2)-(4): activare Night Sync + Pre-Match Sync, cu flag-uri noi (`udal_source_enabled["flashscore"]`, pattern existent în `udal_config.py`), implicit `False`.
+
+---
+
+## 10. [ACTUALIZAT 2026-07-29] Direction Update — Bootstrap incremental, ordine, cote fallback, robustness
+
+Răspuns la "R-SYNC-FLASH-01 — Direction Update (Architecture Decision)". Secțiunile 1-9 de mai sus rămân fundația (principiu arhitectural, capability matrix, mapping Supabase, schelet provider) — ce urmează extinde, nu înlocuiește. **Tot ce urmează rămâne DESIGN — nicio linie de cod de scraping/migrare nouă nu s-a scris ca urmare a acestei actualizări**, cu o singură excepție minoră notată explicit în §10.7.
+
+### 10.1 Principiul auxiliar — neschimbat, reconfirmat
+
+Flashscore rămâne provider auxiliar, ultimul din ordinea UDAL (API → Open Data → Flashscore). ML și Predictor citesc exclusiv din Supabase — niciun cod nu citește Flashscore direct. Neschimbat față de §1.
+
+### 10.2 Bootstrap incremental (înlocuiește ideea de bootstrap masiv, respinsă)
+
+Nicio rulare nu procesează mai mult de un lot mic. Design:
+
+- **50 meciuri/noapte, în 3 batch-uri** (~17 meciuri/batch) — nu 50 dintr-o singură trecere continuă; fiecare batch e o invocare separată (workflow separat sau pas separat în același workflow, cu pauză impusă între ele), nu doar o buclă internă fără respirație.
+- **Rate limiting între batch-uri**: pauză minimă (propunere: 5-10 minute între batch-uri, în plus față de politețea de 2s deja folosită între meciuri individuale în POC) — separă explicit „politețea per-request" (§7, deja proiectată) de „politețea per-lot" (nouă, cerută aici).
+- **Checkpoint după fiecare batch, nu doar la final** — vezi §10.6 pentru mecanismul exact (coadă persistentă, nu variabilă în memorie).
+- **Reluare exactă, nu de la capăt**: dacă procesul moare la mijlocul batch-ului 2, următoarea rulare continuă de la exact următorul meci neprocesat — niciun meci deja `done` nu se reprocesează, niciun meci `in_progress` abandonat nu rămâne blocat permanent (regulă de „stale reclaim", §10.6).
+
+### 10.3 Scope istoric — un singur sezon complet per competiție
+
+**Nu** tot istoricul. Pentru fiecare competiție: **doar ultimul sezon complet** (cel mai recent sezon încheiat, nu sezonul curent în desfășurare — un sezon "complet" înseamnă toate meciurile lui au `actual_result` deja în `match_history`). Restul istoricului rămâne construit organic de sincronizarea zilnică existentă, în timp — compromis explicit acceptat, nu o lacună ascunsă.
+
+Consecință directă asupra volumului: un sezon complet de SuperLiga (32 echipe... de fapt 16 echipe, ~30 runde) înseamnă ~240 meciuri — la 50/noapte, bootstrap-ul SuperLiga complet durează **~5 nopți**, nu una singură. Estimarea din §7 (10-40 meciuri/noapte pentru Night Sync, regim de croazieră) rămâne separată de această fază de bootstrap (regim inițial, mai intens, dar plafonat explicit la 50/noapte).
+
+### 10.4 Ordinea bootstrapului — impusă, nu opțională
+
+```
+1. SuperLiga România   (singura ligă activă acum -> valoare imediata pentru ML)
+2. Premier League
+3. La Liga
+4. Serie A
+5. Bundesliga
+6. Ligue 1
+7. restul competitiilor (ordine neschimbata fata de mappings.LEAGUE_PROVIDERS)
+```
+
+Implementare: coloana `bootstrap_order` din coada persistentă (§10.6) — worker-ul consumă strict în ordinea `bootstrap_order ASC`, o competiție nu începe înainte ca precedenta să atingă `completed` (excepție posibilă, de discutat separat: rulare paralelă pe competiții diferite ar accelera, dar contrazice „SuperLiga produce valoare imediată" ca prioritate explicită — recomandare: **strict secvențial**, cel puțin pentru primele 2-3 competiții, până se validează robustness-ul la scară).
+
+### 10.5 Night Sync — rafinat, nu doar gap-fill generic
+
+După ce bootstrap-ul unei ligi atinge `completed`:
+
+- Night Sync pentru acea ligă comută automat de la „scan tot sezonul" la **doar meciurile noi + ultimele zile** (fereastră mică, propunere: ultimele 3-4 zile, suficient să acopere orice întârziere de sincronizare, nu o redeschidere a întregului istoric).
+- **Nu reprocesează meciuri deja complete** — regula de precedență din §1/§5 (query înainte de fetch, doar rânduri cu câmpuri `NULL`) rămâne mecanismul exact care garantează asta, neschimbată. „Complet" = toate câmpurile țintă din capability matrix (§2) sunt deja populate, indiferent de sursă.
+- Tranziția bootstrap→regim-de-croazieră per ligă e citită direct din `flashscore_acquisition_queue` (§10.6): dacă nu mai există rânduri `pending`/`in_progress` pentru acea competiție la `bootstrap_order`-ul curent, Night Sync-ul standard preia liga respectivă.
+
+### 10.6 Robustness — checkpoint, coadă persistentă, retry, resume automat
+
+Propunere concretă (schemă, nu migrare aplicată — la fel ca §3, arătată explicit, aprobare separată înainte de execuție):
+
+```sql
+CREATE TABLE IF NOT EXISTS flashscore_acquisition_queue (
+    id               BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    competition      TEXT NOT NULL,               -- 'superliga_romania', 'premier_league', ...
+    bootstrap_order  INTEGER NOT NULL,             -- 1..7, ordinea din §10.4
+    season           TEXT NOT NULL,                -- ultimul sezon complet (§10.3)
+    match_url        TEXT NOT NULL,                -- link real, descoperit (acelasi mecanism ca in POC)
+    status           TEXT NOT NULL DEFAULT 'pending'
+                       CHECK (status IN ('pending', 'in_progress', 'done', 'failed')),
+    attempt_count    INTEGER NOT NULL DEFAULT 0,
+    last_error       TEXT,
+    claimed_at       TIMESTAMPTZ,
+    completed_at     TIMESTAMPTZ,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (competition, match_url)
+);
+CREATE INDEX IF NOT EXISTS flashscore_queue_pending_idx
+    ON flashscore_acquisition_queue (bootstrap_order, id) WHERE status = 'pending';
+ALTER TABLE flashscore_acquisition_queue ENABLE ROW LEVEL SECURITY;
+```
+
+- **Populare** (o singură dată per competiție, la începutul bootstrap-ului ei): discovery real (mecanismul deja validat în POC — hub `/results/`, linkuri reale, nu construite) pentru ultimul sezon complet, INSERT în lot, `status='pending'`.
+- **Claim atomic** (elimină check-then-act, regulă deja stabilită în proiect — vezi `upsert_match_canonical`): `UPDATE ... SET status='in_progress', claimed_at=now() WHERE id = (SELECT id FROM flashscore_acquisition_queue WHERE status='pending' ORDER BY bootstrap_order, id LIMIT 1 FOR UPDATE SKIP LOCKED) RETURNING *` — `FOR UPDATE SKIP LOCKED`, pattern standard Postgres pentru cozi, nicio fereastră de cursă.
+- **Checkpoint = starea coloanei `status`, nu o variabilă de proces** — dacă workflow-ul GitHub Actions moare (timeout, crash, întrerupere), rândurile deja `done` rămân `done`, rândurile `in_progress` abandonate sunt recuperate de o regulă de „stale reclaim": `UPDATE ... SET status='pending' WHERE status='in_progress' AND claimed_at < now() - interval '2 hours'` — rulată la începutul fiecărei sesiuni de batch, înainte de claim. Fără asta, un crash mid-batch ar bloca permanent acele rânduri.
+- **Retry logic**: `attempt_count` incrementat la fiecare eșec, `last_error` populat; propunere: după 3 eșecuri consecutive, `status='failed'` definitiv (nu mai reintră în coadă automat) — vizibil pentru investigare manuală, consistent cu `acquisition_dead_letter` (Faza 0) ca precedent de „nimic nu se pierde silențios" (North Star #9).
+- **Trasabilitate**: fiecare batch încă scrie în `acquisition_run_log` (Faza 0, neschimbat) — coada de mai sus e mecanismul de reluare exactă, `acquisition_run_log` rămâne jurnalul agregat per lot.
+
+Acest design reutilizează exclusiv pattern-uri deja stabilite în proiect (advisory-lock-style claim, `ON CONFLICT`, RLS fără policy, `acquisition_run_log`/`acquisition_dead_letter` ca precedent) — nicio dependință nouă (Redis, coadă externă) introdusă, consistent cu „Supabase Single Source of Truth".
+
+### 10.7 Cotele — excepție deliberată, fallback temporar, NU schimbare de filosofie
+
+**Conflict real identificat cu designul existent** (§3.4 al acestui document excludea explicit cotele, citând `ODDS_PERSISTENCE_DESIGN.md`, Frozen via ADR-005, extins ADR-006/ADR-010) — verificare directă a documentului Frozen (nu presupunere):
+
+- `odds_history` are cheie `UNIQUE(fixture_id, bookmaker)` — **fără coloană de sursă/provider**. Verificat live în `database/migrations/001_odds_history.sql`.
+- Confirmat direct în POC (`UDAL_FLASHSCORE_POC_10MATCHES_REPORT.md`, secțiunea 5): Flashscore afișează cote reale de la bookmaker-i reali (**bet365, Unibet** — aceiași nume folosite probabil și de The Odds API).
+- **Consecință**: dacă Flashscore ar scrie direct în `odds_history` folosind același nume de bookmaker ca The Odds API, cele două surse s-ar **amesteca silențios pe același rând** (COALESCE-ul din `upsert_match_canonical` nu se aplică aici — `odds_history` are propriul trigger de imutabilitate, per-coloană, care nu distinge sursa) — **încălcare directă North Star #9** ("orice rezultat trasabil complet până la sursă") dacă nu e tratată explicit.
+
+**Decizie de design, ca răspuns**: **NU** se scrie direct în `odds_history` (tabelă Frozen, trigger deja testat exhaustiv — reopen-ul ei ar cere un ADR care modifică un document deja verdict "FROZEN", risc mai mare decât beneficiul). În loc, o tabelă **nouă, separată**, strict pentru fallback:
+
+```sql
+CREATE TABLE IF NOT EXISTS odds_fallback_flashscore (
+    id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    fixture_id    TEXT NOT NULL,          -- acelasi fixture_id canonic (ADR-024)
+    bookmaker     TEXT NOT NULL,
+    home          NUMERIC,
+    draw          NUMERIC,
+    away          NUMERIC,
+    captured_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (fixture_id, bookmaker)
+);
+ALTER TABLE odds_fallback_flashscore ENABLE ROW LEVEL SECURITY;
+```
+
+- **Regula de citire pentru Predictor** (propusă, de implementat într-un singur punct — `database/queries.py`, nu dispersat): citește întâi `odds_history` (sursa primară, neschimbată); **doar dacă** acel `fixture_id` nu are NICIUN rând acolo, citește `odds_fallback_flashscore` ca alternativă. Niciodată amestecate pe același fixture, niciodată `odds_fallback_flashscore` preferat față de `odds_history` când ambele există.
+- **Etichetare explicită, la nivel de schemă, nu doar de convenție**: numele tabelei însuși (`odds_fallback_flashscore`) documentează statutul temporar/secundar — orice consumator viitor vede imediat, din numele coloanei sursă în query, că nu citește sursa oficială.
+- **Nu schimbă filosofia**: Flashscore rămâne auxiliar; the-odds-api (sau orice provider oficial viitor) rămâne sursa principală de cote, neatinsă, cu prioritate necondiționată în citire.
+- **ADR necesar**: **da** — introducerea unei surse noi de cote care alimentează Predictorul e o schimbare de contract (North Star #5), chiar dacă tabela Frozen `odds_history` nu e atinsă deloc. Propunere: **ADR-043** (următorul număr secvențial liber — verificat, ultimul ADR existent e ADR-042), redactat mai jos (§10.8), status **PROPUS**, neaprobat încă.
+
+### 10.8 ADR-043 (PROPUS) — Flashscore ca sursă de fallback pentru cote
+
+Redactat ca răspuns direct la cerința "verifică dacă noua direcție nu intră în conflict cu ADR-urile existente" — nu e o decizie finală, e propunerea supusă aprobării, salvată separat în `docs/00_GOVERNANCE/ADR-043-flashscore-odds-fallback.md` (§10.9 mai jos descrie exact conținutul, fișierul e creat ca parte a acestei actualizări, status PROPUS — nicio migrare aplicată ca urmare a lui).
+
+### 10.9 Ce NU s-a schimbat / NU s-a implementat ca urmare a acestei actualizări
+
+- Nicio migrare Supabase aplicată (nici cea din §3, nici `flashscore_acquisition_queue`, nici `odds_fallback_flashscore`).
+- Niciun scraping live, `tos_reviewed` neschimbat (`False`).
+- Niciun cod de bootstrap/queue/retry scris — doar schema propusă mai sus.
+- Singura schimbare de cod ca urmare a acestei actualizări: `providers/flashscore/adapter.py`, `FLASH_PROVIDER_CAPABILITIES["odds_snapshot"]` actualizat de la `False` la `True` (cu comentariu „fallback temporar" — POC-ul a confirmat structural date reale de cotă, doar scope-ul de utilizare s-a schimbat acum, nu dovada tehnică) — o declarație, nu o implementare de scriere.
+- ADR-043 rămâne **PROPUS**, nu **ACCEPTAT** — nu intră în vigoare până la aprobare explicită separată, consistent cu disciplina ADR a proiectului.
+
+### 10.10 Pași următori (înlocuiește §9, cumulativ)
+
+1. Aprobare ADR-043 (§10.8/§10.9) — decizie separată de aprobarea restului designului, dat fiind că atinge o zonă adiacentă unui document Frozen.
+2. Aprobare restul actualizării din §10 (bootstrap incremental, ordine, robustness).
+3. Migrații Supabase: `flashscore_acquisition_queue`, `odds_fallback_flashscore`, plus cele din §3 (`player_match_stats`, `match_events`, `upcoming_*`, `home/away_goalkeeper_saves`) — toate arătate explicit, aprobate separat, per `supabase-safety`.
+4. Implementare reală `providers/flashscore/{adapter,extractor,normalizer}.py` + logica de coadă/checkpoint.
+5. `POC_SCRAPER_SOURCE_02` — validare live la volum mic (propunere: 1 batch, 17 meciuri, SuperLiga) — separat de `tos_reviewed=True`.
+6. Abia după (3)-(5): activare Night Sync + Bootstrap, flag nou `udal_source_enabled["flashscore"]`, implicit `False`.

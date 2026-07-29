@@ -55,7 +55,11 @@ FLASH_PROVIDER_CAPABILITIES: dict[str, bool] = {
     "referee": True,
     "attendance": True,
     "stadium": True,
-    "odds_snapshot": False,
+    # [ACTUALIZAT R-Sync-FLASH-01 §10.7, ADR-043 PROPUS] Fallback temporar
+    # DOAR - the-odds-api ramane sursa principala, neschimbata. POC-ul a
+    # confirmat date reale (bet365, Unibet); scrierea NU merge in
+    # odds_history (Frozen) - vezi odds_fallback_flashscore, ADR-043.
+    "odds_snapshot": True,
     "xg": False,
     "weather": False,
     "h2h_history_rows": False,
