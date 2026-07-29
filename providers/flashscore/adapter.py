@@ -221,7 +221,19 @@ class FlashscoreAdapter(ScraperAdapterBase):
         `_pages` (bundle-ul original de HTML). `match_ref` (identitate
         STABILA pre-canonica, pentru `flashscore_raw_extraction`) derivat
         din cheia naturala - nu un identificator Flashscore separat, ca sa
-        ramana stabil indiferent de cand se ruleaza."""
+        ramana stabil indiferent de cand se ruleaza.
+
+        [Notă — audit Canonical Integration, Faza 2] Metoda de contract
+        `SyncAdapter` de aici NU trece `league` (match_history.league e
+        NOT NULL) - nefolosită azi în pipeline-ul real (Discovery apelează
+        direct `persist_match_with_data_trust_layer(..., league=match.league)`,
+        vezi `discovery.run_foundation_data_layer_for_discovered_matches()`,
+        deliberat, exact ca să poată furniza liga). Dacă această metodă
+        devine vreodată apelată dintr-un orchestrator generic (iterare
+        uniformă peste toți adaptorii `SyncAdapter`), INSERT-ul ar eșua
+        curat (`league` NOT NULL) - eșec vizibil, nu scriere silențioasă
+        greșită, dar tot ar trebui extinsă să primească/transmită liga
+        înainte de o asemenea utilizare."""
         if not records:
             return True
         ok = True
