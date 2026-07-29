@@ -247,6 +247,13 @@ def run_foundation_data_layer_for_discovered_matches(
             continue
         record = valid[0]
         match_ref = _build_match_ref(record.get("home_team"), record.get("away_team"), record.get("kickoff_date"))
-        report = persist_match_with_data_trust_layer(record["_pages"], match_ref=match_ref)
+        # [FIX live] match_history.league e NOT NULL - Discovery deja
+        # cunoaste liga (a ales-o explicit ca sa construiasca URL-ul hub-ului,
+        # FLASHSCORE_TRACKED_COMPETITIONS), o furnizeaza direct in loc sa
+        # ceara normalizer-ului sa o extraga din pagina (gol real, documentat
+        # in FLASHSCORE_FIELD_MAPPING_MATRIX.md - "Cross-provider dependency").
+        report = persist_match_with_data_trust_layer(
+            record["_pages"], match_ref=match_ref, league=match.league, competition=match.league,
+        )
         reports.append({**report, "match": match})
     return reports

@@ -130,6 +130,25 @@ def test_persist_match_foundation_data_propagates_season_when_provided(monkeypat
     assert all(r["season"] == "2026-2027" for r in standings_mock.call_args[0][0])
 
 
+def test_persist_match_foundation_data_propagates_league_when_provided(monkeypatch, full_tabs_pages):
+    """[FIX live, gasit la al treilea run live real] match_history.league
+    e NOT NULL - orice meci nou descoperit de Flashscore Discovery esua
+    la INSERT fara el. NU se deriva din pagina Flashscore aici - doar
+    transmis de la apelant (Discovery deja stie liga urmarita)."""
+    match_history_mock = MagicMock(return_value=123)
+    monkeypatch.setattr("providers.flashscore.persistence.upsert_match_and_get_id", match_history_mock)
+    for fn in (
+        "upsert_match_statistics_extended", "upsert_player_roster",
+        "upsert_player_match_stats_extended", "upsert_match_context",
+        "upsert_match_events", "upsert_standings_snapshot",
+    ):
+        monkeypatch.setattr(f"providers.flashscore.persistence.{fn}", MagicMock(return_value=True))
+
+    persist_match_foundation_data(full_tabs_pages, league="Romania SuperLiga")
+
+    assert match_history_mock.call_args[0][0]["league"] == "Romania SuperLiga"
+
+
 def test_persist_match_foundation_data_no_competition_skips_standings(monkeypatch, full_tabs_pages):
     monkeypatch.setattr("providers.flashscore.persistence.upsert_match_and_get_id", lambda *a, **kw: 123)
     monkeypatch.setattr("providers.flashscore.persistence.upsert_match_statistics_extended", lambda *a, **kw: True)
@@ -206,7 +225,7 @@ def test_data_trust_layer_valid_record_writes_raw_and_canonical(monkeypatch, ful
     )
     monkeypatch.setattr(
         "providers.flashscore.persistence.persist_match_foundation_data",
-        lambda pages, competition=None, season=None: {"match_id": 123, "ok": True, "steps": {"match_history": True}},
+        lambda pages, competition=None, season=None, league=None: {"match_id": 123, "ok": True, "steps": {"match_history": True}},
     )
     completeness_mock = MagicMock(return_value=True)
     monkeypatch.setattr("providers.flashscore.persistence.upsert_data_completeness", completeness_mock)

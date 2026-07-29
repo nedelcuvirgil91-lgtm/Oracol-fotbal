@@ -10,11 +10,13 @@ from pathlib import Path
 
 import pytest
 
+from providers.flashscore.adapter import FlashscoreAdapter
 from providers.flashscore.discovery import (
     FLASHSCORE_TRACKED_COMPETITIONS,
     DiscoveredMatch,
     discover_matches,
     parse_match_links,
+    run_foundation_data_layer_for_discovered_matches,
 )
 
 EVIDENCE_DIR = Path(__file__).parent.parent / "docs" / "06_UDAL" / "poc_evidence" / "flashscore_10matches"
@@ -65,3 +67,31 @@ def test_discovered_match_is_frozen_dataclass():
     m = DiscoveredMatch(league="Romania SuperLiga", match_base_url="https://x", mid="abc", source="results")
     with pytest.raises(Exception):
         m.mid = "changed"  # type: ignore[misc]
+
+
+def test_run_foundation_data_layer_passes_league_to_persist(monkeypatch):
+    """[FIX live, gasit la al treilea run live real] match_history.league
+    e NOT NULL - Discovery deja cunoaste liga (a ales-o explicit ca sa
+    construiasca URL-ul), trebuie sa o transmita mai departe la persist(),
+    nu doar la fetch()."""
+    monkeypatch.setattr(FlashscoreAdapter, "preflight", lambda self: None)
+    monkeypatch.setattr(FlashscoreAdapter, "fetch", lambda self, params: {"summary": "<html></html>"})
+    monkeypatch.setattr(FlashscoreAdapter, "normalize", lambda self, raw: [raw])
+    monkeypatch.setattr(
+        FlashscoreAdapter, "validate",
+        lambda self, records: [{
+            "home_team": "A", "away_team": "B", "kickoff_date": "2026-08-01T18:00:00",
+            "_pages": records[0],
+        }],
+    )
+    calls = []
+    monkeypatch.setattr(
+        "providers.flashscore.persistence.persist_match_with_data_trust_layer",
+        lambda pages, match_ref, **kw: calls.append(kw) or {"ok": True},
+    )
+
+    match = DiscoveredMatch(league="Romania SuperLiga", match_base_url="https://x", mid="abc", source="results")
+    reports = run_foundation_data_layer_for_discovered_matches([match])
+
+    assert reports == [{"ok": True, "match": match}]
+    assert calls == [{"league": "Romania SuperLiga", "competition": "Romania SuperLiga"}]

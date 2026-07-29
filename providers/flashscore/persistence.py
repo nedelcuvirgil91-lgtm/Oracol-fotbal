@@ -89,6 +89,7 @@ def _join_player_stats_with_roster(
 
 def persist_match_foundation_data(
     pages: dict[str, str], competition: str | None = None, season: str | None = None,
+    league: str | None = None,
 ) -> dict[str, Any]:
     """Punct de intrare unic pentru persistarea completa a unui meci
     Flashscore (Foundation Data Layer). Returneaza un raport
@@ -98,7 +99,15 @@ def persist_match_foundation_data(
     2026-07-29) - DOAR daca providerul apelant il ofera explicit -
     normalizer-ul NU il deriva (Flashscore nu il expune robust in
     tab-urile confirmate azi, verificat direct pe fixture) - niciodata
-    dedus din reguli calendaristice proprii."""
+    dedus din reguli calendaristice proprii.
+
+    `league` ([FIX live, gasit la al treilea run live real] `match_history.
+    league` e NOT NULL - orice meci nou descoperit de Flashscore Discovery
+    esua la INSERT fara el). NU se extrage din pagina Flashscore aici
+    (breadcrumb-ul ramane un gol real, documentat, FLASHSCORE_FIELD_
+    MAPPING_MATRIX.md - "Cross-provider dependency") - apelantul (Discovery,
+    care ALEGE competiția urmărită dinainte de a naviga, `discovery.
+    FLASHSCORE_TRACKED_COMPETITIONS`) deja stie liga, o furnizeaza direct."""
     steps: dict[str, bool] = {}
 
     base = normalize_match_statistics(pages)
@@ -106,6 +115,7 @@ def persist_match_foundation_data(
         logger.error("[Flashscore.Persistence] cheie naturala lipsa, abandonez: %r", base)
         return {"match_id": None, "ok": False, "steps": steps}
     base["season"] = season
+    base["league"] = league
 
     match_id = upsert_match_and_get_id(base)
     steps["match_history"] = match_id is not None
@@ -186,6 +196,7 @@ def compute_data_completeness(pages: dict[str, str]) -> dict[str, Any]:
 
 def persist_match_with_data_trust_layer(
     pages: dict[str, str], match_ref: str, competition: str | None = None, season: str | None = None,
+    league: str | None = None,
 ) -> dict[str, Any]:
     """Punct de intrare Data Trust Layer (RAW -> VALIDATED -> CANONICAL,
     ADR-044 - "Nu exista bypass"): scrierea CANONICAL
@@ -196,7 +207,10 @@ def persist_match_with_data_trust_layer(
     Star #9, trasabilitate completa). `match_ref` e identitatea stabila
     PRE-canonica (ex. URL/mid Flashscore) - furnizata de apelant
     (`adapter.py`), nu derivata aici. `season` (migratia 038) - DOAR
-    daca apelantul il ofera explicit, niciodata dedus aici."""
+    daca apelantul il ofera explicit, niciodata dedus aici. `league`
+    ([FIX live] `match_history.league` NOT NULL - vezi docstring
+    `persist_match_foundation_data`) - furnizata de apelant (Discovery),
+    niciodata extrasa din pagina aici."""
     raw_snapshot = _raw_snapshot_by_tab(pages, competition)
     base = raw_snapshot.get("stats", {})
 
@@ -206,7 +220,9 @@ def persist_match_with_data_trust_layer(
 
     canonical_report: dict[str, Any] = {"match_id": None, "ok": False, "steps": {}}
     if is_valid:
-        canonical_report = persist_match_foundation_data(pages, competition=competition, season=season)
+        canonical_report = persist_match_foundation_data(
+            pages, competition=competition, season=season, league=league,
+        )
     else:
         logger.warning(
             "[Flashscore.Persistence] validare esuata pentru %s, scriere CANONICAL sarita: %s",
