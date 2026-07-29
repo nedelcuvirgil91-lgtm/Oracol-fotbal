@@ -12,11 +12,27 @@ from scraper_registry import (
 )
 
 
-def test_scrapers_registry_has_exactly_one_pilot_entry_in_phase_1():
-    """[UDAL Faza 1] O singura intrare - pilotul generic, tos_reviewed=False.
-    Regresie directa: nicio a doua sursa nu se adauga fara aprobare
-    explicita separata (decizia proprietarului produsului)."""
-    assert set(SCRAPERS.keys()) == {"udal_pilot_generic_html_stats"}
+def test_scrapers_registry_has_exactly_known_entries():
+    """Regresie directa: nicio sursa noua nu se adauga tacit, in afara
+    setului explicit aprobat pana acum - pilotul generic (Faza 1) si
+    Flashscore (R-Sync-FLASH-01, design-only, tos_reviewed=False)."""
+    assert set(SCRAPERS.keys()) == {
+        "udal_pilot_generic_html_stats",
+        "flashscore_match_enrichment",
+    }
+
+
+def test_flashscore_scraper_tos_not_reviewed():
+    """[R-Sync-FLASH-01] Regresie critica - design-only, ramane
+    tos_reviewed=False pana la un POC live dedicat + aprobare separata."""
+    cap = get_capability("flashscore_match_enrichment")
+    assert cap.tos_reviewed is False
+    assert cap.tos_reviewed_by is None
+    assert cap.tos_reviewed_at is None
+
+
+def test_flashscore_scraper_is_not_runnable_yet():
+    assert is_runnable("flashscore_match_enrichment") is False
 
 
 def test_pilot_scraper_tos_not_reviewed():
