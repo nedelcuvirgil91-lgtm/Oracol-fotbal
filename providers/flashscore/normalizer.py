@@ -304,8 +304,18 @@ def normalize_match_statistics(pages: dict[str, str]) -> dict[str, Any]:
     }
     for label, (home_field, away_field) in STAT_LABEL_TO_FIELDS.items():
         home_val, away_val = stats.get(label, (None, None))
-        result[home_field] = _parse_numeric(home_val)
-        result[away_field] = _parse_numeric(away_val)
+        # [FIX live, gasit la primul run real] home_shots/corners/fouls/
+        # cards/offsides/goalkeeper_saves sunt coloane `integer` in Postgres
+        # (migratiile 008/026/032) - RPC-ul face `(payload->>'home_shots')
+        # ::integer`, o conversie DIRECTA text->integer care respinge
+        # "12.0" (Postgres accepta text cu zecimale doar pentru cast catre
+        # `numeric`, nu `integer`). _parse_numeric() intoarce float -> bun
+        # doar pentru xG/posesie, care SUNT coloane `numeric`. Restul
+        # campurilor din STAT_LABEL_TO_FIELDS sunt numaratori intregi reale
+        # pe Flashscore (nu apar niciodata cu zecimale in textul brut).
+        parse = _parse_numeric if label in ("Expected goals (xG)", "Ball possession") else _parse_int_loose
+        result[home_field] = parse(home_val)
+        result[away_field] = parse(away_val)
 
     lineups_html = pages.get("lineups")
     if lineups_html:
