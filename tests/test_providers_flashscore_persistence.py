@@ -16,7 +16,9 @@ import pytest
 
 from providers.flashscore.persistence import (
     _join_player_stats_with_roster,
+    _raw_snapshot_by_tab,
     persist_match_foundation_data,
+    persist_match_with_data_trust_layer,
 )
 
 FIXTURE_DIR = Path(__file__).parent.parent / "docs" / "06_UDAL" / "poc_evidence" / "flashscore_full_tabs_poc"
@@ -133,3 +135,71 @@ def test_persist_match_foundation_data_returns_none_match_id_when_upsert_fails(m
     assert report["match_id"] is None
     assert report["ok"] is False
     assert report["steps"] == {"match_history": False}
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Data Trust Layer: RAW -> VALIDATED -> CANONICAL
+# ════════════════════════════════════════════════════════════════════════
+
+def test_raw_snapshot_by_tab_has_no_match_id_yet(full_tabs_pages):
+    """RAW e independent de rezolvarea canonica - context_match_id ramane
+    None in snapshot, nu aproximat (North Star #8)."""
+    snap = _raw_snapshot_by_tab(full_tabs_pages, competition="SuperLiga")
+    assert set(snap) == {"stats", "player_stats", "h2h", "standings"}
+    assert snap["h2h"][0]["context_match_id"] is None
+    assert snap["stats"]["home_team"] == "Dinamo Bucuresti"
+
+
+def test_raw_snapshot_by_tab_skips_standings_without_competition(full_tabs_pages):
+    snap = _raw_snapshot_by_tab(full_tabs_pages, competition=None)
+    assert "standings" not in snap
+
+
+def test_data_trust_layer_valid_record_writes_raw_and_canonical(monkeypatch, full_tabs_pages):
+    raw_calls: list = []
+    monkeypatch.setattr(
+        "providers.flashscore.persistence.upsert_raw_extraction",
+        lambda match_ref, tab_name, raw, **kw: raw_calls.append((match_ref, tab_name, kw)) or True,
+    )
+    monkeypatch.setattr(
+        "providers.flashscore.persistence.persist_match_foundation_data",
+        lambda pages, competition=None: {"match_id": 123, "ok": True, "steps": {"match_history": True}},
+    )
+
+    report = persist_match_with_data_trust_layer(full_tabs_pages, match_ref="dinamo_craiova_2026-07-25",
+                                                  competition="SuperLiga")
+
+    assert report["validation_status"] == "valid"
+    assert report["validation_errors"] is None
+    assert report["match_id"] == 123
+    assert report["ok"] is True
+    # RAW scris pentru toate cele 4 tab-uri disponibile (stats/player_stats/h2h/standings).
+    tab_names = {c[1] for c in raw_calls}
+    assert tab_names == {"stats", "player_stats", "h2h", "standings"}
+    for _, _, kw in raw_calls:
+        assert kw["validation_status"] == "valid"
+        assert kw["canonical_written"] is True
+
+
+def test_data_trust_layer_invalid_record_skips_canonical_but_writes_raw(monkeypatch):
+    raw_calls: list = []
+    monkeypatch.setattr(
+        "providers.flashscore.persistence.upsert_raw_extraction",
+        lambda match_ref, tab_name, raw, **kw: raw_calls.append((match_ref, tab_name, kw)) or True,
+    )
+    canonical_mock = MagicMock()
+    monkeypatch.setattr("providers.flashscore.persistence.persist_match_foundation_data", canonical_mock)
+
+    # pages fara continut util -> normalize_match_statistics() intoarce {} ->
+    # fara cheie naturala -> validare esueaza.
+    report = persist_match_with_data_trust_layer({}, match_ref="ref-invalid", competition=None)
+
+    assert report["validation_status"] == "rejected"
+    assert report["validation_errors"] == ["missing_natural_key"]
+    assert report["ok"] is False
+    canonical_mock.assert_not_called()
+    # RAW tot se scrie - "nu exista bypass", dar dovada exista chiar si pentru respins.
+    assert len(raw_calls) >= 1
+    for _, _, kw in raw_calls:
+        assert kw["validation_status"] == "rejected"
+        assert kw["canonical_written"] is False

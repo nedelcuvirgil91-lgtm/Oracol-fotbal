@@ -35,8 +35,10 @@ from database.queries import (
     upsert_match_statistics_extended,
     upsert_player_match_stats_extended,
     upsert_player_roster,
+    upsert_raw_extraction,
     upsert_standings_snapshot,
 )
+from udal_validation import validate_flat_identity
 
 from .normalizer import (
     normalize_match_context,
@@ -115,3 +117,69 @@ def persist_match_foundation_data(
 
     ok = all(steps.values())
     return {"match_id": match_id, "ok": ok, "steps": steps}
+
+
+def _raw_snapshot_by_tab(pages: dict[str, str], competition: str | None) -> dict[str, Any]:
+    """Snapshot RAW per tab - output `normalize_*()` INAINTE de rezolvarea
+    match_id-ului canonic (RAW e independent de CANONICAL, per Data Trust
+    Layer - se scrie chiar daca validarea/scrierea canonica eșuează).
+    Campurile FK-dependente (`context_match_id`) raman `None` in acest
+    snapshot - rezolvate abia la scrierea CANONICAL, niciodata aproximate
+    aici (North Star #8)."""
+    base = normalize_match_statistics(pages)
+    snapshot: dict[str, Any] = {"stats": base}
+    if pages.get("player_stats"):
+        snapshot["player_stats"] = normalize_player_match_stats_table(pages)
+    if pages.get("h2h"):
+        snapshot["h2h"] = normalize_match_context(
+            pages, None, base.get("home_team"), base.get("away_team"),
+        )
+    if competition and pages.get("standings"):
+        snapshot["standings"] = normalize_standings(pages, competition)
+    return snapshot
+
+
+def persist_match_with_data_trust_layer(
+    pages: dict[str, str], match_ref: str, competition: str | None = None,
+) -> dict[str, Any]:
+    """Punct de intrare Data Trust Layer (RAW -> VALIDATED -> CANONICAL,
+    ADR-044 - "Nu exista bypass"): scrierea CANONICAL
+    (`persist_match_foundation_data`) ruleaza DOAR daca validarea
+    identitatii (`udal_validation.validate_flat_identity`) trece. RAW
+    (`flashscore_raw_extraction`) se scrie INDIFERENT de rezultat -
+    dovada de audit completa chiar si pentru meciuri respinse (North
+    Star #9, trasabilitate completa). `match_ref` e identitatea stabila
+    PRE-canonica (ex. URL/mid Flashscore) - furnizata de apelant
+    (`adapter.py`), nu derivata aici."""
+    raw_snapshot = _raw_snapshot_by_tab(pages, competition)
+    base = raw_snapshot.get("stats", {})
+
+    validation = validate_flat_identity([base], source_tier="playwright", source_id="flashscore")
+    is_valid = bool(validation.valid)
+    errors = [r.reason for r in validation.rejected] if not is_valid else None
+
+    canonical_report: dict[str, Any] = {"match_id": None, "ok": False, "steps": {}}
+    if is_valid:
+        canonical_report = persist_match_foundation_data(pages, competition=competition)
+    else:
+        logger.warning(
+            "[Flashscore.Persistence] validare esuata pentru %s, scriere CANONICAL sarita: %s",
+            match_ref, errors,
+        )
+
+    validation_status = "valid" if is_valid else "rejected"
+    canonical_written = bool(canonical_report.get("ok"))
+    for tab_name, raw in raw_snapshot.items():
+        upsert_raw_extraction(
+            match_ref, tab_name, raw,
+            validation_status=validation_status,
+            validation_errors=errors,
+            canonical_written=canonical_written,
+        )
+
+    return {
+        **canonical_report,
+        "match_ref": match_ref,
+        "validation_status": validation_status,
+        "validation_errors": errors,
+    }

@@ -152,6 +152,37 @@ def validate_identity_only(
     return result
 
 
+def validate_flat_identity(
+    records: list[dict], source_tier: str, source_id: str,
+    confidence: str = "SCRAPED_UNVERIFIED",
+) -> ValidationResult:
+    """[Foundation Data Layer, Flashscore] Validare MINIMALĂ pentru forme
+    PLATE bogate (`normalize_match_statistics()` - 20+ câmpuri variabile,
+    nu doar cele 9 fixe din `REQUIRED_FIELDS`) - verifică DOAR cheia
+    naturală (home_team/away_team/kickoff_date). `validate_records()` NU
+    se potrivește aici: schema lui fixă (`home_cards`/`away_cards`
+    combinate) aparține unui pilot Fază 1 anterior, diferit de forma
+    reală Flashscore (`home_yellow_cards`/`home_red_cards` separate) -
+    aplicarea ei ar respinge orice rând valid, fals-negativ. Analog cu
+    `validate_identity_only()` (Faza 1.5, forme ierarhice), dar pentru
+    forme PLATE - același contract de ieșire (`ValidationResult`,
+    proveniență obligatorie)."""
+    result = ValidationResult()
+    for record in records:
+        if not record.get("home_team") or not record.get("away_team") or not record.get("kickoff_date"):
+            result.rejected.append(RejectedRecord(record, "missing_natural_key"))
+            continue
+        provenanced = dict(record)
+        provenanced["_provenance"] = {
+            "source_tier": source_tier,
+            "source_id": source_id,
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
+            "confidence": confidence,
+        }
+        result.valid.append(provenanced)
+    return result
+
+
 def check_conflicts_with_match_history(records: list[dict]) -> list[dict]:
     """[Faza 1, read-only, NU parte din validate_records()] Verifică dacă
     cheia naturală (home_team, away_team, kickoff_date) a unui rând VALID

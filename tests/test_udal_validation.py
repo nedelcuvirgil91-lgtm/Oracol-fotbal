@@ -1,7 +1,12 @@
 """Teste pentru udal_validation.py (UDAL Faza 1, ADR-042) — fără rețea."""
 from __future__ import annotations
 
-from udal_validation import validate_records, validate_identity_only, check_conflicts_with_match_history
+from udal_validation import (
+    check_conflicts_with_match_history,
+    validate_flat_identity,
+    validate_identity_only,
+    validate_records,
+)
 
 
 def _valid_record(**overrides):
@@ -108,3 +113,36 @@ def test_check_conflicts_graceful_without_supabase():
 
 def test_check_conflicts_empty_for_empty_input():
     assert check_conflicts_with_match_history([]) == []
+
+
+# ════════════════════════════════════════════════════════════════════════
+# validate_flat_identity — Foundation Data Layer (forme plate bogate,
+# nu se potrivesc cu REQUIRED_FIELDS-ul fix al validate_records())
+# ════════════════════════════════════════════════════════════════════════
+
+def test_validate_flat_identity_accepts_rich_record_without_fixed_fields():
+    """Un rand real Flashscore (20+ campuri variabile, FARA home_cards/
+    away_cards combinate) ar fi respins gresit de validate_records() -
+    validate_flat_identity() il accepta pe baza cheii naturale."""
+    record = {
+        "home_team": "Dinamo Bucuresti", "away_team": "Univ. Craiova",
+        "kickoff_date": "2026-07-25T17:30:00", "home_yellow_cards": 2,
+        "away_yellow_cards": 1, "attendance": 7128,
+    }
+    result = validate_flat_identity([record], source_tier="playwright", source_id="flashscore")
+    assert len(result.valid) == 1
+    assert len(result.rejected) == 0
+    assert result.valid[0]["_provenance"]["source_tier"] == "playwright"
+
+
+def test_validate_flat_identity_rejects_missing_natural_key():
+    record = {"home_team": "A", "away_team": None, "kickoff_date": "2026-07-25T17:30:00"}
+    result = validate_flat_identity([record], source_tier="playwright", source_id="flashscore")
+    assert len(result.valid) == 0
+    assert result.rejected[0].reason == "missing_natural_key"
+
+
+def test_validate_flat_identity_empty_list():
+    result = validate_flat_identity([], source_tier="playwright", source_id="flashscore")
+    assert result.valid == []
+    assert result.rejected == []

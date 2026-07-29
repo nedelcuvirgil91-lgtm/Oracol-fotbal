@@ -1661,6 +1661,39 @@ def should_retrain_ml(min_new_matches: int = 20) -> bool:
 # PREDICTION EVALUATION (Sprint 0 — Stabilizare, Etapa 3)
 # ════════════════════════════════════════════════════════════════════════════
 
+def upsert_raw_extraction(
+    match_ref: str, tab_name: str, raw_extracted: Any,
+    validation_status: str = "pending", validation_errors: list | None = None,
+    canonical_written: bool = False,
+) -> bool:
+    """`flashscore_raw_extraction` - stratul RAW al Data Trust Layer-ului
+    (RAW -> VALIDATED -> CANONICAL, ADR-044). Scrie output-ul `normalize_
+    *()` INDIFERENT de rezultatul validarii (dovada de audit completa,
+    North Star #9) - apelantul (`providers/flashscore/persistence.py`)
+    decide `validation_status`/`canonical_written` DUPA ce a rulat
+    validarea, dar randul RAW exista chiar si pentru meciuri respinse.
+    `on_conflict="match_ref,tab_name"` - snapshot curent, nu istoric
+    acumulat (schema, migratia 035)."""
+    if not raw_extracted:
+        return True
+    client = get_client()
+    if client is None:
+        return False
+    payload = {
+        "match_ref": match_ref, "tab_name": tab_name, "raw_extracted": raw_extracted,
+        "validation_status": validation_status, "validation_errors": validation_errors,
+        "canonical_written": canonical_written,
+    }
+    try:
+        client.table("flashscore_raw_extraction").upsert(
+            payload, on_conflict="match_ref,tab_name",
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.error("[Queries] upsert_raw_extraction failed (%s/%s): %s", match_ref, tab_name, exc)
+        return False
+
+
 def upsert_match_and_get_id(row: dict) -> int | None:
     """Ca `upsert_match()`, dar returneaza id-ul canonic rezolvat (insert
     SAU update) - necesar pentru scrierile FK-dependente ale Foundation

@@ -237,3 +237,36 @@ def test_upsert_match_context_degrades_gracefully(monkeypatch):
 def test_upsert_standings_snapshot_degrades_gracefully(monkeypatch):
     monkeypatch.setattr(q, "get_client", lambda: _BoomClient())
     assert q.upsert_standings_snapshot([{"competition": "X", "team": "Y"}]) is False
+
+
+# ════════════════════════════════════════════════════════════════════════
+# upsert_raw_extraction — stratul RAW al Data Trust Layer (migratia 035)
+# ════════════════════════════════════════════════════════════════════════
+
+def test_upsert_raw_extraction_correct_conflict_key_and_payload(monkeypatch):
+    fake = _FakeClient()
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    ok = q.upsert_raw_extraction(
+        "dinamo_univ_craiova_2026-07-25", "stats", {"home_team": "Dinamo Bucuresti"},
+        validation_status="valid", canonical_written=True,
+    )
+    assert ok is True
+    call = next(c for c in fake.calls if c[0] == "flashscore_raw_extraction")
+    assert call[3] == "match_ref,tab_name"
+    payload = call[2]
+    assert payload["match_ref"] == "dinamo_univ_craiova_2026-07-25"
+    assert payload["tab_name"] == "stats"
+    assert payload["validation_status"] == "valid"
+    assert payload["canonical_written"] is True
+
+
+def test_upsert_raw_extraction_empty_raw_no_call(monkeypatch):
+    fake = _FakeClient()
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    assert q.upsert_raw_extraction("ref", "stats", {}) is True
+    assert fake.calls == []
+
+
+def test_upsert_raw_extraction_degrades_gracefully(monkeypatch):
+    monkeypatch.setattr(q, "get_client", lambda: _BoomClient())
+    assert q.upsert_raw_extraction("ref", "stats", {"x": 1}) is False
