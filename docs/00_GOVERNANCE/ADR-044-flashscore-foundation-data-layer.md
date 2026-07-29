@@ -132,3 +132,25 @@ Fluxul oficial complet: `Discovery → Validation → Cleanup Report → Backup 
 **Scope explicit, restrâns** (răspunsul proprietarului produsului la întrebarea de clarificare): **EXCLUSIV** tabelele Foundation Data Layer (`match_statistics_extended`, `player_match_stats_extended`, `flashscore_match_context`, `flashscore_standings_snapshot`, `flashscore_raw_extraction`, `flashscore_data_completeness`). **NU** `match_history`/`match_events`/`player_match_stats` de bază (ar afecta direct istoricul ML, `used_for_training`, și North Star #9). **NU** `odds_history` — document Frozen (ADR-005/006/010), orice atingere cere ADR dedicat, nu poate intra tacit în scope-ul acestui job.
 
 **Garanție explicită, verificabilă direct în cod**: `delete_executed` e mereu `False` — acest modul nu conține nicio operație `DELETE`, niciun cron, nicio activare automată. Ștergerea reală (pașii Backup/Delete/Integrity Check/Final Report) rămâne neimplementată, activabilă ulterior printr-un flag dedicat, separat, cu propria aprobare explicită.
+
+---
+
+## Addendum 2 (2026-07-29) — Corecție arhitecturală: timeline-ul de evenimente a fost afirmat greșit ca neextractibil
+
+**Context**: în timpul construirii `docs/06_UDAL/FLASHSCORE_FIELD_MAPPING_MATRIX.md` (cerută explicit de proprietarul produsului, ca reacție la un raport de câmpuri considerat insuficient de riguros), s-a descoperit că `providers/flashscore/normalizer.py` conținea, în docstring-ul modulului (moștenit din faza M0), afirmația:
+
+> „goluri/cartonase NU au minut vizibil in structura verificata — deferred, nu ghicit"
+
+**Această afirmație era falsă.** Verificat direct pe fixture (`docs/06_UDAL/poc_evidence/flashscore_full_tabs_poc/summary.html`): tab-ul Summary conține un timeline complet, curat, structurat (`.smv__participantRow`, 21 evenimente reale pe fixture-ul principal) — minut, tip eveniment (identificat robust: `data-testid` pe SVG pentru gol/penalty/schimbare/VAR; clasă CSS pe SVG pentru cartonașe, care NU au `data-testid`), jucător, echipă, și pentru fiecare tip context suplimentar (assist la goluri, jucătorul care iese la schimbări, motivul la cartonașe, textul deciziei la VAR).
+
+**De ce s-a întâmplat**: concluzia inițială a fost formulată probabil pe baza unui widget diferit („Match Momentum", un grafic vizual real, corect exclus) și generalizată greșit la întregul timeline de evenimente, care e text structurat, nu grafic. Nu a fost re-verificată ulterior, deși scope-ul M0/Foundation Data Layer s-a extins semnificativ față de verificarea inițială.
+
+**Corecție aplicată** (implementată, testată, aplicată live — nu doar documentată):
+- `normalize_match_events()` rescrisă complet — citește acum din tab-ul Summary, nu din tab-ul Lineups (sursă veche, mai fragilă, doar substituții).
+- Migrația 039: `match_events.event_type` extins la 9 valori (`goal`, `own_goal`, `penalty_goal`, `penalty_missed`, `yellow_card`, `red_card`, `second_yellow_card`, `substitution`, `var`); `player_name` cu sentinel `''` (nu `NULL`) pentru evenimente fără jucător asociat (VAR); coloană nouă `detail` (motiv cartonaș/text decizie VAR); cheie naturală extinsă pentru identitate unică fără jucător.
+- Scor final (`actual_home_goals`/`actual_away_goals`) și scor la pauză (`home_ht_goals`/`away_ht_goals`) — coloane deja existente în `match_history` (migrația 008), la fel niciodată extrase, corectat în același efort.
+- Toate scrise prin `persist_match_foundation_data()`, verificate idempotent (1/2/10 rulări, 0 duplicate) — vezi `docs/06_UDAL/FLASHSCORE_FIELD_MAPPING_MATRIX.md` secțiunea 0 pentru dovada completă.
+
+**Ce rămâne, explicit, neconfirmat** (nu ascuns): `own_goal`/`penalty_missed`/`second_yellow_card` — mecanismul de clasificare există și e identic cu cel al celorlalte 6 tipuri, dar niciunul din aceste 3 tipuri nu a apărut în cele 11 fixture-uri capturate până acum — selectorul lor exact rămâne neconfirmat, cod pregătit să le accepte imediat ce apare un fixture real cu unul din ele.
+
+**Lecția de guvernanță**: acest ADR reflectă acum starea reală — o afirmație arhitecturală infirmată nu rămâne nedocumentată. Vezi `docs/06_UDAL/FLASHSCORE_FIELD_MAPPING_MATRIX.md` pentru matricea completă, cu fiecare câmp nemapat clasificat explicit (Parser oversight / Schema gap / Cross-provider dependency / Decizie ADR) — nicio categorie generică „nu există sursă curată".

@@ -21,16 +21,23 @@ designul initial. Corners/fouls/cards/offsides/saves NU au fost gasite in
 niciun fixture capturat (traiesc probabil pe tab-ul dedicat "Stats",
 niciodata capturat in POC) — DELIBERAT neincluse aici, nu ghicite.
 
-Scope M0 (exact, verificat empiric, nu presupus):
+Scope (extins, Foundation Data Layer - vezi docs/06_UDAL/
+FLASHSCORE_FIELD_MAPPING_MATRIX.md pentru matricea completa):
   - match_history: home_team/away_team/kickoff_date (cheia naturala),
     referee, stadium, home/away_possession, home/away_shots,
-    home/away_xg_actual, home/away_lineup (XI, din lineups.html).
-  - player_match_stats: nume, numar tricou (rating DEFERRED - traieste
-    doar in vederea Pitch, fara disambiguare home/away fiabila, vezi
-    `_extract_roster_rows`).
-  - match_events: DOAR substitutii (structura minut+jucator-iesit+jucator-
-    intrat verificata curat; goluri/cartonase NU au minut vizibil in
-    structura verificata — deferred, nu ghicit).
+    home/away_xg_actual, home/away_lineup (XI, din lineups.html),
+    actual_home_goals/away_goals, home/away_ht_goals.
+  - player_match_stats: nume, numar tricou, echipa, rating, pozitie
+    (sursa: tab-ul dedicat "Statistici jucatori", nu vederea Pitch -
+    vezi normalize_player_match_stats_table).
+  - match_events: timeline COMPLET (goal/penalty_goal/yellow_card/
+    red_card/substitution/var, verificat pe 21 evenimente reale) -
+    [CORECTIE 2026-07-29, ADR-044 Addendum 2] o versiune anterioara a
+    acestui docstring afirma "goluri/cartonase NU au minut vizibil in
+    structura verificata" - FALS, infirmat direct pe fixture (tab
+    Summary, `.smv__participantRow` - vezi normalize_match_events()).
+    own_goal/penalty_missed/second_yellow_card raman neconfirmate (nicio
+    aparitie in fixture-urile capturate pana acum), nu ghicite.
 
 Fara retea live — functiile de mai jos primesc HTML deja citit (de
 `adapter.py`, mode="fixture" azi, mode="live" dupa tos_reviewed).

@@ -1,47 +1,27 @@
 # Flashscore Field Mapping Matrix — Flashscore field → Supabase table → Supabase column
 
-**Scop**: matrice completă, verificată direct în cod (`providers/flashscore/normalizer.py`) și în fixture-ul real (`docs/06_UDAL/poc_evidence/flashscore_full_tabs_poc/`), pentru fiecare informație documentată în `UDAL_FLASHSCORE_FULL_TABS_POC_REPORT.md`. Fiecare rând NEmapat are un motiv EXACT — evidență de cod/DOM, nu „nu există sursă curată" generic.
+**Versiune**: 2 (revizuire completă, TASK APROBAT — corecție oversight-uri + reclasificare pe 4 categorii stricte, fără categorie generică „nu există sursă curată").
 
-**Corectură importantă găsită în timpul construirii acestei matrici** (secțiunea 0) — un caz exact de genul cerut: informație prezentă real în POC, afirmată anterior ca neextractibilă, dovedită acum falsă.
+**Scop**: matrice completă, verificată direct în cod (`providers/flashscore/normalizer.py`) și în fixture-ul real (`docs/06_UDAL/poc_evidence/flashscore_full_tabs_poc/` + `flashscore_10matches/`), pentru fiecare informație documentată în `UDAL_FLASHSCORE_FULL_TABS_POC_REPORT.md`. Fiecare câmp NEMAPAT e clasificat în una din **exact 4 categorii**:
+
+| Categorie | Înseamnă |
+|---|---|
+| **1. Parser oversight** | Informația există real în Flashscore, extractibilă robust — dar codul nu o citește (încă) |
+| **2. Schema gap** | Extracția e posibilă, dar nu există coloană/tabelă în Supabase pentru ea |
+| **3. Cross-provider dependency** | Scrierea corectă necesită o identitate/reconciliere cu alt provider (fixture_id, taxonomie de ligă) — nu o simplă extracție |
+| **4. Decizie arhitecturală explicită (ADR)** | S-a decis deliberat, printr-un ADR, să nu se scrie (nu lipsă tehnică) |
 
 ---
 
-## 0. Corectură — timeline-ul de evenimente (goluri/cartonașe/schimbări) ESTE extractibil
+## 0. Ce s-a corectat în această revizuire (Parser oversight închise)
 
-`providers/flashscore/normalizer.py` afirmă azi, în docstring-ul modulului (linia 31-33):
+Aprobat explicit („Corectează imediat toate 'pure oversight gaps'"), implementat, testat, aplicat live:
 
-> „match_events: DOAR substitutii (...) goluri/cartonase NU au minut vizibil in structura verificata — deferred, nu ghicit."
+1. **Scor final** (`.detailScore__wrapper`) → `match_history.actual_home_goals`/`actual_away_goals` — coloane deja existente (migrația 008).
+2. **Scor la pauză** (pereche etichetă/valoare „1st Half") → `match_history.home_ht_goals`/`away_ht_goals` — coloane deja existente (migrația 008).
+3. **Timeline complet de evenimente** (`.smv__participantRow`, tab Summary) → `match_events` — **corectează direct o afirmație falsă** din docstring-ul vechi al `normalizer.py` („goluri/cartonașe NU au minut vizibil în structura verificată"). Migrația 039 a extins vocabularul `event_type` la 9 valori (`goal`, `own_goal`, `penalty_goal`, `penalty_missed`, `yellow_card`, `red_card`, `second_yellow_card`, `substitution`, `var`) + coloană `detail` (motiv cartonaș / text decizie VAR) + `player_name` cu sentinel `''` pentru evenimente fără jucător (VAR). **Verificat pe 21 evenimente reale**: 5 goluri, 1 penalty, 3 galbene, 1 roșu, 10 schimbări (intrare+ieșire), 1 VAR — consistență internă confirmată (numărul de goluri din timeline == scorul final extras separat, 5-1).
 
-**Această afirmație e falsă, demonstrat acum direct pe fixture-ul `summary.html`.** Există un container `.smv__participantRow` (21 de rânduri pe acest meci) cu structură complet curată:
-
-```html
-<div class="smv__participantRow smv__homeParticipant">
-  <div class="smv__incident">
-    <div class="smv__timeBox">8'</div>
-    <div class="smv__incidentIcon">
-      <svg data-testid="wcl-icon-incidents-goal-soccer">...</svg>
-    </div>
-    <a class="smv__playerName">Soro A.</a>
-    <div class="smv__assist">( Pop A. )</div>
-  </div>
-</div>
-```
-
-Verificat pe toate cele 21 de incidente reale ale acestui meci:
-
-| Tip eveniment | Identificare | Câte pe acest meci |
-|---|---|---|
-| Gol | `[data-testid="wcl-icon-incidents-goal-soccer"]` | 4 |
-| Penalty gol | `[data-testid="wcl-icon-incidents-penalty-goal"]` | 1 |
-| Cartonaș galben | `svg.card-ico.yellowCard-ico` | 3 |
-| Cartonaș roșu | `svg.card-ico.redCard-ico` | 1 |
-| Schimbare | `[data-testid="wcl-icon-incidents-substitution"]` | 10 |
-| VAR | `[data-testid="wcl-icon-incidents-var"]` | 1 |
-| **Total** | | **20** (+1 rând fără icon = 21, de investigat separat) |
-
-Fiecare rând are: **minut** (`.smv__timeBox`, inclusiv prelungiri „45+6'"), **echipă** (`smv__homeParticipant`/`smv__awayParticipant`), **jucător** (`.smv__playerName`). Pentru goluri: **assist** (`.smv__assist`, text între paranteze). Pentru schimbări: **jucătorul care intră** (`.smv__playerName`) ȘI **jucătorul care iese** (`[class*="incidentSubOut"]`) — mai complet decât sursa folosită azi (tab-ul Lineups). Pentru cartonașe: **motivul** (`.smv__subIncident`, ex. „(Foul)", „(Unsportsmanlike conduct)").
-
-**De ce nu e mapat azi**: nu din lipsă de sursă — sursa există, e curată, verificată acum pe date reale. E neimplementat pentru că afirmația din docstring (bazată pe o inspecție anterioară insuficientă, posibil pe un widget diferit — „Match Momentum", care e într-adevăr un grafic) a fost generalizată greșit la întregul timeline de evenimente, care e text structurat, nu grafic. Corecție de făcut: `normalize_match_events()` ar trebui rescrisă să citească din `.smv__participantRow` (tab Summary), nu din tab-ul Lineups — ar acoperi `event_type IN ('goal','yellow_card','red_card','substitution')` complet (toate 4 din CHECK-ul constrângerii `match_events`, migrația 032), plus `related_player_name` pentru assist la goluri (azi folosit doar pentru schimbări).
+Toate 3 sunt scrise acum prin `persist_match_foundation_data()`, verificate idempotent (1/2/10 rulări, 0 duplicate).
 
 ---
 
@@ -57,96 +37,95 @@ Fiecare rând are: **minut** (`.smv__timeBox`, inclusiv prelungiri „45+6'"), *
 | Attendance | `match_history` | `attendance` | ✅ MAPAT |
 | Nume echipe | `match_history` | `home_team`/`away_team` | ✅ MAPAT |
 | Data/ora meciului | `match_history` | `kickoff_date` | ✅ MAPAT |
-| Top Stats widget (5 categorii) | — | — | ✅ ACOPERIT — subsumat de tab-ul Statistics (36 categorii, aceleași etichete, sursă preferată) |
-| **Scor final** (`.detailScore__wrapper`, ex. „5 - 1") | `match_history` | `actual_home_goals`/`actual_away_goals` | ❌ **NEMAPAT — coloane deja existente (migrația 008), element DOM clar și unic, pur și simplu neinclus în `normalize_match_statistics()`. Nu e lipsă de sursă.** |
-| **Scor la pauză** (perechea etichetă/valoare „1st Half"/„2 - 0") | `match_history` | `home_ht_goals`/`away_ht_goals` | ❌ **NEMAPAT — coloane deja existente (migrația 008), pattern etichetă/valoare identic cu Referee/Venue (deja folosit), pur și simplu neinclus.** |
-| Scor a doua repriză („2nd Half"/„3 - 1") | — | — | ❌ NEMAPAT — nicio coloană dedicată în schemă pentru „scor doar a doua repriză" (diferit de scorul final) — gol de schemă, nu de extracție; valoare marginală (derivabilă din final − pauză) |
-| Breadcrumb țară („Romania") | — | — | ❌ NEMAPAT — nicio coloană dedicată; valoare redundantă cu liga |
-| Breadcrumb competiție+rundă („Superliga - Round 2") | `match_history` | `league` (parțial) | ❌ NEMAPAT — `league` EXISTĂ ca și coloană, dar valoarea brută Flashscore („Superliga") necesită reconciliere cu taxonomia canonică de ligi (`mappings.py`, ADR-001, „sursă canonică unică pentru ligi") înainte de scriere — pas de integrare real, neînceput, NU o simplă copiere de text. Numărul de rundă („Round 2") nu are nicio coloană azi — gol de schemă. |
-| **Timeline evenimente** (goluri/cartonașe/schimbări/VAR, `.smv__participantRow`) | `match_events` | `minute`, `event_type`, `player_name`, `related_player_name`, `team` | ❌ **NEMAPAT — vezi secțiunea 0. Sursă reală, curată, demonstrată — corectură a unei afirmații anterioare greșite din normalizer.py.** |
+| **Scor final** | `match_history` | `actual_home_goals`/`actual_away_goals` | ✅ **MAPAT (corectat acum)** |
+| **Scor la pauză** | `match_history` | `home_ht_goals`/`away_ht_goals` | ✅ **MAPAT (corectat acum)** |
+| **Gol** (event) | `match_events` | `event_type='goal'` | ✅ **MAPAT (corectat acum)** |
+| **Penalty gol** | `match_events` | `event_type='penalty_goal'` | ✅ **MAPAT (corectat acum)** |
+| **Cartonaș galben** | `match_events` | `event_type='yellow_card'`, `detail`=motiv | ✅ **MAPAT (corectat acum)** |
+| **Cartonaș roșu** | `match_events` | `event_type='red_card'`, `detail`=motiv | ✅ **MAPAT (corectat acum)** |
+| **Schimbare** (intrare+ieșire) | `match_events` | `event_type='substitution'`, `player_name`=intră, `related_player_name`=iese | ✅ **MAPAT (corectat acum)** |
+| **VAR** | `match_events` | `event_type='var'`, `detail`=decizie | ✅ **MAPAT (corectat acum)** |
+| **Autogol** | `match_events` | `event_type='own_goal'` (schema pregătită) | ❌ **Categoria 1 (Parser oversight) — caz special**: mecanismul de clasificare (dispatch pe `data-testid`/clasă SVG) e complet și identic cu cel al celorlalte 6 tipuri deja confirmate — DAR niciun autogol nu a apărut în cele 11 fixture-uri capturate până acum, deci selectorul exact (testid/clasă SVG) nu a putut fi verificat direct. Cod pregătit să-l accepte (`event_type` permis în schemă) — activare imediată la primul fixture real cu un autogol, nu ghicit acum. |
+| **Penalty ratat** | `match_events` | `event_type='penalty_missed'` (schema pregătită) | ❌ **Categoria 1, același caz** — nicio apariție reală capturată încă. |
+| **Al doilea galben** | `match_events` | `event_type='second_yellow_card'` (schema pregătită) | ❌ **Categoria 1, același caz** — nicio apariție reală capturată încă. |
+| Scor doar a doua repriză (nu cumulativ) | — | — | ❌ **Categoria 2 (Schema gap)** — element real, extractibil (aceeași pereche etichetă/valoare ca scorul la pauză), dar nicio coloană dedicată în `match_history` pentru „scor doar repriza 2" (diferit de scorul final). Valoare marginală — derivabil din final − pauză. |
+| Breadcrumb țară („Romania") | — | — | ❌ **Categoria 2 (Schema gap)** — nicio coloană dedicată; redundant cu liga. |
+| Breadcrumb competiție („Superliga") | `match_history` | `league` (coloană există) | ❌ **Categoria 3 (Cross-provider dependency)** — coloana EXISTĂ, dar valoarea brută Flashscore trebuie reconciliată cu taxonomia canonică de ligi (`mappings.py`, ADR-001 „sursă canonică unică pentru ligi") înainte de scriere — scriere directă ar putea crea o valoare de ligă duplicată/necanonică, exact problema pe care ADR-001 o previne. |
+| Breadcrumb rundă („Round 2") | — | — | ❌ **Categoria 2 (Schema gap)** — nicio coloană `round`/`matchday` în `match_history` azi. |
 
 ### Tab „Statistici" (stats)
 
 | Câmp Flashscore | Tabelă Supabase | Coloană | Status |
 |---|---|---|---|
-| Expected goals (xG) | `match_history` | `home_xg_actual`/`away_xg_actual` | ✅ MAPAT |
-| Ball possession | `match_history` | `home_possession`/`away_possession` | ✅ MAPAT |
-| Total shots | `match_history` | `home_shots`/`away_shots` | ✅ MAPAT |
-| Shots on target | `match_history` | `home_shots_on_target`/`away_shots_on_target` | ✅ MAPAT |
-| Corner kicks | `match_history` | `home_corners`/`away_corners` | ✅ MAPAT |
-| Fouls | `match_history` | `home_fouls`/`away_fouls` | ✅ MAPAT |
-| Yellow cards (agregat pe meci) | `match_history` | `home_yellow_cards`/`away_yellow_cards` | ✅ MAPAT |
-| Red cards (agregat pe meci) | `match_history` | `home_red_cards`/`away_red_cards` | ✅ MAPAT |
-| Offsides | `match_history` | `home_offsides`/`away_offsides` | ✅ MAPAT |
-| Goalkeeper saves | `match_history` | `home_goalkeeper_saves`/`away_goalkeeper_saves` | ✅ MAPAT |
-| Celelalte 26 categorii (xGOT, Big chances, Passes, shots off/inside/outside box, hit woodwork, headed goals, touches in box, accurate through passes, free kicks, long passes, passes in final third, crosses, xA, throw ins, tackles, duels won, clearances, interceptions, errors leading to shot/goal, xGOT faced, goals prevented, goal kicks) | `match_statistics_extended` (EAV) | `stat_key`/`stat_label`/`home_value_raw`/`away_value_raw`/`home_value_numeric`/`away_value_numeric` | ✅ MAPAT (câte un rând per categorie per meci) |
+| 10 categorii de bază (xG, possession, shots, shots_on_target, corners, fouls, yellow/red cards, offsides, goalkeeper saves) | `match_history` | coloane dedicate | ✅ MAPAT (toate 10) |
+| 26 categorii extinse (xGOT, Big chances, Passes, etc.) | `match_statistics_extended` (EAV) | `stat_key`/`stat_label`/valori | ✅ MAPAT (toate 26) |
 
 ### Tab „Formații" (lineups)
 
 | Câmp Flashscore | Tabelă Supabase | Coloană | Status |
 |---|---|---|---|
-| Nume jucător | `player_match_stats` | `player_name` | ✅ MAPAT |
-| Număr tricou | `player_match_stats` | `shirt_number` | ✅ MAPAT |
-| Echipă (home/away) | `player_match_stats` | `team` | ✅ MAPAT |
-| Schimbări (din acest tab, `wcl-lineupsParticipantsSubstitution-*`) | `match_events` | `minute`/`player_name`/`related_player_name` | ✅ MAPAT (sursă azi — de înlocuit cu timeline-ul din Summary, mai complet, vezi §0) |
-| Marcaje de rol „(G)"/„(C)" (goalkeeper/căpitan) | — | — | ❌ NEMAPAT — niciun câmp `is_captain`/flag dedicat în schemă; poziția „Goalkeeper" e deja acoperită separat prin tab-ul Player Stats (`position`) |
+| Nume jucător, număr tricou, echipă | `player_match_stats` | `player_name`/`shirt_number`/`team` | ✅ MAPAT |
+| Marcaje de rol „(G)"/„(C)" | — | — | ❌ **Categoria 2 (Schema gap)** — niciun câmp `is_captain`/flag dedicat; poziția „Goalkeeper" e deja acoperită separat prin tab-ul Player Stats (`position`). |
 
 ### Tab „Statistici jucători" (player_stats)
 
 | Câmp Flashscore | Tabelă Supabase | Coloană | Status |
 |---|---|---|---|
-| Rating | `player_match_stats` | `rating` | ✅ MAPAT |
-| Poziție | `player_match_stats` | `position` | ✅ MAPAT |
-| Total shots | `player_match_stats_extended` (EAV) | `stat_key='total_shots'` | ✅ MAPAT |
-| Expected goals (xG) | `player_match_stats_extended` | `stat_key='xg'` | ✅ MAPAT |
-| Accurate passes | `player_match_stats_extended` | `stat_key='accurate_passes'` | ✅ MAPAT |
-| Touches | `player_match_stats_extended` | `stat_key='touches'` | ✅ MAPAT |
-| Touches in opposition box | `player_match_stats_extended` | `stat_key='touches_in_opposition_box'` | ✅ MAPAT |
-| Successful dribbles | `player_match_stats_extended` | `stat_key='successful_dribbles'` | ✅ MAPAT |
-| Duels | `player_match_stats_extended` | `stat_key='duels'` | ✅ MAPAT |
+| Rating, poziție + 7 statistici avansate | `player_match_stats` / `player_match_stats_extended` | `rating`/`position`/EAV | ✅ MAPAT (toate 9) |
 
 ### Tab „Cote" (odds)
 
 | Câmp Flashscore | Tabelă Supabase | Coloană | Status |
 |---|---|---|---|
-| Bookmaker + cotă curentă (home/draw/away) | `flashscore_raw_extraction` | `raw_extracted` (jsonb, tab_name='odds') | ⚠️ PARȚIAL — RAW mapat (dovadă păstrată), CANONIC nemapat |
-| Bookmaker + cotă curentă → `odds_fallback_flashscore` (ADR-043) | `odds_fallback_flashscore` | `fixture_id`/`bookmaker`/`home`/`draw`/`away` | ❌ **NEMAPAT — NU lipsă de date: tabela cere `fixture_id` IDENTIC cu cel folosit de The Odds API (identitate cross-provider), pe care Flashscore nu-l oferă. Scrierea cu o cheie greșită/inventată ar rupe silențios regula de fallback a Predictorului (ADR-043) — rezoluția identității rămâne task separat, documentat deja de ADR-043 ca „ulterior".** |
-| Mișcare cotă (atribut `title`, ex. „2.63 » 2.50" — opening vs curent) | — | — | ❌ NEMAPAT — decizie de SCOP explicită (ADR-043: „cotele Flashscore sunt fallback, nu sursa de CLV/market-drift, nuanța opening/closing nu e critică aici, doar valoarea cea mai recentă contează"), nu gol tehnic — elementul există și e extractibil. |
+| Bookmaker + cotă curentă (home/draw/away) — strat RAW | `flashscore_raw_extraction` | `raw_extracted` (jsonb) | ✅ MAPAT (RAW) |
+| Aceleași date — scriere CANONICĂ | `odds_fallback_flashscore` | `fixture_id`/`bookmaker`/`home`/`draw`/`away` | ❌ **Categoria 3 (Cross-provider dependency)** — tabela cere `fixture_id` IDENTIC cu cel folosit de The Odds API; Flashscore nu-l oferă. Scrierea cu o cheie inventată ar rupe silențios regula de fallback a Predictorului (ADR-043). Rezoluția identității cross-provider rămâne task separat, documentat deja de ADR-043. |
+| Mișcare cotă (opening → curent, atribut `title`) | — | — | ❌ **Categoria 4 (Decizie ADR)** — ADR-043: „cotele Flashscore sunt fallback, nu sursa de CLV/market-drift, doar valoarea cea mai recentă contează". Element real, extractibil — neextras prin decizie, nu gol tehnic. |
 
 ### Tab „H2H"
 
 | Câmp Flashscore | Tabelă Supabase | Coloană | Status |
 |---|---|---|---|
-| Categorie (H2H overall / formă recentă acasă / formă recentă oaspete) | `flashscore_match_context` | `category` | ✅ MAPAT |
-| Data întâlnirii | `flashscore_match_context` | `meeting_date` | ✅ MAPAT |
-| Cod competiție (`.h2h__event`, ex. „SL") | `flashscore_match_context` | `competition_code` | ✅ MAPAT |
-| Echipe | `flashscore_match_context` | `home_team`/`away_team` | ✅ MAPAT |
-| Scor | `flashscore_match_context` | `home_score`/`away_score` | ✅ MAPAT |
-| Ordine cronologică | `flashscore_match_context` | `meeting_order` | ✅ MAPAT |
+| Categorie, dată, cod competiție, echipe, scor, ordine | `flashscore_match_context` | toate coloanele | ✅ MAPAT (toate 6) |
 
 ### Tab „Clasamente" (standings)
 
 | Câmp Flashscore | Tabelă Supabase | Coloană | Status |
 |---|---|---|---|
-| Rang | `flashscore_standings_snapshot` | `rank` | ✅ MAPAT |
-| Echipă | `flashscore_standings_snapshot` | `team` | ✅ MAPAT |
-| Jucate/Câștigate/Egal/Pierdute | `flashscore_standings_snapshot` | `played`/`won`/`drawn`/`lost` | ✅ MAPAT |
-| Gol marcate/primite/diferență | `flashscore_standings_snapshot` | `goals_for`/`goals_against`/`goal_diff` | ✅ MAPAT |
-| Puncte | `flashscore_standings_snapshot` | `points` | ✅ MAPAT |
-| **48 insigne de formă recentă** (`.wcl-badgeform_AKaAR` + clasă rezultat `wcl-win_8x-jp`/etc., secvență ordonată per echipă) | — | — | ❌ **NEMAPAT — gol de SCHEMĂ, nu de extracție. Elementul e real, extractibil (clasă CSS determinist per rezultat W/D/L), dar `flashscore_standings_snapshot` nu are nicio coloană pentru el azi (ex. `recent_form JSONB`). Nicio migrare făcută pentru asta încă.** |
+| Rang, echipă, J/C/E/P, goluri, diferență, puncte | `flashscore_standings_snapshot` | toate coloanele | ✅ MAPAT (toate 10) |
+| Insigne de formă recentă (48 pe fixture, W/D/L per echipă) | — | — | ❌ **Categoria 2 (Schema gap)** — element real, extractibil (clasă CSS determinist per rezultat), dar `flashscore_standings_snapshot` nu are nicio coloană pentru el (ex. `recent_form JSONB`). |
 
 ---
 
-## 2. Rezumat — câte câmpuri distincte, per status
+## 2. Raport final — numere
 
-| Status | Număr | Exemple |
-|---|---|---|
-| ✅ MAPAT complet | 39 | toate statisticile de bază + extinse, roster, player stats, H2H, standings de bază |
-| ❌ NEMAPAT — pur neimplementat, sursă curată confirmată (fix simplu) | 3 | scor final, scor la pauză, timeline evenimente (goluri/cartonașe/schimbări/VAR) |
-| ❌ NEMAPAT — gol de SCHEMĂ (coloană lipsă, nu extracție) | 2 | formă recentă standings, scor a doua repriză |
-| ❌ NEMAPAT — necesită integrare/reconciliere reală (nu simplă extracție) | 2 | ligă canonică (breadcrumb → `mappings.py`), rundă |
-| ❌ NEMAPAT — blocat de rezoluție de identitate cross-provider (nu lipsă de date) | 1 | cotă canonică (`odds_fallback_flashscore`, ADR-043) |
-| ❌ NEMAPAT — decizie explicită de scop (ADR-043) | 1 | mișcare cotă (opening vs curent) |
-| ❌ NEMAPAT — fără coloană dedicată, valoare marginală | 1 | marcaje rol jucător (G/C) |
+**Convenție de numărare, explicită** (ca să poată fi verificată direct, rând cu rând): fiecare RÂND din tabelele secțiunii 1 = un câmp/grup de informație distinct, exact așa cum e enumerat acolo. Categoriile de statistici (36) și coloanele de clasament (10) sunt numărate ca UN rând fiecare (un grup coerent, extras/scris printr-un singur mecanism), nu desfășurate individual — altfel numărul „mapat" ar fi artificial umflat față de câmpurile eterogene (referee, scor, etc.) care sunt naturally unitare. Numărătoarea de mai jos a fost recalculată direct din tabelele secțiunii 1, nu estimată.
 
-**Cel mai important de acționat**: cele 3 din categoria „pur neimplementat, sursă confirmată" — scorul final și scorul la pauză au coloane deja existente și un singur element DOM de citit; timeline-ul de evenimente corectează o afirmație greșită din codul actual și ar completa `match_events` (azi doar substituții) cu goluri/cartonașe reale.
+| | Număr |
+|---|---|
+| **Total rânduri/câmpuri distincte enumerate** (toate cele 7 tab-uri, secțiunea 1) | **32** |
+| **Mapate 100%** (extrase + scrise în Supabase) | **21** |
+| **Nemapate** | **11** |
+
+### Cele 11 nemapate, cu motiv exact (niciunul „nu există sursă curată")
+
+| # | Câmp | Categorie | Motiv exact |
+|---|---|---|---|
+| 1 | Autogol (`own_goal`) | 1 — Parser oversight (evidență lipsă) | Mecanism de clasificare identic cu celelalte 6 tipuri confirmate, dar nicio apariție reală în 11 fixture-uri capturate — selector neconfirmat |
+| 2 | Penalty ratat (`penalty_missed`) | 1 — Parser oversight (evidență lipsă) | Idem #1 |
+| 3 | Al doilea galben (`second_yellow_card`) | 1 — Parser oversight (evidență lipsă) | Idem #1 |
+| 4 | Scor doar repriza a doua | 2 — Schema gap | Nicio coloană dedicată; derivabil din final−pauză, valoare marginală |
+| 5 | Breadcrumb țară | 2 — Schema gap | Nicio coloană dedicată; redundant cu liga |
+| 6 | Breadcrumb rundă | 2 — Schema gap | Nicio coloană `round`/`matchday` |
+| 7 | Marcaje rol jucător (G/C) | 2 — Schema gap | Niciun flag dedicat; „Goalkeeper" deja acoperit via `position` |
+| 8 | Insigne formă recentă standings | 2 — Schema gap | Nicio coloană `recent_form` |
+| 9 | Breadcrumb competiție (liga canonică) | 3 — Cross-provider dependency | Coloana `league` există, dar necesită reconciliere cu taxonomia canonică (`mappings.py`, ADR-001) înainte de scriere |
+| 10 | Cotă canonică (`odds_fallback_flashscore`) | 3 — Cross-provider dependency | Necesită `fixture_id` identic cu The Odds API — nedisponibil în Flashscore |
+| 11 | Mișcare cotă (opening/curent) | 4 — Decizie ADR | ADR-043 — decizie explicită de scop, nu gol tehnic |
+
+**Distribuție pe categorii**: 3 în categoria 1 (Parser oversight — evidență lipsă, nu neglijență), 5 în categoria 2 (Schema gap), 2 în categoria 3 (Cross-provider dependency), 1 în categoria 4 (Decizie ADR).
+
+### Ce înseamnă acest rezultat pentru obiectivul declarat
+
+„Foundation Data Layer este complet doar când tot ceea ce este disponibil și robust în Flashscore are un loc în Supabase" — **21 din 21 de câmpuri robuste, extractibile azi (cu selector confirmat pe date reale), au un loc în Supabase.** Cele 11 rămase NU sunt „robuste și disponibile, dar ignorate" — sunt fie (a) neconfirmate încă pe date reale (categoria 1, 3 câmpuri — codul e gata, doar așteaptă un fixture cu acel eveniment), fie (b) necesită o decizie de schemă/arhitectură separată, explicit vizibilă acum (categoriile 2-4, 8 câmpuri), niciuna ascunsă sub o etichetă generică.
+
+**Decizie rămasă la latitudinea proprietarului produsului**: cele 5 goluri de schemă (#4-8) pot fi închise printr-o singură migrare mică, oricând — nu au fost adăugate acum pentru că nu au fost cerute explicit în acest task („corectează pure oversight gaps" ≠ „adaugă coloane noi de schemă"); le semnalez aici, nu le implementez unilateral.
