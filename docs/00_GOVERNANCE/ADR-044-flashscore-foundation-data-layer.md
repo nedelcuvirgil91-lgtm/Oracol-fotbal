@@ -181,3 +181,22 @@ Tot ce NU este implementat azi reprezintă **exclusiv** una din următoarele tre
 - Sau se restrânge Flashscore să NU mai scrie `actual_*`, lăsând exclusiv `sync_results.py` ca owner, cu scorul Flashscore păstrat doar în `match_events`/RAW?
 
 Niciuna din aceste opțiuni nu e aleasă acum — rămâne deschis, explicit, până la faza de integrare Oracle/Predictor/ML.
+
+---
+
+## Addendum 4 (2026-07-29) — Rezolvare TODO Addendum 3: Flashscore, writer secundar autorizat explicit al `actual_home_goals`/`actual_away_goals`
+
+**Context**: faza de integrare Oracle a început (Faza 2 — Team DNA, `oracle_engine._build_flashscore_dna()`, context aditiv, blending/confidence neatinse) — exact momentul pe care Addendum 3 îl marca drept punctul de decizie.
+
+**Decizie**: a doua opțiune din Addendum 3. `providers/flashscore/normalizer.py` (`normalize_match_statistics()`) devine writer **SECUNDAR autorizat explicit** al `actual_home_goals`/`actual_away_goals`, alături de `sync/sync_results.py`, care rămâne owner-ul **PRIMAR**. `actual_result` rămâne calculat EXCLUSIV de `sync/sync_results.py` — Flashscore nu-l scrie niciodată (nicio ambiguitate de interpretare a scorului brut extras).
+
+**Motivația alegerii** (față de celelalte două opțiuni din Addendum 3):
+- Restrângerea Flashscore la doar `match_events`/RAW (opțiunea 3) ar arunca o informație deja extrasă corect și deja scrisă în siguranță (RPC COALESCE-safe + `hard_conflict`) — fără niciun beneficiu real, doar pierdere de acoperire pentru meciurile pe care Flashscore le descoperă înaintea altui provider (tipic: SuperLiga România, unde `sync_results.py` are un gol de acoperire documentat, vezi „Goluri cunoscute" din CLAUDE.md).
+- Opțiunea 1 (writer secundar nedocumentat) era deja realitatea de facto, dar fără nicio gardă pozitivă care să prevină regresia — dacă cineva ar fi eliminat scrierea din `normalizer.py` crezând-o neintenționată, nimic nu ar fi detectat asta.
+
+**Implementare**:
+- `tests/test_canonical_feature_ownership.py` — gardă AST POZITIVĂ nouă, `test_flashscore_normalizer_is_authorized_secondary_writer_of_actual_columns()`: confirmă că `normalize_match_statistics()` scrie `actual_home_goals`/`actual_away_goals` (regresie dacă dispar) ȘI că NU scrie `actual_result` (regresie dacă apare).
+- `providers/flashscore/normalizer.py` — comentariul `[TODO ownership, NEDECIS]` înlocuit cu `[REZOLVAT — ADR-044 Addendum 4]`, referință directă la ambele gărzi AST (pozitivă pentru Flashscore, pozitivă pentru `sync_results.py`).
+- Niciun cod de producție nou nu a fost necesar — scrierea exista deja, corect, prin RPC-ul COALESCE-safe; singura schimbare e formalizarea prin gardă + documentare, nu comportament nou.
+
+**Consecințe**: TODO-ul din Addendum 3 e închis. Ownership-ul `actual_*` e acum complet acoperit de gărzi AST simetrice (pozitivă pentru fiecare writer autorizat, negativă pentru orice alt cod de producție) — nicio regresie viitoare nu poate trece neobservată prin `pytest tests/`.

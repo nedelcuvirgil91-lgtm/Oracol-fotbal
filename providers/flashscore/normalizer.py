@@ -305,14 +305,14 @@ def normalize_match_statistics(pages: dict[str, str]) -> dict[str, Any]:
     summary_html = pages.get("summary")
     summary_soup = BeautifulSoup(summary_html, "html.parser") if summary_html else None
     info = _extract_labeled_info_pairs(summary_soup) if summary_soup else {}
-    # [TODO ownership, ADR-044 Addendum 3, NEDECIS] actual_home_goals/
-    # actual_away_goals sunt owner-ate azi de sync/sync_results.py (ADR-036,
-    # garda AST test_canonical_feature_ownership.py) - scrierea lor de aici
-    # trece prin acelasi RPC COALESCE-safe + hard-conflict ca restul
-    # match_history, deci nu suprascrie silentios un rezultat deja scris,
-    # dar intrebarea de ownership (Flashscore writer secundar autorizat vs.
-    # restrans doar la match_events/RAW) ramane deschisa - de decis impreuna
-    # la inceputul integrarii Oracle, NU acum, NU unilateral aici.
+    # [REZOLVAT — ADR-044 Addendum 4] actual_home_goals/actual_away_goals:
+    # sync/sync_results.py ramane owner-ul PRIMAR (garda AST,
+    # test_sync_results_remains_owner_of_actual_columns); Flashscore e acum
+    # writer SECUNDAR autorizat explicit (garda AST pozitiva,
+    # test_flashscore_normalizer_is_authorized_secondary_writer_of_actual_
+    # columns) - scrierea trece prin acelasi RPC COALESCE-safe +
+    # hard-conflict ca restul match_history, deci nu suprascrie niciodata
+    # silentios un rezultat deja scris de sync_results.py.
     actual_home_goals, actual_away_goals = _extract_final_score(summary_soup) if summary_soup else (None, None)
     home_ht_goals, away_ht_goals = _extract_half_time_score(summary_soup) if summary_soup else (None, None)
 

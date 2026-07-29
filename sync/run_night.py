@@ -7,23 +7,37 @@ Module: sync/run_night.py
 Orchestrator de noapte, decuplat de `daily.yml`/`sync/run_daily.py`
 (Tier 1 API providers) — secvențiază fluxul complet cerut explicit:
 
-    Discovery → Provideri API → Flashscore → Validation → Canonical
-    Database → Team DNA → Feature Engineering → Oracle Refresh →
-    ML Refresh → Diagnostics → Cleanup → Backup → Final Report
+    Discovery → API Providers → Flashscore → Validation → Canonical
+    Database → Team DNA → Oracle Data Layer → Diagnostics → Cleanup →
+    Backup → Final Report
+
+Plus o etapă SUPLIMENTARĂ, în afara acestor 11 nume — Continuous Learning
+(Learning Core, ADR-030), PRE-EXISTENTĂ, complet independentă de
+Flashscore/Team DNA/Faza 2/Faza 3 (Champion/Challenger, nu recalibrare
+Predictor) — păstrată aici doar ca să nu se piardă automatizarea ei după
+consolidarea schedulerului (vezi `.github/workflows/continuous_learning.yml`,
+cron dezactivat acolo). Gatată intern de `learning_core_enabled`, implicit
+OPRIT — no-op sigur azi.
 
 Fiecare etapă rulează IZOLAT (o excepție într-o etapă nu oprește restul
 pipeline-ului — la fel ca `sync/run_daily.py`, care deja tratează fiecare
 Pas independent). Idempotent: fiecare etapă individuală apelată aici
 (`sync.run_daily.run`, `providers.flashscore.run_foundation_data_layer.run`
 cu Delta Sync, `learning_core.run_continuous_learning.main`,
-`providers.flashscore.season_cleanup.build_cleanup_dry_run_report`) e deja
-idempotentă independent — rularea secvențială, repetată, nu produce
-duplicate.
+`providers.flashscore.season_cleanup.build_cleanup_dry_run_report`,
+`providers.flashscore.backup.run_backup`) e deja idempotentă independent
+— rularea secvențială, repetată, nu produce duplicate (Backup produce un
+fișier nou per rulare, niciodată suprascriere).
 
-Etapele fără implementare reală azi (Team DNA/Feature Engineering rulează
-LIVE, la fiecare predicție din Oracle Engine, nu ca pas batch; Backup nu
-există — ADR-044 Addendum A6, decizie explicită, `delete_executed` rămâne
-mereu False) sunt raportate explicit ca atare — niciodată simulate.
+Team DNA rulează LIVE, la fiecare predicție din Oracle Engine — nu are
+(și nu are nevoie de) un pas batch separat; raportat explicit ca atare,
+niciodată simulat ca un pas care "rulează" ceva. Oracle Data Layer e
+DOAR infrastructură/context (home/away_flashscore_dna pe
+MatchPrediction) — nicio recalibrare, nicio schimbare de blending/
+confidence (Faza 3, neînceput). Backup e REAL (`providers/flashscore/
+backup.py`, export JSON read-only) — Delete/Integrity Check rămân
+neimplementate (ADR-044 Addendum A6, `delete_executed` rămâne mereu
+False în Season Cleanup).
 ================================================================================
 """
 from __future__ import annotations
@@ -83,35 +97,38 @@ def _stage_flashscore() -> str:
     return f"exit_code={exit_code}"
 
 
-def _stage_team_dna_feature_engineering() -> str:
-    """3-4. Team DNA (flashscore_team_dna.py) + Feature Engineering —
-    ambele rulează LIVE, per predicție, în Oracle Engine
-    (_build_flashscore_dna, apelat din evaluate_match()) — niciun pas
-    batch de precalcul există azi, deci nimic de rulat aici. Documentat
-    explicit, nu simulat."""
+def _stage_team_dna() -> str:
+    """6. Team DNA (flashscore_team_dna.py) — rulează LIVE, per predicție,
+    în Oracle Engine (_build_flashscore_dna, apelat din evaluate_match())
+    — niciun pas batch de precalcul există azi, deci nimic de rulat aici.
+    Documentat explicit, nu simulat."""
     return "calculat live per predicție (Oracle Engine) — fără pas batch de precalcul"
 
 
-def _stage_oracle_refresh() -> str:
-    """5. Oracle Refresh — predicțiile se calculează live, la cerere, din
-    Streamlit (app.py → oracle_engine.evaluate_match()) — nu există azi
-    un pas batch de precalcul/cache separat de fluxul de servire live."""
-    return "predicțiile se calculează live, la cerere — fără pas batch azi"
+def _stage_oracle_data_layer() -> str:
+    """7. Oracle Data Layer — infrastructura/contextul (home/away_
+    flashscore_dna pe MatchPrediction) există deja, populată la fiecare
+    evaluate_match(); NU există (și nu trebuie să existe, per cerința
+    explicită "doar infrastructură și context") un pas batch de
+    precalcul/recalibrare aici — asta rămâne Faza 3."""
+    return "context disponibil live în Oracle Engine (home/away_flashscore_dna) — fără recalibrare, fără pas batch"
 
 
-def _stage_ml_refresh() -> str:
-    """6. ML Refresh — reantrenarea de bază e deja Pasul 6 din
-    sync/run_daily.py (etapa 1 de mai sus); aici rulează suplimentar
-    Continuous Learning (Learning Core, ADR-030) — gatat intern de
-    `learning_core_enabled`, implicit OPRIT, deci no-op sigur dacă flag-ul
-    nu e activat explicit."""
+def _stage_ml_refresh_pre_existing() -> str:
+    """Etapă SUPLIMENTARĂ, în afara celor 11 numite explicit — Continuous
+    Learning (Learning Core, ADR-030) PRE-EXISTENTĂ, independentă de
+    Flashscore/Faza 2/Faza 3 (Champion/Challenger, nu recalibrare Team
+    DNA/Predictor). Rulată aici DOAR ca să nu se piardă automatizarea ei
+    (cron-ul propriu, continuous_learning.yml, a fost dezactivat la
+    consolidarea schedulerului — vezi acel fișier) — gatată intern de
+    `learning_core_enabled`, implicit OPRIT, deci no-op sigur azi."""
     from learning_core.run_continuous_learning import main as run_continuous_learning
     run_continuous_learning()
-    return "learning_core.run_continuous_learning executat (gatat de learning_core_enabled)"
+    return "learning_core.run_continuous_learning executat (pre-existent, ADR-030, gatat de learning_core_enabled)"
 
 
 def _stage_diagnostics() -> dict:
-    """7. Diagnostics — snapshot real de completitudine Foundation Data
+    """8. Diagnostics — snapshot real de completitudine Foundation Data
     Layer (ultimele meciuri procesate), NU un probe live nou (acela e
     diagnostics_api_football.py, unealtă POC separată, nefolosită aici)."""
     from database.queries import get_recent_flashscore_matches
@@ -127,7 +144,7 @@ def _stage_diagnostics() -> dict:
 
 
 def _stage_cleanup() -> dict:
-    """8. Cleanup — Season Cleanup DRY RUN (ADR-044 Addendum A6) — RAPORT
+    """9. Cleanup — Season Cleanup DRY RUN (ADR-044 Addendum A6) — RAPORT
     DOAR, nicio ștergere (`delete_executed` rămâne mereu False, garantat
     prin construcție de `season_cleanup.py`, care nu conține niciun DELETE)."""
     from providers.flashscore.season_cleanup import build_cleanup_dry_run_report
@@ -136,34 +153,37 @@ def _stage_cleanup() -> dict:
             "cleanup_candidates": report.get("cleanup_candidates", [])}
 
 
-def _stage_backup() -> str:
-    """9. Backup — NEIMPLEMENTAT, decizie explicită (ADR-044 Addendum A6:
-    pașii Backup/Delete/Integrity Check rămân neimplementați, activabili
-    ulterior printr-un flag dedicat, cu propria aprobare). Raportat
-    explicit ca atare, niciodată simulat ca reușit."""
-    return "neimplementat — ADR-044 Addendum A6, decizie explicită a proprietarului produsului"
+def _stage_backup() -> dict:
+    """10. Backup — export JSON, read-only, al celor 6 tabele Foundation
+    Data Layer (`providers/flashscore/backup.py`) — activarea explicit
+    cerută a pasului lăsat neimplementat de ADR-044 Addendum A6. Delete/
+    Integrity Check rămân neimplementate (scope neschimbat, doar Backup a
+    fost cerut)."""
+    from providers.flashscore.backup import run_backup
+    return run_backup()
 
 
 def run() -> list[dict[str, Any]]:
     print()
     print("═" * 78)
     print("  Football Oracle — Night Sync")
-    print("  Discovery → Provideri API → Flashscore → Validation →")
-    print("  Canonical DB → Team DNA → Feature Engineering → Oracle Refresh →")
-    print("  ML Refresh → Diagnostics → Cleanup → Backup → Final Report")
+    print("  Discovery → API Providers → Flashscore → Validation →")
+    print("  Canonical Database → Team DNA → Oracle Data Layer → Diagnostics →")
+    print("  Cleanup → Backup → Final Report")
+    print("  (+ Continuous Learning, ADR-030, pre-existentă, gatată OFF implicit)")
     print("═" * 78)
 
     started_at = datetime.now(timezone.utc).isoformat()
     report: list[dict[str, Any]] = []
 
-    _run_stage("1-4. Discovery + Provideri API + Validation + Canonical Database", _stage_api_providers, report)
+    _run_stage("1-4. Discovery + API Providers + Validation + Canonical Database", _stage_api_providers, report)
     _run_stage("5. Flashscore (Discovery + fetch/persist, Delta Sync)", _stage_flashscore, report)
-    _run_stage("6. Team DNA + Feature Engineering", _stage_team_dna_feature_engineering, report)
-    _run_stage("7. Oracle Refresh", _stage_oracle_refresh, report)
-    _run_stage("8. ML Refresh (Continuous Learning)", _stage_ml_refresh, report)
-    _run_stage("9. Diagnostics", _stage_diagnostics, report)
-    _run_stage("10. Cleanup (Season Cleanup — dry run)", _stage_cleanup, report)
-    _run_stage("11. Backup", _stage_backup, report)
+    _run_stage("6. Team DNA", _stage_team_dna, report)
+    _run_stage("7. Oracle Data Layer", _stage_oracle_data_layer, report)
+    _run_stage("[extra, pre-existentă] Continuous Learning (ADR-030)", _stage_ml_refresh_pre_existing, report)
+    _run_stage("8. Diagnostics", _stage_diagnostics, report)
+    _run_stage("9. Cleanup (Season Cleanup — dry run)", _stage_cleanup, report)
+    _run_stage("10. Backup", _stage_backup, report)
 
     finished_at = datetime.now(timezone.utc).isoformat()
     ok_count = sum(1 for r in report if r["ok"])

@@ -226,3 +226,40 @@ def test_sync_results_remains_owner_of_actual_columns():
         f"({sorted(RESULT_COLUMNS)}) — owner-ul canonic al rezultatului real "
         f"lipsește. Găsit: {sorted(keys & RESULT_COLUMNS)}."
     )
+
+
+def test_flashscore_normalizer_is_authorized_secondary_writer_of_actual_columns():
+    """ADR-044 Addendum 4 (rezolvă Addendum 3, TODO deschis) — Flashscore e
+    un writer SECUNDAR autorizat explicit pentru `actual_home_goals`/
+    `actual_away_goals` (nu doar `actual_result`, care rămâne calculat
+    exclusiv de sync_results.py din perechea de goluri). Gardă POZITIVĂ:
+    confirmă că `normalize_match_statistics()` chiar scrie aceste coloane —
+    decizia e documentată, nu doar presupusă din cod existent. `sync/
+    sync_results.py` rămâne owner-ul PRIMAR (testul de mai sus); scrierea
+    Flashscore trece prin RPC COALESCE-safe + hard-conflict
+    (`upsert_match_canonical`), deci nu suprascrie niciodată silențios un
+    rezultat deja scris de sync_results.py."""
+    tree = ast.parse((ROOT / "providers" / "flashscore" / "normalizer.py").read_text(encoding="utf-8"))
+    func = _function_def(tree, "normalize_match_statistics")
+    assert func is not None, "normalize_match_statistics() nu a fost găsită în normalizer.py"
+
+    keys: set[str] = set()
+    for node in ast.walk(func):
+        if isinstance(node, ast.Dict):
+            for k in node.keys:
+                if isinstance(k, ast.Constant) and isinstance(k.value, str):
+                    keys.add(k.value)
+
+    expected = {"actual_home_goals", "actual_away_goals"}
+    assert expected <= keys, (
+        f"providers/flashscore/normalizer.py.normalize_match_statistics() nu mai scrie "
+        f"{sorted(expected)} — ar rupe decizia documentată în ADR-044 Addendum 4 "
+        f"(writer secundar autorizat)."
+    )
+    # `actual_result` rămâne EXCLUSIV sync_results.py — Flashscore nu-l
+    # calculează/scrie niciodată (evită orice ambiguitate de interpretare a
+    # scorului brut extras).
+    assert "actual_result" not in keys, (
+        "providers/flashscore/normalizer.py nu are voie să scrie actual_result — "
+        "rămâne calculat exclusiv de sync_results.py (ADR-036)."
+    )

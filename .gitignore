@@ -71,6 +71,10 @@ secrets.toml
 *.log
 logs/
 
+# ── Backup exports (providers/flashscore/backup.py) — artefacte de rulare,
+# nu cod sursa; retenționate ca artefact CI, nu în git ────────────────────
+backups/
+
 # ── Teste / coverage ──────────────────────────────────────────────────────
 .pytest_cache/
 .coverage
