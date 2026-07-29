@@ -1,19 +1,31 @@
-name: Football Oracle — Live Sync (Faza 2, schelet)
+name: Football Oracle — Live Sync
 
 # Nivelul USOR de sincronizare (sync/run_live.py) - discovery/scoruri/
 # cote/statistici/lineups/player stats/H2H/standings, FARA Team DNA/
-# Oracle Refresh/Feature Engineering (acelea raman in Night Sync).
+# Oracle Data Layer/Feature Engineering (acelea raman in Night Sync).
 #
-# DOAR workflow_dispatch - proprietarul produsului a confirmat explicit
-# ca e in regula daca Live Sync nu ruleaza inca automat pe un cron ("e in
-# regula daca Live Sync nu este inca complet implementat... important e
-# ca structura sa fie pregatita"). Nicio cadenta de cron nu a fost
-# specificata explicit - nu s-a inventat una aici (risc real de consum de
-# cota API daca ar fi prea agresiva); cadenta ramane o decizie separata,
-# ulterioara.
+# Cadenta: la fiecare 2 ore (12 rulari/zi) - mai frecvent decat
+# night_sync.yml (o data/noapte), dar semnificativ mai rar decat
+# lineup_sync.yml (*/15 min), care sincronizeaza DOAR loturile - un singur
+# apel usor. Live Sync apeleaza sync.run_daily.run() (multipli provideri
+# API) + Flashscore FDL (Playwright) la fiecare rulare -> o cadenta prea
+# agresiva ar consuma inutil cota API (Regulile pentru chei API,
+# CLAUDE.md - tratate ca infrastructura critica). Delta Sync
+# (is_flashscore_match_already_collected) limiteaza costul Flashscore la
+# meciuri noi/incomplete, dar provider-ii API tot se re-interogheaza la
+# fiecare rulare - 2h e un compromis rezonabil, ajustabil ulterior daca
+# se dovedeste prea agresiv/prea rar.
+# `concurrency` previne suprapunerea (o rulare care depaseste 2h nu
+# porneste una noua peste ea).
 
 on:
+  schedule:
+    - cron: "0 */2 * * *"
   workflow_dispatch: {}
+
+concurrency:
+  group: live-sync
+  cancel-in-progress: false
 
 jobs:
   live-sync:

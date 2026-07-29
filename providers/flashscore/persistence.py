@@ -107,7 +107,19 @@ def persist_match_foundation_data(
     (breadcrumb-ul ramane un gol real, documentat, FLASHSCORE_FIELD_
     MAPPING_MATRIX.md - "Cross-provider dependency") - apelantul (Discovery,
     care ALEGE competiția urmărită dinainte de a naviga, `discovery.
-    FLASHSCORE_TRACKED_COMPETITIONS`) deja stie liga, o furnizeaza direct."""
+    FLASHSCORE_TRACKED_COMPETITIONS`) deja stie liga, o furnizeaza direct.
+
+    [FIX — audit Canonical Integration, Faza 2] `league` trece prin
+    `mappings.normalize_league_name()` înainte de scriere - identic cu
+    disciplina deja aplicată numelor de echipă (`normalize_team_name()`,
+    `_normalize_team_fields()`), altfel o cheie precum
+    `FLASHSCORE_TRACKED_COMPETITIONS` care nu e deja forma canonică (găsit
+    real: `"UEFA Champions League"` e listată ca ALIAS al `"Champions
+    League"` în `mappings.LEAGUE_ALIASES`, nu forma canonică) ar scrie
+    silențios un `league` pe care Oracle Engine nu l-ar găsi niciodată la
+    interogare (`.eq("league", "Champions League")`) - o valoare
+    necunoscută rămâne neschimbată (același principiu sigur ca la echipe),
+    nu se ghicește o formă nouă."""
     steps: dict[str, bool] = {}
 
     base = normalize_match_statistics(pages)
@@ -115,6 +127,9 @@ def persist_match_foundation_data(
         logger.error("[Flashscore.Persistence] cheie naturala lipsa, abandonez: %r", base)
         return {"match_id": None, "ok": False, "steps": steps}
     base["season"] = season
+    if league is not None:
+        from mappings import normalize_league_name
+        league = normalize_league_name(league)
     base["league"] = league
 
     match_id = upsert_match_and_get_id(base)

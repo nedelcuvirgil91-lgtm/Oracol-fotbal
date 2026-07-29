@@ -22,14 +22,36 @@ from providers.flashscore.discovery import (
 EVIDENCE_DIR = Path(__file__).parent.parent / "docs" / "06_UDAL" / "poc_evidence" / "flashscore_10matches"
 
 
-def test_tracked_competitions_only_contains_live_verified_slugs():
-    """Regresie - orice liga noua adaugata aici fara verificare live ar
-    trebui sa fie o schimbare deliberata, vizibila la code review, nu
-    tacita."""
+def test_tracked_competitions_only_contains_verified_slugs():
+    """Regresie - orice liga noua adaugata aici fara verificare (live sau
+    prin cautare web, vezi docstring modul) ar trebui sa fie o schimbare
+    deliberata, vizibila la code review, nu tacita."""
     assert FLASHSCORE_TRACKED_COMPETITIONS == {
         "Romania SuperLiga": ("romania", "superliga"),
-        "UEFA Champions League": ("europe", "champions-league"),
+        "Champions League": ("europe", "champions-league"),
+        "Premier League": ("england", "premier-league"),
+        "La Liga": ("spain", "laliga"),
+        "Serie A": ("italy", "serie-a"),
+        "Bundesliga": ("germany", "bundesliga"),
+        "Ligue 1": ("france", "ligue-1"),
+        "Europa League": ("europe", "europa-league"),
+        "MLS": ("usa", "mls"),
     }
+
+
+def test_tracked_competition_keys_are_all_canonical_league_names():
+    """Gardă directă contra regresiei găsite în audit (Faza 2): o cheie
+    FLASHSCORE_TRACKED_COMPETITIONS care e doar un ALIAS (nu forma
+    canonică din mappings.LEAGUE_ALIASES) ar face ca meciurile colectate
+    să nu fie găsite NICIODATĂ de Oracle Engine la interogare pe `league`."""
+    from mappings import normalize_league_name
+
+    for league_key in FLASHSCORE_TRACKED_COMPETITIONS:
+        assert normalize_league_name(league_key) == league_key, (
+            f"'{league_key}' nu e forma canonică — normalize_league_name() "
+            f"întoarce '{normalize_league_name(league_key)}'. Folosește "
+            f"forma canonică direct ca cheie."
+        )
 
 
 def test_parse_match_links_on_real_superliga_hub_evidence():

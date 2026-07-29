@@ -34,10 +34,32 @@ Structură confirmată (per rând de meci, `.event__match`):
   rămâne NEIMPLEMENTATĂ — documentat explicit, nu ghicită.
 
 FLASHSCORE_TRACKED_COMPETITIONS conține DOAR competiții cu slug
-Flashscore verificat live — extinderea la alte ligi (Premier League, La
-Liga, Serie A, Bundesliga, Ligue 1 — ordinea de bootstrap) rămâne task
-separat, per ligă, fiecare slug verificat live înainte de a fi adăugat,
-niciodată presupus din convenția de URL Flashscore.
+Flashscore verificat — DOUĂ nivele de verificare, distincte, marcate
+explicit mai jos, niciodată amestecate:
+
+- **Nivel A (Romania SuperLiga, UEFA Champions League)** — verificare
+  live COMPLETĂ: navigare Playwright reală, HTML brut salvat ca dovadă
+  (`docs/06_UDAL/poc_evidence/flashscore_10matches/`), structura DOM
+  (`.event__match`, `a.eventRowLink`) confirmată direct pe pagină.
+- **Nivel B (Premier League, La Liga, Serie A, Bundesliga, Ligue 1,
+  Europa League, MLS — adăugate Faza 2, extindere Discovery)** —
+  verificare prin căutare web (titlul REAL, generat de Flashscore, indexat
+  de motorul de căutare, confirmă că URL-ul exact există și corespunde
+  ligii — nu un slug ghicit din convenție), NU prin navigare Playwright
+  live (sandbox-ul de dezvoltare nu are acces direct la flashscore.com).
+  `parse_match_links()` (parserul, generic, PROBAT deja pe 2 hub-uri
+  reale diferite) rămâne neschimbat — riscul rezidual e STRICT la
+  nivelul slug-ului URL, nu al parserului. Recomandat: o rulare
+  `--dry-run` reală per ligă nouă înainte de prima rulare live completă,
+  ca ultimă confirmare (owner-ul produsului are acces live, sesiunea de
+  dezvoltare nu).
+- **World Cup 2026 — EXCLUS deliberat**, NU adăugat: căutarea a întors
+  MULTIPLE URL-uri Flashscore reale, conflictuale, pentru "World Cup
+  2026" (`world/world-championship`, `world/world-cup-2026`,
+  `world/world-cup`, `south-america/world-cup` — acesta din urmă pare
+  calificări, o competiție diferită) — nicio confirmare fără ambiguitate,
+  deci niciun slug ales (Regula #8 — nicio stare necunoscută nu se
+  aproximează).
 
 Pacing: `FLASHSCORE_MIN_DELAY_SECONDS` — unica disciplină de
 politețe/rată implementată azi (`politeness_policy_ref` din
@@ -76,8 +98,25 @@ _PROTECTION_MARKERS = (
 # vezi docstring modul. (country, competition) - exact segmentele folosite
 # de target_url_template din scraper_registry.py.
 FLASHSCORE_TRACKED_COMPETITIONS: dict[str, tuple[str, str]] = {
+    # Nivel A — verificare live completă (Playwright + fixture HTML salvat).
     "Romania SuperLiga": ("romania", "superliga"),
-    "UEFA Champions League": ("europe", "champions-league"),
+    # [FIX — audit Canonical Integration, Faza 2] cheia era "UEFA Champions
+    # League" - listată explicit ca ALIAS (nu formă canonică) în
+    # mappings.LEAGUE_ALIASES["Champions League"]. Redenumit la forma
+    # canonică exactă, altfel meciurile UCL colectate de Flashscore nu ar
+    # fi găsite NICIODATĂ de Oracle Engine (care interoghează cu
+    # "Champions League", din LEAGUE_WEIGHTS) - persist_match_foundation_
+    # data() aplică acum oricum normalize_league_name() ca plasă de
+    # siguranță suplimentară, dar cheia de aici trebuie să fie deja corectă.
+    "Champions League": ("europe", "champions-league"),
+    # Nivel B — verificare prin căutare web (Faza 2, vezi docstring modul).
+    "Premier League": ("england", "premier-league"),
+    "La Liga": ("spain", "laliga"),
+    "Serie A": ("italy", "serie-a"),
+    "Bundesliga": ("germany", "bundesliga"),
+    "Ligue 1": ("france", "ligue-1"),
+    "Europa League": ("europe", "europa-league"),
+    "MLS": ("usa", "mls"),
 }
 
 

@@ -149,6 +149,25 @@ def test_persist_match_foundation_data_propagates_league_when_provided(monkeypat
     assert match_history_mock.call_args[0][0]["league"] == "Romania SuperLiga"
 
 
+def test_persist_match_foundation_data_normalizes_league_alias_to_canonical(monkeypatch, full_tabs_pages):
+    """[FIX — audit Canonical Integration, Faza 2] "UEFA Champions League"
+    e un ALIAS (mappings.LEAGUE_ALIASES), nu forma canonică ("Champions
+    League") pe care Oracle Engine o interoghează — scris ca atare,
+    meciul n-ar fi găsit NICIODATĂ de _build_profile/_build_flashscore_dna."""
+    match_history_mock = MagicMock(return_value=123)
+    monkeypatch.setattr("providers.flashscore.persistence.upsert_match_and_get_id", match_history_mock)
+    for fn in (
+        "upsert_match_statistics_extended", "upsert_player_roster",
+        "upsert_player_match_stats_extended", "upsert_match_context",
+        "upsert_match_events", "upsert_standings_snapshot",
+    ):
+        monkeypatch.setattr(f"providers.flashscore.persistence.{fn}", MagicMock(return_value=True))
+
+    persist_match_foundation_data(full_tabs_pages, league="UEFA Champions League")
+
+    assert match_history_mock.call_args[0][0]["league"] == "Champions League"
+
+
 def test_persist_match_foundation_data_no_competition_skips_standings(monkeypatch, full_tabs_pages):
     monkeypatch.setattr("providers.flashscore.persistence.upsert_match_and_get_id", lambda *a, **kw: 123)
     monkeypatch.setattr("providers.flashscore.persistence.upsert_match_statistics_extended", lambda *a, **kw: True)
