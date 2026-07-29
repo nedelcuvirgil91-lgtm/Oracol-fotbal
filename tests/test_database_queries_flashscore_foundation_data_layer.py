@@ -270,3 +270,41 @@ def test_upsert_raw_extraction_empty_raw_no_call(monkeypatch):
 def test_upsert_raw_extraction_degrades_gracefully(monkeypatch):
     monkeypatch.setattr(q, "get_client", lambda: _BoomClient())
     assert q.upsert_raw_extraction("ref", "stats", {"x": 1}) is False
+
+
+# ════════════════════════════════════════════════════════════════════════
+# upsert_data_completeness — Data Completeness Score (migratia 037)
+# ════════════════════════════════════════════════════════════════════════
+
+def test_upsert_data_completeness_correct_conflict_key_and_payload(monkeypatch):
+    fake = _FakeClient()
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    completeness = {
+        "summary": True, "stats": True, "lineups": True, "player_stats": True,
+        "odds": True, "h2h": True, "standings": True, "coverage_percent": 100.0,
+    }
+    ok = q.upsert_data_completeness("dinamo_craiova_2026-07-25", 123, completeness)
+    assert ok is True
+    call = next(c for c in fake.calls if c[0] == "flashscore_data_completeness")
+    assert call[3] == "match_ref"
+    payload = call[2]
+    assert payload["match_ref"] == "dinamo_craiova_2026-07-25"
+    assert payload["match_id"] == 123
+    assert payload["has_summary"] is True
+    assert payload["has_odds"] is True
+    assert payload["coverage_percent"] == 100.0
+
+
+def test_upsert_data_completeness_handles_none_match_id(monkeypatch):
+    fake = _FakeClient()
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    ok = q.upsert_data_completeness("ref-invalid", None, {"coverage_percent": 0.0})
+    assert ok is True
+    call = next(c for c in fake.calls if c[0] == "flashscore_data_completeness")
+    assert call[2]["match_id"] is None
+    assert call[2]["has_summary"] is False
+
+
+def test_upsert_data_completeness_degrades_gracefully(monkeypatch):
+    monkeypatch.setattr(q, "get_client", lambda: _BoomClient())
+    assert q.upsert_data_completeness("ref", 1, {"coverage_percent": 0.0}) is False

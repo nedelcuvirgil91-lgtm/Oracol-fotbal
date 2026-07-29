@@ -15,6 +15,7 @@ from providers.flashscore.normalizer import (
     normalize_match_context,
     normalize_match_statistics,
     normalize_match_statistics_extended,
+    normalize_odds,
     normalize_player_match_stats_table,
     normalize_standings,
 )
@@ -171,6 +172,18 @@ def test_normalize_match_context_real_values(full_tabs_pages):
     assert most_recent_home_form["context_match_id"] == 999
 
 
+def test_normalize_match_context_populates_competition_code(full_tabs_pages):
+    """[TASK APROBAT M1, regula 5/6] competition_code era un gol de
+    populare documentat explicit in raportul anterior - element real
+    (.h2h__event, text scurt "SL") gasit prin verificare directa pe
+    fixture, acum extras."""
+    rows = normalize_match_context(
+        full_tabs_pages, match_id=999, home_team="Dinamo Bucuresti", away_team="Univ. Craiova",
+    )
+    assert all(r["competition_code"] for r in rows)
+    assert rows[0]["competition_code"] == "SL"
+
+
 def test_normalize_match_context_no_h2h_tab_returns_empty():
     assert normalize_match_context({}, match_id=999, home_team="A", away_team="B") == []
 
@@ -200,3 +213,30 @@ def test_normalize_standings_real_values(full_tabs_pages):
 
 def test_normalize_standings_no_standings_tab_returns_empty():
     assert normalize_standings({}, competition="SuperLiga") == []
+
+
+# ════════════════════════════════════════════════════════════════════════
+# normalize_odds — Odds tab (gol inchis, TASK APROBAT M1 regula 6)
+# ════════════════════════════════════════════════════════════════════════
+
+def test_normalize_odds_real_values(full_tabs_pages):
+    rows = normalize_odds(full_tabs_pages)
+    assert len(rows) == 3
+    by_bookmaker = {r["bookmaker"]: r for r in rows}
+    assert by_bookmaker["bet365.us"]["home"] == 2.50
+    assert by_bookmaker["bet365.us"]["draw"] == 3.10
+    assert by_bookmaker["bet365.us"]["away"] == 2.60
+    assert by_bookmaker["DraftKings"]["home"] == 2.65
+    for r in rows:
+        assert r["source"] == "flashscore"
+
+
+def test_normalize_odds_excludes_bookmaker_without_market(full_tabs_pages):
+    """Fanduel apare in randul de bookmaker dar fara nicio cota reala
+    pentru acest meci (gasit pe fixture) - exclus, nu aproximat cu 0."""
+    rows = normalize_odds(full_tabs_pages)
+    assert "Fanduel" not in {r["bookmaker"] for r in rows}
+
+
+def test_normalize_odds_no_odds_tab_returns_empty():
+    assert normalize_odds({}) == []

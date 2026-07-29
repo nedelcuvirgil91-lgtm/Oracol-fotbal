@@ -30,6 +30,7 @@ import logging
 from typing import Any
 
 from database.queries import (
+    upsert_data_completeness,
     upsert_match_and_get_id,
     upsert_match_context,
     upsert_match_statistics_extended,
@@ -44,9 +45,19 @@ from .normalizer import (
     normalize_match_context,
     normalize_match_statistics,
     normalize_match_statistics_extended,
+    normalize_odds,
     normalize_player_match_stats,
     normalize_player_match_stats_table,
     normalize_standings,
+)
+
+# Cele 7 tab-uri Flashscore confirmate in POC (UDAL_FLASHSCORE_FULL_TABS_POC_
+# REPORT.md) - baza Data Completeness Score (regula 7, TASK APROBAT M1).
+# "summary" nu are tab propriu in `pages` separat de "stats" pentru scopul
+# scorului - statisticile de baza (inclusiv info Referee/Venue/Attendance/
+# Capacity, EXCLUSIV pe "summary") sunt acoperite de cheia "summary".
+ALL_FLASHSCORE_TABS: tuple[str, ...] = (
+    "summary", "stats", "lineups", "player_stats", "odds", "h2h", "standings",
 )
 
 logger = logging.getLogger("FootballOracle.Flashscore.Persistence")
@@ -134,9 +145,23 @@ def _raw_snapshot_by_tab(pages: dict[str, str], competition: str | None) -> dict
         snapshot["h2h"] = normalize_match_context(
             pages, None, base.get("home_team"), base.get("away_team"),
         )
+    if pages.get("odds"):
+        snapshot["odds"] = normalize_odds(pages)
     if competition and pages.get("standings"):
         snapshot["standings"] = normalize_standings(pages, competition)
     return snapshot
+
+
+def compute_data_completeness(pages: dict[str, str]) -> dict[str, Any]:
+    """Data Completeness Score (regula 7, TASK APROBAT - Foundation Data
+    Layer M1) - per tab, prezenta paginii FETCH-uite (nu succesul
+    extractiei ulterioare - definitie simpla, robusta, verificabila
+    direct din `pages`, fara ambiguitatea "cat de bine s-a extras").
+    NU e folosit inca de Oracle Engine - doar persistat pentru folosire
+    viitoare (regula 7, explicit)."""
+    flags = {tab: bool(pages.get(tab)) for tab in ALL_FLASHSCORE_TABS}
+    coverage_percent = round(100.0 * sum(flags.values()) / len(ALL_FLASHSCORE_TABS), 2)
+    return {**flags, "coverage_percent": coverage_percent}
 
 
 def persist_match_with_data_trust_layer(
@@ -176,6 +201,9 @@ def persist_match_with_data_trust_layer(
             validation_errors=errors,
             canonical_written=canonical_written,
         )
+
+    completeness = compute_data_completeness(pages)
+    upsert_data_completeness(match_ref, canonical_report.get("match_id"), completeness)
 
     return {
         **canonical_report,

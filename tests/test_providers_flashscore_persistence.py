@@ -17,6 +17,7 @@ import pytest
 from providers.flashscore.persistence import (
     _join_player_stats_with_roster,
     _raw_snapshot_by_tab,
+    compute_data_completeness,
     persist_match_foundation_data,
     persist_match_with_data_trust_layer,
 )
@@ -145,9 +146,10 @@ def test_raw_snapshot_by_tab_has_no_match_id_yet(full_tabs_pages):
     """RAW e independent de rezolvarea canonica - context_match_id ramane
     None in snapshot, nu aproximat (North Star #8)."""
     snap = _raw_snapshot_by_tab(full_tabs_pages, competition="SuperLiga")
-    assert set(snap) == {"stats", "player_stats", "h2h", "standings"}
+    assert set(snap) == {"stats", "player_stats", "h2h", "standings", "odds"}
     assert snap["h2h"][0]["context_match_id"] is None
     assert snap["stats"]["home_team"] == "Dinamo Bucuresti"
+    assert len(snap["odds"]) == 3
 
 
 def test_raw_snapshot_by_tab_skips_standings_without_competition(full_tabs_pages):
@@ -165,6 +167,8 @@ def test_data_trust_layer_valid_record_writes_raw_and_canonical(monkeypatch, ful
         "providers.flashscore.persistence.persist_match_foundation_data",
         lambda pages, competition=None: {"match_id": 123, "ok": True, "steps": {"match_history": True}},
     )
+    completeness_mock = MagicMock(return_value=True)
+    monkeypatch.setattr("providers.flashscore.persistence.upsert_data_completeness", completeness_mock)
 
     report = persist_match_with_data_trust_layer(full_tabs_pages, match_ref="dinamo_craiova_2026-07-25",
                                                   competition="SuperLiga")
@@ -173,12 +177,19 @@ def test_data_trust_layer_valid_record_writes_raw_and_canonical(monkeypatch, ful
     assert report["validation_errors"] is None
     assert report["match_id"] == 123
     assert report["ok"] is True
-    # RAW scris pentru toate cele 4 tab-uri disponibile (stats/player_stats/h2h/standings).
+    # RAW scris pentru toate cele 5 tab-uri disponibile (stats/player_stats/h2h/standings/odds).
     tab_names = {c[1] for c in raw_calls}
-    assert tab_names == {"stats", "player_stats", "h2h", "standings"}
+    assert tab_names == {"stats", "player_stats", "h2h", "standings", "odds"}
     for _, _, kw in raw_calls:
         assert kw["validation_status"] == "valid"
         assert kw["canonical_written"] is True
+
+    # Data Completeness Score calculat si scris cu match_id-ul rezolvat.
+    completeness_mock.assert_called_once()
+    call_args = completeness_mock.call_args[0]
+    assert call_args[0] == "dinamo_craiova_2026-07-25"
+    assert call_args[1] == 123
+    assert call_args[2]["coverage_percent"] == 100.0
 
 
 def test_data_trust_layer_invalid_record_skips_canonical_but_writes_raw(monkeypatch):
@@ -189,6 +200,8 @@ def test_data_trust_layer_invalid_record_skips_canonical_but_writes_raw(monkeypa
     )
     canonical_mock = MagicMock()
     monkeypatch.setattr("providers.flashscore.persistence.persist_match_foundation_data", canonical_mock)
+    completeness_mock = MagicMock(return_value=True)
+    monkeypatch.setattr("providers.flashscore.persistence.upsert_data_completeness", completeness_mock)
 
     # pages fara continut util -> normalize_match_statistics() intoarce {} ->
     # fara cheie naturala -> validare esueaza.
@@ -203,3 +216,39 @@ def test_data_trust_layer_invalid_record_skips_canonical_but_writes_raw(monkeypa
     for _, _, kw in raw_calls:
         assert kw["validation_status"] == "rejected"
         assert kw["canonical_written"] is False
+
+    # Completeness se calculeaza si se scrie chiar si pentru meci respins
+    # (e o proprietate a colectarii, nu a validarii) - dar cu match_id=None
+    # (nicio scriere canonica nu a avut loc).
+    completeness_mock.assert_called_once()
+    call_args = completeness_mock.call_args[0]
+    assert call_args[1] is None
+    assert call_args[2]["coverage_percent"] == 0.0
+
+
+# ════════════════════════════════════════════════════════════════════════
+# compute_data_completeness — regula 7, TASK APROBAT M1
+# ════════════════════════════════════════════════════════════════════════
+
+def test_compute_data_completeness_full_coverage(full_tabs_pages):
+    score = compute_data_completeness(full_tabs_pages)
+    assert score["coverage_percent"] == 100.0
+    for tab in ("summary", "stats", "lineups", "player_stats", "odds", "h2h", "standings"):
+        assert score[tab] is True
+
+
+def test_compute_data_completeness_partial_coverage():
+    pages = {"summary": "<html>x</html>", "stats": "<html>y</html>"}
+    score = compute_data_completeness(pages)
+    assert score["summary"] is True
+    assert score["stats"] is True
+    assert score["lineups"] is False
+    assert score["odds"] is False
+    assert score["coverage_percent"] == round(100.0 * 2 / 7, 2)
+
+
+def test_compute_data_completeness_empty_pages():
+    score = compute_data_completeness({})
+    assert score["coverage_percent"] == 0.0
+    assert all(score[tab] is False for tab in
+               ("summary", "stats", "lineups", "player_stats", "odds", "h2h", "standings"))

@@ -1694,6 +1694,38 @@ def upsert_raw_extraction(
         return False
 
 
+def upsert_data_completeness(match_ref: str, match_id: int | None, completeness: dict) -> bool:
+    """`flashscore_data_completeness` (migratia 037, regula 7 - TASK
+    APROBAT M1) - scor persistat, NEconsumat de Oracle Engine/ML azi.
+    `completeness`: dict cu cele 7 chei de tab (`summary`/`stats`/
+    `lineups`/`player_stats`/`odds`/`h2h`/`standings`, boolean) +
+    `coverage_percent` - vezi `providers.flashscore.persistence.
+    compute_data_completeness()`. `on_conflict="match_ref"` -
+    idempotent, snapshot curent per meci."""
+    client = get_client()
+    if client is None:
+        return False
+    payload = {
+        "match_ref": match_ref, "match_id": match_id,
+        "has_summary": completeness.get("summary", False),
+        "has_stats": completeness.get("stats", False),
+        "has_lineups": completeness.get("lineups", False),
+        "has_player_stats": completeness.get("player_stats", False),
+        "has_odds": completeness.get("odds", False),
+        "has_h2h": completeness.get("h2h", False),
+        "has_standings": completeness.get("standings", False),
+        "coverage_percent": completeness.get("coverage_percent", 0.0),
+    }
+    try:
+        client.table("flashscore_data_completeness").upsert(
+            payload, on_conflict="match_ref",
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.error("[Queries] upsert_data_completeness failed (%s): %s", match_ref, exc)
+        return False
+
+
 def upsert_match_and_get_id(row: dict) -> int | None:
     """Ca `upsert_match()`, dar returneaza id-ul canonic rezolvat (insert
     SAU update) - necesar pentru scrierile FK-dependente ale Foundation

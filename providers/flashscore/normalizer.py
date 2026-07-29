@@ -458,6 +458,7 @@ def normalize_match_context(
             continue
         for order, link in enumerate(section.select("a[href*='/match/']")):
             date_el = link.select_one("[data-testid='wcl-stageTime']")
+            event_el = link.select_one(".h2h__event")
             participants = link.select("[data-testid='wcl-matchRow-participant']")
             scores = link.select("[data-testid='wcl-tableScore']")
             if len(participants) < 2 or len(scores) < 2:
@@ -467,6 +468,7 @@ def normalize_match_context(
                 "category": category,
                 "meeting_order": order,
                 "meeting_date": _parse_h2h_date(date_el.get_text(strip=True) if date_el else None),
+                "competition_code": event_el.get_text(strip=True) if event_el else None,
                 "home_team": participants[0].get_text(strip=True),
                 "away_team": participants[1].get_text(strip=True),
                 "home_score": _parse_int_loose(scores[0].get_text(strip=True)),
@@ -530,6 +532,58 @@ def normalize_standings(pages: dict[str, str], competition: str) -> list[dict[st
             "goals_against": goals_against,
             "goal_diff": _parse_int_loose(gd_el.get_text(strip=True)) if gd_el else None,
             "points": _parse_int_loose(points_el.get_text(strip=True)) if points_el else None,
+            "source": "flashscore",
+        })
+    return rows_out
+
+
+def normalize_odds(pages: dict[str, str]) -> list[dict[str, Any]]:
+    """Randuri crude 1X2 per bookmaker din tab-ul dedicat Cote
+    (`/odds/?mid=X`) - sursa pentru `odds_fallback_flashscore` (ADR-043,
+    migratia 032), DAR fara `fixture_id` (rezolvarea identitatii
+    cross-provider ramane un pas SEPARAT, la persist() - normalizer-ul nu
+    rezolva identitate, vezi docstring modul).
+
+    Structura reala verificata pe fixture (`.ui-table.oddsCell__odds` ->
+    `.ui-table__row`): numele bookmaker-ului traieste in atributul
+    `title` al link-ului din `.oddsCell__bookmakerPart` (identic cu
+    `img[alt]`, verificat). Cele 3 valori `.oddsCell__odd` sunt
+    identificate robust prin `data-analytics-label`
+    (`..._1`=home, `..._0`=draw, `..._2`=away - confirmat pe fixture,
+    NU presupus din ordinea DOM). Randuri fara nicio cota (bookmaker fara
+    piata pentru acest meci - gasit real pe fixture) sunt EXCLUSE, nu
+    aproximate cu 0 (North Star #8)."""
+    html = pages.get("odds")
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "html.parser")
+    container = soup.select_one(".ui-table.oddsCell__odds")
+    if container is None:
+        return []
+    rows_out: list[dict[str, Any]] = []
+    for row in container.select(".ui-table__row"):
+        bm_link = row.select_one(".oddsCell__bookmakerPart a[title]")
+        bookmaker = bm_link.get("title") if bm_link else None
+        if not bookmaker:
+            continue
+        by_outcome: dict[str, str | None] = {}
+        for cell in row.select(".oddsCell__odd"):
+            label = cell.get("data-analytics-label") or ""
+            span = cell.select_one("span")
+            value = span.get_text(strip=True) if span else None
+            if label.endswith("_1"):
+                by_outcome["home"] = value
+            elif label.endswith("_0"):
+                by_outcome["draw"] = value
+            elif label.endswith("_2"):
+                by_outcome["away"] = value
+        if not by_outcome:
+            continue
+        rows_out.append({
+            "bookmaker": bookmaker,
+            "home": _parse_numeric_loose(by_outcome.get("home")),
+            "draw": _parse_numeric_loose(by_outcome.get("draw")),
+            "away": _parse_numeric_loose(by_outcome.get("away")),
             "source": "flashscore",
         })
     return rows_out
