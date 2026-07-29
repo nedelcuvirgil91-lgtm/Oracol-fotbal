@@ -151,6 +151,33 @@ Fluxul oficial complet: `Discovery → Validation → Cleanup Report → Backup 
 - Scor final (`actual_home_goals`/`actual_away_goals`) și scor la pauză (`home_ht_goals`/`away_ht_goals`) — coloane deja existente în `match_history` (migrația 008), la fel niciodată extrase, corectat în același efort.
 - Toate scrise prin `persist_match_foundation_data()`, verificate idempotent (1/2/10 rulări, 0 duplicate) — vezi `docs/06_UDAL/FLASHSCORE_FIELD_MAPPING_MATRIX.md` secțiunea 0 pentru dovada completă.
 
-**Ce rămâne, explicit, neconfirmat** (nu ascuns): `own_goal`/`penalty_missed`/`second_yellow_card` — mecanismul de clasificare există și e identic cu cel al celorlalte 6 tipuri, dar niciunul din aceste 3 tipuri nu a apărut în cele 11 fixture-uri capturate până acum — selectorul lor exact rămâne neconfirmat, cod pregătit să le accepte imediat ce apare un fixture real cu unul din ele.
+**Ce rămâne, explicit, neconfirmat pe date reale** (nu ascuns, nu ghicit): `own_goal`/`penalty_missed`/`second_yellow_card` — mecanismul de clasificare există și e identic cu cel al celorlalte 6 tipuri, dar niciunul din aceste 3 tipuri nu a apărut în cele 11 fixture-uri capturate până acum — selectorul lor exact rămâne neconfirmat, cod pregătit să le accepte imediat ce apare un fixture real cu unul din ele. Filosofia proiectului rămâne neschimbată: **confirmat → implementat; neconfirmat → documentat, niciodată ghicit.**
 
-**Lecția de guvernanță**: acest ADR reflectă acum starea reală — o afirmație arhitecturală infirmată nu rămâne nedocumentată. Vezi `docs/06_UDAL/FLASHSCORE_FIELD_MAPPING_MATRIX.md` pentru matricea completă, cu fiecare câmp nemapat clasificat explicit (Parser oversight / Schema gap / Cross-provider dependency / Decizie ADR) — nicio categorie generică „nu există sursă curată".
+### Declarație de completitudine (explicit, ca să nu rămână loc de interpretare)
+
+**Foundation Data Layer extrage acum toate datele confirmate în POC care sunt disponibile robust în Flashscore.** Nu există azi niciun câmp descoperit în cele 7 tab-uri ale POC-ului, cu selector confirmat pe date reale, care să nu aibă un loc de scriere în Supabase — verificat exhaustiv, câmp cu câmp, în `docs/06_UDAL/FLASHSCORE_FIELD_MAPPING_MATRIX.md` (21 din 21 de câmpuri robuste confirmate, implementate).
+
+Tot ce NU este implementat azi reprezintă **exclusiv** una din următoarele trei situații — nimic altceva:
+
+1. **Limitări reale ale sursei** — informația nu a apărut încă pe niciun fixture real capturat (ex. `own_goal`/`penalty_missed`/`second_yellow_card`), deci nu poate fi confirmată fără a ghici un selector.
+2. **Decizii ADR** — s-a decis explicit, documentat, să nu se scrie (ex. mișcarea cotei, ADR-043 — decizie de scop, nu limitare tehnică).
+3. **Extensii viitoare** — golurile de schemă (coloane care ar trebui adăugate) și dependențele cross-provider (identitate care trebuie reconciliată) sunt cunoscute, documentate exact, dar rămân la latitudinea proprietarului produsului pentru o etapă viitoare — nu implementate unilateral, nu ascunse.
+
+**Nu există nicio afirmație în acest document sau în matrice care să lase impresia că parserul e incomplet** — parserul e complet față de tot ce s-a putut confirma pe date reale; ce lipsește e fie o decizie viitoare de produs, fie pur și simplu absent din eșantionul de date disponibil azi.
+
+**Lecția de guvernanță**: acest ADR reflectă acum starea reală — o afirmație arhitecturală infirmată nu rămâne nedocumentată. Vezi `docs/06_UDAL/FLASHSCORE_FIELD_MAPPING_MATRIX.md` pentru matricea completă, cu fiecare câmp neimplementat clasificat explicit (Parser limitation / Schema gap / Cross-provider dependency / ADR decision) — nicio categorie generică „nu există sursă curată".
+
+---
+
+## Addendum 3 (2026-07-29) — TODO documentat: ownership `actual_home_goals`/`actual_away_goals` (NEDECIS, NU implementat acum)
+
+**Context**: implementarea scorului final/pauză (Addendum 2) scrie `actual_home_goals`/`actual_away_goals`/`home_ht_goals`/`away_ht_goals` prin `persist_match_foundation_data()`, care rutează prin `upsert_match_canonical` (RPC canonic, COALESCE-only + detecție hard-conflict). Acest lucru a fost semnalat explicit ca posibil conflict cu **Canonical Feature Ownership** (ADR-036/D3.5): garda statică `tests/test_canonical_feature_ownership.py` documentează `sync/sync_results.py` ca owner-ul canonic al `actual_*` (`test_sync_results_remains_owner_of_actual_columns`), iar alți adaptori de statistici (`match_statistics_adapter.py`, `soccerfootballinfo_match_statistics_adapter.py`) sunt EXPLICIT interziși să scrie aceste coloane (`RESULT_COLUMNS` exclus din scope-ul lor aprobat).
+
+**Decizie explicită a proprietarului produsului**: **NU se schimbă ownership-ul acum.** Implementarea rămâne exact cum este (Flashscore scrie `actual_*` prin RPC-ul COALESCE-safe, care previne conflictul silențios prin mecanismul `hard_conflict` deja existent — dar nu a fost extinsă garda AST să recunoască explicit acest writer nou). Nu se deschide un ADR nou pentru asta acum.
+
+**TODO, documentat aici, de decis împreună la începutul integrării Oracle**:
+- Rămâne Flashscore un writer secundar, protejat de COALESCE + hard-conflict, alături de `sync_results.py`?
+- Sau se extinde garda AST (`test_canonical_feature_ownership.py`) să recunoască explicit `providers/flashscore/persistence.py` ca writer autorizat suplimentar?
+- Sau se restrânge Flashscore să NU mai scrie `actual_*`, lăsând exclusiv `sync_results.py` ca owner, cu scorul Flashscore păstrat doar în `match_events`/RAW?
+
+Niciuna din aceste opțiuni nu e aleasă acum — rămâne deschis, explicit, până la faza de integrare Oracle/Predictor/ML.

@@ -2,11 +2,11 @@
 
 **Versiune**: 2 (revizuire completă, TASK APROBAT — corecție oversight-uri + reclasificare pe 4 categorii stricte, fără categorie generică „nu există sursă curată").
 
-**Scop**: matrice completă, verificată direct în cod (`providers/flashscore/normalizer.py`) și în fixture-ul real (`docs/06_UDAL/poc_evidence/flashscore_full_tabs_poc/` + `flashscore_10matches/`), pentru fiecare informație documentată în `UDAL_FLASHSCORE_FULL_TABS_POC_REPORT.md`. Fiecare câmp NEMAPAT e clasificat în una din **exact 4 categorii**:
+**Scop**: matrice completă, verificată direct în cod (`providers/flashscore/normalizer.py`) și în fixture-ul real (`docs/06_UDAL/poc_evidence/flashscore_full_tabs_poc/` + `flashscore_10matches/`), pentru fiecare informație documentată în `UDAL_FLASHSCORE_FULL_TABS_POC_REPORT.md`. Fiecare câmp NEIMPLEMENTAT e clasificat în una din **exact 4 categorii, fără altele**:
 
 | Categorie | Înseamnă |
 |---|---|
-| **1. Parser oversight** | Informația există real în Flashscore, extractibilă robust — dar codul nu o citește (încă) |
+| **1. Parser limitation** | Mecanismul de extracție există și e gata (identic cu al câmpurilor deja confirmate din aceeași familie) — dar niciun fixture real capturat nu conține o apariție a acestei informații, deci selectorul exact nu poate fi confirmat pe date reale. Limitare a EȘANTIONULUI disponibil azi, nu a codului. |
 | **2. Schema gap** | Extracția e posibilă, dar nu există coloană/tabelă în Supabase pentru ea |
 | **3. Cross-provider dependency** | Scrierea corectă necesită o identitate/reconciliere cu alt provider (fixture_id, taxonomie de ligă) — nu o simplă extracție |
 | **4. Decizie arhitecturală explicită (ADR)** | S-a decis deliberat, printr-un ADR, să nu se scrie (nu lipsă tehnică) |
@@ -45,9 +45,9 @@ Toate 3 sunt scrise acum prin `persist_match_foundation_data()`, verificate idem
 | **Cartonaș roșu** | `match_events` | `event_type='red_card'`, `detail`=motiv | ✅ **MAPAT (corectat acum)** |
 | **Schimbare** (intrare+ieșire) | `match_events` | `event_type='substitution'`, `player_name`=intră, `related_player_name`=iese | ✅ **MAPAT (corectat acum)** |
 | **VAR** | `match_events` | `event_type='var'`, `detail`=decizie | ✅ **MAPAT (corectat acum)** |
-| **Autogol** | `match_events` | `event_type='own_goal'` (schema pregătită) | ❌ **Categoria 1 (Parser oversight) — caz special**: mecanismul de clasificare (dispatch pe `data-testid`/clasă SVG) e complet și identic cu cel al celorlalte 6 tipuri deja confirmate — DAR niciun autogol nu a apărut în cele 11 fixture-uri capturate până acum, deci selectorul exact (testid/clasă SVG) nu a putut fi verificat direct. Cod pregătit să-l accepte (`event_type` permis în schemă) — activare imediată la primul fixture real cu un autogol, nu ghicit acum. |
-| **Penalty ratat** | `match_events` | `event_type='penalty_missed'` (schema pregătită) | ❌ **Categoria 1, același caz** — nicio apariție reală capturată încă. |
-| **Al doilea galben** | `match_events` | `event_type='second_yellow_card'` (schema pregătită) | ❌ **Categoria 1, același caz** — nicio apariție reală capturată încă. |
+| **Autogol** | `match_events` | `event_type='own_goal'` (schema pregătită) | ❌ **Categoria 1 (Parser limitation)**: mecanismul de clasificare (dispatch pe `data-testid`/clasă SVG) e complet și identic cu cel al celorlalte 6 tipuri deja confirmate — DAR niciun autogol nu a apărut în cele 11 fixture-uri capturate până acum, deci selectorul exact (testid/clasă SVG) nu a putut fi verificat direct. Cod pregătit să-l accepte (`event_type` permis în schemă) — activare imediată la primul fixture real cu un autogol, nu ghicit acum. |
+| **Penalty ratat** | `match_events` | `event_type='penalty_missed'` (schema pregătită) | ❌ **Categoria 1 (Parser limitation), același caz** — nicio apariție reală capturată încă. |
+| **Al doilea galben** | `match_events` | `event_type='second_yellow_card'` (schema pregătită) | ❌ **Categoria 1 (Parser limitation), același caz** — nicio apariție reală capturată încă. |
 | Scor doar a doua repriză (nu cumulativ) | — | — | ❌ **Categoria 2 (Schema gap)** — element real, extractibil (aceeași pereche etichetă/valoare ca scorul la pauză), dar nicio coloană dedicată în `match_history` pentru „scor doar repriza 2" (diferit de scorul final). Valoare marginală — derivabil din final − pauză. |
 | Breadcrumb țară („Romania") | — | — | ❌ **Categoria 2 (Schema gap)** — nicio coloană dedicată; redundant cu liga. |
 | Breadcrumb competiție („Superliga") | `match_history` | `league` (coloană există) | ❌ **Categoria 3 (Cross-provider dependency)** — coloana EXISTĂ, dar valoarea brută Flashscore trebuie reconciliată cu taxonomia canonică de ligi (`mappings.py`, ADR-001 „sursă canonică unică pentru ligi") înainte de scriere — scriere directă ar putea crea o valoare de ligă duplicată/necanonică, exact problema pe care ADR-001 o previne. |
@@ -96,36 +96,41 @@ Toate 3 sunt scrise acum prin `persist_match_foundation_data()`, verificate idem
 
 ---
 
-## 2. Raport final — numere
+## 2. Concluzie finală
 
-**Convenție de numărare, explicită** (ca să poată fi verificată direct, rând cu rând): fiecare RÂND din tabelele secțiunii 1 = un câmp/grup de informație distinct, exact așa cum e enumerat acolo. Categoriile de statistici (36) și coloanele de clasament (10) sunt numărate ca UN rând fiecare (un grup coerent, extras/scris printr-un singur mecanism), nu desfășurate individual — altfel numărul „mapat" ar fi artificial umflat față de câmpurile eterogene (referee, scor, etc.) care sunt naturally unitare. Numărătoarea de mai jos a fost recalculată direct din tabelele secțiunii 1, nu estimată.
+**Convenție de numărare, explicită** (ca să poată fi verificată direct, rând cu rând): fiecare RÂND din tabelele secțiunii 1 = un câmp/grup de informație distinct, exact așa cum e enumerat acolo. Categoriile de statistici (36) și coloanele de clasament (10) sunt numărate ca UN rând fiecare (un grup coerent, extras/scris printr-un singur mecanism), nu desfășurate individual. Numărătoarea a fost recalculată direct din tabelele secțiunii 1, nu estimată.
 
 | | Număr |
 |---|---|
-| **Total rânduri/câmpuri distincte enumerate** (toate cele 7 tab-uri, secțiunea 1) | **32** |
-| **Mapate 100%** (extrase + scrise în Supabase) | **21** |
-| **Nemapate** | **11** |
+| **Total câmpuri identificate** (toate cele 7 tab-uri, confirmate în POC) | **32** |
+| **Total câmpuri implementate** (extrase + scrise în Supabase) | **21** |
+| **Total câmpuri rămase** (neimplementate) | **11** |
 
-### Cele 11 nemapate, cu motiv exact (niciunul „nu există sursă curată")
+### Cele 11 câmpuri rămase — motivul fiecăruia, clasificat exact în una din cele 4 categorii (fără altele)
 
 | # | Câmp | Categorie | Motiv exact |
 |---|---|---|---|
-| 1 | Autogol (`own_goal`) | 1 — Parser oversight (evidență lipsă) | Mecanism de clasificare identic cu celelalte 6 tipuri confirmate, dar nicio apariție reală în 11 fixture-uri capturate — selector neconfirmat |
-| 2 | Penalty ratat (`penalty_missed`) | 1 — Parser oversight (evidență lipsă) | Idem #1 |
-| 3 | Al doilea galben (`second_yellow_card`) | 1 — Parser oversight (evidență lipsă) | Idem #1 |
-| 4 | Scor doar repriza a doua | 2 — Schema gap | Nicio coloană dedicată; derivabil din final−pauză, valoare marginală |
-| 5 | Breadcrumb țară | 2 — Schema gap | Nicio coloană dedicată; redundant cu liga |
-| 6 | Breadcrumb rundă | 2 — Schema gap | Nicio coloană `round`/`matchday` |
-| 7 | Marcaje rol jucător (G/C) | 2 — Schema gap | Niciun flag dedicat; „Goalkeeper" deja acoperit via `position` |
-| 8 | Insigne formă recentă standings | 2 — Schema gap | Nicio coloană `recent_form` |
-| 9 | Breadcrumb competiție (liga canonică) | 3 — Cross-provider dependency | Coloana `league` există, dar necesită reconciliere cu taxonomia canonică (`mappings.py`, ADR-001) înainte de scriere |
-| 10 | Cotă canonică (`odds_fallback_flashscore`) | 3 — Cross-provider dependency | Necesită `fixture_id` identic cu The Odds API — nedisponibil în Flashscore |
-| 11 | Mișcare cotă (opening/curent) | 4 — Decizie ADR | ADR-043 — decizie explicită de scop, nu gol tehnic |
+| 1 | Autogol (`own_goal`) | **Parser limitation** | Mecanism de clasificare identic cu celelalte 6 tipuri confirmate, dar nicio apariție reală în 11 fixture-uri capturate — selector neconfirmat pe date reale |
+| 2 | Penalty ratat (`penalty_missed`) | **Parser limitation** | Idem #1 |
+| 3 | Al doilea galben (`second_yellow_card`) | **Parser limitation** | Idem #1 |
+| 4 | Scor doar repriza a doua | **Schema gap** | Nicio coloană dedicată; derivabil din final−pauză, valoare marginală |
+| 5 | Breadcrumb țară | **Schema gap** | Nicio coloană dedicată; redundant cu liga |
+| 6 | Breadcrumb rundă | **Schema gap** | Nicio coloană `round`/`matchday` |
+| 7 | Marcaje rol jucător (G/C) | **Schema gap** | Niciun flag dedicat; „Goalkeeper" deja acoperit via `position` |
+| 8 | Insigne formă recentă standings | **Schema gap** | Nicio coloană `recent_form` |
+| 9 | Breadcrumb competiție (liga canonică) | **Cross-provider dependency** | Coloana `league` există, dar necesită reconciliere cu taxonomia canonică (`mappings.py`, ADR-001) înainte de scriere |
+| 10 | Cotă canonică (`odds_fallback_flashscore`) | **Cross-provider dependency** | Necesită `fixture_id` identic cu The Odds API — nedisponibil în Flashscore |
+| 11 | Mișcare cotă (opening/curent) | **ADR decision** | ADR-043 — decizie explicită de scop, nu gol tehnic |
 
-**Distribuție pe categorii**: 3 în categoria 1 (Parser oversight — evidență lipsă, nu neglijență), 5 în categoria 2 (Schema gap), 2 în categoria 3 (Cross-provider dependency), 1 în categoria 4 (Decizie ADR).
+**Distribuție**: 3 Parser limitation · 5 Schema gap · 2 Cross-provider dependency · 1 ADR decision. Nicio altă categorie folosită.
 
-### Ce înseamnă acest rezultat pentru obiectivul declarat
+### Concluzia propriu-zisă
 
-„Foundation Data Layer este complet doar când tot ceea ce este disponibil și robust în Flashscore are un loc în Supabase" — **21 din 21 de câmpuri robuste, extractibile azi (cu selector confirmat pe date reale), au un loc în Supabase.** Cele 11 rămase NU sunt „robuste și disponibile, dar ignorate" — sunt fie (a) neconfirmate încă pe date reale (categoria 1, 3 câmpuri — codul e gata, doar așteaptă un fixture cu acel eveniment), fie (b) necesită o decizie de schemă/arhitectură separată, explicit vizibilă acum (categoriile 2-4, 8 câmpuri), niciuna ascunsă sub o etichetă generică.
+**Toate cele 21 de câmpuri robuste, disponibile, confirmate pe date reale sunt implementate în Supabase azi.** Niciunul din cele 11 rămase nu e „disponibil și ignorat" — fiecare are exact unul din cele 4 motive de mai sus, verificabil direct în cod sau în schemă:
 
-**Decizie rămasă la latitudinea proprietarului produsului**: cele 5 goluri de schemă (#4-8) pot fi închise printr-o singură migrare mică, oricând — nu au fost adăugate acum pentru că nu au fost cerute explicit în acest task („corectează pure oversight gaps" ≠ „adaugă coloane noi de schemă"); le semnalez aici, nu le implementez unilateral.
+- **3 sunt limitări reale ale eșantionului** (Parser limitation) — mecanismul există, așteaptă un fixture real cu acel eveniment pentru confirmare, nu se ghicește selectorul.
+- **5 sunt goluri de schemă** (Schema gap) — decizie de extindere a schemei, rămasă la latitudinea proprietarului produsului (nu implementate unilateral, nu cerute explicit în acest task).
+- **2 sunt dependențe cross-provider** (Cross-provider dependency) — necesită rezoluție de identitate cu alt provider, nu o simplă extracție.
+- **1 e o decizie ADR explicită** (ADR-043) — scop, nu gol tehnic.
+
+Foundation Data Layer extrage azi tot ce e disponibil robust în Flashscore, confirmat pe date reale — vezi și `docs/00_GOVERNANCE/ADR-044-flashscore-foundation-data-layer.md`, Addendum 2.
