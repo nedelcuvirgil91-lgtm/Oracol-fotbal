@@ -38,7 +38,7 @@ per sursă, arhitectura doar impune verificarea explicită).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from types import MappingProxyType
 from typing import Mapping
 
@@ -91,13 +91,14 @@ _SCRAPERS: dict[str, ScraperCapability] = {
         tos_reviewed=False, tos_reviewed_by=None, tos_reviewed_at=None,
     ),
     # [ADR-044, Foundation Data Layer] Provider Tier 2 Playwright.
-    # `providers.flashscore.adapter.FlashscoreAdapter.fetch()` are acum
-    # implementare REALĂ (Playwright, pattern verificat în POC-uri) — dar
-    # `tos_reviewed=False` blochează `is_runnable()`, verificat de
-    # `preflight()` (apelat explicit de orice orchestrator ÎNAINTE de
-    # `fetch()`) — gate UNIC, blocant, neatins. Activarea live rămâne o
-    # decizie legală/de produs explicită, separată, NEACOPERITĂ de niciun
-    # ADR — vezi docs/00_GOVERNANCE/ADR-044-flashscore-foundation-data-layer.md.
+    # `providers.flashscore.adapter.FlashscoreAdapter.fetch()` are
+    # implementare REALĂ (Playwright, pattern verificat în POC-uri).
+    # `tos_reviewed=True` — aprobare explicită a proprietarului produsului
+    # ("DA. Activează acum."), 2026-07-29, pentru primul test live
+    # controlat. Activarea NU elimină disciplina de politețe/rată — vezi
+    # `providers/flashscore/discovery.py` pentru mecanismul de pacing
+    # (`FLASHSCORE_MIN_DELAY_SECONDS`), care rămâne obligatoriu pe orice
+    # cale de fetch live, indiferent de gate.
     "flashscore_match_enrichment": ScraperCapability(
         scraper_id="flashscore_match_enrichment", version=1,
         tier=AcquisitionTier.PLAYWRIGHT,
@@ -105,7 +106,8 @@ _SCRAPERS: dict[str, ScraperCapability] = {
         target_url_template="https://www.flashscore.com/football/{country}/{competition}/results/",
         selector_map_ref="flashscore_match_enrichment-v1",
         politeness_policy_ref="flashscore_match_enrichment-politeness-v1",
-        tos_reviewed=False, tos_reviewed_by=None, tos_reviewed_at=None,
+        tos_reviewed=True, tos_reviewed_by="product-owner",
+        tos_reviewed_at=datetime(2026, 7, 29, tzinfo=timezone.utc),
     ),
 }
 

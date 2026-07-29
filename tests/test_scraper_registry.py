@@ -15,24 +15,28 @@ from scraper_registry import (
 def test_scrapers_registry_has_exactly_known_entries():
     """Regresie directa: nicio sursa noua nu se adauga tacit, in afara
     setului explicit aprobat pana acum - pilotul generic (Faza 1) si
-    Flashscore (R-Sync-FLASH-01, design-only, tos_reviewed=False)."""
+    Flashscore (ADR-044, tos_reviewed=True din 2026-07-29, aprobare
+    explicita a proprietarului produsului)."""
     assert set(SCRAPERS.keys()) == {
         "udal_pilot_generic_html_stats",
         "flashscore_match_enrichment",
     }
 
 
-def test_flashscore_scraper_tos_not_reviewed():
-    """[R-Sync-FLASH-01] Regresie critica - design-only, ramane
-    tos_reviewed=False pana la un POC live dedicat + aprobare separata."""
+def test_flashscore_scraper_tos_reviewed():
+    """[ADR-044] tos_reviewed=True din 2026-07-29 - aprobare explicita,
+    separata, a proprietarului produsului ("DA. Activeaza acum.") pentru
+    primul test live controlat. Regresie critica in sens opus fata de
+    inainte: daca redevine False fara o decizie explicita, acest test
+    trebuie sa pice."""
     cap = get_capability("flashscore_match_enrichment")
-    assert cap.tos_reviewed is False
-    assert cap.tos_reviewed_by is None
-    assert cap.tos_reviewed_at is None
+    assert cap.tos_reviewed is True
+    assert cap.tos_reviewed_by == "product-owner"
+    assert cap.tos_reviewed_at is not None
 
 
-def test_flashscore_scraper_is_not_runnable_yet():
-    assert is_runnable("flashscore_match_enrichment") is False
+def test_flashscore_scraper_is_runnable():
+    assert is_runnable("flashscore_match_enrichment") is True
 
 
 def test_pilot_scraper_tos_not_reviewed():

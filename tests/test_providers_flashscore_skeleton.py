@@ -1,12 +1,12 @@
 """Teste pentru providers/flashscore/adapter.py (Foundation Data Layer,
 ADR-044) — fara retea.
 
-[ACTUALIZAT] adapter.py a fost rescris complet - fetch()/normalize()/
-validate()/persist() au implementare reala acum (nu mai ridica
-NotImplementedError necondiționat), dar `preflight()` (tos_reviewed=False,
-scraper_registry.py) ramane gate-ul BLOCANT, neatins - nicio rulare live
-nu a avut loc, nu are voie sa aiba loc pana la o decizie explicita,
-separata, a proprietarului produsului (vezi ADR-044)."""
+[ACTUALIZAT 2026-07-29] `tos_reviewed=True` pentru `flashscore_match_
+enrichment` (scraper_registry.py) — aprobare explicita, separata, a
+proprietarului produsului ("DA. Activeaza acum."), pentru primul test
+live controlat. Gate-ul `preflight()` ramane mecanismul neschimbat
+(scraper_adapter_base.py) - doar starea `tos_reviewed` s-a schimbat, nu
+codul care o verifica."""
 from __future__ import annotations
 
 import pytest
@@ -17,7 +17,6 @@ from providers.flashscore.adapter import (
     _build_match_ref,
 )
 from providers.flashscore.normalizer import normalize_upcoming_match
-from scraper_adapter_base import ScraperPreflightError
 
 
 def test_flashscore_capabilities_match_poc_findings():
@@ -41,13 +40,14 @@ def test_flashscore_capabilities_match_poc_findings():
     assert all(FLASH_PROVIDER_CAPABILITIES[f] is False for f in confirmed_false)
 
 
-def test_flashscore_adapter_preflight_blocked_by_tos_gate():
-    """Gate independent de fetch() - tos_reviewed=False in scraper_registry.py
-    blocheaza inainte ca fetch() sa fie macar apelat. Cel mai important test
-    din acest fisier - trebuie sa ramana rosu pana la o decizie explicita."""
+def test_flashscore_adapter_preflight_passes_after_tos_review():
+    """[ADR-044, 2026-07-29] tos_reviewed=True in scraper_registry.py -
+    aprobare explicita, separata, a proprietarului produsului. Cel mai
+    important test din acest fisier - trebuie sa ramana verde doar cat
+    timp aceasta aprobare ramane valabila; daca tos_reviewed redevine
+    False fara o decizie explicita, acest test trebuie sa pice."""
     adapter = FlashscoreAdapter()
-    with pytest.raises(ScraperPreflightError):
-        adapter.preflight()
+    assert adapter.preflight() is None
 
 
 def test_flashscore_adapter_fetch_requires_match_identity():

@@ -16,21 +16,22 @@ activat — înlocuit cu `normalizer.py` (parsare pură, label-as-key) +
 idempotent 1/2/10 rulări) — arhitectura REALĂ a Foundation Data Layer,
 nu un schelet.
 
-**Gate dublu, NEATINS**: `preflight()` (moștenit din `ScraperAdapterBase`)
-verifică `scraper_registry.is_runnable(self.scraper_id)` — `tos_reviewed
-=False` blochează ORICE rulare, indiferent dacă `fetch()` de mai jos e
-implementat structural. Codul din acest fișier NU a fost și NU e rulat
-contra rețelei live — implementarea e completă și testabilă structural
-(pattern Playwright deja verificat, identic celui folosit în POC-urile
-aprobate explicit din această sesiune), dar activarea reală rămâne o
-decizie separată, legală/de produs, NEACOPERITĂ de niciun ADR — vezi
-`docs/00_GOVERNANCE/ADR-044-flashscore-foundation-data-layer.md`.
+**Gate ToS — DESCHIS din 2026-07-29**: `preflight()` (moștenit din
+`ScraperAdapterBase`) verifică `scraper_registry.is_runnable(self.
+scraper_id)`. `tos_reviewed=True` (`scraper_registry.py`) — aprobare
+explicită, separată, a proprietarului produsului ("DA. Activează acum."),
+pentru primul test live controlat (ADR-044). Mecanismul `preflight()` NU
+s-a schimbat — doar valoarea `tos_reviewed` — orice orchestrator tot
+trebuie să apeleze explicit `preflight()` înainte de `fetch()`, nu implicit.
+Activarea reală rămâne condiționată de disciplina de politețe/rată — vezi
+`providers/flashscore/discovery.py` pentru mecanismul de pacing.
 
-**Discovery (M1) rămâne NEIMPLEMENTAT** — `fetch()` cere `match_base_url`
+**Discovery (M1) — în construcție** — `fetch()` cere `match_base_url`
 + `mid` deja rezolvate (identitatea meciului pe Flashscore); transformarea
-"echipe + dată" → URL Flashscore e un pas separat, nu construit aici (nicio
-sursă de adevăr azi pentru cum se face discovery-ul la scară — pagina de
-rezultate/fixtures per competiție, nu pagina unui meci individual).
+"competiție urmărită" → listă de meciuri e responsabilitatea
+`providers/flashscore/discovery.py` (structura reală a paginii de
+rezultate/fixtures verificată direct, live, înainte de orice selector —
+niciun selector ghicit).
 
 FLASH_PROVIDER_CAPABILITIES: declarație pură — fiecare `True` corespunde
 unui ✅ verificat direct în rapoartele POC, fiecare `False` unui ❌/⚠️.
@@ -139,9 +140,11 @@ def _check_protection(page, http_status: int | None, tag: str) -> None:
 
 
 class FlashscoreAdapter(ScraperAdapterBase):
-    """Foundation Data Layer (ADR-044). Blocat de `preflight()`
-    (`tos_reviewed=False`) pana la o decizie explicita, separata, a
-    proprietarului produsului."""
+    """Foundation Data Layer (ADR-044). `preflight()` verifică
+    `tos_reviewed` (True din 2026-07-29, aprobare explicită a
+    proprietarului produsului) — orice orchestrator tot trebuie să îl
+    apeleze explicit înainte de `fetch()`, gate-ul rămâne activ ca
+    mecanism, doar starea s-a schimbat."""
 
     scraper_id = "flashscore_match_enrichment"
     provider_id = "flashscore"
