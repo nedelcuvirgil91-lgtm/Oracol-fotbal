@@ -12,6 +12,16 @@
 
 Prioritatea de dezvoltare a întregului proiect, declarată oficial: `M0 → M1 → M2 → M3 → M4` — provider Flashscore funcțional, până la primul Night Sync complet. Detalii, analiza de dependențe, ce s-a amânat (nu abandonat): `docs/06_UDAL/R-SYNC-FLASH-01_DESIGN.md` (secțiunea "CRITICAL PATH OFICIAL" + §15). Consecință directă: niciun task nou privind Predictor/ML/Blending/Confidence nu începe înainte de M4 fără aprobare explicită separată — `docs/00_GOVERNANCE/ML_ACTIVATION_GATE.md`.
 
+### 0.1 Foundation Data Layer + Data Trust Layer (ADR-044, 2026-07-29)
+
+Scope-ul M0 s-a extins oficial (decizie Product Owner) de la statistici de bază la un **Foundation Data Layer** complet — vezi `docs/00_GOVERNANCE/ADR-044-flashscore-foundation-data-layer.md`. **Implementat, testat, NEMERGE-UIT pe `main`** (pe branch, cod complet + teste, `tos_reviewed=False` neatins, nicio scriere live):
+
+- Schema: migrațiile 035 (5 tabele noi + `attendance`/`capacity`) și 036 (fix gol RPC — `goalkeeper_saves`/`attendance`/`capacity` nu erau scrise de `upsert_match_canonical`, aplicate live, `Prediction`).
+- Persist layer complet, idempotent (verificat 1/2/10 rulări): `providers/flashscore/persistence.py`, extensii `database/queries.py`.
+- Data Trust Layer (RAW → VALIDATED → CANONICAL) funcțional: `persist_match_with_data_trust_layer()`, `udal_validation.validate_flat_identity()`.
+- Oracle Engine/ML rămân neatinse — niciun consumator nu citește încă din tabelele noi (secțiunea 5, ADR-044).
+- Următorul pas pe Critical Path rămâne M1 (primul meci descoperit live) — Foundation Data Layer pregătește DESTINAȚIA scrierii, nu înlocuiește pașii M1-M4.
+
 ---
 
 ## 1. Topologia branch-urilor (verificat direct, `git`, 2026-07-28)

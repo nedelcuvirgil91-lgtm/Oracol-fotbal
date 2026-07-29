@@ -1,0 +1,95 @@
+# ADR-044 — Flashscore Foundation Data Layer + Data Trust Layer
+
+**Status**: **ACCEPTAT** (2026-07-29) — aprobat explicit de proprietarul produsului ("TASK APROBAT — Foundation Data Layer (Flashscore) + Data Trust Layer... Poți începe implementarea conform acestei arhitecturi"). Schema (migrațiile 035/036) și stratul de persistență (`providers/flashscore/persistence.py`, `database/queries.py`, `udal_validation.validate_flat_identity`) sunt implementate și acoperite de teste (pytest, fără rețea, contra fixture-ului real `docs/06_UDAL/poc_evidence/flashscore_full_tabs_poc/`). **Scriere live rămâne neactivată** — `tos_reviewed=False` neatins, `providers/flashscore/adapter.py.fetch()` rămâne `NotImplementedError` (Faza 4, ADR-042 §16.2). Acest ADR autorizează arhitectura și schema; activarea scrierii live rămâne o decizie separată, ulterioară.
+
+**Autor**: Claude, la cererea proprietarului produsului.
+
+**Data**: 2026-07-29.
+
+**Companion**: ADR-042 (`universal-data-acquisition-layer.md`, contractul UDAL), ADR-043 (`flashscore-odds-fallback.md`, precedent direct de „provider auxiliar cu scriere separată, niciodată amestecată”), `docs/06_UDAL/R-SYNC-FLASH-01_DESIGN.md` (design-ul inițial, auxiliar), `docs/06_UDAL/UDAL_FLASHSCORE_FULL_TABS_POC_REPORT.md` (dovada tehnică — toate cele 7 tab-uri, câmpuri reale confirmate), `docs/00_GOVERNANCE/ML_ACTIVATION_GATE.md` (Predictor/ML rămân neatinse de acest ADR).
+
+---
+
+## Context
+
+Sesiunea de lucru curentă a evoluat prin mai multe decizii succesive:
+
+1. POC-ul inițial (10 meciuri, Playwright standard, fără evaziune) a confirmat Flashscore ca provider **auxiliar** viabil, fără protecții active.
+2. R-SYNC-FLASH-01 a proiectat Flashscore ca sursă auxiliară — completare de câmpuri lipsă, niciodată înlocuire a providerilor API existenți (API-Football, Soccer Football Info, ESPN, TheSportsDB, football-data.org).
+3. Un POC live suplimentar (1 meci, toate cele 7 tab-uri reale — Sumar/Statistici/Formații/Statistici jucători/Cote/H2H/Clasamente), declanșat de o captură de ecran a proprietarului produsului care a demonstrat direct că datele "Statistici" (cornere, pase, cartonașe) EXISTĂ real pe un tab niciodată vizitat până atunci (`/summary/stats/`), a arătat că bogăția reală de date Flashscore e semnificativ mai mare decât scope-ul M0 inițial: **36 de categorii de statistici de meci** (nu 5), un tabel dedicat de **statistici per jucător cu rating** (32 rânduri), **H2H segmentat pe 3 categorii reale** (30 rânduri), **clasament complet** (16 echipe).
+4. Proprietarul produsului a decis explicit, pe baza acestei descoperiri: Flashscore devine sursa care **completează** (nu înlocuiește) providerii API existenți pentru date bogate de meci — filosofia „nu pierde nicio informație”: orice câmp robust, repetabil, stabil descoperit în POC trebuie salvat, indiferent dacă algoritmul curent îl folosește azi.
+5. Cerința arhitecturală explicită, nouă: un **Data Trust Layer** — `RAW → VALIDATED → CANONICAL → Oracle → ML`, cu regula „nu există bypass”: nicio scriere directă în tabele canonice fără să treacă prin validare; Oracle Engine și ML citesc EXCLUSIV din tabele canonice, niciodată direct din Flashscore.
+
+Acest ADR formalizează rezultatul acelor decizii: schema Supabase finală, fluxul de scriere, și granițele stricte față de Predictor/ML/Oracle Engine (neatinse).
+
+## Decizie
+
+### 1. Flashscore completează, nu înlocuiește
+
+API-Football, Soccer Football Info, ESPN, TheSportsDB, football-data.org **rămân** responsabile pentru fixtures, rezultate, scoruri, status meci și sincronizarea curentă (ADR-034/041, Selection Engine). Flashscore adaugă informații bogate (statistici extinse, statistici per jucător, context H2H/formă, clasament) pe care providerii existenți nu le oferă azi. **Supabase rămâne Single Source of Truth** — niciun consumator (Oracle Engine, ML, UI) nu citește vreodată direct de la un provider extern; totul trece prin tabelele canonice.
+
+### 2. Data Trust Layer — RAW → VALIDATED → CANONICAL
+
+```
+Flashscore (HTML) → normalize_*() [pur, fără I/O] → RAW → VALIDATED → CANONICAL → Oracle Engine / ML
+```
+
+- **RAW** (`flashscore_raw_extraction`, migrația 035): output-ul exact al funcțiilor `normalize_*()` (`providers/flashscore/normalizer.py`), înainte de orice decizie de validare, cheiat pe `(match_ref, tab_name)` — `match_ref` fiind identitatea stabilă PRE-canonică (URL/mid Flashscore), independentă de rezolvarea ulterioară a `match_history.id`. **Se scrie INDIFERENT de rezultatul validării** — un meci respins tot lasă o dovadă RAW completă (North Star #9, trasabilitate). Coloanele `validation_status`/`validation_errors`/`canonical_written` fac starea vizibilă pe același rând, nu într-un tabel separat de audit.
+- **VALIDATED**: `udal_validation.validate_flat_identity()` (nou, aditiv) — verifică prezența cheii naturale (`home_team`/`away_team`/`kickoff_date`). `validate_records()` existent (Faza 1 UDAL) **nu a fost reutilizat direct**: `REQUIRED_FIELDS` al lui e fix, specific unui pilot anterior cu formă plată îngustă (`home_cards`/`away_cards` combinate) — nu se potrivește formei reale, bogate, Flashscore (`home_yellow_cards`/`home_red_cards` separate, 20+ câmpuri variabile). Aplicarea directă ar fi respins fals-negativ orice rând valid. `validate_flat_identity()` păstrează același contract de ieșire (`ValidationResult`, proveniență obligatorie `source_tier`/`source_id`/`fetched_at`/`confidence`) — extensie, nu duplicare paralelă.
+- **CANONICAL**: `providers/flashscore/persistence.persist_match_foundation_data()` scrie DOAR dacă validarea trece. Niciun bypass — `persist_match_with_data_trust_layer()` (punctul de intrare oficial) apelează scrierea canonică condiționat de `validation.valid`, nu necondiționat.
+
+### 3. Schema Supabase (migrațiile 035/036)
+
+**Coloane noi pe `match_history`** (owner: `upsert_match_canonical`, COALESCE-only, ADR-036): `attendance`, `capacity`.
+
+**Gol închis (migrația 036)**: migrațiile 032/035 adăugaseră `home/away_goalkeeper_saves` și `attendance`/`capacity`, dar RPC-ul canonic `_upsert_match_canonical_locked` nu fusese extins să le scrie — găsit prin citire de cod în timpul implementării acestui ADR, corectat aditiv (CREATE OR REPLACE, același contract).
+
+**4 tabele noi**, toate RLS activ, `UNIQUE` pe cheia lor naturală, scriere prin `ON CONFLICT DO UPDATE` (idempotent, verificat explicit prin teste parametrizate 1/2/10 rulări — zero duplicate, id-uri stabile între rulări):
+
+| Tabelă | Cheie UNIQUE | Conținut |
+|---|---|---|
+| `match_statistics_extended` | `(match_id, stat_key)` | EAV — ~26 categorii de statistici FĂRĂ coloană dedicată în `match_history` (xGOT, blocked shots, duels won, tackles, etc.) |
+| `player_match_stats_extended` | `(player_match_stats_id, stat_key)` | EAV per jucător — 7 statistici avansate (total shots, xG, accurate passes, touches, touches in opposition box, successful dribbles, duels) |
+| `flashscore_match_context` | `(context_match_id, category, meeting_order)` | H2H + formă recentă, segmentate pe 3 categorii reale (`h2h_overall`/`recent_form_home`/`recent_form_away`) |
+| `flashscore_standings_snapshot` | `(competition, team)` | Clasament curent (snapshot, nu istoric acumulat) |
+| `flashscore_raw_extraction` | `(match_ref, tab_name)` | Stratul RAW al Data Trust Layer-ului |
+
+**Justificare schemă EAV** (nu coloane fixe noi per statistică): cerință explicită a proprietarului produsului — „peste un an putem folosi 200 [statistici]... prefer să colectăm date o singură dată... decât să modificăm continuu colectarea datelor”. O schemă EAV absoarbe orice statistică nouă descoperită de Flashscore fără migrare nouă.
+
+### 4. `player_match_stats` — îmbogățire, nu duplicare
+
+Tabelul existent (migrația 032) capătă acum `position`/`rating` populate (deferred în M0, blocat de lipsa unei surse curate — rezolvat de tab-ul dedicat „Statistici jucători”). Rândurile de roster brut (nume/număr/echipă, din Lineups) și rândurile îmbogățite (rating/poziție, din tabelul Player Stats) se scriu prin ACELAȘI `on_conflict=(match_id,team,player_name)` — PostgREST generează `UPDATE SET` doar pentru coloanele prezente în payload, deci scrierea roster-ului nu suprascrie cu `NULL` o îmbogățire scrisă anterior (sau invers). Rezoluția `team` pentru tabelul Player Stats (care nu are coloană de echipă) se face prin join pe nume cu roster-ul din Lineups, la persist(), nu la normalizare — limitare cunoscută, documentată (`providers/flashscore/persistence._join_player_stats_with_roster`).
+
+### 5. Oracle Engine / ML — graniță neatinsă
+
+Acest ADR **nu modifică** `oracle_engine.py`, `ml_predictor.py`, sau vreun flux de blending/confidence. Tabelele noi există, dar niciun consumator nu citește din ele încă — activarea citirii (Oracle Engine → tabele canonice noi) e un task separat, ulterior, condiționat de „Garanțiile obligatorii” de mai jos. `ml_blending_enabled=False` (R-ARCH-REVIEW-01) și ML Activation Gate rămân neatinse.
+
+## Garanții obligatorii înainte de orice integrare Predictor/ML
+
+(cerute explicit de proprietarul produsului, verificate în acest ADR)
+
+1. **Date brute salvate** — ✅ `flashscore_raw_extraction`, scris indiferent de rezultatul validării.
+2. **Validarea funcționează** — ✅ `validate_flat_identity()`, testat (accept/reject pe cheie naturală).
+3. **Tabele canonice populate corect** — ✅ verificat contra fixture-ului real (36 statistici, 32 jucători, 15 rânduri H2H/formă, 16 echipe clasament — toate valorile verificate manual contra capturii trimise de proprietarul produsului).
+4. **Rerun-uri fără duplicate** — ✅ demonstrat explicit, teste parametrizate 1/2/10 rulări (`test_providers_flashscore_persistence_idempotency.py`), inclusiv stabilitatea id-urilor între rulări.
+5. **Niciun provider extern nu poate afecta direct modelele** — ✅ prin construcție: Oracle Engine/ML nu citesc din tabelele noi (secțiunea 5); orice integrare viitoare rămâne un task separat, cu propria decizie explicită.
+
+## Consecințe
+
+**Pozitive**:
+- Football Oracle capătă o infrastructură de date semnificativ mai bogată (statistici avansate, rating per jucător, context H2H/formă, clasament) fără nicio schimbare de comportament al Predictorului azi.
+- Schema EAV absoarbe extensii viitoare fără migrări repetate.
+- Trasabilitate completă (RAW păstrat chiar și pentru meciuri respinse) — North Star #9.
+- Gol real de RPC (goalkeeper_saves/attendance/capacity) descoperit și închis ca parte a acestei implementări, nu lăsat latent.
+
+**Negative / riscuri acceptate**:
+- 4 tabele noi + o funcție RPC redefinită = suprafață de întreținere suplimentară.
+- Join-ul nume↔echipă pentru tabelul Player Stats (fără coloană de echipă nativă) e o dependență de calitate a datelor Flashscore — nume ușor diferite între tab-uri ar rupe silențios îmbogățirea (loghează un warning, exclude rândul, nu ghicește — comportament acceptat, nu eliminat).
+- Standings folosește clase CSS, nu `data-testid` (mai fragil potențial la schimbări de build Flashscore) — risc documentat explicit în `normalizer.py`, nu ascuns.
+- Scrierea live rămâne neactivată (`tos_reviewed=False`) — acest ADR autorizează arhitectura și schema, nu operarea live.
+
+## Alternative respinse
+
+- **Coloane fixe noi per statistică în `match_history`** — respinsă: contrazice explicit filosofia proiectului declarată de proprietarul produsului (colectare o singură dată, fără migrări repetate pe măsură ce apar statistici noi).
+- **Reutilizarea directă a `validate_records()`** — respinsă: schema lui fixă ar respinge fals-negativ orice rând real Flashscore (vezi secțiunea 2).
+- **Citire directă Oracle Engine → Flashscore** (bypass complet al Data Trust Layer-ului) — respinsă explicit de proprietarul produsului: „Oracle Engine NU citește niciodată din Flashscore direct”.
