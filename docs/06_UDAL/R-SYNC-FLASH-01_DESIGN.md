@@ -210,6 +210,7 @@ Extinde `ScraperAdapterBase` (Faza 0) + reutilizează `udal_extraction.extract()
 ## 5. Flux Night Sync (ML enrichment)
 
 **Fereastră**: 02:00–05:00 (după fereastra de sincronizare zilnică existentă, `daily.yml` — nu concurent cu ea).
+**[CORECTAT §13.2, R-Sync-FLASH-02]** — afirmația "nu concurent cu `daily.yml`" era greșită, neverificată la momentul redactării: `daily.yml` pornește la `03:00 UTC`, în plină fereastră `02:00-05:00`. Fereastra corectă, cu justificare completă, e în §13.2 (`01:00 UTC`, plafon 90 min).
 
 ```
 1. SELECT din match_history:
@@ -490,3 +491,54 @@ Ce **poate** fi construit și testat acum, fără nicio dependență de rețea l
 - Orice atingere a Predictorului — rămâne blocată explicit, cf. §"Predictor" din cererea curentă și `R-SYNC-FLASH-01_PREDICTOR_IMPACT_ANALYSIS.md`.
 
 **Acest plan așteaptă aprobare explicită înainte de commit-ul 2.1.**
+
+---
+
+## 13. [R-SYNC-FLASH-02, 2026-07-29] Night Sync ca flux permanent, separat de Bootstrap — verificare de conflicte
+
+Răspuns la "R-SYNC-FLASH-02 — Night Sync pentru sezonul curent (după bootstrap)". **Analiză, fără cod implementat** — cf. cerință explicită.
+
+### 13.1 Confirmare — fără conflict
+
+Separarea Bootstrap (one-time, per competiție, niciodată reluat după `completed`)/Night Sync (permanent, doar ultimele 3-4 zile, doar câmpuri lipsă) e deja consistentă cu §10.2-§10.5 din acest document — nicio contradicție, doar formalizare mai explicită. Regula COALESCE (niciodată rescriere de date existente) rămâne neschimbată, deja garantată de `upsert_match_canonical`. Decizia de a NU introduce un Weight Manager Predictor/ML: confirmată, fără impact de design — nimic din R-Sync-FLASH-01/02 presupunea sau necesita așa ceva.
+
+### 13.2 Conflict real găsit #1 — coliziune de programare cu `daily.yml`, propunere de soluție
+
+Fereastra Night Sync propusă inițial (§5: "02:00–05:00") **se suprapune cu `daily.yml`, care pornește la 03:00 UTC** (`cron: "0 3 * * *"`) și rulează, în aceeași execuție, `history_sync` → `feature_update` (`sync.backfill_features.run_backfill()`, recalculează exact mediile mobile care alimentează `corner_dominance`/`card_diff`/`foul_diff`/`shot_dominance` — vezi `R-SYNC-FLASH-01_PREDICTOR_IMPACT_ANALYSIS.md`) → `ml_retrain` (**deja există**, `PipelineStep("ml_retrain", depends_on=("feature_update",))`, `sync/run_daily.py`).
+
+**Consecință dacă neschimbat**: dacă Flashscore Night Sync nu apucă să termine înainte ca `feature_update` să citească `match_history` în aceeași noapte, completarea de azi nu ajunge în recalcularea de azi — beneficiul se amână cu o zi, silențios, contrazicând exact așteptarea din cerere ("dacă azi s-au jucat meciuri... mâine dimineață... deja").
+
+**Soluție propusă** (aleasă dintre 2 opțiuni evaluate):
+- **Opțiunea A — integrare formală ca `PIPELINE_STEP`** (`flashscore_night_sync`, `depends_on=("history_sync",)`, extinde `feature_update` la `depends_on=("history_sync", "flashscore_night_sync")`) — corectitudine garantată de dependență, nu de presupunere temporală. **Respinsă pentru acum**: `run_daily.py` nu are azi un motor real de orchestrare cross-workflow (propriul docstring, PIPELINE_STEPS: "O adevărată orchestrare... rămâne o extindere viitoare, neaprobată acum") — un pas care necesită Playwright ar cere fie adăugarea browserului în job-ul existent `daily.yml` (risc asupra bugetului de 30 min deja alocat altor 12 pași), fie o coordonare cross-workflow pe care manifestul declarativ nu o impune azi (doar validează dependențe declarate, nu așteaptă alt workflow GitHub Actions).
+- **Opțiunea B — workflow separat, fereastră de timp cu marjă generoasă, ALEASĂ**: Flashscore Night Sync rămâne un workflow GitHub Actions propriu (Playwright izolat, buget de timp propriu, fără să concureze cu cei 12+ pași deja din `daily.yml`), programat **înainte** de 03:00 UTC, cu plafon intern ferm (propunere: pornire `01:00 UTC`, timeout intern 90 min, deci finalizat cel târziu `02:30 UTC` — marjă de 30 min față de pornirea `daily.yml`). Mai puțin "corect" arhitectural decât Opțiunea A (garanție de timp, nu de dependență), dar realist azi, izolează eșecul (dacă Flashscore Night Sync pică, nu afectează deloc `daily.yml`), și nu cere nicio modificare a `run_daily.py` existent.
+- **Plasă de siguranță, opțională, neimplementată acum**: `feature_update` ar putea verifica, informativ (nu blocant), dacă `acquisition_run_log` are o intrare Flashscore reușită din noaptea curentă, înainte de `01:00 UTC` — logare de avertisment dacă lipsește, fără să oprească pipeline-ul. Idee reținută pentru o etapă viitoare, nu parte a aprobării curente.
+
+### 13.3 Clarificare (nu conflict de blocat, dar necesară în documentație) #2 — "ML se reantrenează automat" există deja
+
+Verificat direct în cod: **`ml_retrain` e deja un `PIPELINE_STEP` activ** (`depends_on=("feature_update",)`) și `continuous_learning.yml` rulează deja zilnic (06:00 UTC) cu `learning_core_enabled=true` **deja activ** (`docs/00_GOVERNANCE/ARCHITECTURE_STATE.md`, confirmat live). **R-Sync-FLASH-02 nu introduce nicio automatizare nouă aici** — doar îmbunătățește datele de intrare pe care aceste procese, deja existente și deja aprobate, le consumă.
+
+**Distincție care trebuie păstrată explicit, altfel riscă să fie înțeleasă greșit ulterior**: "Predictorul folosește deja datele noi" e adevărat **imediat** pentru componenta statistică/Poisson/ELO/formă (`oracle_engine._build_profile()`, verificat — citește live din `match_history`, fără cache/TTL intermediar) — dar pentru componenta **ML**, rămâne adevărat **doar după promovare manuală** a Challenger-ului antrenat cu datele noi (Champion Manager, ADR-002/ADR-016, neschimbat — "Not Implemented: Auto-promovare... fără om în buclă" din CLAUDE.md rămâne valabil, R-Sync-FLASH-02 nu-l atinge și nu-l ocolește). Diagrama din cerere ("retrain ML → Predictor") descrie corect fluxul de ANTRENARE automată (deja existent), nu o promovare automată (care nu există și nu se introduce aici).
+
+### 13.4 Actualizare a interogării de gap-fill Night Sync (§5) — completare, nu schimbare de principiu
+
+Interogarea originală din §5 nu enumera explicit `match_events`/`player_match_stats` ca declanșatori de gap-fill (doar coloanele `match_history`). Corectat aici — condiția de target pentru Night Sync devine:
+
+```
+WHERE actual_result IS NOT NULL
+  AND kickoff_date >= now() - interval '4 days'   -- fereastra 3-4 zile, cf. cerinta
+  AND (
+    home_possession IS NULL OR home_shots IS NULL OR home_corners IS NULL
+    OR home_goalkeeper_saves IS NULL OR referee IS NULL OR home_lineup IS NULL
+    OR NOT EXISTS (SELECT 1 FROM match_events WHERE match_events.match_id = match_history.id)
+    OR NOT EXISTS (SELECT 1 FROM player_match_stats WHERE player_match_stats.match_id = match_history.id)
+  )
+```
+
+Regula de precedență (§1: dacă API/Open Data au deja completat un câmp, Flashscore nu se mai interoghează pentru el) rămâne identică — extinsă acum explicit și la `match_events`/`player_match_stats`, nu doar la coloanele `match_history`.
+
+### 13.5 Ce rămâne neschimbat / neimplementat
+
+- Niciun cod scris ca urmare a acestei secțiuni — analiză + actualizare documentație, cf. cerință explicită.
+- Niciun Weight Manager Predictor/ML — confirmat, neintrodus.
+- `tos_reviewed` neschimbat — Night Sync-ul real rămâne, la fel ca Bootstrap-ul, blocat de același gate (§12.0) până la o decizie separată.
+- Planul de Stage 2 (§12) rămâne valabil neschimbat — integrarea de programare (§13.2) e o decizie de arhitectură pentru un Stage viitor (worker-ul de execuție), nu pentru mecanica cozii deja planificată acolo.
