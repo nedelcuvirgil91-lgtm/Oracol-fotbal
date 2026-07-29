@@ -13,6 +13,7 @@ import pytest
 
 from providers.flashscore.normalizer import (
     normalize_match_context,
+    normalize_match_events,
     normalize_match_statistics,
     normalize_match_statistics_extended,
     normalize_odds,
@@ -65,6 +66,26 @@ def test_normalize_match_statistics_prefers_dedicated_stats_tab(full_tabs_pages)
     assert result["away_offsides"] == 1.0
     assert result["home_goalkeeper_saves"] == 4.0
     assert result["away_goalkeeper_saves"] == 2.0
+
+
+def test_normalize_match_statistics_final_and_half_time_score(full_tabs_pages):
+    """[TASK APROBAT - corectie oversight] Scor final si scor la pauza -
+    .detailScore__wrapper si perechea "1st Half"/valoare - coloane
+    match_history deja existente (migratia 008), niciodata extrase
+    anterior. Meciul real: 5-1 final, 2-0 la pauza."""
+    result = normalize_match_statistics(full_tabs_pages)
+    assert result["actual_home_goals"] == 5
+    assert result["actual_away_goals"] == 1
+    assert result["home_ht_goals"] == 2
+    assert result["away_ht_goals"] == 0
+
+
+def test_normalize_match_statistics_no_summary_page_score_is_none():
+    result = normalize_match_statistics({"stats": "<html></html>"})
+    assert result.get("actual_home_goals") is None
+    assert result.get("actual_away_goals") is None
+    assert result.get("home_ht_goals") is None
+    assert result.get("away_ht_goals") is None
 
 
 def test_normalize_match_statistics_lineups_still_populated(full_tabs_pages):
@@ -240,3 +261,70 @@ def test_normalize_odds_excludes_bookmaker_without_market(full_tabs_pages):
 
 def test_normalize_odds_no_odds_tab_returns_empty():
     assert normalize_odds({}) == []
+
+
+# ════════════════════════════════════════════════════════════════════════
+# normalize_match_events — timeline complet (corectie oversight, TASK APROBAT M1)
+# ════════════════════════════════════════════════════════════════════════
+
+def test_normalize_match_events_full_timeline_real_values(full_tabs_pages):
+    """21 evenimente reale, toate tipurile confirmate pe acest fixture:
+    6 goluri (5 goal + 1 penalty_goal), 3 cartonase galbene, 1 rosu,
+    10 schimbari, 1 VAR. Consistenta interna: goluri per echipa (5-1)
+    coincide exact cu scorul final extras separat (actual_home_goals/
+    actual_away_goals)."""
+    events = normalize_match_events(full_tabs_pages, match_id=999)
+    assert len(events) == 21
+    counts = Counter(e["event_type"] for e in events)
+    assert counts == {
+        "goal": 5, "penalty_goal": 1, "yellow_card": 3,
+        "red_card": 1, "substitution": 10, "var": 1,
+    }
+
+    base = normalize_match_statistics(full_tabs_pages)
+    home_goals = sum(1 for e in events if e["team"] == "home" and e["event_type"] in ("goal", "penalty_goal", "own_goal"))
+    away_goals = sum(1 for e in events if e["team"] == "away" and e["event_type"] in ("goal", "penalty_goal", "own_goal"))
+    assert home_goals == base["actual_home_goals"] == 5
+    assert away_goals == base["actual_away_goals"] == 1
+
+
+def test_normalize_match_events_goal_has_assist(full_tabs_pages):
+    events = normalize_match_events(full_tabs_pages, match_id=999)
+    first_goal = next(e for e in events if e["minute"] == 8 and e["event_type"] == "goal")
+    assert first_goal["player_name"] == "Soro A."
+    assert first_goal["related_player_name"] == "Pop A."
+    assert first_goal["team"] == "home"
+
+
+def test_normalize_match_events_substitution_in_and_out(full_tabs_pages):
+    events = normalize_match_events(full_tabs_pages, match_id=999)
+    sub = next(e for e in events if e["minute"] == 37 and e["event_type"] == "substitution")
+    assert sub["player_name"] == "Mora C."  # intra
+    assert sub["related_player_name"] == "Webster R."  # iese
+    assert sub["team"] == "away"
+
+
+def test_normalize_match_events_card_has_detail_reason(full_tabs_pages):
+    events = normalize_match_events(full_tabs_pages, match_id=999)
+    card = next(e for e in events if e["minute"] == 32 and e["event_type"] == "yellow_card")
+    assert card["player_name"] == "Irimia D."
+    assert card["detail"] == "Foul"
+
+
+def test_normalize_match_events_var_has_no_player_but_has_detail(full_tabs_pages):
+    """VAR e o decizie la nivel de meci, nu de jucator - player_name
+    string gol (sentinel schema, migratia 039), NU None (coloana NOT
+    NULL DEFAULT '')."""
+    events = normalize_match_events(full_tabs_pages, match_id=999)
+    var_event = next(e for e in events if e["event_type"] == "var")
+    assert var_event["player_name"] == ""
+    assert var_event["detail"] == "Goal Disallowed - handball"
+    assert var_event["minute"] == 43
+
+
+def test_normalize_match_events_stoppage_time_minute_parsed_correctly(full_tabs_pages):
+    """"90+2'" -> minutul nominal 90, NU 902 (bug real posibil cu un
+    regex generic de cifre - verificat explicit)."""
+    events = normalize_match_events(full_tabs_pages, match_id=999)
+    stoppage_goal = next(e for e in events if e["player_name"] == "Pascual M.")
+    assert stoppage_goal["minute"] == 90

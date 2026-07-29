@@ -196,6 +196,40 @@ def _extract_labeled_stat_pairs(soup: BeautifulSoup) -> dict[str, tuple[str | No
     return result
 
 
+def _extract_final_score(soup: BeautifulSoup) -> tuple[int | None, int | None]:
+    """Scor final (`.detailScore__wrapper`, 2 span-uri separate de un
+    al treilea span `detailScore__divider`, ex. "5 - 1") - verificat pe
+    2 fixture-uri distincte. Element unic pe pagina, structura simpla."""
+    el = soup.select_one(".detailScore__wrapper")
+    if el is None:
+        return None, None
+    spans = [
+        s for s in el.find_all("span", recursive=False)
+        if "detailScore__divider" not in (s.get("class") or [])
+    ]
+    home = _parse_int_loose(spans[0].get_text(strip=True)) if len(spans) > 0 else None
+    away = _parse_int_loose(spans[1].get_text(strip=True)) if len(spans) > 1 else None
+    return home, away
+
+
+def _extract_half_time_score(soup: BeautifulSoup) -> tuple[int | None, int | None]:
+    """Scor la pauza - container `.wclHeaderSection--summary` cu exact 2
+    copii `wcl-scores-overline-02` (eticheta "1st Half" + valoare "2 - 0")
+    - verificat ca structura DISTINCTA de containerul "2nd Half" (2 elemente
+    `.wclHeaderSection--summary` separate pe pagina, nu unul singur cu 4
+    copii - verificat direct pe 2 fixture-uri). Scorul "2nd Half" (doar
+    a doua repriza, NU cumulativ) nu are coloana dedicata in schema -
+    neextras deliberat, nu gol de extractie."""
+    for container in soup.select(".wclHeaderSection--summary"):
+        spans = container.select("[data-testid='wcl-scores-overline-02']")
+        if len(spans) >= 2 and spans[0].get_text(strip=True) == "1st Half":
+            m = re.match(r"(\d+)\s*-\s*(\d+)", spans[1].get_text(strip=True))
+            if m:
+                return int(m.group(1)), int(m.group(2))
+            return None, None
+    return None, None
+
+
 def _extract_labeled_info_pairs(soup: BeautifulSoup) -> dict[str, str | None]:
     """Pereche eticheta/valoare din wcl-summaryMatchInformation — copii
     directi alternand (labelWrapper, infoValue), acelasi pattern ca
@@ -234,7 +268,10 @@ def normalize_match_statistics(pages: dict[str, str]) -> dict[str, Any]:
     stats = _extract_labeled_stat_pairs(stats_soup)
 
     summary_html = pages.get("summary")
-    info = _extract_labeled_info_pairs(BeautifulSoup(summary_html, "html.parser")) if summary_html else {}
+    summary_soup = BeautifulSoup(summary_html, "html.parser") if summary_html else None
+    info = _extract_labeled_info_pairs(summary_soup) if summary_soup else {}
+    actual_home_goals, actual_away_goals = _extract_final_score(summary_soup) if summary_soup else (None, None)
+    home_ht_goals, away_ht_goals = _extract_half_time_score(summary_soup) if summary_soup else (None, None)
 
     result: dict[str, Any] = {
         "home_team": home_team,
@@ -244,6 +281,10 @@ def normalize_match_statistics(pages: dict[str, str]) -> dict[str, Any]:
         "stadium": info.get("Venue:"),
         "attendance": _parse_int_loose(info.get("Attendance:")),
         "capacity": _parse_int_loose(info.get("Capacity:")),
+        "actual_home_goals": actual_home_goals,
+        "actual_away_goals": actual_away_goals,
+        "home_ht_goals": home_ht_goals,
+        "away_ht_goals": away_ht_goals,
         "stats_source": "flashscore",
     }
     for label, (home_field, away_field) in STAT_LABEL_TO_FIELDS.items():
@@ -357,34 +398,131 @@ def normalize_player_match_stats(pages: dict[str, str], match_id: int) -> list[d
     ]
 
 
+# [CORECTIE, TASK APROBAT M1] Docstring-ul vechi al acestui modul afirma
+# "goluri/cartonase NU au minut vizibil in structura verificata" - FALS,
+# demonstrat direct pe fixture (docs/06_UDAL/FLASHSCORE_FIELD_MAPPING_
+# MATRIX.md, sectiunea 0): tab-ul Summary are un timeline complet, curat,
+# `.smv__participantRow` (21 evenimente reale verificate pe fixture-ul
+# principal) - minut + tip + jucator + echipa, pentru toate tipurile.
+_EVENT_TYPE_BY_TESTID: dict[str, str] = {
+    "wcl-icon-incidents-goal-soccer": "goal",
+    "wcl-icon-incidents-penalty-goal": "penalty_goal",
+    "wcl-icon-incidents-substitution": "substitution",
+    "wcl-icon-incidents-var": "var",
+}
+
+_MINUTE_RE = re.compile(r"^(\d+)")
+
+
+def _parse_incident_minute(raw: str | None) -> int | None:
+    """Minutul NOMINAL (partea dinaintea lui '+') - "45+6'" -> 45,
+    "90+2'" -> 90. NU `_parse_int_loose`/regex generic de cifre (ar
+    concatena eronat "45"+"6" -> 456)."""
+    if not raw:
+        return None
+    m = _MINUTE_RE.match(raw.strip())
+    return int(m.group(1)) if m else None
+
+
+def _strip_parens(text: str | None) -> str | None:
+    if not text:
+        return None
+    text = text.strip()
+    if text.startswith("(") and text.endswith(")"):
+        text = text[1:-1].strip()
+    return text or None
+
+
+def _classify_incident_icon(row: BeautifulSoup) -> str | None:
+    """Determina `event_type` dintr-un rand `.smv__participantRow` -
+    verificat pe cele 21 evenimente reale ale fixture-ului principal: 4
+    tipuri au `data-testid` pe SVG (goal-soccer/penalty-goal/substitution/
+    var), cartonasele NU au `data-testid` (verificat explicit - doar
+    clase CSS: `card-ico` + `yellowCard-ico`/`redCard-ico`).
+    `own_goal`/`penalty_missed`/`second_yellow_card` NU au aparut in
+    niciun fixture capturat pana acum - schema (migratia 039) permite
+    aceste valori, dar FARA dovada directa a selectorului exact nu sunt
+    ghicite aici (North Star #8) - raman neclasificate (None, rand
+    exclus) pana la un fixture real care le contine."""
+    icon_container = row.select_one(".smv__incidentIcon, .smv__incidentIconSub")
+    if icon_container is None:
+        return None
+    svg = icon_container.select_one("svg")
+    if svg is None:
+        return None
+    testid = svg.get("data-testid")
+    if testid in _EVENT_TYPE_BY_TESTID:
+        return _EVENT_TYPE_BY_TESTID[testid]
+    classes = svg.get("class") or []
+    if "yellowCard-ico" in classes:
+        return "yellow_card"
+    if "redCard-ico" in classes:
+        return "red_card"
+    return None
+
+
 def normalize_match_events(pages: dict[str, str], match_id: int) -> list[dict[str, Any]]:
-    """Randuri `match_events` (migratia 032/033) - DOAR substitutii,
-    scope M0 (vezi docstring modul - goluri/cartonase deferred, structura
-    de minut neverificata curat)."""
-    lineups_html = pages.get("lineups")
-    if not lineups_html:
+    """Randuri `match_events` (migratia 032/033/039) - timeline COMPLET
+    din tab-ul Summary (`.smv__participantRow`), nu doar substitutii.
+    Pentru goluri (`goal`/`penalty_goal`): `related_player_name` =
+    asistul (`.smv__assist`), daca exista. Pentru substitutii:
+    `player_name` = jucatorul care INTRA (`.smv__playerName`),
+    `related_player_name` = jucatorul care IESE (`.smv__incidentSubOut`)
+    - schimbare fata de sursa veche (tab Lineups), care dadea sensul
+    invers. Pentru cartonase/VAR: `detail` = motivul/textul deciziei
+    (`.smv__subIncident`, sau title-ul SVG pentru VAR daca subIncident
+    lipseste)."""
+    summary_html = pages.get("summary")
+    if not summary_html:
         return []
-    soup = BeautifulSoup(lineups_html, "html.parser")
+    soup = BeautifulSoup(summary_html, "html.parser")
     events: list[dict[str, Any]] = []
-    for side, team in (("left", "home"), ("right", "away")):
-        for sub_el in soup.select(f"[data-testid='wcl-lineupsParticipantsSubstitution-{side}']"):
-            player_out_el = sub_el.select_one("[data-testid='wcl-scores-simple-text-01']")
-            player_in_el = sub_el.select_one(".wcl-subName_irp5W, [class*='wcl-subName']")
-            minute_el = sub_el.select_one(".wcl-minute_sXwww, [class*='wcl-minute']")
-            if not (player_out_el and player_in_el and minute_el):
-                continue
-            minute_text = minute_el.get_text(strip=True).rstrip("'")
-            if not minute_text.isdigit():
-                continue
-            events.append({
-                "match_id": match_id,
-                "team": team,
-                "minute": int(minute_text),
-                "event_type": "substitution",
-                "player_name": player_out_el.get_text(strip=True),
-                "related_player_name": player_in_el.get_text(strip=True),
-                "source": "flashscore",
-            })
+    for row in soup.select(".smv__participantRow"):
+        classes = row.get("class") or []
+        if "smv__homeParticipant" in classes:
+            team = "home"
+        elif "smv__awayParticipant" in classes:
+            team = "away"
+        else:
+            continue
+        minute_el = row.select_one(".smv__timeBox")
+        minute = _parse_incident_minute(minute_el.get_text(strip=True) if minute_el else None)
+        if minute is None:
+            continue
+        event_type = _classify_incident_icon(row)
+        if event_type is None:
+            continue
+
+        player_el = row.select_one(".smv__playerName")
+        player_name = player_el.get_text(strip=True) if player_el else ""
+        related_player_name: str | None = None
+        detail = ""
+
+        if event_type == "substitution":
+            out_el = row.select_one(".smv__incidentSubOut")
+            related_player_name = out_el.get_text(strip=True) if out_el else None
+        elif event_type in ("goal", "penalty_goal", "own_goal"):
+            assist_el = row.select_one(".smv__assist")
+            related_player_name = _strip_parens(assist_el.get_text(strip=True)) if assist_el else None
+
+        if event_type in ("yellow_card", "red_card", "second_yellow_card", "var"):
+            sub_el = row.select_one(".smv__subIncident")
+            detail = _strip_parens(sub_el.get_text(strip=True)) if sub_el else None
+            if not detail and event_type == "var":
+                title_el = row.select_one(".smv__incidentIcon svg title")
+                detail = title_el.get_text(strip=True) if title_el else None
+            detail = detail or ""
+
+        events.append({
+            "match_id": match_id,
+            "team": team,
+            "minute": minute,
+            "event_type": event_type,
+            "player_name": player_name,
+            "related_player_name": related_player_name,
+            "detail": detail,
+            "source": "flashscore",
+        })
     return events
 
 

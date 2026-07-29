@@ -83,6 +83,17 @@ def test_normalize_match_statistics_real_values(superliga_1_pages):
     assert result["stats_source"] == "flashscore"
 
 
+def test_normalize_match_statistics_final_and_half_time_score(superliga_1_pages):
+    """[TASK APROBAT - corectie oversight] Verificat pe un al DOILEA
+    fixture, distinct de cel din Foundation Data Layer POC - scor final
+    1-1, scor la pauza 0-1 (verificat direct pe fixture)."""
+    result = normalize_match_statistics(superliga_1_pages)
+    assert result["actual_home_goals"] == 1
+    assert result["actual_away_goals"] == 1
+    assert result["home_ht_goals"] == 0
+    assert result["away_ht_goals"] == 1
+
+
 def test_normalize_match_statistics_no_fabricated_fields(superliga_1_pages):
     """[Foundation Data Layer] Aceste 5 perechi au acum mapare reala in
     STAT_LABEL_TO_FIELDS (confirmate pe tab-ul dedicat "stats") - dar
@@ -139,19 +150,37 @@ def test_normalize_player_match_stats_real_values(superliga_1_pages):
     assert anestis["shirt_number"] == 99
 
 
-def test_normalize_match_events_only_substitutions_with_real_data(superliga_1_pages):
-    """Scope M0 explicit: doar substitutii (structura de minut verificata
-    curat) - goluri/cartonase deferred, nu ghicite (vezi normalizer.py)."""
+def test_normalize_match_events_full_timeline_with_real_data(superliga_1_pages):
+    """[CORECTIE TASK APROBAT M1] Sursa veche (tab Lineups, doar
+    substitutii) inlocuita cu timeline-ul complet din tab-ul Summary
+    (`.smv__participantRow`) - 24 evenimente reale pe acest fixture,
+    verificate: 1 gol + 1 penalty (=2 goluri totale, coincide cu scorul
+    final 1-1), 11 cartonase galbene, 2 rosii, 9 schimbari."""
     events = normalize_match_events(superliga_1_pages, match_id=123)
-    assert len(events) == 9
-    assert all(e["event_type"] == "substitution" for e in events)
+    assert len(events) == 24
+    from collections import Counter
+    counts = Counter(e["event_type"] for e in events)
+    assert counts == {
+        "yellow_card": 11, "substitution": 9, "red_card": 2,
+        "goal": 1, "penalty_goal": 1,
+    }
     assert all(e["match_id"] == 123 for e in events)
     assert all(isinstance(e["minute"], int) and 0 < e["minute"] <= 120 for e in events)
-    assert all(e["player_name"] and e["related_player_name"] for e in events)
-    first = events[0]
-    assert first["player_name"] == "Bayeye B. J."
-    assert first["related_player_name"] == "Cret R."
-    assert first["minute"] == 46
+
+    # Consistenta interna: numarul de goluri per echipa (goal+penalty_goal)
+    # trebuie sa coincida cu scorul final extras separat (1-1).
+    home_goals = sum(1 for e in events if e["team"] == "home" and e["event_type"] in ("goal", "penalty_goal", "own_goal"))
+    away_goals = sum(1 for e in events if e["team"] == "away" and e["event_type"] in ("goal", "penalty_goal", "own_goal"))
+    assert (home_goals, away_goals) == (1, 1)
+
+    first_sub = next(e for e in events if e["event_type"] == "substitution")
+    assert first_sub["minute"] == 46
+    assert first_sub["player_name"] == "Bayeye B. J."  # jucatorul care INTRA
+    assert first_sub["related_player_name"] == "Cret R."  # jucatorul care IESE
+
+
+def test_normalize_match_events_no_summary_page_returns_empty():
+    assert normalize_match_events({"lineups": "<html></html>"}, match_id=1) == []
 
 
 @pytest.mark.parametrize("prefix", ALL_10_PREFIXES)
@@ -169,4 +198,9 @@ def test_normalize_all_10_fixtures_produce_valid_match_and_no_crash(prefix):
     pstats = normalize_player_match_stats(pages, match_id=1)
     assert len(pstats) > 0, f"niciun jucator extras pentru {prefix}"
     events = normalize_match_events(pages, match_id=1)
-    assert all(e["event_type"] == "substitution" for e in events)
+    valid_types = {
+        "goal", "own_goal", "penalty_goal", "penalty_missed",
+        "yellow_card", "red_card", "second_yellow_card", "substitution", "var",
+    }
+    assert all(e["event_type"] in valid_types for e in events), f"tip necunoscut pentru {prefix}"
+    assert all(e["team"] in ("home", "away") for e in events)
