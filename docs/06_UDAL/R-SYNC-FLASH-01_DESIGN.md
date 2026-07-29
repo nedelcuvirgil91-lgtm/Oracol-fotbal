@@ -4,6 +4,28 @@
 **Cerut**: "R-SYNC-FLASH-01 — Flashscore as Auxiliary UDAL Provider" (după POC-ul cu 10 meciuri, `UDAL_FLASHSCORE_POC_10MATCHES_REPORT.md`, recomandare B — sursă auxiliară).
 **[ACTUALIZAT 2026-07-29]** — "Direction Update (Architecture Decision)": bootstrap incremental (nu bulk), scope redus (ultimul sezon complet, nu tot istoricul), ordine explicită de bootstrap, cote ca fallback temporar, robustness (checkpoint/queue/resume). Vezi §10 — secțiunile 1-9 rămân valabile ca fundație, neînlocuite, doar extinse. Status rămâne DESIGN — „Nu implementa imediat" respectat identic.
 
+---
+
+## ⭐ CRITICAL PATH OFICIAL — Football Oracle (2026-07-29)
+
+**Declarat oficial, la cererea explicită a proprietarului produsului.** Acesta e drumul critic al întregului proiect, nu doar al acestui document — orice altă activitate care nu contribuie direct la el se amână.
+
+```
+M0 → M1 → M2 → M3 → M4
+```
+
+| # | Milestone | Necesită `tos_reviewed=True`? |
+|---|---|---|
+| **M0** | Pipeline dovedit end-to-end pe date reale capturate (fetch(fixture)→normalize→persist, contra celor 10 fixture-uri HTML din POC) | Nu |
+| **M1** | Primul meci **descoperit live** (hub `/results/`, real) | Da |
+| **M2** | Primul meci **extras live** (normalize pe pagina reală, curentă) | Da |
+| **M3** | Primul meci **salvat în Supabase**, dintr-un fetch live | Da |
+| **M4** | Primul **Night Sync complet** (workflow programat, §13.2, gap-fill real) | Da |
+
+Detalii complete (analiza de dependențe, ce s-a eliminat/amânat și de ce): §15 mai jos.
+
+**Confirmare explicită**: niciun task nou privind **Predictorul, ML, Blending, Confidence sau alte optimizări** nu începe până la finalizarea **M4**, cu o singură excepție — aprobare explicită, separată, a proprietarului produsului. Mecanismul de enforcement (`ml_blending_enabled=False`) e deja în cod (R-ARCH-REVIEW-01); acest Critical Path extinde înghețarea de la "nu se activează" la "nu se începe niciun task nou" în acea zonă — vezi `docs/00_GOVERNANCE/ML_ACTIVATION_GATE.md`, actualizat în același commit.
+
 ## 0. Corecție arhitecturală față de propunerea inițială (surprinsă înainte de implementare, nu după)
 
 Propunerea cerea scriere în tabele noi `match_statistics`, `match_lineups`, `match_events`, `player_match_stats`. Verificare directă a schemei live (`match_history`, migrațiile 008 și 026) arată că **`match_statistics` și `match_lineups` există deja — ca și coloane pe `match_history`, nu ca tabele separate**:
@@ -548,3 +570,60 @@ Regula de precedență (§1: dacă API/Open Data au deja completat un câmp, Fla
 ## 14. [R-ML-GATE-01, 2026-07-29] Activation Gate — pointer
 
 Predictorul/ML/blending-ul rămân complet înghețate cât timp acest document e activ — nicio schimbare de acest fel nu face parte din roadmap-ul Flashscore. Condiții și stare curentă: `docs/00_GOVERNANCE/ML_ACTIVATION_GATE.md`. Prioritatea de dezvoltare, confirmată explicit: (1) provider Flashscore, (2) validare extractibilitate, (3) integrare pipeline, (4) colectare automată/populare bază, (5) monitorizare sincronizări — Stage 2 (§12) rămâne următorul pas concret, neschimbat, în așteptare de aprobare.
+
+---
+
+## 15. [2026-07-29] Critical Path — analiză completă de dependențe, deferred (nu abandonat)
+
+Detaliul complet al declarației de la începutul documentului. Rol: analiza de Technical Lead cerută explicit, consemnată oficial.
+
+### 15.1 Ce lipsește exact pentru primul meci real salvat automat
+
+1. `fetch()` real în `providers/flashscore/adapter.py` — portarea navigării Playwright deja scrisă/testată în `scripts/_poc_flashscore_10matches_temp.py`.
+2. `normalize()` real — leagă `extractor.py` (hărțile există deja) de `udal_extraction.extract()` (există deja, Faza 1.5).
+3. `persist()` real — `upsert_match_canonical` (RPC existent, neschimbat) + `INSERT` în `player_match_stats`/`match_events`.
+4. Script minim de orchestrare (discover N meciuri reale → fetch → normalize → validate → persist) — **fără coadă, fără checkpoint** (§15.3).
+5. Decizia `tos_reviewed` (§15.4).
+6. Workflow GitHub Actions pentru rularea live a lui (4).
+
+### 15.2 Reordonare strictă după dependență tehnică (nu după ordinea în care au fost proiectate)
+
+```
+[BLOCANT - decizie, nu cod]           tos_reviewed = True/False
+        |
+        +-- DACA False, INCA se poate construi (fara retea live):
+        |     A. fetch() real (cod scris, apelabil, dar preflight() il respinge)
+        |     B. normalize() real - TESTAT contra fixture-urilor REALE din POC
+        |     C. persist() real - TESTAT (dry-run) contra acelor fixture-uri
+        |     D. Dovada: rulare completa fetch(fixture)->normalize->validate->persist
+        |        pe cele 10 meciuri deja capturate -> randuri reale in
+        |        match_history/player_match_stats/match_events, DIN DATE REALE
+        |        (capturate live in POC), fara nicio cerere noua catre Flashscore.
+        |        = M0
+        |
+        +-- DUPA True, se poate:
+              E. Workflow GH Actions - fetch() live, 1-5 meciuri (nu 50) = M1/M2/M3
+              F. Verificare Supabase - primul rand REAL, din fetch LIVE
+              G. Extindere la Night Sync (§13.2, deja proiectat) = M4
+              H. (mai tarziu, doar daca volumul o cere) coada de bootstrap
+```
+
+### 15.3 Deferred, NU abandonat — lista explicită
+
+Nimic din lista de mai jos e șters/renunțat — rămâne proiectat, documentat, gata de reluat, doar nu pe drumul critic acum:
+
+- **Coada de bootstrap** (`flashscore_acquisition_queue` — claim/retry/stale-reclaim, §10.6, §12) — necesară doar la scară (50 meciuri/noapte cu checkpoint pe crash), nu pentru M0-M4. Schema există deja (Stage 1, aplicată live) — doar logica de execuție e amânată.
+- **Stage 2 așa cum fusese planificat inițial** (§12, mecanica cozii ca prim pas) — înlocuit ca prioritate de M0-M4; planul din §12 rămâne valabil ca document, reluat după M4 sau când volumul o cere (§15.1, pct. H).
+- **Wiring Predictor la `odds_fallback_flashscore`** — deferred, cf. `ML_ACTIVATION_GATE.md`.
+- **`player_match_stats`/`match_events`** — opționale pentru PRIMUL meci (M3); scope redus la câmpurile `match_history` deja COALESCE-gate-uite (posesie/șuturi/cornere/cartonașe/arbitru/stadion/spectatori/lineup XI) e suficient pentru M3. Adăugate fast-follow, imediat după, nu blochează M3.
+- **Orice document/ADR nou** privind Flashscore — niciunul planificat până la M4.
+- **Predictor, ML, Blending, Confidence, orice optimizare** — înghețate complet (§ „Critical Path Oficial" de mai sus + `ML_ACTIVATION_GATE.md`) — niciun task nou nu începe fără aprobare explicită separată sau finalizarea M4.
+
+### 15.4 `tos_reviewed` — de ce, ce trebuie decis, ce se poate/nu se poate face înainte
+
+- **De ce e blocaj**: `ScraperAdapterBase.preflight()` respinge necondiționat orice `fetch()` cât timp `scraper_registry.is_runnable("flashscore_match_enrichment")` e `False` — verificat prin test (`test_flashscore_scraper_is_not_runnable_yet`), fail-closed prin design, nu o convenție de cod ocolibilă.
+- **Ce trebuie decis**: proprietarul produsului decide explicit dacă acceptă riscul/termenii de utilizare Flashscore pentru scraping — decizie legală/de produs, nu tehnică. Schimbarea tehnică ulterioară e trivială: un commit în `scraper_registry.py` (`tos_reviewed=True, tos_reviewed_by=..., tos_reviewed_at=...`) — `tos_reviewed` trăiește în cod, nu într-un rând Supabase.
+- **Ce se poate implementa înainte de decizie**: A-D din §15.2 — `fetch()`/`normalize()`/`persist()` reale, testate complet contra celor 10 fixture-uri HTML deja capturate în POC (date reale, nu sintetice) — tot pipeline-ul, dovedit funcțional, fără nicio cerere nouă către Flashscore. Acesta e **M0**.
+- **Ce NU se poate implementa înainte**: nicio cerere live nouă către `flashscore.com` — M1-M4 rămân imposibile până la decizie.
+
+### 15.5 Plan final M0 — vezi mesajul separat de prezentare (cerut explicit înainte de aprobare)

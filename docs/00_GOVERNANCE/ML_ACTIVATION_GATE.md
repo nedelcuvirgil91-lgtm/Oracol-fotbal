@@ -3,6 +3,8 @@
 **Status**: checkpoint activ, obligatoriu. Document-only (R-ML-GATE-01) — nu schimbă cod, nu schimbă configurație, nu atinge `ml_blending_enabled`/`ml_blend_weight`.
 **Creat**: 2026-07-29, ca răspuns direct la riscul semnalat explicit: "peste câteva săptămâni nimeni nu mai ține minte că blending-ul pornește automat după primul model antrenat."
 
+**[ACTUALIZAT 2026-07-29, Critical Path oficial]** — înghețarea s-a extins: nu doar "nu se activează blending-ul", ci **niciun task nou** privind Predictor/ML/Blending/Confidence/alte optimizări nu începe până la finalizarea **M4** (primul Night Sync Flashscore complet — vezi `docs/06_UDAL/R-SYNC-FLASH-01_DESIGN.md`, secțiunea "CRITICAL PATH OFICIAL" + §15), cu o singură excepție: aprobare explicită, separată, a proprietarului produsului. Condițiile din secțiunea de mai jos rămân valabile neschimbate pentru **activare**; această actualizare adaugă condiția suplimentară, mai largă, pentru simpla **începere** a oricărui task nou în zonă.
+
 ## Scop
 
 Acest document e locul unic, permanent, care răspunde la o singură întrebare: **e permisă activarea blending-ului Predictor+ML în producție?** Răspunsul e "nu" până toate condițiile de mai jos sunt bifate — nu prin memorie sau presupunere, ci prin verificare directă a acestui fișier.
