@@ -449,3 +449,44 @@ SQL exact: `database/migrations/032_flashscore_auxiliary_provider_infrastructure
 - Stage 5: regula de citire Predictor (`odds_history` → fallback `odds_fallback_flashscore`) în `database/queries.py`.
 
 Fiecare etapă: commit separat, teste rulate înainte de commit, raportate explicit.
+
+---
+
+## 12. [2026-07-29] Plan Stage 2 — propus, NEAPROBAT, NEIMPLEMENTAT
+
+Răspuns la cererea explicită: "Înainte să scrii cod pentru Stage 2 vreau să îmi prezinți: planul exact al implementării; ordinea commit-urilor; estimarea fiecărui commit; riscurile fiecărui commit... Nu implementa încă Stage 2." Nicio linie de cod din acest §12 nu a fost scrisă încă.
+
+### 12.0 Corecție de plan față de §11.3 — găsită înainte de a scrie cod, nu după
+
+`§11.3` grupase greșit „Stage 2: populare coadă" ca pas separat de „Stage 4: fetch() real". Revizuire: **popularea cozii (`flashscore_acquisition_queue`) cere ea însăși un `fetch()` live** (navigare pe hub-ul `/results/` al competiției, exact mecanismul din POC) — deci e supusă **aceluiași gate** ca Stage 4: `ScraperAdapterBase.preflight()` blochează orice `fetch()` cât timp `tos_reviewed=False` (neschimbat, nicio decizie de ToS luată în acest document). Consecință: **popularea reală a cozii nu poate fi implementată/rulată acum** — ar fi cod scris care nu poate rula niciodată legitim până la o decizie separată de `tos_reviewed`.
+
+Ce **poate** fi construit și testat acum, fără nicio dependență de rețea live: **mecanica cozii** — claim atomic, marcare done/failed, stale-reclaim, retry — operații pur SQL/Python peste rânduri deja existente în `flashscore_acquisition_queue` (populate manual, cu date sintetice, în teste — exact tiparul deja folosit la Faza 1, fixture local în loc de rețea live).
+
+### 12.1 Plan de commit-uri (revizuit)
+
+| # | Commit | Conținut | Dependință de rețea live? |
+|---|---|---|---|
+| 2.1 | `database/queries.py` — funcții cozii | `claim_next_flashscore_queue_item()` (`FOR UPDATE SKIP LOCKED`), `mark_queue_item_done(id)`, `mark_queue_item_failed(id, error)` (incrementează `attempt_count`, `status='failed'` după 3), `reclaim_stale_queue_items()` (`claimed_at < now() - 2h`) | **Nu** — SQL pur, testabil cu rânduri sintetice |
+| 2.2 | `tests/test_flashscore_queue_mechanics.py` | Teste pentru fiecare funcție de mai sus — inserare rânduri sintetice direct (nu prin discovery), verificare tranziții de stare, verificare că `FOR UPDATE SKIP LOCKED` nu livrează același rând de două ori la claim-uri concurente (test cu 2 conexiuni/thread-uri, dacă infra de test o permite; altfel, verificare secvențială a stării, cu notă explicită despre limitarea testului) | **Nu** |
+| 2.3 | `scripts/flashscore_queue_admin.py` (opțional, utilitar) | CLI simplu pentru inspecție manuală a cozii (`--status pending`, `--competition superliga_romania`) — utilitate operațională, nu parte a fluxului automat | **Nu** |
+| — | ~~Populare coadă (discovery real)~~ | **Scos din Stage 2** — mutat implicit sub Stage 4 (același gate `tos_reviewed`) | **Da — blocat** |
+
+### 12.2 Estimare per commit
+
+- **2.1**: mediu — ~120-180 linii Python, 4 funcții, fiecare cu semantică SQL atomică deja proiectată (§10.6) — risc de implementare scăzut, logica e deja specificată exact.
+- **2.2**: mediu — teste multiple per funcție (happy path + concurență + stale-reclaim + prag retry) — cel mai mare consumator de timp al Stage 2, dar fără risc arhitectural (testare pură).
+- **2.3**: mic — opțional, poate fi omis din Stage 2 dacă nu e considerat necesar acum.
+
+### 12.3 Riscuri per commit
+
+- **2.1**: risc principal — corectitudinea semanticii `FOR UPDATE SKIP LOCKED` sub concurență reală (două rulări GitHub Actions suprapuse) nu poate fi testată complet fără infra de concurență reală în CI; mitigare — test unitar cât de aproape posibil de concurență reală (thread-uri/conexiuni paralele către Supabase de test), plus review explicit al SQL-ului înainte de commit (per `supabase-safety`, chiar dacă funcțiile astea nu creează schemă nouă).
+- **2.2**: risc scăzut — cel mai mare pericol e un test fals-pozitiv (verifică prea puțin) sau fals-negativ (flaky din cauza timing-ului real de rețea Supabase) — mitigare: teste rulate de mai multe ori local înainte de commit, nu doar o rulare.
+- **2.3**: risc minim, utilitate opțională.
+
+### 12.4 Ce rămâne explicit AFARĂ din Stage 2 (mutat, nu uitat)
+
+- Discovery real / populare coadă cu meciuri reale — necesită `tos_reviewed=True`, decizie separată, neluată aici.
+- `fetch()`/`normalize()`/`persist()` real (Stage 4, neschimbat).
+- Orice atingere a Predictorului — rămâne blocată explicit, cf. §"Predictor" din cererea curentă și `R-SYNC-FLASH-01_PREDICTOR_IMPACT_ANALYSIS.md`.
+
+**Acest plan așteaptă aprobare explicită înainte de commit-ul 2.1.**
