@@ -95,3 +95,40 @@ def test_run_foundation_data_layer_passes_league_to_persist(monkeypatch):
 
     assert reports == [{"ok": True, "match": match}]
     assert calls == [{"league": "Romania SuperLiga", "competition": "Romania SuperLiga"}]
+
+
+def test_run_foundation_data_layer_skips_already_collected_match_delta_sync(monkeypatch):
+    """Delta Sync (Faza 2) — dacă mid-ul e deja canonic persistat
+    (is_flashscore_match_already_collected == True), fetch()/persist() NU
+    se apelează deloc pentru acel meci."""
+    monkeypatch.setattr(FlashscoreAdapter, "preflight", lambda self: None)
+    fetch_calls = []
+    monkeypatch.setattr(
+        FlashscoreAdapter, "fetch",
+        lambda self, params: fetch_calls.append(params) or {"summary": "<html></html>"},
+    )
+    monkeypatch.setattr(
+        "database.queries.is_flashscore_match_already_collected",
+        lambda mid: mid == "already-seen",
+    )
+
+    seen = DiscoveredMatch(league="Romania SuperLiga", match_base_url="https://x", mid="already-seen", source="results")
+    new = DiscoveredMatch(league="Romania SuperLiga", match_base_url="https://y", mid="new-mid", source="results")
+    monkeypatch.setattr(FlashscoreAdapter, "normalize", lambda self, raw: [raw])
+    monkeypatch.setattr(
+        FlashscoreAdapter, "validate",
+        lambda self, records: [{
+            "home_team": "A", "away_team": "B", "kickoff_date": "2026-08-01T18:00:00",
+            "_pages": records[0],
+        }],
+    )
+    monkeypatch.setattr(
+        "providers.flashscore.persistence.persist_match_with_data_trust_layer",
+        lambda pages, match_ref, **kw: {"ok": True},
+    )
+
+    reports = run_foundation_data_layer_for_discovered_matches([seen, new])
+
+    assert reports[0] == {"match_id": None, "ok": True, "skipped": True, "reason": "already_collected", "match": seen}
+    assert reports[1]["ok"] is True and not reports[1].get("skipped")
+    assert fetch_calls == [{"match_base_url": "https://y", "mid": "new-mid"}]

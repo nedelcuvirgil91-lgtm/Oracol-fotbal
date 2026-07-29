@@ -1,0 +1,60 @@
+name: Football Oracle — Night Sync (Faza 2)
+
+# Orchestrare completa: Discovery -> Provideri API -> Flashscore ->
+# Validation -> Canonical Database -> Team DNA -> Feature Engineering ->
+# Oracle Refresh -> ML Refresh -> Diagnostics -> Cleanup -> Backup ->
+# Raport Final (sync/run_night.py) — vezi acel fisier pentru detaliul
+# fiecarei etape (unele ruleaza live, nu batch; Backup e neimplementat,
+# ADR-044 Addendum A6, decizie explicita).
+#
+# DOAR workflow_dispatch deocamdata — daily.yml (0 3 UTC),
+# flashscore_foundation_data_layer.yml (0 6 UTC) si continuous_learning.yml
+# (0 6 UTC) raman active si separate, ca sa nu se ruleze de doua ori acelasi
+# provider/Flashscore/Continuous Learning in aceeasi noapte (dublu consum
+# de cota API, doua rulari Playwright). Consolidarea intr-un singur cron
+# nocturn (dezactivand cele 3 separate) e o decizie operationala separata,
+# semnalata explicit proprietarului produsului, nu luata unilateral aici.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  night-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Run Night Sync
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          RAPIDAPI_KEY_FREELIVEFOOTBALL: ${{ secrets.RAPIDAPI_KEY_FREELIVEFOOTBALL }}
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: python -m sync.run_night
+
+      - name: Upload sync logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: night-sync-logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 7
+          if-no-files-found: ignore

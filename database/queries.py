@@ -2364,6 +2364,40 @@ def get_team_standings_row(team: str, competition: str) -> dict | None:
     return None
 
 
+def is_flashscore_match_already_collected(mid: str) -> bool:
+    """Delta Sync (Faza 2, §7 din task) — verifică ÎNAINTE de fetch dacă
+    acest meci (identificat prin `mid`-ul Flashscore, cunoscut deja la
+    Discovery, înaintea oricărui fetch) a fost deja persistat canonic.
+
+    `normalize_match_statistics()` scrie `fixture_id = f"flashscore_{mid}"`
+    pe `match_history` (același `mid` extras din URL-ul hub-ului de
+    Discovery și din og:url-ul paginii de meci — aceeași identitate,
+    confirmată direct în cod). Un `True` aici înseamnă cu certitudine
+    "am scris deja canonic acest meci Flashscore" — niciun fals-pozitiv.
+
+    Un `False` NU înseamnă cu certitudine "niciodată colectat" — dacă
+    meciul exista deja în `match_history` cu `fixture_id` de la alt
+    provider (COALESCE-only, ADR-036, fixture_id-ul altui provider are
+    prioritate), acest cec întoarce False și re-rulează fetch/persist —
+    exact comportamentul de azi (fără regresie), doar mai rar declanșat.
+    Nu se ghicește o stare intermediară — doar True când dovada e directă."""
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        res = (
+            client.table("match_history")
+            .select("id")
+            .eq("fixture_id", f"flashscore_{mid}")
+            .limit(1)
+            .execute()
+        )
+        return bool(res.data)
+    except Exception as exc:
+        logger.warning("[Queries] is_flashscore_match_already_collected failed pentru mid=%s: %s", mid, exc)
+        return False
+
+
 def get_predictions_with_results(days_back: int | None = None) -> list[dict]:
     """
     [ADAUGAT Sprint 0 — Stabilizare, Etapa 3] Citire READ-ONLY — rânduri din

@@ -224,6 +224,11 @@ def run_foundation_data_layer_for_discovered_matches(
     from .adapter import FlashscoreAdapter, _build_match_ref
     from .persistence import persist_match_with_data_trust_layer
 
+    try:
+        from database.queries import is_flashscore_match_already_collected
+    except ModuleNotFoundError:
+        is_flashscore_match_already_collected = None
+
     adapter = FlashscoreAdapter()
     adapter.preflight()
 
@@ -231,6 +236,16 @@ def run_foundation_data_layer_for_discovered_matches(
     for i, match in enumerate(matches):
         if i > 0:
             time.sleep(FLASHSCORE_MIN_DELAY_SECONDS)
+        # [Delta Sync — Faza 2] `mid` e cunoscut ÎNAINTE de fetch (Discovery
+        # îl extrage din URL-ul hub-ului) — dacă acest meci a fost deja
+        # persistat canonic (fixture_id="flashscore_{mid}" pe match_history),
+        # sărim fetch-ul complet (7 tab-uri Playwright), nu doar persist().
+        if is_flashscore_match_already_collected is not None and is_flashscore_match_already_collected(match.mid):
+            reports.append({
+                "match_id": None, "ok": True, "skipped": True,
+                "reason": "already_collected", "match": match,
+            })
+            continue
         try:
             pages = adapter.fetch({"match_base_url": match.match_base_url, "mid": match.mid})
         except Exception as exc:

@@ -70,10 +70,13 @@ def run(leagues: list[str] | None, limit_per_league: int | None, dry_run: bool) 
     reports = run_foundation_data_layer_for_discovered_matches(matches)
 
     ok_count = sum(1 for r in reports if r.get("ok"))
+    skipped_count = sum(1 for r in reports if r.get("skipped"))
     fail_count = len(reports) - ok_count
     for r in reports:
         m = r.get("match")
-        if r.get("ok"):
+        if r.get("skipped"):
+            status = "SĂRIT (deja colectat — Delta Sync)"
+        elif r.get("ok"):
             status = "OK"
         elif r.get("error"):
             status = f"ESUAT ({r['error']})"
@@ -93,7 +96,8 @@ def run(leagues: list[str] | None, limit_per_league: int | None, dry_run: bool) 
 
     print()
     _print_separator("═")
-    print(f"  Rezultat: {ok_count} reușite, {fail_count} eșuate din {len(reports)} meciuri.")
+    print(f"  Rezultat: {ok_count} reușite ({skipped_count} sărite, Delta Sync), "
+          f"{fail_count} eșuate din {len(reports)} meciuri.")
     _print_separator("═")
     print()
     return 0 if fail_count == 0 else 1

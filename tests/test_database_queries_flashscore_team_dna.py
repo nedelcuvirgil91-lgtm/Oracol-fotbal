@@ -174,3 +174,31 @@ def test_get_team_standings_row_returns_none_when_team_not_found(monkeypatch):
 def test_get_team_standings_row_degrades_gracefully(monkeypatch):
     monkeypatch.setattr(q, "get_client", lambda: _BoomClient())
     assert q.get_team_standings_row("Dinamo", "Romania SuperLiga") is None
+
+
+# ════════════════════════════════════════════════════════════════════════
+# is_flashscore_match_already_collected (Delta Sync)
+# ════════════════════════════════════════════════════════════════════════
+
+def test_is_flashscore_match_already_collected_true_when_row_exists(monkeypatch):
+    fake = _FakeClient({"match_history": [{"id": 42}]})
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    assert q.is_flashscore_match_already_collected("abc123") is True
+    call = next(c for c in fake.calls if c[0] == "match_history" and c[1] == "eq")
+    assert call[2] == ("fixture_id", "flashscore_abc123")
+
+
+def test_is_flashscore_match_already_collected_false_when_no_row(monkeypatch):
+    fake = _FakeClient({"match_history": []})
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    assert q.is_flashscore_match_already_collected("never-seen") is False
+
+
+def test_is_flashscore_match_already_collected_false_when_no_client(monkeypatch):
+    monkeypatch.setattr(q, "get_client", lambda: None)
+    assert q.is_flashscore_match_already_collected("abc123") is False
+
+
+def test_is_flashscore_match_already_collected_degrades_gracefully(monkeypatch):
+    monkeypatch.setattr(q, "get_client", lambda: _BoomClient())
+    assert q.is_flashscore_match_already_collected("abc123") is False
