@@ -1858,11 +1858,17 @@ def upsert_player_match_stats_extended(
     for row in stats_rows:
         team = row.get("team")
         if not team:
+            # [FIX live, gasit prin testare reala GitHub Actions] Randul e
+            # EXCLUS deliberat (numele din tab-ul Player Stats nu s-a
+            # potrivit cu roster-ul - vezi docstring) - o excludere
+            # documentata, nu o eroare de scriere. `ok=False` aici facea sa
+            # esueze TOT meciul pentru un singur jucator neconcordant, desi
+            # restul statisticilor s-au scris corect (gasit real: "Leescu
+            # R. Player" a facut ESUAT un meci in care doar acel rand lipsea).
             logger.warning(
                 "[Queries] player_match_stats_extended: '%s' fara echipa rezolvata, exclus",
                 row.get("player_name"),
             )
-            ok = False
             continue
         enrich_payload = {
             "match_id": match_id, "team": team, "player_name": row["player_name"],

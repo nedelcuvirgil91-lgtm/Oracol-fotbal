@@ -191,12 +191,25 @@ def test_upsert_player_match_stats_extended_writes_enrichment_then_eav(monkeypat
 
 
 def test_upsert_player_match_stats_extended_excludes_rows_without_team(monkeypatch):
+    """[FIX live, gasit prin testare reala GitHub Actions] O excludere
+    documentata (nume neconcordant intre tab-ul Player Stats si roster)
+    NU e o eroare de scriere - inainte de fix, un singur jucator
+    neconcordant facea sa esueze TOT meciul (ok=False), desi nu s-a incercat
+    nicio scriere care sa fi esuat cu adevarat."""
     fake = _FakeClient()
     monkeypatch.setattr(q, "get_client", lambda: fake)
     row_no_team = _stat_row(team=None)
     ok = q.upsert_player_match_stats_extended(999, [row_no_team])
-    assert ok is False
+    assert ok is True
     assert fake.calls == []
+
+
+def test_upsert_player_match_stats_extended_excluded_row_does_not_fail_other_rows(monkeypatch):
+    fake = _FakeClient()
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    ok = q.upsert_player_match_stats_extended(999, [_stat_row(team=None), _stat_row(team="home")])
+    assert ok is True
+    assert any(c[0] == "player_match_stats" for c in fake.calls)
 
 
 def test_upsert_player_match_stats_extended_empty_no_call(monkeypatch):
