@@ -414,3 +414,38 @@ Redactat ca răspuns direct la cerința "verifică dacă noua direcție nu intr�
 4. Implementare reală `providers/flashscore/{adapter,extractor,normalizer}.py` + logica de coadă/checkpoint.
 5. `POC_SCRAPER_SOURCE_02` — validare live la volum mic (propunere: 1 batch, 17 meciuri, SuperLiga) — separat de `tos_reviewed=True`.
 6. Abia după (3)-(5): activare Night Sync + Bootstrap, flag nou `udal_source_enabled["flashscore"]`, implicit `False`.
+
+---
+
+## 11. [2026-07-29] Verificare finală de conflicte + Stage 1 (implementare aprobată, etapizată)
+
+Răspuns la aprobarea explicită ("Sunt de acord cu soluția ta... dacă designul este compatibil, începe implementarea etapizat, în commit-uri mici, cu teste după fiecare etapă").
+
+### 11.1 Verificare de conflicte (înainte de orice cod) — rezultat: niciun conflict nou
+
+- **North Star #1-10**: verificate individual. Niciuna încălcată — `tos_reviewed=False` continuă să blocheze orice rulare reală (#1); niciun flag nou implicit activ, `udal_source_enabled["flashscore"]` rămâne `False` (#3); niciun document Frozen editat direct — `odds_history`/`ODDS_PERSISTENCE_DESIGN.md` complet neatinse (#4, verificat live, vezi §10.7); ADR-043 acoperă schimbarea de contract pentru cote (#5); SQL arătat explicit înainte de execuție (#6, acest document + mesajul de commit); niciun câmp neconfirmat marcat `True` în capability matrix (#8); trasabilitate păstrată prin `flashscore_acquisition_queue`/`acquisition_run_log`/numele auto-documentat `odds_fallback_flashscore` (#9); nicio dependință nouă „în sus" — Predictor citește Supabase, nu Flashscore direct (#10).
+- **ADR-036 (Canonical Feature Ownership)**: verificat direct în `tests/test_canonical_feature_ownership.py` — garda AST acoperă exclusiv `_save_prediction`/`update_weights_from_result`, nu vizează un modul nou de Sync Layer care scrie prin `upsert_match_canonical`. Niciun conflict.
+- **ADR-024 (Canonical Match Identity)**: `fixture_id` în `odds_fallback_flashscore` e `TEXT`, identic tipului din `odds_history` (migrația 001) — consistent, opac per-provider, cum specifică ADR-024.
+- **FROZEN_REGISTRY.md**: verificat complet — niciun document Frozen listat (`ARCHITECTURE.md`, `DATABASE_SPEC.md`, `PIPELINE_SPEC.md`, `ENGINE_SPEC.md`, `CONFIG_SPEC.md`, `ODDS_PERSISTENCE_DESIGN.md`, contractele Learning Core, `BASELINE_FAZA1_2026-07.md`) nu are conținut care intră în conflict cu tabelele noi propuse — cele 5 declarate Frozen dar absente fizic din repo (gol cunoscut, documentat deja în `CLAUDE.md`) rămân neverificabile prin construcție, nu prin omisiune aici.
+- **CLAUDE.md, „Regulile bazelor de date"**: toate cele 7 tabele noi — idempotente (`CREATE TABLE IF NOT EXISTS`), RLS activ, scriere atomică (`FOR UPDATE SKIP LOCKED` pentru coadă, `ON CONFLICT` pentru restul — niciun check-then-act).
+
+**Concluzie**: designul (§1-§10) e compatibil cu ADR-urile existente, CLAUDE.md și North Star — niciun conflict nou identificat, nicio schimbare de arhitectură necesară înainte de implementare.
+
+### 11.2 Stage 1 — Migrație Supabase (schema-only), APLICATĂ live
+
+SQL exact: `database/migrations/032_flashscore_auxiliary_provider_infrastructure.sql` (commit separat, mic — un singur obiectiv: schema, nimic altceva). Aplicată live pe proiectul `Prediction` (`gtlpyxzocacaqyompkwe`), verificată prin `list_tables` — toate 7 tabele noi există, RLS activ pe fiecare:
+
+`player_match_stats`, `match_events`, `upcoming_matches`, `upcoming_lineups`, `upcoming_match_features`, `flashscore_acquisition_queue`, `odds_fallback_flashscore` — plus `match_history.home/away_goalkeeper_saves` (coloane aditive).
+
+**Test pentru această etapă**: verificare schema-only, nu pytest (fără precedent în repo de a testa migrații SQL direct — `pytest tests/` rămâne fără dependință de rețea/Supabase live, per `test-coverage-guard`) — confirmarea e `list_tables` live, arătată mai sus, plus re-rularea completă a `pytest tests/` (neschimbată de această migrație, 1670 passed, aceleași 3 eșecuri preexistente).
+
+**Notă de securitate, nelegată de acest task** (semnalată de Supabase advisor, obligatoriu de raportat, NU auto-remediată): 12 tabele PRE-EXISTENTE (`sync_status`, `elo_ratings`, `api_cache`, `league_provider_coverage`, `api_provider_status`, `provider_metrics`, `shadow_predictions`, `experiment_registry`, cele 4 `match_history_*_backup_*`) au RLS dezactivat — expuse complet la `anon`/`authenticated`. Niciuna atinsă de acest task; SQL de remediere disponibil, dar necesită decizie separată a proprietarului produsului (dezactivarea RLS fără politici ar bloca accesul existent la ele).
+
+### 11.3 Etapele următoare (nu începute încă — commit-uri mici, separate)
+
+- Stage 2: logica de populare a cozii (`flashscore_acquisition_queue`) — discovery real per competiție, INSERT în lot, ordonat după `bootstrap_order`.
+- Stage 3: worker-ul de claim/procesare (`FOR UPDATE SKIP LOCKED`, stale-reclaim, retry) — fără `fetch()` real încă (rămâne blocat de `tos_reviewed=False` + `PlaywrightNotImplementedError`, neschimbat).
+- Stage 4: implementarea reală `fetch()`/`normalize()`/`persist()` — necesită, separat, `POC_SCRAPER_SOURCE_02` + decizie explicită de `tos_reviewed=True`, per disciplina deja stabilită (nu parte a acestei aprobări).
+- Stage 5: regula de citire Predictor (`odds_history` → fallback `odds_fallback_flashscore`) în `database/queries.py`.
+
+Fiecare etapă: commit separat, teste rulate înainte de commit, raportate explicit.

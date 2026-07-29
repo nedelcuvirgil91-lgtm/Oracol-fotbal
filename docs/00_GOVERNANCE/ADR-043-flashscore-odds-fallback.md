@@ -1,6 +1,6 @@
 # ADR-043 — Flashscore ca sursă de fallback temporar pentru cote (Predictor)
 
-**Status**: **PROPUS** — neaprobat, neimplementat, nicio migrare aplicată. Redactat ca parte a `R-SYNC-FLASH-01_DESIGN.md` §10 ("Direction Update"), la cererea explicită a proprietarului produsului: "verifică dacă noua direcție nu intră în conflict cu ADR-urile existente... propune cea mai bună arhitectură posibilă." Nu intră în vigoare până la aprobare separată, explicită.
+**Status**: **ACCEPTAT** (2026-07-29) — aprobat explicit de proprietarul produsului ("Sunt conștient că există ADR-urile privind odds_history. Sunt de acord cu soluția ta"). Schema propusă (`odds_fallback_flashscore`) aplicată live (migrația 032, Stage 1 din implementarea etapizată) — `odds_history` rămâne complet neatins, confirmat. Regula de citire pentru Predictor (§Decizie, pct. 3) și scrierea reală din Flashscore rămân neimplementate — task separat, ulterior (vezi `R-SYNC-FLASH-01_DESIGN.md` §10.10).
 
 **Autor**: Claude, la cererea proprietarului produsului.
 
