@@ -240,6 +240,96 @@ def test_upsert_standings_snapshot_degrades_gracefully(monkeypatch):
 
 
 # ════════════════════════════════════════════════════════════════════════
+# _dedupe_by_keys — [FIX live, gasit prima rulare reala GitHub Actions]
+# Postgres respinge INTREGUL batch ON CONFLICT DO UPDATE daca 2 randuri
+# din ACELASI batch au aceeasi cheie de conflict ("ON CONFLICT DO UPDATE
+# command cannot affect row a second time", cod 21000) - un singur
+# jucator duplicat a facut sa esueze integral 2 din 16 meciuri reale.
+# ════════════════════════════════════════════════════════════════════════
+
+def test_dedupe_by_keys_keeps_first_occurrence():
+    rows = [
+        {"team": "home", "player_name": "Leescu R.", "shirt_number": 7},
+        {"team": "home", "player_name": "Pop A.", "shirt_number": 9},
+        {"team": "home", "player_name": "Leescu R.", "shirt_number": 7},
+    ]
+    result = q._dedupe_by_keys(rows, ("team", "player_name"), "test")
+    assert len(result) == 2
+    assert result[0]["player_name"] == "Leescu R."
+    assert result[1]["player_name"] == "Pop A."
+
+
+def test_dedupe_by_keys_no_duplicates_returns_all_rows():
+    rows = [{"stat_key": "big_chances"}, {"stat_key": "duels_won"}]
+    assert q._dedupe_by_keys(rows, ("stat_key",), "test") == rows
+
+
+def test_upsert_player_roster_deduplicates_before_upsert(monkeypatch):
+    """Regresie directa a esecului real: 'Leescu R.' aparea de 2 ori in
+    lotul extras pentru un meci - fara dedup, tot meciul esua, nu doar
+    randul duplicat."""
+    fake = _FakeClient()
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    roster = [
+        {"team": "home", "player_name": "Leescu R.", "shirt_number": 7, "source": "flashscore"},
+        {"team": "home", "player_name": "Leescu R.", "shirt_number": 7, "source": "flashscore"},
+        {"team": "home", "player_name": "Pop A.", "shirt_number": 9, "source": "flashscore"},
+    ]
+    assert q.upsert_player_roster(999, roster) is True
+    call = next(c for c in fake.calls if c[0] == "player_match_stats")
+    sent_names = [r["player_name"] for r in call[2]]
+    assert sent_names == ["Leescu R.", "Pop A."]
+
+
+def test_upsert_match_statistics_extended_deduplicates_before_upsert(monkeypatch):
+    fake = _FakeClient()
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    rows = [
+        {"stat_key": "big_chances", "stat_label": "Big chances", "home_value_raw": "6", "away_value_raw": "2"},
+        {"stat_key": "big_chances", "stat_label": "Big chances", "home_value_raw": "6", "away_value_raw": "2"},
+    ]
+    assert q.upsert_match_statistics_extended(999, rows) is True
+    call = next(c for c in fake.calls if c[0] == "match_statistics_extended")
+    assert len(call[2]) == 1
+
+
+def test_upsert_match_events_deduplicates_before_upsert(monkeypatch):
+    fake = _FakeClient()
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    events = [
+        {"team": "home", "minute": 34, "event_type": "goal", "player_name": "Pop A.", "detail": ""},
+        {"team": "home", "minute": 34, "event_type": "goal", "player_name": "Pop A.", "detail": ""},
+    ]
+    assert q.upsert_match_events(999, events) is True
+    call = next(c for c in fake.calls if c[0] == "match_events")
+    assert len(call[2]) == 1
+
+
+def test_upsert_match_context_deduplicates_before_upsert(monkeypatch):
+    fake = _FakeClient()
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    rows = [
+        {"context_match_id": 999, "category": "h2h_overall", "meeting_order": 0, "home_team": "A", "away_team": "B"},
+        {"context_match_id": 999, "category": "h2h_overall", "meeting_order": 0, "home_team": "A", "away_team": "B"},
+    ]
+    assert q.upsert_match_context(rows) is True
+    call = next(c for c in fake.calls if c[0] == "flashscore_match_context")
+    assert len(call[2]) == 1
+
+
+def test_upsert_standings_snapshot_deduplicates_before_upsert(monkeypatch):
+    fake = _FakeClient()
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    rows = [
+        {"competition": "SuperLiga", "team": "FCSB", "rank": 1},
+        {"competition": "SuperLiga", "team": "FCSB", "rank": 1},
+    ]
+    assert q.upsert_standings_snapshot(rows) is True
+    call = next(c for c in fake.calls if c[0] == "flashscore_standings_snapshot")
+    assert len(call[2]) == 1
+
+
+# ════════════════════════════════════════════════════════════════════════
 # upsert_raw_extraction — stratul RAW al Data Trust Layer (migratia 035)
 # ════════════════════════════════════════════════════════════════════════
 

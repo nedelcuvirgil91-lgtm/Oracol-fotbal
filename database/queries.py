@@ -1760,6 +1760,30 @@ def upsert_match_and_get_id(row: dict) -> int | None:
 # exact constrangerea UNIQUE din migratia 035 - rerun-uri repetate produc
 # acelasi rand, niciodata un duplicat nou.
 
+def _dedupe_by_keys(rows: list[dict], keys: tuple[str, ...], context: str) -> list[dict]:
+    """[FIX live, gasit prima rulare reala GitHub Actions] Postgres refuza
+    intreaga comanda ON CONFLICT DO UPDATE daca 2 randuri din ACELASI batch
+    au aceeasi cheie de conflict ('ON CONFLICT DO UPDATE command cannot
+    affect row a second time', cod 21000) - un singur jucator duplicat in
+    lot a facut sa esueze tot meciul, nu doar randul lui. Pastreaza PRIMA
+    aparitie, elimina restul - nu pierde date (flashscore_raw_extraction
+    ramane complet, neafectat de acest dedup canonic)."""
+    seen: dict[tuple, dict] = {}
+    dropped = 0
+    for row in rows:
+        key = tuple(row.get(k) for k in keys)
+        if key in seen:
+            dropped += 1
+            continue
+        seen[key] = row
+    if dropped:
+        logger.warning(
+            "[Queries] %s: %d rand(uri) duplicat(e) pe cheia %s eliminate inainte de upsert",
+            context, dropped, keys,
+        )
+    return list(seen.values())
+
+
 def upsert_match_statistics_extended(match_id: int, rows: list[dict]) -> bool:
     """`match_statistics_extended` (EAV) - `on_conflict="match_id,stat_key"`,
     exact cheia UNIQUE a tabelei (migratia 035)."""
@@ -1769,6 +1793,7 @@ def upsert_match_statistics_extended(match_id: int, rows: list[dict]) -> bool:
     if client is None:
         return False
     payload = [{**r, "match_id": match_id} for r in rows]
+    payload = _dedupe_by_keys(payload, ("stat_key",), "upsert_match_statistics_extended")
     try:
         client.table("match_statistics_extended").upsert(
             payload, on_conflict="match_id,stat_key",
@@ -1801,6 +1826,7 @@ def upsert_player_roster(match_id: int, roster_rows: list[dict], season: str | N
         }
         for r in roster_rows
     ]
+    payload = _dedupe_by_keys(payload, ("team", "player_name"), "upsert_player_roster")
     try:
         client.table("player_match_stats").upsert(
             payload, on_conflict="match_id,team,player_name",
@@ -1891,6 +1917,7 @@ def upsert_match_context(rows: list[dict]) -> bool:
     client = get_client()
     if client is None:
         return False
+    rows = _dedupe_by_keys(rows, ("context_match_id", "category", "meeting_order"), "upsert_match_context")
     try:
         client.table("flashscore_match_context").upsert(
             rows, on_conflict="context_match_id,category,meeting_order",
@@ -1911,6 +1938,7 @@ def upsert_standings_snapshot(rows: list[dict]) -> bool:
     client = get_client()
     if client is None:
         return False
+    rows = _dedupe_by_keys(rows, ("competition", "team"), "upsert_standings_snapshot")
     try:
         client.table("flashscore_standings_snapshot").upsert(
             rows, on_conflict="competition,team",
@@ -1943,6 +1971,9 @@ def upsert_match_events(match_id: int, events: list[dict], season: str | None = 
         }
         for e in events
     ]
+    payload = _dedupe_by_keys(
+        payload, ("team", "minute", "event_type", "player_name", "detail"), "upsert_match_events",
+    )
     try:
         client.table("match_events").upsert(
             payload, on_conflict="match_id,team,minute,event_type,player_name,detail",
