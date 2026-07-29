@@ -36,12 +36,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from acquisition_tier import AcquisitionTier
+
 
 @dataclass(frozen=True)
 class ProviderRecord:
     provider_id: str
     name: str
     requires_credentials: bool
+    # [ADAUGAT UDAL Faza 0, ADR-042] Aditiv, cu default — toți cei 9
+    # provideri declarați azi rămân AcquisitionTier.API fără să fie atinși
+    # individual (niciunul nu e un scraper sau un target Playwright).
+    tier: AcquisitionTier = AcquisitionTier.API
 
 
 # Declarație de domeniu, canonică, independentă de key_manager.PROVIDERS.

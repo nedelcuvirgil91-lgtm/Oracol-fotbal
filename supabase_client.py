@@ -1427,6 +1427,119 @@ def get_provider_call_log(provider: str, hours: int) -> list[dict]:
         return []
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# UDAL — Universal Data Acquisition Layer (Faza 0, ADR-042)
+# ════════════════════════════════════════════════════════════════════════════
+# [ADAUGAT UDAL Faza 0] Cale de scriere/citire pentru cele 3 tabele noi
+# (migrarea 031) — infrastructură aditivă, NEAPELATĂ de niciun cod de
+# producție încă (niciun adaptor concret de scraping nu există în Faza 0,
+# vezi scraper_adapter_base.py). Funcțiile există ca UDAL Faza 1+ să aibă
+# un punct unic de scriere gata testat, nu ca să fie folosite azi.
+
+def record_acquisition_run(
+    target_data_type: str, target_league: str, tier: str, mode: str,
+    source_id: str, target_season: str | None = None,
+    records_fetched: int = 0, records_validated: int = 0,
+    records_persisted: int = 0, records_rejected: int = 0,
+    duration_ms: float | None = None,
+    drift_flags_raised: list | None = None,
+    diagnostic_ref: str | None = None,
+) -> bool:
+    """Un rând per rulare de țintă de achiziție (lot, nu apel HTTP
+    individual — spre deosebire de `record_provider_call`). `mode` ∈
+    {LIVE, HISTORICAL}, `tier` ∈ {api, http_scraper, playwright} — validare
+    la nivel de string, nu enum în schemă (tipar identic `failure_reason`,
+    vocabular deschis, nu enum închis)."""
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("acquisition_run_log").insert({
+            "target_data_type": target_data_type, "target_league": target_league,
+            "target_season": target_season, "mode": mode, "tier": tier,
+            "source_id": source_id,
+            "records_fetched": records_fetched, "records_validated": records_validated,
+            "records_persisted": records_persisted, "records_rejected": records_rejected,
+            "duration_ms": duration_ms,
+            "drift_flags_raised": drift_flags_raised or [],
+            "diagnostic_ref": diagnostic_ref,
+            "completed_at": datetime.now(timezone.utc).isoformat(),
+        }).execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Supabase] record_acquisition_run failed: %s", exc)
+        return False
+
+
+def record_acquisition_dead_letter(
+    target_data_type: str, target_league: str, tier: str, mode: str,
+    source_id: str, raw_record: dict, rejection_reason: str,
+    target_season: str | None = None,
+) -> bool:
+    """Scrie un rând respins de Validation Layer — trasabilitate completă
+    (North Star #9), niciodată ștergere silențioasă. Insert simplu, nu
+    upsert — deduplicarea/creșterea `occurrence_count` pentru rânduri
+    repetate rămâne responsabilitatea Validation Layer-ului viitor (Faza
+    1+), nu a acestui punct de scriere generic."""
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("acquisition_dead_letter").insert({
+            "target_data_type": target_data_type, "target_league": target_league,
+            "target_season": target_season, "mode": mode, "tier": tier,
+            "source_id": source_id, "raw_record": raw_record,
+            "rejection_reason": rejection_reason,
+        }).execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Supabase] record_acquisition_dead_letter failed: %s", exc)
+        return False
+
+
+def get_scraper_selector_map(scraper_id: str) -> dict | None:
+    """Versiunea CURENTĂ (`version` maxim) a hărții de selectori pentru un
+    scraper — `None` dacă nu există nicio versiune înregistrată încă."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("scraper_selector_registry").select("selector_map,version")
+            .eq("scraper_id", scraper_id).order("version", desc=True).limit(1).execute()
+        )
+        rows = res.data or []
+        return rows[0]["selector_map"] if rows else None
+    except Exception as exc:
+        logger.debug("[Supabase] get_scraper_selector_map failed: %s", exc)
+        return None
+
+
+def set_scraper_selector_map(scraper_id: str, selector_map: dict, updated_by: str) -> bool:
+    """Scrie o versiune NOUĂ (niciodată suprascrie o versiune existentă —
+    `UNIQUE (scraper_id, version)` din migrarea 031 impune asta la nivel
+    de schemă) — istoric complet de selectori, condiție necesară pentru
+    detectarea de drift (viitoare, neimplementată în Faza 0)."""
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        res = (
+            client.table("scraper_selector_registry").select("version")
+            .eq("scraper_id", scraper_id).order("version", desc=True).limit(1).execute()
+        )
+        rows = res.data or []
+        next_version = (rows[0]["version"] + 1) if rows else 1
+        client.table("scraper_selector_registry").insert({
+            "scraper_id": scraper_id, "version": next_version,
+            "selector_map": selector_map, "updated_by": updated_by,
+        }).execute()
+        return True
+    except Exception as exc:
+        logger.warning("[Supabase] set_scraper_selector_map failed: %s", exc)
+        return False
+
+
 def cleanup_provider_call_log(retention_days: int = 9) -> int:
     """[ADAUGAT ADR-041 Faza 2, Sprint 1.1 #2] Șterge rândurile mai vechi de
     `retention_days` zile — singura întreținere necesară, apelată zilnic din

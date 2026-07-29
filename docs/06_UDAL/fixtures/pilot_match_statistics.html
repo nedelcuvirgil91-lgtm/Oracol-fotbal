@@ -1,0 +1,90 @@
+<!--
+UDAL Faza 1 — fixture HTML SINTETIC, pentru pilot, NU date reale.
+
+Echipele ("FC Pilot Nord", "FC Pilot Sud", etc.) sunt NUME PLACEHOLDER,
+inventate deliberat — nu corespund niciunui club real din Romania
+SuperLiga. Structura tabelului e reprezentativă generic pentru cum arată
+un tabel HTML de statistici de meci (per SCRAPER_SOURCE_EVALUATION.md),
+NU o copie a vreunui site real (WebFetch a fost blocat în această sesiune,
+nicio pagină reală n-a fost citită).
+
+Include deliberat rânduri VALIDE și rânduri INVALIDE (cornere negative,
+câmp lipsă, cheie naturală duplicată în lot) — ca Validation Layer-ul din
+Faza 1 să aibă ceva real de respins, nu doar cazul fericit.
+-->
+<html>
+<body>
+<table class="match-stats">
+  <tbody>
+    <tr>
+      <td class="home-team">FC Pilot Nord</td>
+      <td class="away-team">FC Pilot Sud</td>
+      <td class="date">2026-03-01</td>
+      <td class="home-corners">6</td>
+      <td class="away-corners">4</td>
+      <td class="home-cards">2</td>
+      <td class="away-cards">3</td>
+      <td class="home-fouls">11</td>
+      <td class="away-fouls">14</td>
+    </tr>
+    <tr>
+      <td class="home-team">FC Pilot Est</td>
+      <td class="away-team">FC Pilot Vest</td>
+      <td class="date">2026-03-01</td>
+      <td class="home-corners">3</td>
+      <td class="away-corners">7</td>
+      <td class="home-cards">1</td>
+      <td class="away-cards">1</td>
+      <td class="home-fouls">9</td>
+      <td class="away-fouls">10</td>
+    </tr>
+    <tr>
+      <td class="home-team">FC Pilot Centru</td>
+      <td class="away-team">FC Pilot Munte</td>
+      <td class="date">2026-03-02</td>
+      <td class="home-corners">5</td>
+      <td class="away-corners">5</td>
+      <td class="home-cards">0</td>
+      <td class="away-cards">2</td>
+      <td class="home-fouls">8</td>
+      <td class="away-fouls">12</td>
+    </tr>
+    <!-- Invalid: cornere negative (imposibil fizic) -->
+    <tr>
+      <td class="home-team">FC Pilot Mare</td>
+      <td class="away-team">FC Pilot Deal</td>
+      <td class="date">2026-03-02</td>
+      <td class="home-corners">-1</td>
+      <td class="away-corners">6</td>
+      <td class="home-cards">2</td>
+      <td class="away-cards">1</td>
+      <td class="home-fouls">10</td>
+      <td class="away-fouls">9</td>
+    </tr>
+    <!-- Invalid: camp obligatoriu lipsa (away-corners absent) -->
+    <tr>
+      <td class="home-team">FC Pilot Padure</td>
+      <td class="away-team">FC Pilot Camp</td>
+      <td class="date">2026-03-03</td>
+      <td class="home-corners">4</td>
+      <td class="home-cards">1</td>
+      <td class="away-cards">2</td>
+      <td class="home-fouls">7</td>
+      <td class="away-fouls">13</td>
+    </tr>
+    <!-- Invalid: duplicat de cheie naturala fata de primul rand (acelasi meci raportat de doua ori) -->
+    <tr>
+      <td class="home-team">FC Pilot Nord</td>
+      <td class="away-team">FC Pilot Sud</td>
+      <td class="date">2026-03-01</td>
+      <td class="home-corners">6</td>
+      <td class="away-corners">4</td>
+      <td class="home-cards">2</td>
+      <td class="away-cards">3</td>
+      <td class="home-fouls">11</td>
+      <td class="away-fouls">14</td>
+    </tr>
+  </tbody>
+</table>
+</body>
+</html>

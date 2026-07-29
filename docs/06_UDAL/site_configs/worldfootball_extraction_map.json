@@ -1,0 +1,26 @@
+{
+  "extraction_type": "css",
+  "match": {
+    "league": ".data-header .league",
+    "season": ".data-header .season",
+    "status": ".data-header .status"
+  },
+  "teams": {
+    "home_team": ".team-home",
+    "away_team": ".team-away"
+  },
+  "score": {
+    "ft_home": ".ft-home",
+    "ft_away": ".ft-away"
+  },
+  "statistics": {
+    "home_corners": ".corners-home",
+    "away_corners": ".corners-away",
+    "home_fouls": ".fouls-home",
+    "away_fouls": ".fouls-away",
+    "home_yellow_cards": ".yellow-home",
+    "away_yellow_cards": ".yellow-away",
+    "home_red_cards": ".red-home",
+    "away_red_cards": ".red-away"
+  }
+}

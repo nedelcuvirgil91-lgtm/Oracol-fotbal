@@ -132,6 +132,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "h2h_lookback_days":           1095,
     "monte_carlo_simulations":     10000,
     "ml_blend_weight":             0.35,
+    # [ADAUGAT — R-ARCH-REVIEW-01] Control manual, separat de is_trained —
+    # ML se antrenează/salvează zilnic indiferent de acest flag; doar
+    # influența lui asupra predicției finale (blend_predictions()) e
+    # gatată aici. Implicit OPRIT — Predictorul rămâne 100% Poisson/ELO/
+    # formă până la activare explicită.
+    "ml_blending_enabled":         False,
     # [ADAUGAT] Shadow testing - vezi architecture/ADR-002-shadow-testing.md.
     # Implicit OPRIT - nicio schimbare de comportament fara activare explicita.
     "shadow_mode_enabled":         False,
@@ -1468,7 +1474,11 @@ class FootballOracleEngine:
         ml_blend_label  = "poisson-only"
         ml_samples_used = 0
 
-        if self.ml and self.ml.is_trained:
+        # [R-ARCH-REVIEW-01] Control mutat de la is_trained (are ML un
+        # model?) la ml_blending_enabled (decizie manuala, model_config) -
+        # antrenarea/salvarea modelului raman complet neatinse de acest
+        # flag, doar influenta asupra predictiei finale e gatata aici.
+        if self.ml and self.ml.is_trained and self.config.get("ml_blending_enabled", False):
             try:
                 ml_features = self._build_ml_features(
                     home_p, away_p, h2h, home_xg, away_xg, ph, pd, pa, mc, w_pen,

@@ -1,0 +1,25 @@
+{
+  "extraction_type": "css",
+  "match": {
+    "league": ".block_match .league-name",
+    "season": ".block_match .season-name",
+    "date": ".matchdate",
+    "venue": ".ground"
+  },
+  "teams": {
+    "home_team": ".team-a",
+    "away_team": ".team-b"
+  },
+  "score": {
+    "ft_home": ".score-ft-home",
+    "ft_away": ".score-ft-away"
+  },
+  "player_statistics": {
+    "list": ".scorer-row",
+    "item": {
+      "name": ".player-name",
+      "team_side": ".scorer-team",
+      "goal_minute": ".scorer-minute"
+    }
+  }
+}

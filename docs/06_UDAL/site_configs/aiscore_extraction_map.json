@@ -1,0 +1,27 @@
+{
+  "extraction_type": "css",
+  "_comment": "Tier 2 (probabil) - profil tehnic neconfirmat direct in aceasta sesiune, tratat conservator ca DOM post-randare, la fel ca Flashscore.",
+  "match": {
+    "league": ".match-card .league",
+    "status": ".match-card .match-status"
+  },
+  "teams": {
+    "home_team": ".match-card .home-team",
+    "away_team": ".match-card .away-team"
+  },
+  "score": {
+    "ft_home": ".match-card .score-home",
+    "ft_away": ".match-card .score-away"
+  },
+  "statistics": {
+    "home_possession": ".possession-home",
+    "away_possession": ".possession-away",
+    "home_shots": ".shots-home",
+    "away_shots": ".shots-away"
+  },
+  "odds": {
+    "home_odds": ".odd-1",
+    "draw_odds": ".odd-x",
+    "away_odds": ".odd-2"
+  }
+}

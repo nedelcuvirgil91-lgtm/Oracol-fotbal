@@ -1,0 +1,106 @@
+{
+  "run_at": "2026-07-28T21:29:39.016278+00:00",
+  "worldfootball": {
+    "source": "worldfootball",
+    "calls": [
+      {
+        "url": "https://www.worldfootball.net/competition/co66/romania-liga-1/",
+        "status": 403,
+        "latency_ms": 99.1
+      }
+    ],
+    "error": "hub_page_fetch_failed"
+  },
+  "sofascore": {
+    "source": "sofascore",
+    "calls": [
+      {
+        "url": "https://api.sofascore.com/api/v1/sport/football/scheduled-events/2026-07-27",
+        "status": 403,
+        "latency_ms": 212.0
+      },
+      {
+        "url": "https://api.sofascore.com/api/v1/sport/football/scheduled-events/2026-07-26",
+        "status": 403,
+        "latency_ms": 46.5
+      },
+      {
+        "url": "https://api.sofascore.com/api/v1/sport/football/scheduled-events/2026-07-25",
+        "status": 403,
+        "latency_ms": 44.8
+      },
+      {
+        "url": "https://api.sofascore.com/api/v1/sport/football/scheduled-events/2026-07-24",
+        "status": 403,
+        "latency_ms": 45.3
+      },
+      {
+        "url": "https://api.sofascore.com/api/v1/sport/football/scheduled-events/2026-07-23",
+        "status": 403,
+        "latency_ms": 47.4
+      },
+      {
+        "url": "https://api.sofascore.com/api/v1/sport/football/scheduled-events/2026-07-22",
+        "status": 403,
+        "latency_ms": 45.9
+      },
+      {
+        "url": "https://api.sofascore.com/api/v1/sport/football/scheduled-events/2026-07-21",
+        "status": 403,
+        "latency_ms": 44.5
+      },
+      {
+        "url": "https://api.sofascore.com/api/v1/sport/football/scheduled-events/2026-07-20",
+        "status": 403,
+        "latency_ms": 45.9
+      },
+      {
+        "url": "https://api.sofascore.com/api/v1/sport/football/scheduled-events/2026-07-19",
+        "status": 403,
+        "latency_ms": 45.4
+      },
+      {
+        "url": "https://api.sofascore.com/api/v1/sport/football/scheduled-events/2026-07-18",
+        "status": 403,
+        "latency_ms": 46.6
+      },
+      {
+        "url": "https://api.sofascore.com/api/v1/sport/football/scheduled-events/2026-07-17",
+        "status": 403,
+        "latency_ms": 47.0
+      },
+      {
+        "url": "https://api.sofascore.com/api/v1/sport/football/scheduled-events/2026-07-16",
+        "status": 403,
+        "latency_ms": 45.8
+      },
+      {
+        "url": "https://api.sofascore.com/api/v1/sport/football/scheduled-events/2026-07-15",
+        "status": 403,
+        "latency_ms": 45.3
+      },
+      {
+        "url": "https://api.sofascore.com/api/v1/sport/football/scheduled-events/2026-07-14",
+        "status": 403,
+        "latency_ms": 46.0
+      }
+    ],
+    "dates_checked": [
+      "2026-07-27",
+      "2026-07-26",
+      "2026-07-25",
+      "2026-07-24",
+      "2026-07-23",
+      "2026-07-22",
+      "2026-07-21",
+      "2026-07-20",
+      "2026-07-19",
+      "2026-07-18",
+      "2026-07-17",
+      "2026-07-16",
+      "2026-07-15",
+      "2026-07-14"
+    ],
+    "error": "no_romania_liga_1_event_found_in_checked_window"
+  }
+}

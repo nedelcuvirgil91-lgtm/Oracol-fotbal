@@ -770,7 +770,7 @@ elif nav == "portfolio":
 # ═════════════════════════════════════════════════════════════════════════════
 elif nav == "settings":
     st.markdown('<div class="section-bar"><div class="section-bar-title">⚙️ Setări model</div></div>', unsafe_allow_html=True)
-    t1,t2,t3,t4,t5=st.tabs(["🎛 Weights","⚡ Config","🧠 League Learning","🔍 Diagnostics","📋 Activitate"])
+    t1,t2,t3,t4,t5,t6=st.tabs(["🎛 Weights","⚡ Config","🧠 League Learning","🔍 Diagnostics","📋 Activitate","🛰 Flashscore"])
     with t1:
         # [REPARAT] Inainte citea direct din weights.json, ignorand Supabase
         # complet - arata valori vechi cand Supabase e sursa reala activa.
@@ -1167,3 +1167,102 @@ elif nav == "settings":
             st.dataframe(runs_df[cols], use_container_width=True, hide_index=True)
         else:
             st.caption("Fără rulări autonome înregistrate încă.")
+
+    with t6:
+        # [ADAUGAT — ADR-044, Foundation Data Layer] Secțiune read-only,
+        # diagnostic — vizibilitate asupra a ce a colectat Flashscore
+        # (Discovery + fetch/normalize/validate/persist, Data Trust Layer).
+        # NU citește/scrie nimic din calea de predicție — Oracle Engine,
+        # Predictor și ML rămân complet neatinse (North Star #10: nicio
+        # dependință "în sus" a servirii live către infrastructura de
+        # Foundation Data Layer). Dacă secțiunea de mai jos e goală,
+        # înseamnă doar că încă nu s-a rulat nicio colectare Flashscore
+        # live — nu un semn de eroare.
+        from database import queries as fdl_queries
+
+        st.markdown(
+            '<span class="sub-label">🛰 Foundation Data Layer — meciuri Flashscore colectate</span>',
+            unsafe_allow_html=True,
+        )
+        recent = fdl_queries.get_recent_flashscore_matches(limit=30)
+        if not recent:
+            st.caption(
+                "Niciun meci colectat încă prin Flashscore Foundation Data Layer "
+                "(rulează `python -m providers.flashscore.run_foundation_data_layer`)."
+            )
+        else:
+            summary_rows = []
+            for row in recent:
+                m = row.get("match") or {}
+                summary_rows.append({
+                    "meci": f"{m.get('home_team', '?')} – {m.get('away_team', '?')}" if m else row["match_ref"],
+                    "data": m.get("kickoff_date", "—"),
+                    "liga": m.get("league", "—"),
+                    "scor": (
+                        f"{m.get('actual_home_goals')}-{m.get('actual_away_goals')}"
+                        if m.get("actual_home_goals") is not None else "—"
+                    ),
+                    "completitudine %": row.get("coverage_percent", 0.0),
+                    "sezon": row.get("season") or "necunoscut",
+                    "match_id": m.get("id"),
+                    "match_ref": row["match_ref"],
+                })
+            summary_df = pd.DataFrame(summary_rows)
+            st.dataframe(
+                summary_df.drop(columns=["match_id", "match_ref"]),
+                use_container_width=True, hide_index=True,
+            )
+
+            st.markdown("---")
+            st.markdown('<span class="sub-label">🔎 Detaliu meci</span>', unsafe_allow_html=True)
+            options = {
+                f"{r['meci']} ({r['data']})": (r["match_id"], r["match_ref"])
+                for r in summary_rows
+            }
+            picked = st.selectbox("Alege un meci pentru detalii", list(options.keys()))
+            match_id, match_ref = options[picked]
+
+            completeness = fdl_queries.get_data_completeness(match_ref)
+            if completeness:
+                tab_flags = {
+                    "Summary": completeness.get("has_summary"), "Stats": completeness.get("has_stats"),
+                    "Lineups": completeness.get("has_lineups"), "Player Stats": completeness.get("has_player_stats"),
+                    "Odds": completeness.get("has_odds"), "H2H": completeness.get("has_h2h"),
+                    "Standings": completeness.get("has_standings"),
+                }
+                flags_str = "  ".join(f"{'✅' if v else '❌'} {k}" for k, v in tab_flags.items())
+                st.caption(f"Completitudine: {completeness.get('coverage_percent', 0.0)}% — {flags_str}")
+
+            if match_id is None:
+                st.warning("Acest meci nu are match_id canonic (validare identitate eșuată la colectare) — doar RAW disponibil, fără detalii canonice.")
+            else:
+                dt1, dt2 = st.columns(2)
+                with dt1:
+                    st.markdown("**Timeline evenimente**")
+                    events = fdl_queries.get_match_events(match_id)
+                    if events:
+                        st.dataframe(pd.DataFrame(events), use_container_width=True, hide_index=True)
+                    else:
+                        st.caption("Niciun eveniment înregistrat.")
+
+                    st.markdown("**Roster + rating**")
+                    players = fdl_queries.get_player_match_stats(match_id)
+                    if players:
+                        st.dataframe(pd.DataFrame(players), use_container_width=True, hide_index=True)
+                    else:
+                        st.caption("Niciun jucător înregistrat.")
+
+                with dt2:
+                    st.markdown("**Statistici extinse (EAV)**")
+                    stats_ext = fdl_queries.get_match_statistics_extended(match_id)
+                    if stats_ext:
+                        st.dataframe(pd.DataFrame(stats_ext), use_container_width=True, hide_index=True)
+                    else:
+                        st.caption("Nicio statistică extinsă înregistrată.")
+
+                    st.markdown("**H2H + formă recentă**")
+                    context_rows = fdl_queries.get_match_context(match_id)
+                    if context_rows:
+                        st.dataframe(pd.DataFrame(context_rows), use_container_width=True, hide_index=True)
+                    else:
+                        st.caption("Niciun context H2H/formă înregistrat.")

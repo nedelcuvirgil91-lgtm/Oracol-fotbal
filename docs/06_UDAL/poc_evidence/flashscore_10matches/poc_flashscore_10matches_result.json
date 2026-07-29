@@ -1,0 +1,1484 @@
+{
+  "run_at": "2026-07-28T23:20:42.924006+00:00",
+  "log": [
+    {
+      "tag": "superliga-results-hub",
+      "http_status": 200,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-results-hub",
+      "http_status": 200,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-1-summary",
+      "http_status": 200,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-1-Lineups",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-1-H2H",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-1-Odds",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-1-Standings",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-2-summary",
+      "http_status": 200,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-2-Lineups",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-2-H2H",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-2-Odds",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-2-Standings",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-3-summary",
+      "http_status": 200,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-3-Lineups",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-3-H2H",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-3-Odds",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-3-Standings",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-4-summary",
+      "http_status": 200,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-4-Lineups",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-4-H2H",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-4-Odds",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-4-Standings",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-5-summary",
+      "http_status": 200,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-5-Lineups",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-5-H2H",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-5-Odds",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "superliga-5-Standings",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-6-summary",
+      "http_status": 200,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-6-Lineups",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-6-H2H",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-6-Odds",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-7-summary",
+      "http_status": 200,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-7-Lineups",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-7-H2H",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-7-Odds",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-8-summary",
+      "http_status": 200,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-8-Lineups",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-8-H2H",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-8-Odds",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-9-summary",
+      "http_status": 200,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-9-Lineups",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-9-H2H",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-9-Odds",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-10-summary",
+      "http_status": 200,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-10-Lineups",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-10-H2H",
+      "http_status": null,
+      "protection_check": "clean"
+    },
+    {
+      "tag": "ucl-10-Odds",
+      "http_status": null,
+      "protection_check": "clean"
+    }
+  ],
+  "discovery": {
+    "superliga": {
+      "hub_url": "https://www.flashscore.com/football/romania/superliga/",
+      "attempts": [
+        {
+          "source": "results",
+          "url": "https://www.flashscore.com/football/romania/superliga/results/",
+          "http_status": 200,
+          "links_found": 43
+        }
+      ],
+      "matches": [
+        "https://www.flashscore.com/match/football/fc-botosani-GjY1JjUS/rapid-bucuresti-YFCpigVG/?mid=EeqI7WJc",
+        "https://www.flashscore.com/match/football/cfr-cluj-4KfIhq7B/voluntari-WIoSeFi4/?mid=631P5AlA",
+        "https://www.flashscore.com/match/football/fcsb-Gv2kjDpN/miercurea-ciuc-A5gTQ7pG/?mid=IPgBd6Bd",
+        "https://www.flashscore.com/match/football/sepsi-IDsPIcMA/universitatea-cluj-Us6gkXaT/?mid=vHaX3lJM",
+        "https://www.flashscore.com/match/football/dinamo-bucuresti-rBgMi3MH/univ-craiova-bsd9fGaK/?mid=AJtcK933"
+      ],
+      "source_used": "results"
+    },
+    "ucl": {
+      "hub_url": "https://www.flashscore.com/football/europe/champions-league/",
+      "attempts": [
+        {
+          "source": "results",
+          "url": "https://www.flashscore.com/football/europe/champions-league/results/",
+          "http_status": 200,
+          "links_found": 75
+        }
+      ],
+      "matches": [
+        "https://www.flashscore.com/match/football/ararat-armenia-xlT9cL89/shamrock-rovers-KIN6lmnH/?mid=f9yUru7s",
+        "https://www.flashscore.com/match/football/hearts-0rGrwwNc/sturm-graz-zsktjfsD/?mid=0M0wdHSH",
+        "https://www.flashscore.com/match/football/celje-SpbURe4O/kf-egnatia-CjYs7BO9/?mid=WxPrLDQE",
+        "https://www.flashscore.com/match/football/din-zagreb-8G5ufQTg/thun-4WElAd9p/?mid=rqFko0Ea",
+        "https://www.flashscore.com/match/football/lincoln-red-imps-bHbMply6/mjallby-S0XtXM1E/?mid=4CbLusAN"
+      ],
+      "source_used": "results"
+    }
+  },
+  "matches": [
+    {
+      "match_url": "https://www.flashscore.com/match/football/fc-botosani-GjY1JjUS/rapid-bucuresti-YFCpigVG/?mid=EeqI7WJc",
+      "tag": "superliga",
+      "index": 1,
+      "tabs_visited": {
+        "summary": {
+          "found": true,
+          "content_length": 1187287
+        },
+        "statistics": {
+          "found": false,
+          "reason": "not_visible"
+        },
+        "lineups": {
+          "found": true,
+          "content_length": 1242729
+        },
+        "h2h": {
+          "found": true,
+          "content_length": 1142749
+        },
+        "odds": {
+          "found": true,
+          "content_length": 1096825
+        },
+        "standings": {
+          "found": true,
+          "content_length": 1113250
+        }
+      },
+      "field_detection": {
+        "possession": {
+          "heuristic_found": true,
+          "pattern": "ball possession"
+        },
+        "shots_total": {
+          "heuristic_found": true,
+          "pattern": "goal attempts"
+        },
+        "shots_on_target": {
+          "heuristic_found": true,
+          "pattern": "shots on (goal|target)"
+        },
+        "corners": {
+          "heuristic_found": true,
+          "pattern": "corner kicks"
+        },
+        "fouls": {
+          "heuristic_found": true,
+          "pattern": "\\bfouls\\b"
+        },
+        "yellow_cards": {
+          "heuristic_found": true,
+          "pattern": "yellow cards"
+        },
+        "red_cards": {
+          "heuristic_found": true,
+          "pattern": "red cards"
+        },
+        "offsides": {
+          "heuristic_found": true,
+          "pattern": "\\boffsides\\b"
+        },
+        "saves": {
+          "heuristic_found": true,
+          "pattern": "goalkeeper saves"
+        },
+        "lineups_starting_xi": {
+          "heuristic_found": true,
+          "pattern": "starting (lineups|xi)"
+        },
+        "lineups_bench": {
+          "heuristic_found": true,
+          "pattern": "\\bsubstitutes\\b"
+        },
+        "lineups_coach": {
+          "heuristic_found": true,
+          "pattern": "\\bcoach\\b"
+        },
+        "referee": {
+          "heuristic_found": true,
+          "pattern": "\\breferee\\b"
+        },
+        "stadium": {
+          "heuristic_found": true,
+          "pattern": "\\bvenue\\b"
+        },
+        "attendance": {
+          "heuristic_found": true,
+          "pattern": "\\battendance\\b"
+        },
+        "weather": {
+          "heuristic_found": false,
+          "pattern": null
+        },
+        "xg": {
+          "heuristic_found": true,
+          "pattern": "\\bxg\\b"
+        },
+        "h2h": {
+          "heuristic_found": true,
+          "pattern": "head-to-head"
+        },
+        "odds": {
+          "heuristic_found": true,
+          "pattern": "\\bodds\\b"
+        },
+        "player_rating": {
+          "heuristic_found": true,
+          "pattern": "\\brating\\b"
+        }
+      },
+      "stability": {
+        "load_time_ms": 1156.7,
+        "http_status": 200,
+        "gdpr_banner_seen": false,
+        "page_fully_loaded": true
+      },
+      "page_title": "BOT 1-1 FC | FC Botosani v FC Rapid Bucuresti 27/07/2026 | Football - Flashscore | Match"
+    },
+    {
+      "match_url": "https://www.flashscore.com/match/football/cfr-cluj-4KfIhq7B/voluntari-WIoSeFi4/?mid=631P5AlA",
+      "tag": "superliga",
+      "index": 2,
+      "tabs_visited": {
+        "summary": {
+          "found": true,
+          "content_length": 1202583
+        },
+        "statistics": {
+          "found": false,
+          "reason": "not_visible"
+        },
+        "lineups": {
+          "found": true,
+          "content_length": 1238912
+        },
+        "h2h": {
+          "found": true,
+          "content_length": 1143028
+        },
+        "odds": {
+          "found": true,
+          "content_length": 1097088
+        },
+        "standings": {
+          "found": true,
+          "content_length": 1113013
+        }
+      },
+      "field_detection": {
+        "possession": {
+          "heuristic_found": true,
+          "pattern": "ball possession"
+        },
+        "shots_total": {
+          "heuristic_found": true,
+          "pattern": "goal attempts"
+        },
+        "shots_on_target": {
+          "heuristic_found": true,
+          "pattern": "shots on (goal|target)"
+        },
+        "corners": {
+          "heuristic_found": true,
+          "pattern": "corner kicks"
+        },
+        "fouls": {
+          "heuristic_found": true,
+          "pattern": "\\bfouls\\b"
+        },
+        "yellow_cards": {
+          "heuristic_found": true,
+          "pattern": "yellow cards"
+        },
+        "red_cards": {
+          "heuristic_found": true,
+          "pattern": "red cards"
+        },
+        "offsides": {
+          "heuristic_found": true,
+          "pattern": "\\boffsides\\b"
+        },
+        "saves": {
+          "heuristic_found": true,
+          "pattern": "goalkeeper saves"
+        },
+        "lineups_starting_xi": {
+          "heuristic_found": true,
+          "pattern": "starting (lineups|xi)"
+        },
+        "lineups_bench": {
+          "heuristic_found": true,
+          "pattern": "\\bsubstitutes\\b"
+        },
+        "lineups_coach": {
+          "heuristic_found": true,
+          "pattern": "\\bcoach\\b"
+        },
+        "referee": {
+          "heuristic_found": true,
+          "pattern": "\\breferee\\b"
+        },
+        "stadium": {
+          "heuristic_found": true,
+          "pattern": "\\bvenue\\b"
+        },
+        "attendance": {
+          "heuristic_found": true,
+          "pattern": "\\battendance\\b"
+        },
+        "weather": {
+          "heuristic_found": false,
+          "pattern": null
+        },
+        "xg": {
+          "heuristic_found": true,
+          "pattern": "\\bxg\\b"
+        },
+        "h2h": {
+          "heuristic_found": true,
+          "pattern": "head-to-head"
+        },
+        "odds": {
+          "heuristic_found": true,
+          "pattern": "\\bodds\\b"
+        },
+        "player_rating": {
+          "heuristic_found": true,
+          "pattern": "\\brating\\b"
+        }
+      },
+      "stability": {
+        "load_time_ms": 747.7,
+        "http_status": 200,
+        "gdpr_banner_seen": false,
+        "page_fully_loaded": true
+      },
+      "page_title": "CFR 5-0 VOL | CFR Cluj v FC Voluntari 27/07/2026 | Football - Flashscore | Match"
+    },
+    {
+      "match_url": "https://www.flashscore.com/match/football/fcsb-Gv2kjDpN/miercurea-ciuc-A5gTQ7pG/?mid=IPgBd6Bd",
+      "tag": "superliga",
+      "index": 3,
+      "tabs_visited": {
+        "summary": {
+          "found": true,
+          "content_length": 1192854
+        },
+        "statistics": {
+          "found": false,
+          "reason": "not_visible"
+        },
+        "lineups": {
+          "found": true,
+          "content_length": 1240313
+        },
+        "h2h": {
+          "found": true,
+          "content_length": 1140995
+        },
+        "odds": {
+          "found": true,
+          "content_length": 1097372
+        },
+        "standings": {
+          "found": true,
+          "content_length": 1113010
+        }
+      },
+      "field_detection": {
+        "possession": {
+          "heuristic_found": true,
+          "pattern": "ball possession"
+        },
+        "shots_total": {
+          "heuristic_found": true,
+          "pattern": "goal attempts"
+        },
+        "shots_on_target": {
+          "heuristic_found": true,
+          "pattern": "shots on (goal|target)"
+        },
+        "corners": {
+          "heuristic_found": true,
+          "pattern": "corner kicks"
+        },
+        "fouls": {
+          "heuristic_found": true,
+          "pattern": "\\bfouls\\b"
+        },
+        "yellow_cards": {
+          "heuristic_found": true,
+          "pattern": "yellow cards"
+        },
+        "red_cards": {
+          "heuristic_found": true,
+          "pattern": "red cards"
+        },
+        "offsides": {
+          "heuristic_found": true,
+          "pattern": "\\boffsides\\b"
+        },
+        "saves": {
+          "heuristic_found": true,
+          "pattern": "goalkeeper saves"
+        },
+        "lineups_starting_xi": {
+          "heuristic_found": true,
+          "pattern": "starting (lineups|xi)"
+        },
+        "lineups_bench": {
+          "heuristic_found": true,
+          "pattern": "\\bsubstitutes\\b"
+        },
+        "lineups_coach": {
+          "heuristic_found": true,
+          "pattern": "\\bcoach\\b"
+        },
+        "referee": {
+          "heuristic_found": true,
+          "pattern": "\\breferee\\b"
+        },
+        "stadium": {
+          "heuristic_found": true,
+          "pattern": "\\bvenue\\b"
+        },
+        "attendance": {
+          "heuristic_found": true,
+          "pattern": "\\battendance\\b"
+        },
+        "weather": {
+          "heuristic_found": false,
+          "pattern": null
+        },
+        "xg": {
+          "heuristic_found": true,
+          "pattern": "\\bxg\\b"
+        },
+        "h2h": {
+          "heuristic_found": true,
+          "pattern": "head-to-head"
+        },
+        "odds": {
+          "heuristic_found": true,
+          "pattern": "\\bodds\\b"
+        },
+        "player_rating": {
+          "heuristic_found": true,
+          "pattern": "\\brating\\b"
+        }
+      },
+      "stability": {
+        "load_time_ms": 880.4,
+        "http_status": 200,
+        "gdpr_banner_seen": false,
+        "page_fully_loaded": true
+      },
+      "page_title": "CSI 0-2 FCS | Csikszereda M. Ciuc v FCSB 26/07/2026 | Football - Flashscore | Match"
+    },
+    {
+      "match_url": "https://www.flashscore.com/match/football/sepsi-IDsPIcMA/universitatea-cluj-Us6gkXaT/?mid=vHaX3lJM",
+      "tag": "superliga",
+      "index": 4,
+      "tabs_visited": {
+        "summary": {
+          "found": true,
+          "content_length": 1186319
+        },
+        "statistics": {
+          "found": false,
+          "reason": "not_visible"
+        },
+        "lineups": {
+          "found": true,
+          "content_length": 1230884
+        },
+        "h2h": {
+          "found": true,
+          "content_length": 1144676
+        },
+        "odds": {
+          "found": true,
+          "content_length": 1097208
+        },
+        "standings": {
+          "found": true,
+          "content_length": 1113084
+        }
+      },
+      "field_detection": {
+        "possession": {
+          "heuristic_found": true,
+          "pattern": "ball possession"
+        },
+        "shots_total": {
+          "heuristic_found": true,
+          "pattern": "goal attempts"
+        },
+        "shots_on_target": {
+          "heuristic_found": true,
+          "pattern": "shots on (goal|target)"
+        },
+        "corners": {
+          "heuristic_found": true,
+          "pattern": "corner kicks"
+        },
+        "fouls": {
+          "heuristic_found": true,
+          "pattern": "\\bfouls\\b"
+        },
+        "yellow_cards": {
+          "heuristic_found": true,
+          "pattern": "yellow cards"
+        },
+        "red_cards": {
+          "heuristic_found": true,
+          "pattern": "red cards"
+        },
+        "offsides": {
+          "heuristic_found": true,
+          "pattern": "\\boffsides\\b"
+        },
+        "saves": {
+          "heuristic_found": true,
+          "pattern": "goalkeeper saves"
+        },
+        "lineups_starting_xi": {
+          "heuristic_found": true,
+          "pattern": "starting (lineups|xi)"
+        },
+        "lineups_bench": {
+          "heuristic_found": true,
+          "pattern": "\\bsubstitutes\\b"
+        },
+        "lineups_coach": {
+          "heuristic_found": true,
+          "pattern": "\\bcoach\\b"
+        },
+        "referee": {
+          "heuristic_found": true,
+          "pattern": "\\breferee\\b"
+        },
+        "stadium": {
+          "heuristic_found": true,
+          "pattern": "\\bvenue\\b"
+        },
+        "attendance": {
+          "heuristic_found": true,
+          "pattern": "\\battendance\\b"
+        },
+        "weather": {
+          "heuristic_found": false,
+          "pattern": null
+        },
+        "xg": {
+          "heuristic_found": true,
+          "pattern": "\\bxg\\b"
+        },
+        "h2h": {
+          "heuristic_found": true,
+          "pattern": "head-to-head"
+        },
+        "odds": {
+          "heuristic_found": true,
+          "pattern": "\\bodds\\b"
+        },
+        "player_rating": {
+          "heuristic_found": true,
+          "pattern": "\\brating\\b"
+        }
+      },
+      "stability": {
+        "load_time_ms": 906.7,
+        "http_status": 200,
+        "gdpr_banner_seen": false,
+        "page_fully_loaded": true
+      },
+      "page_title": "SEP 1-0 UNI | Sepsi Sf. Gheorghe v U. Cluj 26/07/2026 | Football - Flashscore | Match"
+    },
+    {
+      "match_url": "https://www.flashscore.com/match/football/dinamo-bucuresti-rBgMi3MH/univ-craiova-bsd9fGaK/?mid=AJtcK933",
+      "tag": "superliga",
+      "index": 5,
+      "tabs_visited": {
+        "summary": {
+          "found": true,
+          "content_length": 1211551
+        },
+        "statistics": {
+          "found": false,
+          "reason": "not_visible"
+        },
+        "lineups": {
+          "found": true,
+          "content_length": 1246600
+        },
+        "h2h": {
+          "found": true,
+          "content_length": 1144796
+        },
+        "odds": {
+          "found": true,
+          "content_length": 1096864
+        },
+        "standings": {
+          "found": true,
+          "content_length": 1113300
+        }
+      },
+      "field_detection": {
+        "possession": {
+          "heuristic_found": true,
+          "pattern": "ball possession"
+        },
+        "shots_total": {
+          "heuristic_found": true,
+          "pattern": "goal attempts"
+        },
+        "shots_on_target": {
+          "heuristic_found": true,
+          "pattern": "shots on (goal|target)"
+        },
+        "corners": {
+          "heuristic_found": true,
+          "pattern": "corner kicks"
+        },
+        "fouls": {
+          "heuristic_found": true,
+          "pattern": "\\bfouls\\b"
+        },
+        "yellow_cards": {
+          "heuristic_found": true,
+          "pattern": "yellow cards"
+        },
+        "red_cards": {
+          "heuristic_found": true,
+          "pattern": "red cards"
+        },
+        "offsides": {
+          "heuristic_found": true,
+          "pattern": "\\boffsides\\b"
+        },
+        "saves": {
+          "heuristic_found": true,
+          "pattern": "goalkeeper saves"
+        },
+        "lineups_starting_xi": {
+          "heuristic_found": true,
+          "pattern": "starting (lineups|xi)"
+        },
+        "lineups_bench": {
+          "heuristic_found": true,
+          "pattern": "\\bsubstitutes\\b"
+        },
+        "lineups_coach": {
+          "heuristic_found": true,
+          "pattern": "\\bcoach\\b"
+        },
+        "referee": {
+          "heuristic_found": true,
+          "pattern": "\\breferee\\b"
+        },
+        "stadium": {
+          "heuristic_found": true,
+          "pattern": "\\bvenue\\b"
+        },
+        "attendance": {
+          "heuristic_found": true,
+          "pattern": "\\battendance\\b"
+        },
+        "weather": {
+          "heuristic_found": false,
+          "pattern": null
+        },
+        "xg": {
+          "heuristic_found": true,
+          "pattern": "\\bxg\\b"
+        },
+        "h2h": {
+          "heuristic_found": true,
+          "pattern": "head-to-head"
+        },
+        "odds": {
+          "heuristic_found": true,
+          "pattern": "\\bodds\\b"
+        },
+        "player_rating": {
+          "heuristic_found": true,
+          "pattern": "\\brating\\b"
+        }
+      },
+      "stability": {
+        "load_time_ms": 1107.7,
+        "http_status": 200,
+        "gdpr_banner_seen": false,
+        "page_fully_loaded": true
+      },
+      "page_title": "DIN 5-1 UNI | Dinamo Bucuresti v Univ. Craiova 25/07/2026 | Football - Flashscore | Match"
+    },
+    {
+      "match_url": "https://www.flashscore.com/match/football/ararat-armenia-xlT9cL89/shamrock-rovers-KIN6lmnH/?mid=f9yUru7s",
+      "tag": "ucl",
+      "index": 6,
+      "tabs_visited": {
+        "summary": {
+          "found": true,
+          "content_length": 1146480
+        },
+        "statistics": {
+          "found": false,
+          "reason": "not_visible"
+        },
+        "lineups": {
+          "found": true,
+          "content_length": 1231567
+        },
+        "h2h": {
+          "found": true,
+          "content_length": 1142347
+        },
+        "odds": {
+          "found": true,
+          "content_length": 1103964
+        },
+        "standings": {
+          "found": false,
+          "reason": "not_visible"
+        }
+      },
+      "field_detection": {
+        "possession": {
+          "heuristic_found": true,
+          "pattern": "ball possession"
+        },
+        "shots_total": {
+          "heuristic_found": true,
+          "pattern": "goal attempts"
+        },
+        "shots_on_target": {
+          "heuristic_found": true,
+          "pattern": "shots on (goal|target)"
+        },
+        "corners": {
+          "heuristic_found": true,
+          "pattern": "corner kicks"
+        },
+        "fouls": {
+          "heuristic_found": true,
+          "pattern": "\\bfouls\\b"
+        },
+        "yellow_cards": {
+          "heuristic_found": true,
+          "pattern": "yellow cards"
+        },
+        "red_cards": {
+          "heuristic_found": true,
+          "pattern": "red cards"
+        },
+        "offsides": {
+          "heuristic_found": true,
+          "pattern": "\\boffsides\\b"
+        },
+        "saves": {
+          "heuristic_found": true,
+          "pattern": "goalkeeper saves"
+        },
+        "lineups_starting_xi": {
+          "heuristic_found": true,
+          "pattern": "starting (lineups|xi)"
+        },
+        "lineups_bench": {
+          "heuristic_found": true,
+          "pattern": "\\bsubstitutes\\b"
+        },
+        "lineups_coach": {
+          "heuristic_found": true,
+          "pattern": "\\bcoach\\b"
+        },
+        "referee": {
+          "heuristic_found": true,
+          "pattern": "\\breferee\\b"
+        },
+        "stadium": {
+          "heuristic_found": true,
+          "pattern": "\\bvenue\\b"
+        },
+        "attendance": {
+          "heuristic_found": true,
+          "pattern": "\\battendance\\b"
+        },
+        "weather": {
+          "heuristic_found": false,
+          "pattern": null
+        },
+        "xg": {
+          "heuristic_found": true,
+          "pattern": "\\bxg\\b"
+        },
+        "h2h": {
+          "heuristic_found": true,
+          "pattern": "head-to-head"
+        },
+        "odds": {
+          "heuristic_found": true,
+          "pattern": "\\bodds\\b"
+        },
+        "player_rating": {
+          "heuristic_found": true,
+          "pattern": "\\brating\\b"
+        }
+      },
+      "stability": {
+        "load_time_ms": 706.7,
+        "http_status": 200,
+        "gdpr_banner_seen": false,
+        "page_fully_loaded": true
+      },
+      "page_title": "SHA 2-1 ARA | Shamrock Rovers v Ararat-Armenia 28/07/2026 | Football - Flashscore | Match"
+    },
+    {
+      "match_url": "https://www.flashscore.com/match/football/hearts-0rGrwwNc/sturm-graz-zsktjfsD/?mid=0M0wdHSH",
+      "tag": "ucl",
+      "index": 7,
+      "tabs_visited": {
+        "summary": {
+          "found": true,
+          "content_length": 1204767
+        },
+        "statistics": {
+          "found": false,
+          "reason": "not_visible"
+        },
+        "lineups": {
+          "found": true,
+          "content_length": 1231704
+        },
+        "h2h": {
+          "found": true,
+          "content_length": 1139840
+        },
+        "odds": {
+          "found": true,
+          "content_length": 1102931
+        },
+        "standings": {
+          "found": false,
+          "reason": "not_visible"
+        }
+      },
+      "field_detection": {
+        "possession": {
+          "heuristic_found": true,
+          "pattern": "ball possession"
+        },
+        "shots_total": {
+          "heuristic_found": true,
+          "pattern": "goal attempts"
+        },
+        "shots_on_target": {
+          "heuristic_found": true,
+          "pattern": "shots on (goal|target)"
+        },
+        "corners": {
+          "heuristic_found": true,
+          "pattern": "corner kicks"
+        },
+        "fouls": {
+          "heuristic_found": true,
+          "pattern": "\\bfouls\\b"
+        },
+        "yellow_cards": {
+          "heuristic_found": true,
+          "pattern": "yellow cards"
+        },
+        "red_cards": {
+          "heuristic_found": true,
+          "pattern": "red cards"
+        },
+        "offsides": {
+          "heuristic_found": true,
+          "pattern": "\\boffsides\\b"
+        },
+        "saves": {
+          "heuristic_found": true,
+          "pattern": "goalkeeper saves"
+        },
+        "lineups_starting_xi": {
+          "heuristic_found": true,
+          "pattern": "starting (lineups|xi)"
+        },
+        "lineups_bench": {
+          "heuristic_found": true,
+          "pattern": "\\bsubstitutes\\b"
+        },
+        "lineups_coach": {
+          "heuristic_found": true,
+          "pattern": "\\bcoach\\b"
+        },
+        "referee": {
+          "heuristic_found": true,
+          "pattern": "\\breferee\\b"
+        },
+        "stadium": {
+          "heuristic_found": true,
+          "pattern": "\\bvenue\\b"
+        },
+        "attendance": {
+          "heuristic_found": true,
+          "pattern": "\\battendance\\b"
+        },
+        "weather": {
+          "heuristic_found": false,
+          "pattern": null
+        },
+        "xg": {
+          "heuristic_found": true,
+          "pattern": "\\bxg\\b"
+        },
+        "h2h": {
+          "heuristic_found": true,
+          "pattern": "head-to-head"
+        },
+        "odds": {
+          "heuristic_found": true,
+          "pattern": "\\bodds\\b"
+        },
+        "player_rating": {
+          "heuristic_found": true,
+          "pattern": "\\brating\\b"
+        }
+      },
+      "stability": {
+        "load_time_ms": 571.6,
+        "http_status": 200,
+        "gdpr_banner_seen": false,
+        "page_fully_loaded": true
+      },
+      "page_title": "HEA 0-2 STU | Hearts v Sturm Graz 28/07/2026 | Football - Flashscore | Match"
+    },
+    {
+      "match_url": "https://www.flashscore.com/match/football/celje-SpbURe4O/kf-egnatia-CjYs7BO9/?mid=WxPrLDQE",
+      "tag": "ucl",
+      "index": 8,
+      "tabs_visited": {
+        "summary": {
+          "found": true,
+          "content_length": 1164559
+        },
+        "statistics": {
+          "found": false,
+          "reason": "not_visible"
+        },
+        "lineups": {
+          "found": true,
+          "content_length": 1243283
+        },
+        "h2h": {
+          "found": true,
+          "content_length": 1141148
+        },
+        "odds": {
+          "found": true,
+          "content_length": 1103604
+        },
+        "standings": {
+          "found": false,
+          "reason": "not_visible"
+        }
+      },
+      "field_detection": {
+        "possession": {
+          "heuristic_found": true,
+          "pattern": "ball possession"
+        },
+        "shots_total": {
+          "heuristic_found": true,
+          "pattern": "goal attempts"
+        },
+        "shots_on_target": {
+          "heuristic_found": true,
+          "pattern": "shots on (goal|target)"
+        },
+        "corners": {
+          "heuristic_found": true,
+          "pattern": "corner kicks"
+        },
+        "fouls": {
+          "heuristic_found": true,
+          "pattern": "\\bfouls\\b"
+        },
+        "yellow_cards": {
+          "heuristic_found": true,
+          "pattern": "yellow cards"
+        },
+        "red_cards": {
+          "heuristic_found": true,
+          "pattern": "red cards"
+        },
+        "offsides": {
+          "heuristic_found": true,
+          "pattern": "\\boffsides\\b"
+        },
+        "saves": {
+          "heuristic_found": true,
+          "pattern": "goalkeeper saves"
+        },
+        "lineups_starting_xi": {
+          "heuristic_found": true,
+          "pattern": "starting (lineups|xi)"
+        },
+        "lineups_bench": {
+          "heuristic_found": true,
+          "pattern": "\\bsubstitutes\\b"
+        },
+        "lineups_coach": {
+          "heuristic_found": true,
+          "pattern": "\\bcoach\\b"
+        },
+        "referee": {
+          "heuristic_found": true,
+          "pattern": "\\breferee\\b"
+        },
+        "stadium": {
+          "heuristic_found": true,
+          "pattern": "\\bvenue\\b"
+        },
+        "attendance": {
+          "heuristic_found": true,
+          "pattern": "\\battendance\\b"
+        },
+        "weather": {
+          "heuristic_found": false,
+          "pattern": null
+        },
+        "xg": {
+          "heuristic_found": true,
+          "pattern": "\\bxg\\b"
+        },
+        "h2h": {
+          "heuristic_found": true,
+          "pattern": "head-to-head"
+        },
+        "odds": {
+          "heuristic_found": true,
+          "pattern": "\\bodds\\b"
+        },
+        "player_rating": {
+          "heuristic_found": true,
+          "pattern": "\\brating\\b"
+        }
+      },
+      "stability": {
+        "load_time_ms": 816.5,
+        "http_status": 200,
+        "gdpr_banner_seen": false,
+        "page_fully_loaded": true
+      },
+      "page_title": "CEL 2-2 EGN (PEN: 4-1) | Celje v Egnatia 28/07/2026 | Football - Flashscore | Match"
+    },
+    {
+      "match_url": "https://www.flashscore.com/match/football/din-zagreb-8G5ufQTg/thun-4WElAd9p/?mid=rqFko0Ea",
+      "tag": "ucl",
+      "index": 9,
+      "tabs_visited": {
+        "summary": {
+          "found": true,
+          "content_length": 1229135
+        },
+        "statistics": {
+          "found": false,
+          "reason": "not_visible"
+        },
+        "lineups": {
+          "found": true,
+          "content_length": 1255600
+        },
+        "h2h": {
+          "found": true,
+          "content_length": 1139199
+        },
+        "odds": {
+          "found": true,
+          "content_length": 1102591
+        },
+        "standings": {
+          "found": false,
+          "reason": "not_visible"
+        }
+      },
+      "field_detection": {
+        "possession": {
+          "heuristic_found": true,
+          "pattern": "ball possession"
+        },
+        "shots_total": {
+          "heuristic_found": true,
+          "pattern": "goal attempts"
+        },
+        "shots_on_target": {
+          "heuristic_found": true,
+          "pattern": "shots on (goal|target)"
+        },
+        "corners": {
+          "heuristic_found": true,
+          "pattern": "corner kicks"
+        },
+        "fouls": {
+          "heuristic_found": true,
+          "pattern": "\\bfouls\\b"
+        },
+        "yellow_cards": {
+          "heuristic_found": true,
+          "pattern": "yellow cards"
+        },
+        "red_cards": {
+          "heuristic_found": true,
+          "pattern": "red cards"
+        },
+        "offsides": {
+          "heuristic_found": true,
+          "pattern": "\\boffsides\\b"
+        },
+        "saves": {
+          "heuristic_found": true,
+          "pattern": "goalkeeper saves"
+        },
+        "lineups_starting_xi": {
+          "heuristic_found": true,
+          "pattern": "starting (lineups|xi)"
+        },
+        "lineups_bench": {
+          "heuristic_found": true,
+          "pattern": "\\bsubstitutes\\b"
+        },
+        "lineups_coach": {
+          "heuristic_found": true,
+          "pattern": "\\bcoach\\b"
+        },
+        "referee": {
+          "heuristic_found": true,
+          "pattern": "\\breferee\\b"
+        },
+        "stadium": {
+          "heuristic_found": true,
+          "pattern": "\\bvenue\\b"
+        },
+        "attendance": {
+          "heuristic_found": true,
+          "pattern": "\\battendance\\b"
+        },
+        "weather": {
+          "heuristic_found": false,
+          "pattern": null
+        },
+        "xg": {
+          "heuristic_found": true,
+          "pattern": "\\bxg\\b"
+        },
+        "h2h": {
+          "heuristic_found": true,
+          "pattern": "head-to-head"
+        },
+        "odds": {
+          "heuristic_found": true,
+          "pattern": "\\bodds\\b"
+        },
+        "player_rating": {
+          "heuristic_found": true,
+          "pattern": "\\brating\\b"
+        }
+      },
+      "stability": {
+        "load_time_ms": 564.7,
+        "http_status": 200,
+        "gdpr_banner_seen": false,
+        "page_fully_loaded": true
+      },
+      "page_title": "DIN 3-2 THU | Dinamo Zagreb v Thun 28/07/2026 | Football - Flashscore | Match"
+    },
+    {
+      "match_url": "https://www.flashscore.com/match/football/lincoln-red-imps-bHbMply6/mjallby-S0XtXM1E/?mid=4CbLusAN",
+      "tag": "ucl",
+      "index": 10,
+      "tabs_visited": {
+        "summary": {
+          "found": true,
+          "content_length": 1161705
+        },
+        "statistics": {
+          "found": false,
+          "reason": "not_visible"
+        },
+        "lineups": {
+          "found": true,
+          "content_length": 1231064
+        },
+        "h2h": {
+          "found": true,
+          "content_length": 1141271
+        },
+        "odds": {
+          "found": true,
+          "content_length": 1104161
+        },
+        "standings": {
+          "found": false,
+          "reason": "not_visible"
+        }
+      },
+      "field_detection": {
+        "possession": {
+          "heuristic_found": true,
+          "pattern": "ball possession"
+        },
+        "shots_total": {
+          "heuristic_found": true,
+          "pattern": "goal attempts"
+        },
+        "shots_on_target": {
+          "heuristic_found": true,
+          "pattern": "shots on (goal|target)"
+        },
+        "corners": {
+          "heuristic_found": true,
+          "pattern": "corner kicks"
+        },
+        "fouls": {
+          "heuristic_found": true,
+          "pattern": "\\bfouls\\b"
+        },
+        "yellow_cards": {
+          "heuristic_found": true,
+          "pattern": "yellow cards"
+        },
+        "red_cards": {
+          "heuristic_found": true,
+          "pattern": "red cards"
+        },
+        "offsides": {
+          "heuristic_found": true,
+          "pattern": "\\boffsides\\b"
+        },
+        "saves": {
+          "heuristic_found": true,
+          "pattern": "goalkeeper saves"
+        },
+        "lineups_starting_xi": {
+          "heuristic_found": true,
+          "pattern": "starting (lineups|xi)"
+        },
+        "lineups_bench": {
+          "heuristic_found": true,
+          "pattern": "\\bsubstitutes\\b"
+        },
+        "lineups_coach": {
+          "heuristic_found": true,
+          "pattern": "\\bcoach\\b"
+        },
+        "referee": {
+          "heuristic_found": true,
+          "pattern": "\\breferee\\b"
+        },
+        "stadium": {
+          "heuristic_found": true,
+          "pattern": "\\bvenue\\b"
+        },
+        "attendance": {
+          "heuristic_found": true,
+          "pattern": "\\battendance\\b"
+        },
+        "weather": {
+          "heuristic_found": false,
+          "pattern": null
+        },
+        "xg": {
+          "heuristic_found": true,
+          "pattern": "\\bxg\\b"
+        },
+        "h2h": {
+          "heuristic_found": true,
+          "pattern": "head-to-head"
+        },
+        "odds": {
+          "heuristic_found": true,
+          "pattern": "\\bodds\\b"
+        },
+        "player_rating": {
+          "heuristic_found": true,
+          "pattern": "\\brating\\b"
+        }
+      },
+      "stability": {
+        "load_time_ms": 834.2,
+        "http_status": 200,
+        "gdpr_banner_seen": false,
+        "page_fully_loaded": true
+      },
+      "page_title": "LIN 0-0 MJA | Lincoln Red Imps v Mjallby 28/07/2026 | Football - Flashscore | Match"
+    }
+  ],
+  "stopped_due_to_protection": null,
+  "total_matches_tested": 10
+}

@@ -1,0 +1,44 @@
+{
+  "extraction_type": "css",
+  "_comment": "Tier 2 (Playwright) - acest map se aplica DOAR pe DOM-ul deja randat (vezi fixture-ul flashscore_match_rendered.html), niciodata pe raspunsul HTTP brut - fetch()-ul Tier 2 ramane neimplementat in Faza 1.5 (rezervat Faza 4).",
+  "match": {
+    "league": ".tournamentHeader__country",
+    "season": ".tournamentHeader__season",
+    "kickoff": ".duelParticipant__startTime"
+  },
+  "teams": {
+    "home_team": ".duelParticipant__home",
+    "away_team": ".duelParticipant__away"
+  },
+  "score": {
+    "ft_home": ".detailScore__home",
+    "ft_away": ".detailScore__away"
+  },
+  "statistics": {
+    "home_possession": "div[data-stat=\"possession\"] span.home",
+    "away_possession": "div[data-stat=\"possession\"] span.away",
+    "home_shots": "div[data-stat=\"shots\"] span.home",
+    "away_shots": "div[data-stat=\"shots\"] span.away",
+    "home_corners": "div[data-stat=\"corners\"] span.home",
+    "away_corners": "div[data-stat=\"corners\"] span.away",
+    "home_yellow_cards": "div[data-stat=\"yellowCards\"] span.home",
+    "away_yellow_cards": "div[data-stat=\"yellowCards\"] span.away"
+  },
+  "lineups": {
+    "home_formation": ".lineups__formation--home",
+    "away_formation": ".lineups__formation--away",
+    "home_starting_xi": {
+      "list": ".lineups__player--home",
+      "item": {"name": ".lineups__playerName", "number": ".lineups__playerNumber"}
+    },
+    "away_starting_xi": {
+      "list": ".lineups__player--away",
+      "item": {"name": ".lineups__playerName", "number": ".lineups__playerNumber"}
+    }
+  },
+  "odds": {
+    "home_odds": ".oddsCell.home",
+    "draw_odds": ".oddsCell.draw",
+    "away_odds": ".oddsCell.away"
+  }
+}

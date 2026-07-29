@@ -8,6 +8,26 @@
 
 ---
 
+## 0. Critical Path oficial curent (2026-07-29)
+
+Prioritatea de dezvoltare a întregului proiect, declarată oficial: `M0 → M1 → M2 → M3 → M4` — provider Flashscore funcțional, până la primul Night Sync complet. Detalii, analiza de dependențe, ce s-a amânat (nu abandonat): `docs/06_UDAL/R-SYNC-FLASH-01_DESIGN.md` (secțiunea "CRITICAL PATH OFICIAL" + §15). Consecință directă: niciun task nou privind Predictor/ML/Blending/Confidence nu începe înainte de M4 fără aprobare explicită separată — `docs/00_GOVERNANCE/ML_ACTIVATION_GATE.md`.
+
+### 0.1 Foundation Data Layer + Data Trust Layer (ADR-044, 2026-07-29)
+
+Scope-ul M0 s-a extins oficial (decizie Product Owner) de la statistici de bază la un **Foundation Data Layer** complet — vezi `docs/00_GOVERNANCE/ADR-044-flashscore-foundation-data-layer.md`. **Implementat, testat, NEMERGE-UIT pe `main`** (pe branch, cod complet + teste, `tos_reviewed=False` neatins, nicio scriere live):
+
+- Schema: migrațiile 035 (5 tabele noi + `attendance`/`capacity`), 036 (fix gol RPC — `goalkeeper_saves`/`attendance`/`capacity` nu erau scrise de `upsert_match_canonical`), 037 (`flashscore_data_completeness`), 038 (coloana `season` pe `match_history` + toate cele 7 tabele FDL) — toate aplicate live, `Prediction`.
+- Persist layer complet, idempotent (verificat 1/2/10 rulări): `providers/flashscore/persistence.py`, extensii `database/queries.py`.
+- Data Trust Layer (RAW → VALIDATED → CANONICAL) funcțional: `persist_match_with_data_trust_layer()`, `udal_validation.validate_flat_identity()`.
+- **Odds** (`normalize_odds()`) — gol închis, tab confirmat în POC, extras acum, inclus în stratul RAW. Scrierea canonică în `odds_fallback_flashscore` (ADR-043) rămâne deliberat neimplementată — necesită rezolvarea `fixture_id` cross-provider, task separat.
+- **Data Completeness Score** (`flashscore_data_completeness`, migrația 037) — calculat și scris per meci, **neconsumat de Oracle Engine azi** (regulă 7, TASK APROBAT M1).
+- **Model de sezon** (`season`, migrația 038) — DOAR dacă providerul îl oferă explicit, niciodată dedus din reguli calendaristice; Flashscore nu îl expune robust azi (verificat pe fixture) — coloana există, pregătită pentru ponderare Oracle/ML pe sezon (neimplementată).
+- **Season Cleanup** (`providers/flashscore/season_cleanup.py`) — DOAR Discovery + Cleanup Report (dry-run), `delete_executed` mereu `False`. Scope explicit restrâns la tabelele Foundation Data Layer — NU `match_history`/`match_events`/`player_match_stats` de bază, NU `odds_history` (Frozen). Ștergerea reală rămâne neimplementată, viitoare, cu propriul flag/aprobare.
+- Oracle Engine/ML rămân neatinse — niciun consumator nu citește încă din tabelele noi (secțiunea 5, ADR-044).
+- Următorul pas pe Critical Path rămâne M1 (primul meci descoperit live) — Foundation Data Layer pregătește DESTINAȚIA scrierii, nu înlocuiește pașii M1-M4.
+
+---
+
 ## 1. Topologia branch-urilor (verificat direct, `git`, 2026-07-28)
 
 | | |
