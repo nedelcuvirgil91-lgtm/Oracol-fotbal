@@ -1695,6 +1695,32 @@ def upsert_raw_extraction(
         return False
 
 
+def get_raw_odds(match_ref: str) -> list[dict]:
+    """Cotele 1X2 per bookmaker, direct din stratul RAW
+    (`flashscore_raw_extraction`, tab_name='odds') - [GOL UI gasit prin
+    testare live] `odds_fallback_flashscore` (canonic, ADR-043) ramane
+    neactivat, blocat de rezolutia fixture_id cross-provider - dar RAW-ul
+    exista deja complet (normalize_odds()) si e suficient pentru afisare
+    diagnostic, fara sa astepte acea rezolutie."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("flashscore_raw_extraction")
+            .select("raw_extracted")
+            .eq("match_ref", match_ref)
+            .eq("tab_name", "odds")
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0]["raw_extracted"] if rows and rows[0].get("raw_extracted") else []
+    except Exception as exc:
+        logger.warning("[Queries] get_raw_odds failed pentru %s: %s", match_ref, exc)
+        return []
+
+
 def upsert_data_completeness(
     match_ref: str, match_id: int | None, completeness: dict, season: str | None = None,
 ) -> bool:

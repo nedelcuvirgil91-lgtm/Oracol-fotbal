@@ -1233,6 +1233,22 @@ elif nav == "settings":
                 flags_str = "  ".join(f"{'✅' if v else '❌'} {k}" for k, v in tab_flags.items())
                 st.caption(f"Completitudine: {completeness.get('coverage_percent', 0.0)}% — {flags_str}")
 
+            st.markdown("**Cote (RAW, Flashscore)**")
+            raw_odds = fdl_queries.get_raw_odds(match_ref)
+            if raw_odds:
+                odds_rows = [
+                    {
+                        "Casă de pariuri": o.get("bookmaker") or "—",
+                        "1 (Acasă)": o.get("home"),
+                        "X (Egal)": o.get("draw"),
+                        "2 (Oaspeți)": o.get("away"),
+                    }
+                    for o in raw_odds
+                ]
+                st.dataframe(pd.DataFrame(odds_rows), use_container_width=True, hide_index=True)
+            else:
+                st.caption("Nicio cotă înregistrată pentru acest meci.")
+
             if match_id is None:
                 st.warning("Acest meci nu are match_id canonic (validare identitate eșuată la colectare) — doar RAW disponibil, fără detalii canonice.")
             else:
