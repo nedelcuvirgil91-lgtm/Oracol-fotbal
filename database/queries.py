@@ -2127,6 +2127,38 @@ def get_standings_snapshot(competition: str) -> list[dict]:
         return []
 
 
+def get_match_core_stats(match_id: int) -> dict | None:
+    """Statisticile CU coloana dedicata pe `match_history` (nu EAV) -
+    sut/sut pe poarta/cornere/fouluri/cartonase/offsides/aparari portar/
+    posesie/xG/referee/stadion/spectatori. [GOL UI gasit prin testare
+    live reala] `get_match_statistics_extended()` NU le include deliberat
+    (`normalize_match_statistics_extended()` exclude explicit orice
+    eticheta deja mapata pe coloana - STAT_LABEL_TO_FIELDS) - fara aceasta
+    functie, cornere/cartonase totale/sut-uri/posesie/xG raman scrise in
+    Supabase dar invizibile in Streamlit."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("match_history")
+            .select("referee,stadium,attendance,capacity,"
+                    "home_possession,away_possession,home_xg_actual,away_xg_actual,"
+                    "home_shots,away_shots,home_shots_on_target,away_shots_on_target,"
+                    "home_corners,away_corners,home_fouls,away_fouls,"
+                    "home_yellow_cards,away_yellow_cards,home_red_cards,away_red_cards,"
+                    "home_offsides,away_offsides,home_goalkeeper_saves,away_goalkeeper_saves")
+            .eq("id", match_id)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Queries] get_match_core_stats failed pentru match_id=%s: %s", match_id, exc)
+        return None
+
+
 def get_predictions_with_results(days_back: int | None = None) -> list[dict]:
     """
     [ADAUGAT Sprint 0 — Stabilizare, Etapa 3] Citire READ-ONLY — rânduri din

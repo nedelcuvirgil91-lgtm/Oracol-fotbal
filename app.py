@@ -1236,6 +1236,42 @@ elif nav == "settings":
             if match_id is None:
                 st.warning("Acest meci nu are match_id canonic (validare identitate eșuată la colectare) — doar RAW disponibil, fără detalii canonice.")
             else:
+                st.markdown("**Statistici de bază**")
+                core = fdl_queries.get_match_core_stats(match_id)
+                if core:
+                    info_bits = []
+                    if core.get("referee"):
+                        info_bits.append(f"Arbitru: {core['referee']}")
+                    if core.get("stadium"):
+                        info_bits.append(f"Stadion: {core['stadium']}")
+                    if core.get("attendance") is not None:
+                        info_bits.append(f"Spectatori: {core['attendance']}" + (
+                            f"/{core['capacity']}" if core.get("capacity") is not None else ""
+                        ))
+                    if info_bits:
+                        st.caption(" · ".join(info_bits))
+
+                    core_rows = [
+                        ("Posesie %", core.get("home_possession"), core.get("away_possession")),
+                        ("xG", core.get("home_xg_actual"), core.get("away_xg_actual")),
+                        ("Șuturi", core.get("home_shots"), core.get("away_shots")),
+                        ("Șuturi pe poartă", core.get("home_shots_on_target"), core.get("away_shots_on_target")),
+                        ("Cornere", core.get("home_corners"), core.get("away_corners")),
+                        ("Faulturi", core.get("home_fouls"), core.get("away_fouls")),
+                        ("Cartonașe galbene", core.get("home_yellow_cards"), core.get("away_yellow_cards")),
+                        ("Cartonașe roșii", core.get("home_red_cards"), core.get("away_red_cards")),
+                        ("Offside", core.get("home_offsides"), core.get("away_offsides")),
+                        ("Apărări portar", core.get("home_goalkeeper_saves"), core.get("away_goalkeeper_saves")),
+                    ]
+                    core_rows = [(label, h, a) for label, h, a in core_rows if h is not None or a is not None]
+                    if core_rows:
+                        core_df = pd.DataFrame(core_rows, columns=["Statistică", "Acasă", "Oaspeți"])
+                        st.dataframe(core_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.caption("Nicio statistică de bază înregistrată pentru acest meci.")
+                else:
+                    st.caption("Nicio statistică de bază înregistrată pentru acest meci.")
+
                 dt1, dt2 = st.columns(2)
                 with dt1:
                     st.markdown("**Timeline evenimente**")
