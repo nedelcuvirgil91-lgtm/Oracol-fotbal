@@ -6,7 +6,7 @@ name: Football Oracle — Live Sync
 #
 # Cadenta: la fiecare 2 ore (12 rulari/zi) - mai frecvent decat
 # night_sync.yml (o data/noapte), dar semnificativ mai rar decat
-# lineup_sync.yml (*/15 min), care sincronizeaza DOAR loturile - un singur
+# lineup_sync.yml (*/30 min), care sincronizeaza DOAR loturile - un singur
 # apel usor. Live Sync apeleaza sync.run_daily.run() (multipli provideri
 # API) + Flashscore FDL (Playwright) la fiecare rulare -> o cadenta prea
 # agresiva ar consuma inutil cota API (Regulile pentru chei API,
