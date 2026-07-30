@@ -19,7 +19,7 @@ on:
   schedule:
     # Preia slotul original al daily.yml - prima etapa a Night Sync e
     # exact sync/run_daily.py.
-    - cron: "0 3 * * *"
+    - cron: "0 3 * * 1"
   workflow_dispatch: {}
 
 jobs:
