@@ -182,6 +182,16 @@ def resolve_league_weights(weights: dict, league: str) -> dict:
     Matematică pură, identică cu cea folosită anterior inline în
     oracle_engine._get_league_weights(). `weights` este dict-ul complet de
     ponderi (global + league_weights), la fel ca self.weights din motorul live.
+
+    Stare live (verificată 2026-08-03, ORACLE_ENGINE_AUDIT.md §4.3): `sample_count`
+    e 0 pentru toate cele 11 ligi din `model_weights` → `alpha=0` mereu → funcția
+    întoarce azi 100% ponderile globale, niciodată cele per-ligă, indiferent de
+    valorile diferite prezente în `league_weights`. Cauza: `sample_count` se
+    incrementează doar prin `recalibration.py` (apelat din `sync/sync_results.py`),
+    gatat de `auto_recalibration_enabled` (implicit False/absent în `model_config`).
+    Nu e un bug — flag oprit implicit, conform North Star #3 — ci un mecanism
+    prezent dar inert azi; nu se activează ca parte a EPIC-ului „ML Activation &
+    Oracle Evolution" (decizie separată, vezi ML_ACTIVATION_IMPLEMENTATION_PLAN.md §2.4).
     """
     lw_all = weights.get("league_weights", {})
     lw     = lw_all.get(league, lw_all.get("default", {}))

@@ -90,6 +90,16 @@ Migrările 014/015 sunt aplicate pe Supabase live de mult (`champion_health_eval
 
 ---
 
+## 7. Oracle Engine — ponderi per-ligă inerte (EPIC „ML Activation & Oracle Evolution", verificat 2026-08-03)
+
+`feature_engine.resolve_league_weights()` face blend între ponderile globale și cele per-ligă din `model_weights`, ponderat de `sample_count` (saturează la `sample_count=5`). **Verificat live, 2026-08-03**: `sample_count = 0` pentru toate cele 11 ligi, fără excepție → `alpha = 0` mereu → funcția întoarce azi **100% ponderile globale**, niciodată cele per-ligă, indiferent de valorile diferite prezente în `league_weights` (ex. Bundesliga are `dna_weight`/`form_weight`/`home_advantage` proprii, dar neaplicate).
+
+**Cauza**: `sample_count` se incrementează doar prin `recalibration.py`, apelat din `sync/sync_results.py`, gatat de `auto_recalibration_enabled` — cheie absentă din `model_config` azi, deci cade pe default `False` (consistent cu `recalibration_log = 0`, §4 de mai sus).
+
+**Nu e un bug** — flag oprit implicit, conform North Star #3 — dar un mecanism prezent în cod și în date, complet inert în formula servită. Documentat integral în `docs/00_GOVERNANCE/ORACLE_ENGINE_AUDIT.md` §4.3 și tratat explicit în `docs/00_GOVERNANCE/ML_ACTIVATION_IMPLEMENTATION_PLAN.md` §2.4/§6.2 (pasul 1: documentare, fără activare — decizia de a activa `auto_recalibration_enabled` rămâne separată, neluată în acest EPIC).
+
+---
+
 ## Architecture State Report — convenția de raportare la începutul fiecărei etape
 
 De la ADR-037/R3.5 încolo, orice etapă nouă începe cu acest raport minimal (patru linii, citite din acest document + `git`/Supabase, nu din memorie):
