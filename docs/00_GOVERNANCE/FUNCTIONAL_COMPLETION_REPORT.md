@@ -1,6 +1,10 @@
 # Functional Completion Report — Engine Completion (EPIC 1–4)
 
-**Status**: RAPORT DE ÎNCHIDERE, oficial.
+**Status**: Final review completed. Implementation status:
+- P1 ✅ Implemented
+- P2 ✅ Implemented
+- P3 🟡 Deferred after architectural review — necesită `FOLLOW-UP-P3-01` înainte de orice implementare
+- P4 ✅ Implemented
 
 **Perioadă**: 2026-08-03 (sesiune unică).
 
@@ -269,6 +273,17 @@ Secțiune nouă în `ML_ACTIVATION_GATE.md`, „Acoperirea reală a feature-uril
 - **Urmărirea strictă a baseline-ului de teste (număr exact, nu aproximat) a făcut posibilă o afirmație fermă de „zero regresie"** la fiecare din cele 3 commit-uri de cod — fără acest obicei, „am rulat testele și au trecut" ar fi fost o afirmație mai slabă, ne-cuantificată.
 - **Separarea strictă „analiză" vs. „implementare" (Punctul 3) a prevenit o decizie prematură** — dacă implementarea ar fi fost făcută în aceeași sesiune cu analiza, presiunea de a „termina EPIC-ul" ar fi putut duce la integrarea semnalului constant doar ca să existe un rezultat de arătat.
 - **Documentarea explicită a limitelor unei soluții (ce NU acoperă) s-a dovedit la fel de valoroasă ca documentarea a ce acoperă** — atât `PREDICTOR_REGRESSION_SUITE.md` cât și `ML_ACTIVATION_GATE.md` au necesitat clarificări suplimentare, cerute explicit de proprietarul produsului, tocmai pentru că absența unei limite explicite lasă loc de interpretare optimistă ulterioară.
+
+---
+
+## Navigare rapidă — commit-uri principale per punct
+
+| Punct | Commit |
+|---|---|
+| P1 | `4e4eec1` |
+| P2 | `9192526` |
+| P3 | — (Deferred, niciun commit de cod) |
+| P4 | `3335508` |
 
 ---
 
