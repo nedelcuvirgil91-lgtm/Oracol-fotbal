@@ -43,6 +43,23 @@ Guvernanța (ADR-uri, documente Frozen, promovare manuală) e tratată ca avanta
 9. Orice rezultat — predicție, evaluare, promovare — trebuie trasabil complet până la sursă.
 10. Nicio dependință „în sus" între straturile arhitecturale — servirea live nu depinde niciodată de infrastructura de învățare.
 
+## Viziune pe termen lung — Oracle și ML (constrângere permanentă, adăugată 2026-08-03)
+
+Oracle rămâne motorul principal în prezent datorită performanței demonstrate (verificat prin benchmark, `docs/00_GOVERNANCE/ORACLE_VS_ML_REPORT.md`) — nu din inerție sau preferință.
+
+**ML nu este un experiment abandonat și nu este un fallback.** Obiectivul proiectului e dezvoltarea unui sistem ML autonom care:
+
+- învață continuu din istoricul complet;
+- învață incremental din meciurile noi;
+- își calibrează automat modelele;
+- își monitorizează performanța;
+- își generează propriile predicții, independente de Oracle;
+- afișează permanent aceste predicții în UI;
+- permite compararea Oracle vs. ML;
+- poate deveni în timp predictorul principal, DACĂ dovezile statistice demonstrează superioritatea sa (North Star #2 — dovadă simultană pe metrici multiple, niciodată o singură metrică sau intuiție).
+
+Această viziune fixează direcția pe termen lung a proiectului și previne „optimizarea" proiectului prin eliminarea ML — orice propunere viitoare de a simplifica arhitectura prin renunțarea la stratul ML trebuie evaluată explicit împotriva acestei viziuni, nu decisă tacit.
+
 ## Knowledge Map — rolul fiecărui modul
 
 | Modul | Rol (o propoziție) | Depinde de | Consumat de |
