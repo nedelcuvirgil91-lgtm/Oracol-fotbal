@@ -70,7 +70,7 @@ from datetime import date, datetime
 from typing import Any
 
 DEFAULT_LEAGUE_WEIGHTS_TEMPLATE: dict[str, float | int] = {
-    "form_weight": 0.60, "dna_weight": 0.40, "goals_weight": 0.45,
+    "form_weight": 0.60, "base_weight": 0.40, "goals_weight": 0.45,
     "shots_ot_weight": 0.30, "possession_weight": 0.25,
     "home_advantage": 1.07, "away_penalty": 0.95, "sample_count": 0,
 }
@@ -207,7 +207,7 @@ def recalibrate_weights(
     if league not in lw_all:
         lw_all[league] = {
             "form_weight":       float(w.get("form_weight",       0.60)),
-            "dna_weight":        float(w.get("dna_weight",        0.40)),
+            "base_weight":        float(w.get("base_weight",        0.40)),
             "goals_weight":      float(w.get("goals_weight",      0.45)),
             "shots_ot_weight":   float(w.get("shots_ot_weight",   0.30)),
             "possession_weight": float(w.get("possession_weight", 0.25)),
@@ -230,7 +230,7 @@ def recalibrate_weights(
             "actual":         f"{actual_home_goals}-{actual_away_goals}",
             "combined_error": round(combined, 3),
             "new_form_w":     float(lw.get("form_weight", 0.60)),
-            "new_dna_w":      float(lw.get("dna_weight", 0.40)),
+            "new_dna_w":      float(lw.get("base_weight", 0.40)),
             "home_advantage": float(lw.get("home_advantage", 1.07)),
             "reason":         "Model accurate — sample inregistrat, fara ajustare de ponderi.",
         }
@@ -255,7 +255,7 @@ def recalibrate_weights(
     scale_l   = min(combined / 3.0, 1.0) * lr_league
 
     fw  = float(lw.get("form_weight",       0.60))
-    dw  = float(lw.get("dna_weight",        0.40))
+    dw  = float(lw.get("base_weight",        0.40))
     gw  = float(lw.get("goals_weight",      0.45))
     sow = float(lw.get("shots_ot_weight",   0.30))
     pw  = float(lw.get("possession_weight", 0.25))
@@ -264,7 +264,7 @@ def recalibrate_weights(
 
     if combined >= 0.50:
         fw = _shift("form_weight", fw, -scale_l * 0.6, lo=0.10, hi=0.90)
-        dw = _shift("dna_weight",  dw, +scale_l * 0.6, lo=0.10, hi=0.90)
+        dw = _shift("base_weight",  dw, +scale_l * 0.6, lo=0.10, hi=0.90)
         reasons.append(f"[{league}] Large error ({combined:.2f}) → DNA shift.")
 
     if avg_err > 0.50:
@@ -291,20 +291,20 @@ def recalibrate_weights(
         dw = round(dw / t_fd, 4)
 
     lw_all[league].update({
-        "form_weight": fw, "dna_weight": dw, "goals_weight": gw,
+        "form_weight": fw, "base_weight": dw, "goals_weight": gw,
         "shots_ot_weight": sow, "possession_weight": pw,
         "home_advantage": ha, "away_penalty": ap, "sample_count": sc + 1,
     })
 
     gfw  = float(w.get("form_weight",       0.60))
-    gdw  = float(w.get("dna_weight",        0.40))
+    gdw  = float(w.get("base_weight",        0.40))
     ggw  = float(w.get("goals_weight",      0.45))
     gsow = float(w.get("shots_ot_weight",   0.30))
     gpw  = float(w.get("possession_weight", 0.25))
 
     w.update({
         "form_weight":       round(max(0.10, min(0.90, gfw  + (fw  - gfw)  * 0.25)), 4),
-        "dna_weight":        round(max(0.10, min(0.90, gdw  + (dw  - gdw)  * 0.25)), 4),
+        "base_weight":        round(max(0.10, min(0.90, gdw  + (dw  - gdw)  * 0.25)), 4),
         "goals_weight":      round(max(0.10, min(0.80, ggw  + (gw  - ggw)  * 0.25)), 4),
         "shots_ot_weight":   round(max(0.05, min(0.60, gsow + (sow - gsow) * 0.25)), 4),
         "possession_weight": round(max(0.05, min(0.50, gpw  + (pw  - gpw)  * 0.25)), 4),

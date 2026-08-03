@@ -872,7 +872,7 @@ elif nav == "settings":
                 wc1,wc2=st.columns(2)
                 with wc1:
                     nfw=st.slider("form_weight",.05,.95,float(w.get("form_weight",.60)),.05)
-                    ndw=st.slider("dna_weight",.05,.95,float(w.get("dna_weight",.40)),.05)
+                    nbw=st.slider("base_weight",.05,.95,float(w.get("base_weight",.40)),.05)
                     ngw=st.slider("goals_weight",.05,.80,float(w.get("goals_weight",.45)),.05)
                     nsow=st.slider("shots_ot_weight",.05,.60,float(w.get("shots_ot_weight",.30)),.05)
                     npw=st.slider("possession_weight",.05,.50,float(w.get("possession_weight",.25)),.05)
@@ -881,7 +881,7 @@ elif nav == "settings":
                     nap=st.slider("away_penalty",0.80,1.00,float(w.get("away_penalty",0.95)),.01)
                     nel=st.slider("elo_blend_weight",.10,.60,float(w.get("elo_blend_weight",.35)),.05)
                 if st.form_submit_button("💾 Salvează",use_container_width=True):
-                    w.update({"form_weight":nfw,"dna_weight":ndw,"goals_weight":ngw,"shots_ot_weight":nsow,"possession_weight":npw,"home_advantage":nha,"away_penalty":nap,"elo_blend_weight":nel})
+                    w.update({"form_weight":nfw,"base_weight":nbw,"goals_weight":ngw,"shots_ot_weight":nsow,"possession_weight":npw,"home_advantage":nha,"away_penalty":nap,"elo_blend_weight":nel})
                     # [REPARAT] Supabase (model_weights) e SURSA CANONICA -
                     # se scrie acolo daca e activ. weights.json local se
                     # actualizeaza mereu, DAR doar ca fallback/oglinda pt

@@ -83,13 +83,13 @@ def _injury_count(report) -> int:
 
 
 def _stage_prob_home(home_off, home_def, away_off, away_def, home_form, away_form,
-                      baseline, form_w, dna_w, home_adv, away_pen, d_cap,
+                      baseline, form_w, base_w, home_adv, away_pen, d_cap,
                       h2h_mod, h2h_meet, weather_pen, max_goals) -> float:
     home_xg, away_xg = calibrate_xg(
         home_offensive_rating=home_off, home_defensive_rating=home_def,
         away_offensive_rating=away_off, away_defensive_rating=away_def,
         home_form_score=home_form, away_form_score=away_form,
-        baseline=baseline, form_weight=form_w, dna_weight=dna_w,
+        baseline=baseline, form_weight=form_w, base_weight=base_w,
         home_advantage=home_adv, away_penalty=away_pen, defensive_cap=d_cap,
         h2h_modifier=h2h_mod, h2h_meetings=h2h_meet, weather_penalty=weather_pen,
     )
@@ -148,7 +148,7 @@ def explain_prediction(pred, weights: dict, config: dict) -> MatchExplanation | 
                                         delta_pct=round(delta * 100, 2), detail=detail or {}))
         prev_ph = ph
 
-    common = dict(baseline=baseline, form_w=lw["form_weight"], dna_w=lw["dna_weight"],
+    common = dict(baseline=baseline, form_w=lw["form_weight"], base_w=lw["base_weight"],
                   d_cap=d_cap, max_goals=max_goals)
     home_team, away_team = pred.home_team, pred.away_team
 

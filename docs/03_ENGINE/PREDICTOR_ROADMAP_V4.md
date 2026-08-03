@@ -19,7 +19,7 @@ Documentele Frozen declarate în `FROZEN_REGISTRY.md` (`ARCHITECTURE.md`, `DATAB
 Predicția finală (`oracle_engine.evaluate_match()`) combină patru componente independente:
 
 ### 1.1 Motorul Poisson (xG calibrat) — `feature_engine.calibrate_xg()`
-Intrări: `home/away_offensive_rating`, `home/away_defensive_rating`, `home/away_form_score`, `baseline` (per ligă), `form_weight`, `dna_weight`, `home_advantage`, `away_penalty`, `defensive_cap`, `h2h_modifier`, `h2h_meetings`, `weather_penalty`. La rândul lor, `offensive_rating`/`defensive_rating` vin din `feature_engine.compute_team_offdef_rating()` (`oracle_engine.py:442-650`, `_build_profile()`), care combină:
+Intrări: `home/away_offensive_rating`, `home/away_defensive_rating`, `home/away_form_score`, `baseline` (per ligă), `form_weight`, `base_weight`, `home_advantage`, `away_penalty`, `defensive_cap`, `h2h_modifier`, `h2h_meetings`, `weather_penalty`. La rândul lor, `offensive_rating`/`defensive_rating` vin din `feature_engine.compute_team_offdef_rating()` (`oracle_engine.py:442-650`, `_build_profile()`), care combină:
 - `avg_goals_for`, `avg_goals_against` — reale, din cascada de surse live (FreeLF/Odds API/football-data.org/TSDB/date naționale hardcodate).
 - `avg_shots_on_target`, `avg_possession` — **vezi §2.1, sunt sintetice, nu reale, pentru echipele de club.**
 - multiplicator ELO (blend 35% implicit, `elo_blend_weight`).

@@ -24,7 +24,7 @@ CHANGES v2 (strategie bootstrap — NU se modifică recalibrate_weights()):
     ligi) — niciun semnal de eroare dintr-o ligă nu se scurge în alta.
   - [SALVARE] Se scrie DOAR league_weights[liga] pentru fiecare din cele 9
     ligi procesate (câte o intrare, rezultatul exclusiv al replay-ului ei).
-    Câmpurile globale de top-level (form_weight, dna_weight, goals_weight,
+    Câmpurile globale de top-level (form_weight, base_weight, goals_weight,
     shots_ot_weight, possession_weight, home_advantage, away_penalty,
     league_baselines, offensive_cap, defensive_cap) NU mai sunt suprascrise
     de bootstrap — rămân la valorile din DEFAULT_WEIGHTS, ca fallback pur
@@ -326,7 +326,7 @@ def _bootstrap_one_league(
             away_form_score=away_form_score,
             baseline=baseline,
             form_weight=lw["form_weight"],
-            dna_weight=lw["dna_weight"],
+            base_weight=lw["base_weight"],
             home_advantage=lw["home_advantage"],
             away_penalty=lw["away_penalty"],
             defensive_cap=float(weights.get("defensive_cap", 2.5)),
@@ -382,10 +382,10 @@ def _bootstrap_one_league(
     )
     if league_weights_entry:
         logger.info(
-            "[Bootstrap] [%s] sample_count=%d form_w=%.3f dna_w=%.3f home_adv=%.3f",
+            "[Bootstrap] [%s] sample_count=%d form_w=%.3f base_w=%.3f home_adv=%.3f",
             league, league_weights_entry.get("sample_count", 0),
             league_weights_entry.get("form_weight", 0),
-            league_weights_entry.get("dna_weight", 0),
+            league_weights_entry.get("base_weight", 0),
             league_weights_entry.get("home_advantage", 0),
         )
 
@@ -476,8 +476,8 @@ def run_bootstrap(
     for lg in BOOTSTRAP_LEAGUES:
         lw = league_weights.get(lg, {})
         logger.info(
-            "   %-25s sample_count=%-5d form_w=%.3f dna_w=%.3f home_adv=%.3f",
-            lg, lw.get("sample_count", 0), lw.get("form_weight", 0), lw.get("dna_weight", 0),
+            "   %-25s sample_count=%-5d form_w=%.3f base_w=%.3f home_adv=%.3f",
+            lg, lw.get("sample_count", 0), lw.get("form_weight", 0), lw.get("base_weight", 0),
             lw.get("home_advantage", 0),
         )
 

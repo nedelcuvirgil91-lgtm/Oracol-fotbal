@@ -97,7 +97,7 @@ Migrările 014/015 sunt aplicate pe Supabase live de mult (`champion_health_eval
 
 ## 7. Oracle Engine — ponderi per-ligă inerte (EPIC „ML Activation & Oracle Evolution", verificat 2026-08-03)
 
-`feature_engine.resolve_league_weights()` face blend între ponderile globale și cele per-ligă din `model_weights`, ponderat de `sample_count` (saturează la `sample_count=5`). **Verificat live, 2026-08-03**: `sample_count = 0` pentru toate cele 11 ligi, fără excepție → `alpha = 0` mereu → funcția întoarce azi **100% ponderile globale**, niciodată cele per-ligă, indiferent de valorile diferite prezente în `league_weights` (ex. Bundesliga are `dna_weight`/`form_weight`/`home_advantage` proprii, dar neaplicate).
+`feature_engine.resolve_league_weights()` face blend între ponderile globale și cele per-ligă din `model_weights`, ponderat de `sample_count` (saturează la `sample_count=5`). **Verificat live, 2026-08-03**: `sample_count = 0` pentru toate cele 11 ligi, fără excepție → `alpha = 0` mereu → funcția întoarce azi **100% ponderile globale**, niciodată cele per-ligă, indiferent de valorile diferite prezente în `league_weights` (ex. Bundesliga are `base_weight`/`form_weight`/`home_advantage` proprii, dar neaplicate). **Notă (Pasul 7, ADR-047)**: cheia era `dna_weight` la verificarea inițială de mai sus — redenumită `base_weight` ulterior, în aceeași sesiune, aceleași valori.
 
 **Cauza**: `sample_count` se incrementează doar prin `recalibration.py`, apelat din `sync/sync_results.py`, gatat de `auto_recalibration_enabled` — cheie absentă din `model_config` azi, deci cade pe default `False` (consistent cu `recalibration_log = 0`, §4 de mai sus).
 

@@ -64,7 +64,7 @@ def _independent_ground_truth(home_p, away_p, h2h, weights, config, league=LEAGU
         home_offensive_rating=home_off, home_defensive_rating=home_def,
         away_offensive_rating=away_off, away_defensive_rating=away_def,
         home_form_score=home_p.form_score, away_form_score=away_p.form_score,
-        baseline=baseline, form_weight=lw["form_weight"], dna_weight=lw["dna_weight"],
+        baseline=baseline, form_weight=lw["form_weight"], base_weight=lw["base_weight"],
         home_advantage=lw["home_advantage"], away_penalty=lw["away_penalty"],
         defensive_cap=weights["defensive_cap"],
         h2h_modifier=h2h.h2h_modifier if h2h else 0.0, h2h_meetings=h2h.meetings if h2h else 0,

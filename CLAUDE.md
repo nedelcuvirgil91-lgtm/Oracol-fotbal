@@ -89,6 +89,7 @@ Această viziune fixează direcția pe termen lung a proiectului și previne „
 - Orice schimbare de model de date/contract/responsabilitate de componentă = ADR nou, numerotat secvențial, format `Status/Context/Decizie/Consecințe` (vezi `architecture/ADR-001…004`, `docs/00_GOVERNANCE/ADR-005…006`).
 - Detaliile de implementare (formatul unei erori, ora unui cron) NU necesită ADR — vezi `FROZEN_REGISTRY.md`, Change Policy.
 - Motivație invalidă pentru un ADR: preferințe subiective, stil, „cum aș fi făcut eu".
+- **Discovery Rule** (adăugată permanent, 2026-08-03, precedent: ADR-047, descoperirea `recalibration_log.new_dna_w` în timpul implementării): dacă în timpul implementării unui ADR deja aprobat e descoperit un contract nou, o migrare nouă, un tabel/coloană nouă sau o dependență care NU a fost identificată în ADR-ul aprobat — implementarea se oprește imediat, descoperirea e prezentată explicit proprietarului produsului, și acesta decide dintre: (a) rămâne în afara scopului, documentată ca „Out of Scope Discovery" în ADR-ul curent; (b) se extinde ADR-ul curent printr-un amendament explicit; (c) se creează un ADR nou, separat. **Nu se extinde niciodată scopul unui ADR aprobat „din mers", tacit, fără această decizie explicită.**
 
 ## Regulile pentru documentele Frozen
 

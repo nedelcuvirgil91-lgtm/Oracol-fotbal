@@ -138,7 +138,7 @@ def calibrate_xg(
     away_form_score: float,
     baseline: float,
     form_weight: float,
-    dna_weight: float,
+    base_weight: float,
     home_advantage: float,
     away_penalty: float,
     defensive_cap: float,
@@ -155,8 +155,8 @@ def calibrate_xg(
     home_form_mod = 0.80 + home_form_score * 0.40
     away_form_mod = 0.80 + away_form_score * 0.40
 
-    home_xg = home_offensive_rating * away_def_mod * baseline * (form_weight * home_form_mod + dna_weight) * home_advantage
-    away_xg = away_offensive_rating * home_def_mod * baseline * (form_weight * away_form_mod + dna_weight) * away_penalty
+    home_xg = home_offensive_rating * away_def_mod * baseline * (form_weight * home_form_mod + base_weight) * home_advantage
+    away_xg = away_offensive_rating * home_def_mod * baseline * (form_weight * away_form_mod + base_weight) * away_penalty
 
     if h2h_meetings >= 2:
         home_xg = home_xg * (1 + h2h_modifier)
@@ -205,7 +205,7 @@ def resolve_league_weights(weights: dict, league: str) -> dict:
 
     return {
         "form_weight":       _blend("form_weight",       0.60),
-        "dna_weight":        _blend("dna_weight",        0.40),
+        "base_weight":        _blend("base_weight",        0.40),
         "goals_weight":      _blend("goals_weight",      0.45),
         "shots_ot_weight":   _blend("shots_ot_weight",   0.30),
         "possession_weight": _blend("possession_weight", 0.25),

@@ -110,4 +110,24 @@ Nu se introduce niciun shim de compatibilitate dual-read (`w.get("base_weight", 
 
 Se aprobă redenumirea `dna_weight` → `base_weight` (și `dna_w` → `base_w` pentru cheia abreviată din explainability), executată atomic conform ordinii din §6, cu migrarea `model_weights` (Supabase) ca pas separat, explicit confirmat, DUPĂ ce codul + `weights.json` + teste sunt verzi local. Fără shim de compatibilitate permanent. Rollback posibil complet, fără pierdere de date, conform §7.
 
-**Acest ADR nu autorizează implementarea** — rămâne PROPUS până la aprobarea explicită a proprietarului produsului. După aprobare, implementarea urmează exact ordinea din §6, cu regresie + review înainte de commit, conform fluxului stabilit pentru acest EPIC.
+**Aprobat** — 2026-08-03, de proprietarul produsului, cu completarea Deployment Rule (§6.0). Implementarea urmează exact ordinea din §6, cu regresie + review înainte de commit, conform fluxului stabilit pentru acest EPIC.
+
+## 10. Out of Scope / Discoveries During Implementation
+
+**`recalibration_log.new_dna_w`** (descoperit 2026-08-03, în timpul implementării §6 pas 1 — grep pe `supabase_client.py` a scos la iveală o coloană SQL reală, nu doar un nume de variabilă Python).
+
+Verificat live (read-only, `list_tables`): `public.recalibration_log` există în producție, cu o coloană reală `new_dna_w` (`numeric`, nullable), **0 rânduri** azi.
+
+**Decizie explicită a proprietarului produsului**: `new_dna_w` **NU face parte din scopul acestui ADR**. Motivație:
+
+- ADR-047 a fost aprobat pentru redenumirea contractului Oracle (`model_weights`, `weights.json`, codul Oracle Engine, UI) — nu pentru infrastructura de audit/logging.
+- `recalibration_log` e infrastructură de audit/logging, nu participă la calculul predicției.
+- `auto_recalibration_enabled = False` — mecanismul care ar scrie în această tabelă e inert azi.
+- Tabela are 0 rânduri — nicio dată reală afectată de decizie, în niciun sens.
+- Nu se extinde scopul unui ADR deja aprobat „din mers".
+
+**Consecință concretă asupra implementării**: `recalibration.py` a fost corectat să producă în continuare cheia `"new_dna_w"` (nu `"new_base_w"`) în dict-ul trimis către `supabase_client.append_recalibration_log()`/`append_recalibration_log_batch()` — consistent cu coloana SQL neschimbată. Valoarea propriu-zisă citită pentru acea cheie (`lw.get("base_weight", 0.40)`) rămâne corect actualizată la noul nume de cheie din `model_weights`. `supabase_client.py` rămâne complet neatins.
+
+**Nu se face**: `ALTER TABLE recalibration_log RENAME COLUMN new_dna_w TO new_base_w`. Nicio schimbare de schemă SQL ca parte a acestui ADR.
+
+**Va fi tratată separat**: dacă mecanismul de recalibrare automată (`auto_recalibration_enabled`) va fi vreodată activat în viitor, redenumirea `recalibration_log.new_dna_w` (și orice altă curățare de nume asociată) va necesita propriul ADR dedicat — nu se presupune sau se decide implicit aici.

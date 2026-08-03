@@ -172,22 +172,22 @@ DEFAULT_CONFIG: dict[str, Any] = {
 
 DEFAULT_WEIGHTS: dict[str, Any] = {
     "goals_weight": 0.45, "shots_ot_weight": 0.30, "possession_weight": 0.25,
-    "form_weight": 0.60, "dna_weight": 0.40,
+    "form_weight": 0.60, "base_weight": 0.40,
     "home_advantage": 1.07, "away_penalty": 0.95,
     "offensive_cap": 3.5, "defensive_cap": 2.5,
     "league_baselines": LEAGUE_BASELINES,
     "league_weights": {
-        "Premier League":    {"form_weight":0.60,"dna_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95,"sample_count":0},
-        "La Liga":           {"form_weight":0.60,"dna_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.06,"away_penalty":0.95,"sample_count":0},
-        "Serie A":           {"form_weight":0.60,"dna_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.06,"away_penalty":0.95,"sample_count":0},
-        "Bundesliga":        {"form_weight":0.65,"dna_weight":0.35,"goals_weight":0.50,"shots_ot_weight":0.28,"possession_weight":0.22,"home_advantage":1.08,"away_penalty":0.94,"sample_count":0},
-        "Ligue 1":           {"form_weight":0.60,"dna_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95,"sample_count":0},
-        "Champions League":  {"form_weight":0.55,"dna_weight":0.45,"goals_weight":0.42,"shots_ot_weight":0.32,"possession_weight":0.26,"home_advantage":1.05,"away_penalty":0.96,"sample_count":0},
-        "Europa League":     {"form_weight":0.58,"dna_weight":0.42,"goals_weight":0.43,"shots_ot_weight":0.31,"possession_weight":0.26,"home_advantage":1.06,"away_penalty":0.95,"sample_count":0},
-        "Romania SuperLiga": {"form_weight":0.65,"dna_weight":0.35,"goals_weight":0.48,"shots_ot_weight":0.28,"possession_weight":0.24,"home_advantage":1.09,"away_penalty":0.93,"sample_count":0},
-        "World Cup 2026":    {"form_weight":0.55,"dna_weight":0.45,"goals_weight":0.44,"shots_ot_weight":0.30,"possession_weight":0.26,"home_advantage":1.03,"away_penalty":0.97,"sample_count":0},
-        "MLS":               {"form_weight":0.60,"dna_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.08,"away_penalty":0.94,"sample_count":0},
-        "default":           {"form_weight":0.60,"dna_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95,"sample_count":0},
+        "Premier League":    {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95,"sample_count":0},
+        "La Liga":           {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.06,"away_penalty":0.95,"sample_count":0},
+        "Serie A":           {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.06,"away_penalty":0.95,"sample_count":0},
+        "Bundesliga":        {"form_weight":0.65,"base_weight":0.35,"goals_weight":0.50,"shots_ot_weight":0.28,"possession_weight":0.22,"home_advantage":1.08,"away_penalty":0.94,"sample_count":0},
+        "Ligue 1":           {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95,"sample_count":0},
+        "Champions League":  {"form_weight":0.55,"base_weight":0.45,"goals_weight":0.42,"shots_ot_weight":0.32,"possession_weight":0.26,"home_advantage":1.05,"away_penalty":0.96,"sample_count":0},
+        "Europa League":     {"form_weight":0.58,"base_weight":0.42,"goals_weight":0.43,"shots_ot_weight":0.31,"possession_weight":0.26,"home_advantage":1.06,"away_penalty":0.95,"sample_count":0},
+        "Romania SuperLiga": {"form_weight":0.65,"base_weight":0.35,"goals_weight":0.48,"shots_ot_weight":0.28,"possession_weight":0.24,"home_advantage":1.09,"away_penalty":0.93,"sample_count":0},
+        "World Cup 2026":    {"form_weight":0.55,"base_weight":0.45,"goals_weight":0.44,"shots_ot_weight":0.30,"possession_weight":0.26,"home_advantage":1.03,"away_penalty":0.97,"sample_count":0},
+        "MLS":               {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.08,"away_penalty":0.94,"sample_count":0},
+        "default":           {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95,"sample_count":0},
     },
 }
 
@@ -1202,7 +1202,7 @@ class FootballOracleEngine:
             away_form_score=away_p.form_score,
             baseline=baseline,
             form_weight=lw["form_weight"],
-            dna_weight=lw["dna_weight"],
+            base_weight=lw["base_weight"],
             home_advantage=lw["home_advantage"],
             away_penalty=lw["away_penalty"],
             defensive_cap=d_cap,
@@ -2027,7 +2027,7 @@ class FootballOracleEngine:
 
     def get_league_learning_stats(self) -> pd.DataFrame:
         global_defaults = {
-            "form_weight": 0.60, "dna_weight": 0.40, "goals_weight": 0.45,
+            "form_weight": 0.60, "base_weight": 0.40, "goals_weight": 0.45,
             "shots_ot_weight": 0.30, "possession_weight": 0.25,
             "home_advantage": 1.07, "away_penalty": 0.95,
         }
@@ -2042,7 +2042,7 @@ class FootballOracleEngine:
                 "Samples":    sc,
                 "Confidence": f"{min(sc / 5 * 100, 100):.0f}%",
                 "form_w":     round(float(lw.get("form_weight",    0.60)), 4),
-                "dna_w":      round(float(lw.get("dna_weight",     0.40)), 4),
+                "base_w":      round(float(lw.get("base_weight",     0.40)), 4),
                 "goals_w":    round(float(lw.get("goals_weight",   0.45)), 4),
                 "home_adv":   round(float(lw.get("home_advantage", 1.07)), 4),
                 "Δ form_w":   round(float(lw.get("form_weight",    0.60)) - global_defaults["form_weight"],    4),
@@ -2051,7 +2051,7 @@ class FootballOracleEngine:
             })
         if not rows:
             return pd.DataFrame(columns=[
-                "League", "Samples", "Confidence", "form_w", "dna_w",
+                "League", "Samples", "Confidence", "form_w", "base_w",
                 "goals_w", "home_adv", "Δ form_w", "Δ goals_w", "Δ home_adv",
             ])
         return pd.DataFrame(rows).sort_values("Samples", ascending=False).reset_index(drop=True)
