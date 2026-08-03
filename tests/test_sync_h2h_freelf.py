@@ -62,6 +62,7 @@ def test_run_registers_one_task_per_fixture_and_executes(monkeypatch):
         {"home_team_canonical": "Real Madrid", "away_team_canonical": "Barcelona", "freelf_event_id": "2"},
     ]
     monkeypatch.setattr(sync_h2h_freelf, "_fixtures_needing_sync", lambda days_ahead=14: fake_fixtures)
+    monkeypatch.setattr(sync_h2h_freelf, "_already_has_flashscore_h2h", lambda home, away: False)
 
     fake_orchestrator = SyncOrchestrator(request_manager=_AlwaysAllowRequestManager())
     monkeypatch.setattr(sync_h2h_freelf, "get_sync_orchestrator", lambda: fake_orchestrator)
@@ -74,6 +75,7 @@ def test_run_registers_one_task_per_fixture_and_executes(monkeypatch):
 
 def test_run_registers_zero_tasks_when_no_fixtures(monkeypatch):
     monkeypatch.setattr(sync_h2h_freelf, "_fixtures_needing_sync", lambda days_ahead=14: [])
+    monkeypatch.setattr(sync_h2h_freelf, "_already_has_flashscore_h2h", lambda home, away: False)
 
     fake_orchestrator = SyncOrchestrator(request_manager=_AlwaysAllowRequestManager())
     monkeypatch.setattr(sync_h2h_freelf, "get_sync_orchestrator", lambda: fake_orchestrator)
@@ -81,6 +83,39 @@ def test_run_registers_zero_tasks_when_no_fixtures(monkeypatch):
 
     results = sync_h2h_freelf.run()
     assert results == []
+
+
+def test_run_skips_fixture_when_flashscore_already_has_h2h(monkeypatch):
+    """[ADAUGAT Pasul 1 Master Repair Plan, ADR-045 — Single Owner] Daca
+    Flashscore are deja context H2H complet pentru o pereche, FreeLF NU mai
+    e interogat pentru ea — dar restul perechilor raman neschimbate."""
+    fake_fixtures = [
+        {"home_team_canonical": "Arsenal", "away_team_canonical": "Chelsea", "freelf_event_id": "1"},
+        {"home_team_canonical": "Real Madrid", "away_team_canonical": "Barcelona", "freelf_event_id": "2"},
+    ]
+    monkeypatch.setattr(sync_h2h_freelf, "_fixtures_needing_sync", lambda days_ahead=14: fake_fixtures)
+    monkeypatch.setattr(
+        sync_h2h_freelf, "_already_has_flashscore_h2h",
+        lambda home, away: (home, away) == ("Arsenal", "Chelsea"),
+    )
+
+    fake_orchestrator = SyncOrchestrator(request_manager=_AlwaysAllowRequestManager())
+    monkeypatch.setattr(sync_h2h_freelf, "get_sync_orchestrator", lambda: fake_orchestrator)
+    monkeypatch.setattr(sync_h2h_freelf, "FreelfH2hAdapter", lambda: _FakeAdapter())
+
+    results = sync_h2h_freelf.run()
+    assert len(results) == 1
+    assert "Real Madrid" in results[0].task_name
+
+
+def test_already_has_flashscore_h2h_delegates_to_queries(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "database.queries.has_flashscore_h2h_context",
+        lambda home, away: (calls.append((home, away)), True)[1],
+    )
+    assert sync_h2h_freelf._already_has_flashscore_h2h("Arsenal", "Chelsea") is True
+    assert calls == [("Arsenal", "Chelsea")]
 
 
 def test_fixtures_needing_sync_delegates_to_queries(monkeypatch):

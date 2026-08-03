@@ -1,26 +1,36 @@
 name: Football Oracle — Live Sync
 
-# Nivelul USOR de sincronizare (sync/run_live.py) - discovery/scoruri/
-# cote/statistici/lineups/player stats/H2H/standings, FARA Team DNA/
-# Oracle Data Layer/Feature Engineering (acelea raman in Night Sync).
+# [REDEFINIT — Pasul 2 Master Repair Plan, ADR-045 Single Owner] Nivelul
+# USOR de sincronizare (sync/run_live.py) - DOAR Flashscore Foundation
+# Data Layer (Delta Sync). Apelul catre providerii API
+# (sync.run_daily.run()) a fost ELIMINAT - night_sync.yml Stage 1 apeleaza
+# deja run_daily.run() COMPLET, o data pe zi; un apel suplimentar de aici
+# ar fi exact tipul de "interogare inutila catre provideri live" interzis
+# explicit de filosofia proiectului (cota API critica).
 #
-# Cadenta: la fiecare 2 ore (12 rulari/zi) - mai frecvent decat
-# night_sync.yml (o data/noapte), dar semnificativ mai rar decat
-# lineup_sync.yml (*/30 min), care sincronizeaza DOAR loturile - un singur
-# apel usor. Live Sync apeleaza sync.run_daily.run() (multipli provideri
-# API) + Flashscore FDL (Playwright) la fiecare rulare -> o cadenta prea
-# agresiva ar consuma inutil cota API (Regulile pentru chei API,
-# CLAUDE.md - tratate ca infrastructura critica). Delta Sync
-# (is_flashscore_match_already_collected) limiteaza costul Flashscore la
-# meciuri noi/incomplete, dar provider-ii API tot se re-interogheaza la
-# fiecare rulare - 2h e un compromis rezonabil, ajustabil ulterior daca
-# se dovedeste prea agresiv/prea rar.
-# `concurrency` previne suprapunerea (o rulare care depaseste 2h nu
-# porneste una noua peste ea).
+# Cadenta: la 4 ore (6 rulari/zi) - 02:00/06:00/10:00/14:00/18:00/22:00 UTC.
+# [ALES DELIBERAT — Pasul 2 Master Repair Plan, rafinat dupa feedback]
+# Program ales exclusiv prin cron, ca sa garanteze absenta suprapunerii cu
+# night_sync.yml (03:00 UTC, timeout-minutes: 120 -> GitHub Actions
+# OPRESTE jobul la exact 120 min, deci ora cea mai tarzie posibila de
+# finalizare e 05:00 UTC, nu o estimare) - fara niciun mecanism de
+# concurrency intre workflow-uri diferite (prefera programare simpla, nu
+# blocare). Slotul 02:00 se termina cu mult inainte de 03:00 (timeout
+# live_sync: 20 min); slotul 06:00 incepe la o ora dupa cea mai tarzie
+# finalizare posibila a night_sync.yml - marja absorbe si intarzierile
+# tipice de programare cron ale GitHub Actions (documentate, cateva
+# minute in perioade de incarcare). Flashscore are Delta Sync real
+# (is_flashscore_match_already_collected) - o cadenta mai deasa e ieftina
+# prin design, spre deosebire de providerii API, care nu au acest
+# mecanism si raman la o singura rulare/zi (night_sync.yml).
+# `concurrency` de mai jos previne doar suprapunerea unei rulari live_sync
+# cu EA INSASI (o rulare care depaseste 4h nu porneste una noua peste ea)
+# - nu are legatura cu garantia fata de night_sync.yml, asigurata integral
+# prin programare.
 
 on:
   schedule:
-    
+    - cron: "0 2,6,10,14,18,22 * * *"
   workflow_dispatch: {}
 
 concurrency:
@@ -52,9 +62,4 @@ jobs:
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
-          RAPIDAPI_KEY_FREELIVEFOOTBALL: ${{ secrets.RAPIDAPI_KEY_FREELIVEFOOTBALL }}
-          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
-          WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
-          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
-          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: python -m sync.run_live

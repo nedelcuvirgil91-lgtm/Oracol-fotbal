@@ -38,7 +38,14 @@ def _print_separator(char: str = "─", width: int = 78) -> None:
     print(char * width)
 
 
-def run(leagues: list[str] | None, limit_per_league: int | None, dry_run: bool) -> int:
+def run(
+    leagues: list[str] | None, limit_per_league: int | None, dry_run: bool,
+    include_future_fixtures: bool = True,
+) -> int:
+    """`include_future_fixtures` [ADAUGAT Pasul 1 Master Repair Plan] —
+    implicit True (comportament CLI/manual neschimbat). Rulările automate
+    (`run_night.py`/`run_live.py`) apelează cu `False` — vezi
+    `discovery._discover_for_hub()` pentru motivul complet."""
     targets = leagues if leagues is not None else list(FLASHSCORE_TRACKED_COMPETITIONS.keys())
     print()
     _print_separator("═")
@@ -47,10 +54,12 @@ def run(leagues: list[str] | None, limit_per_league: int | None, dry_run: bool) 
     print(f"  Competiții: {', '.join(targets)}")
     print(f"  Limită per competiție: {limit_per_league if limit_per_league is not None else 'fără limită'}")
     print(f"  Mod: {'DRY RUN (doar Discovery, fără fetch/persist)' if dry_run else 'LIVE (fetch + persist real)'}")
+    print(f"  Meciuri viitoare: {'incluse' if include_future_fixtures else 'excluse (doar meciuri terminate)'}")
     _print_separator("─")
     print()
 
-    matches = discover_matches(leagues=leagues, limit_per_league=limit_per_league)
+    matches = discover_matches(leagues=leagues, limit_per_league=limit_per_league,
+                                include_future_fixtures=include_future_fixtures)
     print(f"Discovery: {len(matches)} meciuri găsite.")
     for m in matches:
         print(f"  [{m.league}] {m.match_base_url} (mid={m.mid}, source={m.source})")
@@ -120,9 +129,15 @@ def main() -> None:
         "--dry-run", action="store_true",
         help="Rulează doar Discovery — nu apelează fetch()/persist() pentru niciun meci",
     )
+    parser.add_argument(
+        "--no-future-fixtures", action="store_true",
+        help="Exclude meciurile VIITOARE (hub /fixtures/) — colectează doar meciuri deja terminate "
+             "(implicit folosit de rulările automate, night_sync.yml/live_sync.yml)",
+    )
     args = parser.parse_args()
 
-    exit_code = run(leagues=args.leagues, limit_per_league=args.limit_per_league, dry_run=args.dry_run)
+    exit_code = run(leagues=args.leagues, limit_per_league=args.limit_per_league, dry_run=args.dry_run,
+                     include_future_fixtures=not args.no_future_fixtures)
     sys.exit(exit_code)
 
 

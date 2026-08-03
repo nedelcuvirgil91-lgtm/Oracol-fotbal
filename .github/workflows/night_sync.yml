@@ -9,17 +9,33 @@ name: Football Oracle — Night Sync (Faza 2)
 #
 # [Faza 2 — consolidare, aprobare explicita proprietar produs, "Nu vreau
 # joburi automate care executa aceleasi functii in paralel"] Acesta e
-# ACUM singurul workflow AUTOMAT nocturn - daily.yml,
-# flashscore_foundation_data_layer.yml si continuous_learning.yml au
-# ramas doar workflow_dispatch (rulare manuala/depanare), cron-ul lor a
-# fost eliminat explicit ca sa nu se ruleze de doua ori aceeasi noapte
-# aceiasi provideri/Flashscore/Continuous Learning.
+# ACUM singurul workflow AUTOMAT care ruleaza providerii API (Discovery,
+# rezultate, statistici, sincronizare istoric, feature engineering, ML
+# retrain, odds persistence) - daily.yml, flashscore_foundation_data_
+# layer.yml si continuous_learning.yml au ramas doar workflow_dispatch
+# (rulare manuala/depanare), cron-ul lor a fost eliminat explicit ca sa
+# nu se ruleze de doua ori aceiasi provideri/Flashscore/Continuous
+# Learning. `live_sync.yml` NU mai apeleaza providerii API (Pasul 2,
+# Master Repair Plan, ADR-045 Single Owner) - doar Flashscore, la o
+# cadenta separata.
+#
+# [CORECTAT Pasul 2 Master Repair Plan, 2026-08-03] Cron-ul a fost
+# `0 3 * * 1` (doar luni) intre 2026-07-30 si 2026-08-03, editat direct pe
+# GitHub, fara aprobare, degradand toata infrastructura de sincronizare de
+# la zilnic la saptamanal (gasit prin audit complet). Revenit la zilnic,
+# forma originala din Faza 2.
 
 on:
   schedule:
-    # Preia slotul original al daily.yml - prima etapa a Night Sync e
-    # exact sync/run_daily.py.
-    - cron: "0 3 * * 1"
+    # Zilnic, 03:00 UTC - slotul original din Faza 2 (consolidare
+    # scheduler). timeout-minutes: 120 mai jos -> ora cea mai tarzie
+    # posibila de finalizare e 05:00 UTC (GitHub Actions opreste jobul
+    # exact la limita, nu doar estimeaza). `live_sync.yml` ruleaza la 4h,
+    # cu sloturi alese explicit sa evite fereastra [03:00, 05:00]
+    # (02:00/06:00/10:00/...) - garantie prin programare, nu prin
+    # concurrency intre workflow-uri (verificare + decizie explicita,
+    # Pasul 2 Master Repair Plan).
+    - cron: "0 3 * * *"
   workflow_dispatch: {}
 
 jobs:

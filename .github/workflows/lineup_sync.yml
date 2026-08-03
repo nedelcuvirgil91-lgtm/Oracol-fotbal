@@ -2,15 +2,23 @@ name: Football Oracle — Lineup Sync (Free Live Football)
 
 # [ADAUGAT Sprint 3, R-Sync-10] Cadență DEDICATĂ, separată de daily.yml —
 # aliniamentele FreeLF se confirmă aproape de kickoff, nu o dată/zi e prea
-# rar. La fiecare 15 minute, script-ul interoghează doar fixture-urile din
-# fereastra apropiată de kickoff (scheduled_fixtures.freelf_event_id,
-# R-Sync-7a) — o rulare fără fixture-uri în fereastră termină instant, fără
-# cost. Vezi sync/sync_lineup_freelf.py pentru detalii arhitecturale
-# complete și motivul ferestrei generoase (T-15min..T+240min).
+# rar. Script-ul interoghează doar fixture-urile din fereastra apropiată de
+# kickoff (scheduled_fixtures.freelf_event_id, R-Sync-7a) — o rulare fără
+# fixture-uri în fereastră termină instant, fără cost. Vezi
+# sync/sync_lineup_freelf.py pentru detalii arhitecturale complete și
+# motivul ferestrei generoase (T-15min..T+240min).
+#
+# [REDUS — Pasul 2 Master Repair Plan] De la */15 la */30 min — cota FreeLF
+# e documentat cronic epuizată (CLAUDE.md), iar acest job (fără detectare
+# de schimbare a lotului între poll-uri, gol cunoscut, neatins aici — vezi
+# Master Repair Plan P0-04) era cel mai concret contribuitor, până la 32
+# apeluri FreeLF/meci în fereastra de 4h. La */30 min, un meci în fereastra
+# de 4h primește ~8 poll-uri (până la 16 apeluri), înjumătățind consumul,
+# păstrând acoperire rezonabilă aproape de kickoff.
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
       window_minutes:

@@ -81,6 +81,24 @@ def test_backup_stage_calls_real_backup_module(monkeypatch):
     assert detail["path"] == "backups/x.json"
 
 
+def test_flashscore_stage_uses_configurable_limit_and_excludes_future_fixtures(monkeypatch):
+    """[ADAUGAT Pasul 1 Master Repair Plan, ADR-045; rafinat dupa feedback]
+    Plafonul vine din get_limit_per_league_automated() (configurabil prin
+    Supabase model_config, nu hardcodat) si include_future_fixtures=False
+    — solutia reala pentru cele 240 de fixture-uri viitoare persistate
+    integral (audit 2026-08-03)."""
+    monkeypatch.setattr("providers.flashscore.discovery.get_limit_per_league_automated", lambda: 27)
+    calls = []
+    monkeypatch.setattr(
+        "providers.flashscore.run_foundation_data_layer.run",
+        lambda leagues=None, limit_per_league=None, dry_run=False, include_future_fixtures=True:
+            calls.append((leagues, limit_per_league, dry_run, include_future_fixtures)) or 0,
+    )
+    detail = night._stage_flashscore()
+    assert calls == [(None, 27, False, False)]
+    assert "exit_code=0" in detail
+
+
 def test_team_dna_stage_documents_live_computation_not_batch():
     detail = night._stage_team_dna()
     assert "live" in detail.lower()

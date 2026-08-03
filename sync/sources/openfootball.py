@@ -150,6 +150,17 @@ def _parse_match_json(
         # la upsert pe fixture_id existent, None rescria cu NULL un ELO deja
         # calculat. Cheile absente lasă coloanele neatinse (update) / NULL
         # implicit (insert) — feature-urile rămân de completat incremental.
+        #
+        # [FIX Pasul 3, Master Repair Plan] `season` era deja cunoscut aici
+        # (parametru din LEAGUE_PATHS[...]["seasons"], folosit la construirea
+        # fixture_id-ului, linia ~141) dar nu ajungea niciodată în dict-ul
+        # scris în match_history — aceeași clasă de bug găsită și reparată
+        # în football_data.py (season parsat/cunoscut, dar aruncat înainte de
+        # persistare). Text liber, exact cum e primit (ex. "2021-22") —
+        # migrația 038 nu cere un format anume, doar "cum îl oferă sursa".
+        # Fără backfill pentru rândurile existente: 0 rânduri openfootball_*
+        # în producție azi (verificat live, 2026-08-03) — nimic de reparat
+        # retroactiv, doar scrierile viitoare beneficiază de fix.
         return {
             "fixture_id":        fixture_id,
             "home_team":         home_name,
@@ -162,6 +173,7 @@ def _parse_match_json(
             "home_xg_pred":      None,
             "away_xg_pred":      None,
             "used_for_training": True,
+            "season":            season,
         }
     except Exception as exc:
         logger.debug("[OpenFootball] Parse error: %s — %s", match, exc)

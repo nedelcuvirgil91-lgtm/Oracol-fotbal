@@ -91,9 +91,29 @@ def _stage_api_providers() -> str:
 
 def _stage_flashscore() -> str:
     """2. Flashscore — Discovery + fetch/normalize/validate/persist, cu
-    Delta Sync (sare meciurile deja persistate canonic, Faza 2 §7)."""
+    Delta Sync (sare meciurile deja persistate canonic, Faza 2 §7).
+
+    [ADAUGAT Pasul 1 Master Repair Plan, ADR-045; rafinat dupa feedback]
+    Doua schimbari fata de comportamentul original (limit_per_league=None,
+    fara nicio protectie):
+    - `include_future_fixtures=False` — solutia REALA pentru cauza
+      radacina a celor 240 de fixture-uri VIITOARE persistate integral
+      (audit 2026-08-03): rularile automate nu mai incearca deloc hub-ul
+      `/fixtures/` — Flashscore nu are niciodata valoare pe un meci
+      nejucat (ADR-045, Owner matrix), deci nu mai are rost sa-l descopere
+      automat, indiferent daca Sync Layer il are deja in scheduled_fixtures.
+    - `limit_per_league=get_limit_per_league_automated()` — plafon
+      CONFIGURABIL (Supabase `model_config`, cheia
+      `flashscore_limit_per_league_automated`), nu hardcodat; se aplica
+      doar hub-ului `/results/` (meciuri terminate), ca proxy pentru
+      "cele mai recente N meciuri" (hub-ul e cronologic, cel mai recent
+      primul — vezi discovery.py pentru justificare completa).
+    Rularile manuale (CLI, `--limit-per-league`/`--no-future-fixtures`)
+    raman complet neafectate."""
+    from providers.flashscore.discovery import get_limit_per_league_automated
     from providers.flashscore.run_foundation_data_layer import run as run_flashscore
-    exit_code = run_flashscore(leagues=None, limit_per_league=None, dry_run=False)
+    exit_code = run_flashscore(leagues=None, limit_per_league=get_limit_per_league_automated(),
+                                dry_run=False, include_future_fixtures=False)
     return f"exit_code={exit_code}"
 
 

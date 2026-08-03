@@ -94,6 +94,56 @@ _PROTECTION_MARKERS = (
     "please verify you are a human", "detected unusual activity",
 )
 
+# [ADAUGAT Pasul 1 Master Repair Plan, rafinat dupa feedback] Plafon pentru
+# rularile AUTOMATE (night_sync.yml/live_sync.yml) - se aplica DOAR hub-ului
+# `/results/` (meciuri deja TERMINATE, singurele cu valoare reala pentru
+# Flashscore - vezi ADR-045, Owner matrix: Results/Statistics/Standings/H2H/
+# Player Ratings/Events cer toate un meci deja jucat). Nu mai e folosit
+# pentru `/fixtures/` (meciuri VIITOARE) - vezi `include_future_fixtures`
+# mai jos, care elimina complet acea cale la rularile automate, nu doar o
+# plafoneaza.
+#
+# Configurabil, NU hardcodat - citit din `model_config.data` (Supabase,
+# rand unic id=1, acelasi tipar deja folosit de `ml_blending_enabled`/
+# `flashscore_shadow_logging_enabled`/etc.), cheia
+# `FLASHSCORE_LIMIT_PER_LEAGUE_CONFIG_KEY`. Valoarea de mai jos e DOAR
+# fallback-ul folosit cand cheia lipseste din config (implicit azi, nicio
+# scriere facuta) - vezi `get_limit_per_league_automated()`.
+#
+# Justificare pentru valoarea de fallback (20): dimensiunea reala a
+# hub-ului `/results/`, verificata live pe doua competitii diferite (POC
+# 10-matches, docstring modul, liniile 16-34) - 16 meciuri unice SuperLiga,
+# 28 unice UCL, fara paginare dincolo de randarea initiala. 20 acopera
+# confortabil o runda/fereastra recenta reala per competitie, fara sa
+# proceseze un arhiva istorica intreaga la fiecare rulare (Delta Sync face
+# reprocesarea sigura, dar nu gratuita - fiecare meci inca cere o rulare
+# de pagina). Rularile manuale (CLI, `--limit-per-league`) raman complet
+# neafectate de acest plafon si de config-ul Supabase - doar apelurile
+# implicite din run_night.py/run_live.py il folosesc.
+FLASHSCORE_LIMIT_PER_LEAGUE_CONFIG_KEY = "flashscore_limit_per_league_automated"
+DEFAULT_LIMIT_PER_LEAGUE_AUTOMATED = 20
+
+
+def get_limit_per_league_automated() -> int:
+    """Plafonul REAL folosit de rularile automate — citit din
+    `model_config.data` (Supabase), cu fallback la
+    `DEFAULT_LIMIT_PER_LEAGUE_AUTOMATED` daca cheia lipseste sau clientul
+    Supabase nu e disponibil (degradare identica restului proiectului —
+    niciodata excepție, niciodata blocaj). Configurabil fără deploy de
+    cod: `UPDATE model_config SET data = jsonb_set(data,
+    '{flashscore_limit_per_league_automated}', '30') WHERE id = 1;` (SQL
+    exemplu — orice scriere reală trece prin disciplina supabase-safety,
+    SQL arătat explicit înainte de rulare)."""
+    try:
+        from supabase_client import load_config
+        cfg = load_config(default={})
+        value = cfg.get(FLASHSCORE_LIMIT_PER_LEAGUE_CONFIG_KEY)
+        if isinstance(value, int) and value > 0:
+            return value
+    except Exception as exc:
+        logger.warning("[Discovery] get_limit_per_league_automated failed, fallback la implicit: %s", exc)
+    return DEFAULT_LIMIT_PER_LEAGUE_AUTOMATED
+
 # [ADR-044] Doar competitii cu slug Flashscore VERIFICAT LIVE (nu ghicit) -
 # vezi docstring modul. (country, competition) - exact segmentele folosite
 # de target_url_template din scraper_registry.py.
@@ -188,11 +238,33 @@ def parse_match_links(html: str) -> list[tuple[str, str]]:
     return list(seen.items())
 
 
-def _discover_for_hub(page, hub_url: str, league: str, limit: int | None) -> list[DiscoveredMatch]:
+def _discover_for_hub(
+    page, hub_url: str, league: str, limit: int | None,
+    include_future_fixtures: bool = True,
+) -> list[DiscoveredMatch]:
     """`hub_url` fara `/results/`/`/fixtures/` - ambele incercate,
     `/results/` intai (identic POC-ului 10-matches, deja verificat live);
-    `/fixtures/` folosit doar daca `/results/` nu intoarce niciun link."""
-    for source in ("results", "fixtures"):
+    `/fixtures/` folosit doar daca `/results/` nu intoarce niciun link.
+
+    `include_future_fixtures` [ADAUGAT Pasul 1 Master Repair Plan, rafinat
+    dupa feedback] — implicit True (comportament NESCHIMBAT pentru orice
+    apelant existent/CLI manual). Cand False, `/fixtures/` (meciuri
+    VIITOARE) nu mai e incercat deloc — daca `/results/` nu intoarce
+    niciun link (competitie in pauza competitionala, confirmat live pentru
+    Premier League/La Liga/Serie A/Bundesliga/Ligue 1 in Coverage Audit
+    2026-08-03), liga e sarita curat pentru acea rulare, fara sa persiste
+    fixture-uri fara nicio statistica posibila inca. Solutia reala pentru
+    "Discovery Flashscore nu mai cauta meciuri deja descoperite de Sync
+    Layer" (ADR-045): Flashscore nu are NICIODATA valoare pe un meci
+    nejucat (Owner matrix — Results/Statistics/Standings/H2H/Player
+    Ratings/Events cer toate un meci deja jucat), deci rularile automate
+    nu mai incearca deloc acea treaba, indiferent daca Sync Layer a
+    descoperit deja fixture-ul sau nu — nu mai era nevoie de o
+    cross-referentiere fragila (slug URL -> nume canonic) cu
+    `scheduled_fixtures`, care ar fi cerut fie o schimbare de schema, fie
+    o potrivire de nume nesigura."""
+    sources = ("results", "fixtures") if include_future_fixtures else ("results",)
+    for source in sources:
         url = f"{hub_url.rstrip('/')}/{source}/"
         resp = page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
         http_status = resp.status if resp else None
@@ -213,13 +285,17 @@ def _discover_for_hub(page, hub_url: str, league: str, limit: int | None) -> lis
 
 def discover_matches(
     leagues: list[str] | None = None, limit_per_league: int | None = None,
+    include_future_fixtures: bool = True,
 ) -> list[DiscoveredMatch]:
     """Punct de intrare M1 - o singura sesiune Playwright, un singur
     browser, pacing explicit intre hub-uri succesive
     (`FLASHSCORE_MIN_DELAY_SECONDS`). `leagues=None` -> toate din
     `FLASHSCORE_TRACKED_COMPETITIONS`. Ridica `FlashscoreProtectionDetected`
     si se opreste imediat la orice semn de protectie, nu incearca sa
-    ocoleasca - identic restul acestui provider."""
+    ocoleasca - identic restul acestui provider.
+
+    `include_future_fixtures` — vezi docstring `_discover_for_hub()`.
+    Implicit True (comportament CLI/manual neschimbat)."""
     targets = leagues if leagues is not None else list(FLASHSCORE_TRACKED_COMPETITIONS.keys())
     unknown = [lg for lg in targets if lg not in FLASHSCORE_TRACKED_COMPETITIONS]
     if unknown:
@@ -240,7 +316,7 @@ def discover_matches(
                 hub_url = f"https://www.flashscore.com/football/{country}/{competition}"
                 if i > 0:
                     time.sleep(FLASHSCORE_MIN_DELAY_SECONDS)
-                results.extend(_discover_for_hub(page, hub_url, league, limit_per_league))
+                results.extend(_discover_for_hub(page, hub_url, league, limit_per_league, include_future_fixtures))
         finally:
             browser.close()
     return results

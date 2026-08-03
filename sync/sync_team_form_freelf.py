@@ -38,13 +38,22 @@ def _make_task_runner(adapter: FreeLfFormAdapter, league: str):
 
 def run() -> list:
     from mappings import FREE_LF_LEAGUE_IDS
+    from database.queries import get_flashscore_covered_standings_leagues
 
     adapter = FreeLfFormAdapter()
     orchestrator = get_sync_orchestrator()
 
-    logger.info("[TeamFormFreeLF] %d ligi de sincronizat", len(FREE_LF_LEAGUE_IDS))
+    # [ADAUGAT Pasul 1 Master Repair Plan, ADR-045 — Single Owner] Ligile
+    # pentru care Flashscore are deja un clasament recent nu mai sunt
+    # sincronizate de FreeLF. Fallback neschimbat pentru restul ligilor.
+    flashscore_covered = get_flashscore_covered_standings_leagues()
+
+    logger.info("[TeamFormFreeLF] %d ligi de sincronizat (%d acoperite deja de Flashscore, sărite)",
+                len(FREE_LF_LEAGUE_IDS), len(flashscore_covered & set(FREE_LF_LEAGUE_IDS)))
 
     for league in FREE_LF_LEAGUE_IDS:
+        if league in flashscore_covered:
+            continue
         task_name = f"team_form_freelf:{league}"
         orchestrator.register_task(SyncTask(
             name=task_name,

@@ -136,21 +136,40 @@ def _parse_match(match: dict, league: str) -> dict | None:
         utc_date  = match.get("utcDate", "")
         kick_date = utc_date[:10] if utc_date else ""
         match_id  = match.get("id", "")
-        season    = (match.get("season") or {}).get("startDate", "")[:4]
+
+        # [FIX Pasul 3, Master Repair Plan] season era parsat din payload-ul
+        # real al providerului dar nu ajungea niciodata in dict-ul scris in
+        # match_history (variabila locala neutilizata) - de aceea season
+        # ramanea NULL pentru toate randurile football-data.org, desi
+        # providerul il oferea. Format "YYYY-YYYY", direct din startDate/
+        # endDate ale providerului (migratia 038) - nicio aproximare
+        # calendaristica proprie (interzis explicit, season_cleanup.py).
+        season_obj   = match.get("season") or {}
+        start_year   = (season_obj.get("startDate") or "")[:4]
+        end_year     = (season_obj.get("endDate") or "")[:4]
+        if start_year and end_year and start_year != end_year:
+            season = f"{start_year}-{end_year}"
+        elif start_year:
+            season = start_year
+        else:
+            season = None
 
         fixture_id = f"fd_{match_id}"
 
         # Statistici suplimentare dacă sunt disponibile
         home_xg = None
         away_xg = None
-        odds_home = odds_draw = odds_away = None
 
-        # football-data.org include odds în unele răspunsuri
-        odds = match.get("odds", {})
-        if odds:
-            odds_home = odds.get("homeWin")
-            odds_draw = odds.get("draw")
-            odds_away = odds.get("awayWin")
+        # [ELIMINAT Pasul 3, Master Repair Plan] football-data.org include
+        # uneori match.get("odds") (homeWin/draw/awayWin), dar acest modul nu
+        # are voie sa le scrie nicaieri: singura tabela reala de cote e
+        # odds_history, alimentata EXCLUSIV din The Odds API prin
+        # oracle_api._attach_odds() -> OddsPersistenceService (contract
+        # Frozen, ADR-005/006 sectiunea 5 - "evita dubla sursa de adevar").
+        # match_history nu are nicio coloana odds_*. Codul vechi parsa
+        # match["odds"] in 3 variabile locale niciodata incluse in dict-ul
+        # returnat - exact clasa de bug gasita la season (fix anterior in
+        # acest fisier) - eliminat complet, nu doar lasat neutilizat.
 
         # [FIX 2026-07-13 — writer destructiv] NU mai trimitem home_elo/away_elo
         # explicit None: la upsert pe fixture_id existent, None RESCRIA cu NULL
@@ -170,6 +189,7 @@ def _parse_match(match: dict, league: str) -> dict | None:
             "home_xg_pred":      home_xg,
             "away_xg_pred":      away_xg,
             "used_for_training": True,
+            "season":            season,
         }
     except Exception as exc:
         logger.debug("[FD] Parse error: %s", exc)

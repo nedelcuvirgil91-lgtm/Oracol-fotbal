@@ -42,13 +42,24 @@ def _make_task_runner(adapter: FootballDataFormAdapter, comp_code: str):
 
 def run() -> list:
     from mappings import FD_COMPETITIONS
+    from database.queries import get_flashscore_covered_standings_leagues
 
     adapter = FootballDataFormAdapter()
     orchestrator = get_sync_orchestrator()
 
-    logger.info("[TeamFormFootballData] %d ligi de sincronizat", len(FD_COMPETITIONS))
+    # [ADAUGAT Pasul 1 Master Repair Plan, ADR-045 — Single Owner] Ligile
+    # pentru care Flashscore are deja un clasament recent (flashscore_
+    # standings_snapshot, in ultimele 7 zile) nu mai sunt sincronizate de
+    # football-data.org. Fallback ramane neschimbat pentru orice liga unde
+    # Flashscore nu are inca date recente.
+    flashscore_covered = get_flashscore_covered_standings_leagues()
+
+    logger.info("[TeamFormFootballData] %d ligi de sincronizat (%d acoperite deja de Flashscore, sărite)",
+                len(FD_COMPETITIONS), len(flashscore_covered & set(FD_COMPETITIONS.keys())))
 
     for league, comp_code in FD_COMPETITIONS.items():
+        if league in flashscore_covered:
+            continue
         task_name = f"team_form_footballdata:{league}"
         orchestrator.register_task(SyncTask(
             name=task_name,

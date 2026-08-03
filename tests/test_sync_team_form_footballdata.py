@@ -48,6 +48,7 @@ def test_task_runner_fetches_normalizes_validates_persists():
 def test_run_registers_one_task_per_league_and_executes(monkeypatch):
     fake_competitions = {"Premier League": "PL", "La Liga": "PD"}
     monkeypatch.setattr("mappings.FD_COMPETITIONS", fake_competitions)
+    monkeypatch.setattr("database.queries.get_flashscore_covered_standings_leagues", lambda: set())
 
     fake_orchestrator = SyncOrchestrator(request_manager=_AlwaysAllowRequestManager())
     monkeypatch.setattr(sync_team_form_footballdata, "get_sync_orchestrator", lambda: fake_orchestrator)
@@ -60,6 +61,7 @@ def test_run_registers_one_task_per_league_and_executes(monkeypatch):
 
 def test_run_registers_zero_tasks_when_no_competitions(monkeypatch):
     monkeypatch.setattr("mappings.FD_COMPETITIONS", {})
+    monkeypatch.setattr("database.queries.get_flashscore_covered_standings_leagues", lambda: set())
 
     fake_orchestrator = SyncOrchestrator(request_manager=_AlwaysAllowRequestManager())
     monkeypatch.setattr(sync_team_form_footballdata, "get_sync_orchestrator", lambda: fake_orchestrator)
@@ -67,3 +69,20 @@ def test_run_registers_zero_tasks_when_no_competitions(monkeypatch):
 
     results = sync_team_form_footballdata.run()
     assert results == []
+
+
+def test_run_skips_league_already_covered_by_flashscore(monkeypatch):
+    """[ADAUGAT Pasul 1 Master Repair Plan, ADR-045 — Single Owner] Ligile
+    cu clasament Flashscore recent NU mai sunt sincronizate de
+    football-data.org — restul ligilor raman neschimbate."""
+    fake_competitions = {"Premier League": "PL", "La Liga": "PD"}
+    monkeypatch.setattr("mappings.FD_COMPETITIONS", fake_competitions)
+    monkeypatch.setattr("database.queries.get_flashscore_covered_standings_leagues", lambda: {"Premier League"})
+
+    fake_orchestrator = SyncOrchestrator(request_manager=_AlwaysAllowRequestManager())
+    monkeypatch.setattr(sync_team_form_footballdata, "get_sync_orchestrator", lambda: fake_orchestrator)
+    monkeypatch.setattr(sync_team_form_footballdata, "FootballDataFormAdapter", lambda: _FakeAdapter())
+
+    results = sync_team_form_footballdata.run()
+    assert len(results) == 1
+    assert "La Liga" in results[0].task_name
