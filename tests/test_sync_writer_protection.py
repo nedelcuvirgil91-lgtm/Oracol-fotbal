@@ -93,6 +93,35 @@ def test_openfootball_payload_has_no_elo_keys():
     assert row["actual_result"] == "H"
 
 
+def test_openfootball_payload_includes_season():
+    """[FIX Pasul 3, Master Repair Plan] season era deja cunoscut (parametru
+    din LEAGUE_PATHS[...]["seasons"], folosit la construirea fixture_id-ului)
+    dar niciodata inclus in dict-ul scris in match_history — aceeasi clasa
+    de bug ca la football_data.py. Text liber, exact cum e primit."""
+    match = {
+        "team1": {"name": "FCSB"},
+        "team2": {"name": "CFR Cluj"},
+        "score": {"ft": [2, 1]},
+        "date": "2024-03-10",
+    }
+    row = of_parse(match, "Romania SuperLiga", "2023-24")
+    assert row is not None
+    assert row["season"] == "2023-24"
+
+
+def test_football_data_payload_has_no_dead_odds_keys():
+    """[ELIMINAT Pasul 3, Master Repair Plan] odds_home/odds_draw/odds_away
+    erau parsate din match["odds"] dar niciodata incluse in payload — cod
+    mort, eliminat complet (nu doar lasat neutilizat). Singura tabela reala
+    de cote e odds_history, alimentata exclusiv din The Odds API
+    (ADR-005/006 sectiunea 5 — evita dubla sursa de adevar)."""
+    match = _fd_sample_match()
+    match["odds"] = {"homeWin": 1.9, "draw": 3.4, "awayWin": 4.1}
+    row = fd_parse(match, "Premier League")
+    assert row is not None
+    assert "odds_home" not in row and "odds_draw" not in row and "odds_away" not in row
+
+
 # ════════════════════════════════════════════════════════════════════════
 # (a') Garda de clasa la punctul unic de trecere: upsert-ul elimina orice
 #      cheie None, indiferent de sursa — clasa de defect nu mai poate

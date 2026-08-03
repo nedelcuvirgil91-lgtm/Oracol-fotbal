@@ -159,14 +159,17 @@ def _parse_match(match: dict, league: str) -> dict | None:
         # Statistici suplimentare dacă sunt disponibile
         home_xg = None
         away_xg = None
-        odds_home = odds_draw = odds_away = None
 
-        # football-data.org include odds în unele răspunsuri
-        odds = match.get("odds", {})
-        if odds:
-            odds_home = odds.get("homeWin")
-            odds_draw = odds.get("draw")
-            odds_away = odds.get("awayWin")
+        # [ELIMINAT Pasul 3, Master Repair Plan] football-data.org include
+        # uneori match.get("odds") (homeWin/draw/awayWin), dar acest modul nu
+        # are voie sa le scrie nicaieri: singura tabela reala de cote e
+        # odds_history, alimentata EXCLUSIV din The Odds API prin
+        # oracle_api._attach_odds() -> OddsPersistenceService (contract
+        # Frozen, ADR-005/006 sectiunea 5 - "evita dubla sursa de adevar").
+        # match_history nu are nicio coloana odds_*. Codul vechi parsa
+        # match["odds"] in 3 variabile locale niciodata incluse in dict-ul
+        # returnat - exact clasa de bug gasita la season (fix anterior in
+        # acest fisier) - eliminat complet, nu doar lasat neutilizat.
 
         # [FIX 2026-07-13 — writer destructiv] NU mai trimitem home_elo/away_elo
         # explicit None: la upsert pe fixture_id existent, None RESCRIA cu NULL
