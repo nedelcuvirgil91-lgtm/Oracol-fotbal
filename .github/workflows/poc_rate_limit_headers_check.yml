@@ -1,0 +1,29 @@
+name: Football Oracle — Probă header-e reale de rate-limit (Phase 4, P1)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run header check (discovery, nu integrare — un singur apel per provider)
+        env:
+          WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: |
+          python sync/poc_rate_limit_headers_check.py
