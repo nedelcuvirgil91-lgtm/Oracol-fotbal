@@ -383,6 +383,11 @@ def _render_match_card(match: dict, engine) -> None:
     mc_home = getattr(pred, "mc_prob_home", None)
     if mc_home is not None:
         st.markdown('<span class="sub-label">Model comparison — Poisson vs Monte Carlo (10k sim)</span>', unsafe_allow_html=True)
+        st.caption(
+            "Poisson calculează probabilitățile direct din xG. Monte Carlo simulează "
+            "10.000 de meciuri folosind aceleași valori xG, ca verificare a stabilității "
+            "rezultatului. Valorile ar trebui să fie apropiate."
+        )
         mc_draw = pred.mc_prob_draw; mc_away = pred.mc_prob_away
         st.markdown(f"""
         <div style="padding:0 1.5rem;">
@@ -520,26 +525,69 @@ def _render_match_card(match: dict, engine) -> None:
             def _v(x, fmt="{:.1f}"):
                 return fmt.format(x) if x is not None else "—"
 
+            def _sample_badge(n) -> str:
+                if not n:
+                    return ""
+                if n >= 25:
+                    return "🟢"
+                if n >= 10:
+                    return "🟡"
+                return "🔴"
+
             hadv = (hdna or {}).get("advanced") or {}
             aadv = (adna or {}).get("advanced") or {}
             hstd = (hdna or {}).get("standings") or {}
             astd = (adna or {}).get("standings") or {}
             hrat = (hdna or {}).get("player_ratings") or {}
             arat = (adna or {}).get("player_ratings") or {}
+
+            # ── Grupul 1 — statistici de performanță (per meci) ────────────
             core_rows = [
                 ("xG real/meci", _v(hadv.get("avg_xg")), _v(aadv.get("avg_xg"))),
+                ("Goluri marcate/meci", _v(hadv.get("avg_goals_for")), _v(aadv.get("avg_goals_for"))),
+                ("Goluri primite/meci", _v(hadv.get("avg_goals_against")), _v(aadv.get("avg_goals_against"))),
                 ("Posesie reală %", _v(hadv.get("avg_possession")), _v(aadv.get("avg_possession"))),
                 ("Offside/meci", _v(hadv.get("avg_offsides")), _v(aadv.get("avg_offsides"))),
                 ("Apărări portar/meci", _v(hadv.get("avg_goalkeeper_saves")), _v(aadv.get("avg_goalkeeper_saves"))),
                 ("Cartonașe roșii/meci", _v(hadv.get("avg_red_cards")), _v(aadv.get("avg_red_cards"))),
                 ("Rating mediu jucători", _v(hrat.get("avg_player_rating")), _v(arat.get("avg_player_rating"))),
-                ("Clasament", _v(hstd.get("rank"), "{:.0f}") if hstd.get("rank") is not None else "—",
-                 _v(astd.get("rank"), "{:.0f}") if astd.get("rank") is not None else "—"),
             ]
             st.dataframe(
                 pd.DataFrame(core_rows, columns=["Statistică", home, away]),
                 use_container_width=True, hide_index=True,
             )
+
+            # ── Grupul 2 — încrederea eșantionului (nu statistică de joc) ──
+            h_matches, a_matches = hadv.get("matches_sampled"), aadv.get("matches_sampled")
+            h_players, a_players = hrat.get("players_sampled"), arat.get("players_sampled")
+            if h_matches or a_matches or h_players or a_players:
+                st.caption(
+                    f"📊 Eșantion — {home}: {_sample_badge(h_matches)} {h_matches or 0} meciuri / "
+                    f"{h_players or 0} evaluări jucători · {away}: {_sample_badge(a_matches)} "
+                    f"{a_matches or 0} meciuri / {a_players or 0} evaluări jucători"
+                )
+
+            # ── Grupul 3 — clasament complet (context extern, nu formă) ────
+            standings_fields = [
+                ("Loc", "rank", "{:.0f}"), ("Jucate", "played", "{:.0f}"),
+                ("V", "won", "{:.0f}"), ("E", "drawn", "{:.0f}"), ("Î", "lost", "{:.0f}"),
+                ("GM", "goals_for", "{:.0f}"), ("GP", "goals_against", "{:.0f}"),
+                ("GD", "goal_diff", "{:.0f}"), ("Pct", "points", "{:.0f}"),
+            ]
+            has_standings = any(
+                hstd.get(k) is not None or astd.get(k) is not None for _, k, _ in standings_fields
+            )
+            if has_standings:
+                st.caption("Clasament complet")
+                standings_rows = [
+                    (label, _v(hstd.get(key), fmt), _v(astd.get(key), fmt))
+                    for label, key, fmt in standings_fields
+                ]
+                st.dataframe(
+                    pd.DataFrame(standings_rows, columns=["Clasament", home, away]),
+                    use_container_width=True, hide_index=True,
+                )
+
             hext = (hdna or {}).get("extended_stats") or {}
             aext = (adna or {}).get("extended_stats") or {}
             ext_keys = sorted(set(hext.keys()) | set(aext.keys()))
