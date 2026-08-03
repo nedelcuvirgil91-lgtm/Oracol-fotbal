@@ -65,6 +65,30 @@ FREE_LF_HOST       = "free-api-live-football-data.p.rapidapi.com"
 
 DEFAULT_SEASON = 2026
 
+# [ADAUGAT Phase 4 Functional Completion, punctul 1, 2026-08-03] Throttling
+# static, aplicat direct in `_get()`, DOAR pentru providerii confirmati live
+# (POC dedicat, sync/poc_rate_limit_headers_check.py, rulare GitHub Actions
+# 30831280759) ca nu trimit NICIUN header de rate-limit — deci gating-ul prin
+# RateLimitManager (should_request/record_response_headers, mai jos) ramane
+# structural fail-open pentru ei, la nesfarsit, indiferent de cate raspunsuri
+# reale se citesc. Interval ales conservator, NU dintr-o documentatie
+# oficiala confirmata (niciuna gasita la verificarea live a header-elor) —
+# aceeasi filosofie ca REQUEST_INTERVAL din sync/sources/football_data.py
+# (stare la nivel de modul, elapsed fata de ultimul apel real, indiferent de
+# cate instante FootballOracleAPI exista in acelasi proces).
+#
+# eloratings.net NU e in aceasta lista desi trimite tot zero header-e reale
+# (confirmat live, acelasi POC) — protejat deja structural, mai puternic
+# decat orice interval static: scrape unic (toate ratingurile nationale
+# intr-un singur raspuns, fara paginare per echipa), cache CacheManager 24h
+# (`_cget("elo_ratings")`), deci cel mult un apel real la 24h indiferent de
+# cate procese partajeaza acelasi cache disc/Supabase — vezi
+# `_fetch_elo_ratings()`.
+_STATIC_THROTTLE_INTERVAL_SECONDS: dict[str, float] = {
+    "thesportsdb": 1.0,
+}
+_static_throttle_last_call: dict[str, float] = {}
+
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -274,7 +298,20 @@ class FootballOracleAPI:
         exact tiparul deja dovedit în `ApiFootballProvider._get()`.
         Implicit `False` — toți ceilalți apelanți existenți (Odds API,
         football-data.org, ESPN, TheSportsDB, eloratings.net, Weather)
-        primesc exact `data`, comportament complet neschimbat."""
+        primesc exact `data`, comportament complet neschimbat.
+
+        [EXTINS — Phase 4 Functional Completion, punctul 1, 2026-08-03]
+        Gating (`should_request`) + înregistrare header-e reale
+        (`record_response_headers`) devin UNIVERSALE aici, pe baza
+        providerului detectat din URL (`_detect_provider_endpoint()`, deja
+        folosit identic pentru `provider_metrics`) — nu mai e nevoie ca
+        fiecare apelant să repete manual tiparul din `_free_lf_get()`.
+        Sigur pentru orice provider care nu trimite header-e recunoscute
+        (fail-open neschimbat, exact design-ul existent al
+        `RateLimitManager`) și pentru dublurile de test care înlocuiesc
+        `self._s` — `getattr(r, "headers", None)` întoarce `None`/`{}`
+        pentru un fake fără atribut `headers`, iar `record_response_headers`
+        iese imediat (`if not headers: return`)."""
         start = time.monotonic()
 
         def _ret(data, resp):
@@ -284,9 +321,34 @@ class FootballOracleAPI:
             # nu are nevoie de el, deci nu trebuie să existe pentru ei.
             return (data, getattr(resp, "headers", None)) if return_headers else data
 
+        # [DEFENSIV] `getattr` — dublurile de test existente construiesc
+        # `FootballOracleAPI.__new__(...)` + atribute manuale, ocolind
+        # `__init__` (deci fara `_request_manager`) — tipar deja folosit
+        # in zeci de fisiere de test. Fail-open identic cu designul deja
+        # existent al `RequestManager.should_request()` cand `_rate_limiter`
+        # e `None`.
+        request_manager = getattr(self, "_request_manager", None)
+        provider, _endpoint = self._detect_provider_endpoint(url)
+        if request_manager is not None and provider != "unknown" and not request_manager.should_request(provider):
+            logger.warning(
+                "[RateLimit] %s: cerere blocata inainte de HTTP (buget epuizat, confirmat din header-e reale).",
+                provider,
+            )
+            return _ret(None, None)
+
+        throttle_interval = _STATIC_THROTTLE_INTERVAL_SECONDS.get(provider)
+        if throttle_interval is not None:
+            last_call = _static_throttle_last_call.get(provider, 0.0)
+            wait = throttle_interval - (time.monotonic() - last_call)
+            if wait > 0:
+                time.sleep(wait)
+            _static_throttle_last_call[provider] = time.monotonic()
+
         try:
             r = self._s.get(url, headers=headers or {}, params=params or {}, timeout=timeout)
             latency_ms = (time.monotonic() - start) * 1000
+            if request_manager is not None and provider != "unknown":
+                request_manager.record_response_headers(provider, getattr(r, "headers", None))
             if r.status_code == 404:
                 logger.warning("[HTTP 404] %s", url[:80]); self._record_metric(url, False, latency_ms, status_code=404); return _ret(None, r)
             if r.status_code == 403:
@@ -326,13 +388,12 @@ class FootballOracleAPI:
         proprie (`path`+`params`), independentă de cheile L1/L2 ale
         fiecărui apelant.
 
-        Header-ele reale de răspuns pot avea alt format decât cele
-        oficiale API-Football pe care `RateLimitManager` le recunoaște
-        azi (semnalat, neconfirmat live, în auditul R4.1/R-Sync-6) —
-        design-ul existent al `RateLimitManager` e deja fail-open pentru
-        header-e nerecunoscute (`can_request()` returnează `True` cât
-        timp niciun header cunoscut n-a fost citit încă), deci integrarea
-        de aici e sigură indiferent de rezultat, nu presupune formatul.
+        [SIMPLIFICAT — Phase 4 Functional Completion, punctul 1] Înregistrarea
+        header-elor de răspuns (`record_response_headers`) nu mai e manuală
+        aici — `_get()` o face acum universal, pentru orice provider
+        detectat din URL (`_detect_provider_endpoint()`), deci și pentru
+        acest apel (`FREE_LF_URL` → "freelivefootball"). `return_headers`
+        rămâne nefolosit aici — `_get()` întoarce direct `data`.
         """
         provider = "freelivefootball"
         ram_category = "freelf_raw"
@@ -351,14 +412,11 @@ class FootballOracleAPI:
             return None
 
         try:
-            data, response_headers = self._get(
+            data = self._get(
                 f"{FREE_LF_URL}/{path}",
                 headers=self._key_manager.get_headers("freelivefootball") or {},
                 params=params or {},
-                return_headers=True,
             )
-            if response_headers is not None:
-                self._request_manager.record_response_headers(provider, response_headers)
             if data is not None:
                 self._request_manager.set_ram(provider, ram_category, ram_key, data)
             return data
@@ -1177,6 +1235,18 @@ class FootballOracleAPI:
         # [REPARAT] Elimin stratul redundant (_disc_fresh + self._elo_cache) -
         # CacheManager (prin _cget, categoria "elo", TTL 24h) acoperea deja
         # exact acelasi caz, dublat inutil. O singura sursa de adevar acum.
+        #
+        # [THROTTLING STATIC DOCUMENTAT — Phase 4 Functional Completion,
+        # punctul 1] Bypass istoric al `_get()` (HTML, nu JSON) — nu poate
+        # trece prin gating-ul universal de mai sus. Confirmat live (POC
+        # 2026-08-03): eloratings.net nu trimite niciun header de
+        # rate-limit. Protectia reala e mai sus in acest exact bloc: cache-ul
+        # de 24h (`_cget`/`_cset("elo_ratings", ...)`, cateva linii mai jos)
+        # face ca acest `self._s.get()` sa se execute cel mult o data la 24h
+        # per proces, indiferent de cate ori e apelat `get_elo_rating()` -
+        # un raspuns unic acopera TOATE echipele nationale (fara paginare
+        # per echipa), deci nu exista risc de burst pe care un interval
+        # static l-ar mai reduce.
         cached = self._cget("elo_ratings")
         if cached is not None: return cached
         if not BS4_AVAILABLE:

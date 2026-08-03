@@ -83,3 +83,66 @@ def test_status_reports_known_state():
     assert status["known"] is True
     assert status["daily_limit"] == 100
     assert status["daily_remaining"] == 77
+
+
+# ── Scheme reale per provider (Phase 4 Functional Completion, punctul 1) ──
+# Confirmate live prin POC dedicat (sync/poc_rate_limit_headers_check.py,
+# rulare GitHub Actions 30831280759, 2026-08-03) — nu presupuse.
+
+def test_oddsapi_real_header_recognized_not_apifootball_convention():
+    """The Odds API trimite "x-requests-remaining", nu "x-ratelimit-*" —
+    inainte de generalizare, acest header nu era niciodata recunoscut si
+    oddsapi ramanea fail-open permanent."""
+    rlm = RateLimitManager()
+    rlm.record_response_headers("oddsapi", {"x-requests-remaining": "0"})
+    assert rlm.can_request("oddsapi") is False
+    assert rlm.status("oddsapi")["daily_remaining"] == 0
+
+
+def test_oddsapi_positive_remaining_allows_request():
+    rlm = RateLimitManager()
+    rlm.record_response_headers("oddsapi", {"x-requests-remaining": "484"})
+    assert rlm.can_request("oddsapi") is True
+    assert rlm.status("oddsapi")["daily_remaining"] == 484
+
+
+def test_weatherapi_real_header_recognized_as_minute_budget():
+    """WeatherAPI trimite "x-weatherapi-qpm-left" (queries per minut) —
+    semantic per-minut, mapat la minute_remaining, nu daily_remaining."""
+    rlm = RateLimitManager()
+    rlm.record_response_headers("weatherapi", {"x-weatherapi-qpm-left": "0"})
+    assert rlm.can_request("weatherapi") is False
+    status = rlm.status("weatherapi")
+    assert status["minute_remaining"] == 0
+    assert status["daily_remaining"] is None
+
+
+def test_weatherapi_high_qpm_left_allows_request():
+    rlm = RateLimitManager()
+    rlm.record_response_headers("weatherapi", {"x-weatherapi-qpm-left": "999999"})
+    assert rlm.can_request("weatherapi") is True
+
+
+def test_apifootball_scheme_unaffected_by_provider_specific_schemes():
+    """Generalizarea NU trebuie sa schimbe comportamentul existent pentru
+    providerii deja acoperiti de scheme-ul implicit (API-Football, Soccer
+    Football Info) — regresie directa pe schema default."""
+    rlm = RateLimitManager()
+    rlm.record_response_headers("apifootball", {
+        "x-ratelimit-requests-limit": "100", "x-ratelimit-requests-remaining": "0",
+    })
+    assert rlm.can_request("apifootball") is False
+    # Header-ele reale ale oddsapi/weatherapi NU trebuie sa afecteze apifootball.
+    rlm.record_response_headers("apifootball", {"x-requests-remaining": "0"})
+    assert rlm.status("apifootball")["daily_remaining"] == 0  # neschimbat de la primul apel
+
+
+def test_thesportsdb_and_eloratings_have_no_scheme_stay_fail_open():
+    """Confirmat live: zero header-e de rate-limit pentru TheSportsDB si
+    eloratings.net — raman fail-open prin design (protejate separat, prin
+    throttling static in oracle_api.py, nu prin header-e aici)."""
+    rlm = RateLimitManager()
+    rlm.record_response_headers("thesportsdb", {"date": "Mon, 03 Aug 2026 16:15:53 GMT", "server": "cloudflare"})
+    assert rlm.can_request("thesportsdb") is True
+    rlm.record_response_headers("eloratings", {"server": "LiteSpeed"})
+    assert rlm.can_request("eloratings") is True
