@@ -246,7 +246,7 @@ Inofensiv funcțional (idempotent), dar semnalează că injury penalty a fost ad
 
 ## 9. Rezumat pentru Etapa 4 (roadmap) — puncte de decizie identificate aici
 
-1. `avg_goals_for` dublu-contorizat în `off_stat` (§6.1) — necesită decizie: eliminare al doilea termen, sau documentare explicită a intenției.
+1. `avg_goals_for` dublu-contorizat în `off_stat` (§6.1) — **investigat complet 2026-08-03** (EPIC ML Activation, Pasul 8), **cod NEATINS, decizie deliberată**: bugul rămâne confirmat și nerezolvat în cod. Eliminarea simplă degradează Oracle (backtest, 4849 meciuri); compensarea validată (recalibrare `goals_weight` 0.45→0.75) există și e documentată ca „Oracle Insight" (`docs/03_ENGINE/ORACLE_INSIGHT_GOALS_WEIGHT.md`), dar **nu a fost aplicată** — orice modificare a parametrilor matematici Oracle e tratată ca experiment de calibrare separat, cu propria aprobare, niciodată bundle-uit în task-ul de fix. Follow-up: **FOLLOW-UP-P8-01 — Oracle Calibration (`goals_weight`)**, task separat, neînceput.
 2. Ponderile per-ligă sunt complet inerte azi (`sample_count=0` peste tot, `auto_recalibration_enabled` implicit oprit) — necesită decizie: activare (cu monitorizare), sau eliminare a diferențierii per-ligă dacă nu se dorește activarea.
 3. `dna_weight` — nume derutant, fără semnal real de „DNA" în spate — necesită decizie: redenumire (schimbare de contract, ADR necesar) sau documentare clară.
 4. 5 elemente de cod confirmat mort în `injury_manager.py` (§7) — candidați pentru curățare, risc zero (zero apelanți).

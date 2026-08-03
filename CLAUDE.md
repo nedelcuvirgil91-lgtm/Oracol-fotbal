@@ -30,6 +30,8 @@ O stare necunoscută rămâne explicit „necunoscută"/„insuficiente date" �
 
 Guvernanța (ADR-uri, documente Frozen, promovare manuală) e tratată ca avantaj pe termen lung, nu ca frână — costul de disciplină e acceptat conștient (vezi ADR-002, „Consecințe").
 
+**Nu păstrăm buguri în cod doar pentru că produc rezultate bune** (regulă permanentă, adăugată 2026-08-03, precedent: EPIC ML Activation Pasul 8, „Oracle Insight" — dubla numărare `avg_goals_for`, `docs/03_ENGINE/ORACLE_INSIGHT_GOALS_WEIGHT.md`). Dacă un bug demonstrat matematic produce empiric o performanță mai bună pe backtest, nu se acceptă păstrarea lui — se identifică explicit informația predictivă utilă pe care o introduce (analiză cauzală, nu doar corelație), se documentează ca „Oracle Insight". **Dar bug fix-urile nu introduc schimbări de model**: orice modificare a parametrilor matematici ai Oracle (recalibrare de pondere, prag, cap) — chiar dacă rezolvă corect regresia cauzată de eliminarea bugului și e validată prin backtest — e tratată ca **experiment de calibrare separat**, cu propriul review și propria aprobare explicită, niciodată bundle-uit tacit în task-ul de fix. Un backtest favorabil nu e, singur, suficient pentru a schimba formula Oracle.
+
 ## Architectural North Star — 10 reguli care nu se încalcă niciodată
 
 1. Producția nu e niciodată afectată de un experiment activ — shadow rămâne shadow până e dovedit, niciodată invers.
