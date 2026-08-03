@@ -95,7 +95,7 @@ class MatchStatsBackfillService:
         client = self._sb.get_client()
         select_cols = (
             "id,fixture_id,home_team,away_team,kickoff_date,"
-            "actual_home_goals,actual_away_goals," + ",".join(self.columns)
+            "actual_home_goals,actual_away_goals,stats_source," + ",".join(self.columns)
         )
         rows: list[dict] = []
         offset, page_size = 0, 1000
@@ -174,6 +174,16 @@ class MatchStatsBackfillService:
             if not to_write:
                 metrics.already_complete += 1
                 continue
+
+            # [FIX Pasul 3, Master Repair Plan] Cei 3 ceilalți writer de
+            # statistici (freelivefootball, soccerfootballinfo, flashscore)
+            # scriu `stats_source` odată cu valorile — acest writer nu o
+            # făcea, deși e singurul care completează coloane pe rânduri
+            # deja existente (de la football-data.org). Aceeași gardă
+            # non-destructivă: scris DOAR dacă e azi NULL, DOAR când chiar
+            # se scrie o valoare noua (to_write non-gol).
+            if candidate.get("stats_source") is None:
+                to_write["stats_source"] = self.provider
 
             if dry_run:
                 metrics.written_ok += 1

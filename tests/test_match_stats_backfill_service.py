@@ -132,6 +132,7 @@ def test_writes_only_null_columns_never_overwrites():
     assert result.written_ok == 1
     assert sink[0][1] == {
         "away_shots": 8, "home_shots_on_target": 5, "away_shots_on_target": 3,
+        "stats_source": "test-provider",
     }, "home_shots era deja populat (99) si NU trebuia inclus in UPDATE"
     assert mh[0]["home_shots"] == 99, "valoarea reala preexistenta a fost suprascrisa — regresie destructiva"
 
@@ -145,7 +146,7 @@ def test_source_missing_column_never_written_as_approximation():
     result = _service(mh, src, sink).run()
 
     assert result.matched == 1
-    assert sink[0][1] == {"home_shots": 12, "away_shots": 8}
+    assert sink[0][1] == {"home_shots": 12, "away_shots": 8, "stats_source": "test-provider"}
     assert "home_shots_on_target" not in sink[0][1]
     assert "away_shots_on_target" not in sink[0][1]
 
@@ -209,6 +210,48 @@ def test_dry_run_never_calls_update():
     assert result.matched == 1
     assert result.written_ok == 1
     assert sink == [], "dry_run nu are voie sa scrie"
+
+
+def test_stats_source_written_when_missing_and_a_real_value_is_written():
+    """[Pasul 3, Master Repair Plan] stats_source trebuie completat cu
+    provider-ul serviciului cand e azi NULL SI se scrie efectiv o valoare
+    noua — la fel cum fac deja freelivefootball/soccerfootballinfo/
+    flashscore odata cu propriile lor scrieri de statistici."""
+    mh = [_mh_row(1, "Team A", "Team B", 10, 2, 1)]
+    src = [_source_row("Team A", "Team B", 10, 2, 1, home_shots=12, away_shots=8)]
+    sink = []
+    result = _service(mh, src, sink).run()
+
+    assert result.matched == 1
+    assert sink[0][1]["stats_source"] == "test-provider"
+
+
+def test_stats_source_not_overwritten_when_already_set():
+    """Non-destructiv: un rand cu stats_source deja populat (alt provider)
+    nu trebuie niciodata rescris, chiar daca se completeaza alte coloane
+    NULL."""
+    mh = [_mh_row(1, "Team A", "Team B", 10, 2, 1, stats_source="flashscore", home_shots=99)]
+    src = [_source_row("Team A", "Team B", 10, 2, 1, home_shots=1, away_shots=8)]
+    sink = []
+    result = _service(mh, src, sink).run()
+
+    assert result.matched == 1
+    assert sink[0][1] == {"away_shots": 8}, "stats_source existent nu trebuia atins/inclus in UPDATE"
+
+
+def test_stats_source_not_written_when_row_already_complete():
+    """Un rand deja complet (nimic de scris) nu primeste retroactiv un
+    stats_source doar pentru ca serviciul l-a vizitat — fara scriere de
+    date reale, nu exista nimic de atribuit."""
+    mh = [_mh_row(1, "Team A", "Team B", 10, 2, 1,
+                  home_shots=1, away_shots=2, home_shots_on_target=3, away_shots_on_target=4)]
+    src = [_source_row("Team A", "Team B", 10, 2, 1,
+                        home_shots=99, away_shots=99, home_shots_on_target=99, away_shots_on_target=99)]
+    sink = []
+    result = _service(mh, src, sink).run()
+
+    assert result.already_complete == 1
+    assert sink == []
 
 
 def test_columns_populated_counter_per_column():
