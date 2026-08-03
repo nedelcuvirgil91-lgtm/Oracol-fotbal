@@ -137,7 +137,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "elo_sigmoid_scale":           400.0,
     "elo_reference":               1500.0,
     "h2h_weight":                  0.15,
-    "h2h_lookback_days":           1095,
     "monte_carlo_simulations":     10000,
     "ml_blend_weight":             0.35,
     # [ADAUGAT — R-ARCH-REVIEW-01] Control manual, separat de is_trained —

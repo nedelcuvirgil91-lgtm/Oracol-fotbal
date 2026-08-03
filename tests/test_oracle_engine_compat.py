@@ -15,7 +15,7 @@ def test_default_config_preserves_all_previous_keys():
         "recalibration_learning_rate": 0.05, "recalibration_max_delta": 0.15,
         "recency_half_life_days": 365, "elo_blend_weight": 0.35,
         "elo_sigmoid_scale": 400.0, "elo_reference": 1500.0,
-        "h2h_weight": 0.15, "h2h_lookback_days": 1095,
+        "h2h_weight": 0.15,
         "monte_carlo_simulations": 10000, "ml_blend_weight": 0.35,
     }
     for key, value in expected_preexisting.items():

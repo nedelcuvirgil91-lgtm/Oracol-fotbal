@@ -61,6 +61,10 @@ Oracle Engine Audit (§7) marchează `h2h_lookback_days` (din `DEFAULT_CONFIG`) 
 
 **Recomandare**: pas investigativ, separat de orice eliminare — grep exhaustiv pe `h2h_lookback_days` în tot repo-ul (inclusiv `sync/`), înainte de orice decizie. Dacă neapelat confirmat: se adaugă la lista de cod mort (§2.5, extensie). Dacă apelat: se documentează rolul real. Zero risc — pas de citire, nu de scriere.
 
+**Rezultat (executat 2026-08-03, Pasul 4)**: **confirmat cod mort, 100%, și eliminat în același pas**. Grep exhaustiv pe tot repo (`.py`, inclusiv `sync/`) — singurele apariții: definiția din `DEFAULT_CONFIG` (`oracle_engine.py:140`) și `tests/test_oracle_engine_compat.py:18` (test de regresie pe forma dict-ului `DEFAULT_CONFIG`, nu citire funcțională). Verificat integral, linie cu linie, `_build_h2h()`/`_h2h_record_from_history_rows()` (toate cele 3 cascade — DB/`match_history`, FreeLF, Odds API): niciuna nu citea `h2h_lookback_days`, doar `h2h_weight`. Actualizat `ORACLE_ENGINE_AUDIT.md` §7 cu concluzia finală.
+
+**Decizie de proces (cerută explicit de proprietarul produsului, 2026-08-03)**: un pas nu se consideră închis doar pentru că demonstrează o problemă — se închide când problema e rezolvată complet, dacă rezolvarea e sigură și în scopul pasului. Aplicat aici: Pasul 4 nu s-a oprit la "confirmat, dar neeliminat" — cheia a fost scoasă din `DEFAULT_CONFIG` și din testul de regresie asociat, în același pas, imediat după confirmare. Această regulă se aplică de acum tuturor pașilor rămași din EPIC.
+
 ### 2.7 Suprapunerea ferestrei de date formă/goluri — documentare, fără acțiune de cod (adăugat din Architecture Review)
 
 Oracle Engine Audit (§6.3) semnalează explicit că `form_score` și `avg_goals_for`/`avg_goals_against` provin din ACEEAȘI fereastră de `last_n_fixtures` (5 meciuri) — nu o duplicare de informație, dar o limitare reală a diversității semnalului de intrare, marcată explicit de audit drept „relevant pentru Etapa 4". Acest punct fusese omis din versiunea inițială a planului — completare cerută de Architecture Review.
