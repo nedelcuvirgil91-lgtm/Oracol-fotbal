@@ -35,6 +35,37 @@ Acest document **nu modifică acel cod** — descrie DOAR condițiile sub care c
 
 Nicio bifă parțială — la fel ca disciplina `DEFINITION_OF_DONE.md` ("O căsuță rămâne goală... până la rezolvare"), o condiție neîndeplinită nu se rotunjește optimist.
 
+## Acoperirea reală a feature-urilor derivate (parte a condiției #3)
+
+**[ADAUGAT — EPIC „Functional Completion", Punctul 4, 2026-08-03]** Golul identificat de `docs/00_GOVERNANCE/FUNCTIONAL_COMPLETION_MASTER_PLAN.md` (P5-01, 🟠 Major): acest document nu documenta explicit acoperirea reală per feature — cerință necesară pentru ca oricine evaluează condiția #3 ("test de ablație măsurat") să interpreteze corect metricile, nu doar procentul agregat de accuracy/log-loss.
+
+**Statut — pur informativ, NU o a 5-a condiție obligatorie.** Secțiunea de mai jos nu adaugă o nouă căsuță la lista din „Condiții obligatorii" de mai sus și nu blochează nimic prin ea însăși — e context necesar pentru interpretarea corectă a condiției #3, deja existentă, atunci când un test de ablație nou va fi rulat. Cele 4 condiții obligatorii rămân exact patru, neschimbate.
+
+**Măsurătoare din 2026-08-03 — cifrele de mai jos NU sunt înghețate.** Acoperirea (în special cea de 17,1% a coloanelor derivate) se poate schimba pe măsură ce se acumulează date noi (bootstrap SuperLiga, sync continuu, backfill de statistici) — orice reevaluare viitoare a condiției #3 trebuie să re-verifice live procentele, nu să presupună că rămân cele de aici.
+
+`ml_predictor.FEATURE_COLUMNS` are azi 14 coloane, în două grupe cu acoperire foarte diferită. Verificat live (`Prediction`, `match_history`, 2026-08-03):
+
+```sql
+SELECT count(*) AS total,
+       count(*) FILTER (WHERE home_offensive_rating IS NOT NULL) AS off_rating,
+       count(*) FILTER (WHERE home_corner_avg_recent IS NOT NULL) AS corner_avg
+FROM match_history;
+-- total=53.769, off_rating=53.486 (99,5%), corner_avg=9.215 (17,1%)
+```
+
+| Grup | Coloane | Rânduri populate | Acoperire |
+|---|---|---|---|
+| **Core** (ADR original, ratinguri/formă/ELO/H2H) | `home/away_offensive_rating`, `home/away_defensive_rating`, `home/away_form_score`, `home/away_elo`, `h2h_modifier`, `h2h_meetings` (10 coloane) | 53.486 / 53.769 | **99,5%** |
+| **Derivate** (promovate ulterior prin ablație dedicată) | `corner_dominance`, `card_diff` (ADR-012), `foul_diff` (ADR-013), `shot_dominance` (ADR-021/P7.1) | 9.215 / 53.769 | **17,1%** |
+
+Toate cele 4 coloane derivate sunt calculate din aceleași 4 perechi de coloane brute (`home/away_corner_avg_recent`, `home/away_card_avg_recent`, `home/away_foul_avg_recent`, `home/away_shot_avg_recent`) — de aceea cele 4 procente de acoperire sunt identice (aceleași 9.215 rânduri gatează toate patru simultan, `ml_predictor.py:198-215`).
+
+**Cum gestionează antrenarea lipsa acestor date — corect, nu o aproximare** (`ml_predictor.py::_fetch_training_dataframe()`, liniile 194-218): dacă rândurile brute lipsesc, coloana derivată devine `NaN` explicit (niciodată 0 sau o valoare medie presupusă) și trece nativ către XGBoost, care are propriul mecanism de split pe valori lipsă (`missing-value split`) — comportament documentat explicit în cod, nu descoperit acum. Singurul `dropna()` din pipeline e pe `actual_result` (eticheta), nu pe feature-uri.
+
+**De ce contează pentru condiția #3**: cele 4 feature-uri derivate au fost promovate prin teste de ablație reale (`docs/03_ENGINE/CORNER_CARD_DOMINANCE_ABLATION_2026-07-13.md`, `FOULS_DOMINANCE_ABLATION_2026-07-14.md`, `SHOT_DOMINANCE_ABLATION_2026-07-15.md`) — câștigul măsurat acolo a fost obținut pe eșantionul disponibil la acel moment, nu pe întreg `match_history`. Orice evaluare viitoare a activării blending-ului trebuie să țină cont explicit că, azi, ~83% din rândurile de antrenare nu au deloc semnal de la aceste 4 coloane (XGBoost le tratează ca "lipsă", nu ca "zero" sau "neutru") — un test de ablație nou, măsurat pe volumul curent, ar trebui raportat separat pe cele două grupe de acoperire, nu doar ca o singură cifră agregată de accuracy.
+
+**Limitare suplimentară a setului de antrenare** (context, nu blocaj): `MIN_SAMPLES_TO_TRAIN = 30` (`ml_predictor.py:36`) — prag ușor depășit de volumul actual (53.769 rânduri totale, 53.482 cu `actual_result` populat), deci antrenarea zilnică rulează fără probleme; limitarea de mai sus e despre **calitatea semnalului per feature**, nu despre volumul brut de rânduri antrenabile.
+
 ## Starea curentă, până la bifarea completă
 
 - **Predictorul** (Poisson/ELO/formă) rămâne sistemul principal de decizie — neschimbat, activ, servește predicții azi.
