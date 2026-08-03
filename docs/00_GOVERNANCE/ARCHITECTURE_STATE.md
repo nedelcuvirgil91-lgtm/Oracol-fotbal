@@ -6,6 +6,8 @@
 
 **Ultima verificare completă**: 2026-07-28, prin inspecție directă `git`/Supabase (nu presupusă) — vezi metodologia §5. **Corecție majoră față de versiunea anterioară (verificată 2026-07-22)**: acel document afirma că tot lanțul ADR-037 R1-R3 era „doar pe branch, nemerge-uit" — verificat direct azi (`git show origin/main:learning_core/champion_guardian.py` etc.), **merge-ul s-a produs între timp**. Secțiunile 1-5 de mai jos sunt rescrise complet pe baza stării reale de azi, nu corectate punctual.
 
+**Actualizare punctuală, 2026-08-03**: `main` HEAD = `30c20da` (§1) — fast-forward al `claude/continua-faza-1-adr5-o52jat` după aprobarea Pasului 1 din EPIC „ML Activation & Oracle Evolution" (`docs/00_GOVERNANCE/ML_ACTIVATION_IMPLEMENTATION_PLAN.md`). De acum, fiecare pas aprobat din acel plan merge-uiește imediat pe `main` (vezi nota din §1) — acest document se actualizează la fiecare astfel de merge, nu doar la etapele majore ADR-037/Flashscore de mai jos.
+
 ---
 
 ## 0. Critical Path oficial curent (2026-07-29)
@@ -28,16 +30,18 @@ Scope-ul M0 s-a extins oficial (decizie Product Owner) de la statistici de bază
 
 ---
 
-## 1. Topologia branch-urilor (verificat direct, `git`, 2026-07-28)
+## 1. Topologia branch-urilor (verificat direct, `git`, 2026-08-03)
 
 | | |
 |---|---|
 | Branch default (GitHub Actions rulează pe el) | `main` (verificat: `git remote show origin` → `HEAD branch: main`) |
-| `main` HEAD | `af77758` |
-| Branch de lucru curent | `claude/sprint0-stabilizare-feedback-loop` |
-| Commit-uri branch înaintea lui `main` | 37 |
-| Commit-uri `main` înaintea branch-ului | 0 (branch-ul curent conține tot istoricul `main`) |
-| Ultima migrare pe `main` | `029_freelf_h2h_snapshot` (include 014/015, verificat `git show origin/main:database/migrations/01{4,5}_*.sql`) |
+| `main` HEAD | `30c20da` — fast-forward de pe `claude/continua-faza-1-adr5-o52jat`, `git push origin main`, 2026-08-03 (include audituri Etapa 1-3, `ML_ACTIVATION_IMPLEMENTATION_PLAN.md` post Architecture Review, Pasul 1 EPIC ML Activation) |
+| Branch de lucru curent | `claude/continua-faza-1-adr5-o52jat` |
+| Commit-uri branch înaintea lui `main` | 0 (fast-forward complet — branch și `main` identice după merge) |
+| Commit-uri `main` înaintea branch-ului | 0 |
+| Ultima migrare pe `main` | `029_freelf_h2h_snapshot` (include 014/015, verificat `git show origin/main:database/migrations/01{4,5}_*.sql`) — neatinsă de commit-urile EPIC „ML Activation & Oracle Evolution" (doar documentație + comentariu, zero schimbare de schemă) |
+
+**Strategie de merge (EPIC „ML Activation & Oracle Evolution", din Pasul 2 încolo)**: după fiecare pas aprobat individual, merge fast-forward imediat pe `main` (nu se acumulează mai multe pași pe branch înainte de merge) + actualizare acestui document cu noul SHA. Scop: `main` reflectă mereu exact ce a fost aprobat, fără fereastră în care branch-ul de lucru divergă vizibil de starea aprobată.
 
 ## 2. Ce e pe `main` azi (implementat, live, nu doar cod) — ADR-037 MERGE-UIT
 
