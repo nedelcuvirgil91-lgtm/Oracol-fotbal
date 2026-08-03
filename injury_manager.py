@@ -33,11 +33,6 @@ POSITION_WEIGHTS: dict[str, float] = {
     "F": 1.2, "FWD": 1.2, "A": 1.2,
 }
 
-ABSENCE_CERTAINTY: dict[str, float] = {
-    "injured": 1.0, "suspended": 1.0, "doubtful": 0.5,
-    "questionable": 0.4, "unknown": 0.3,
-}
-
 _EXPECTED_RETURN_CERTAINTY: dict[str, float] = {
     "doubtful": 0.50, "doubt": 0.50,
     "about a week": 0.95, "a week": 0.95,
@@ -48,8 +43,6 @@ _EXPECTED_RETURN_CERTAINTY: dict[str, float] = {
     "questionable": 0.40,
 }
 
-MIN_STARTER_MINUTES    = 900
-MIN_KEY_PLAYER_MINUTES = 1500
 MAX_SINGLE_PLAYER_IMPACT = 0.18
 MAX_TOTAL_TEAM_IMPACT    = 0.30
 
@@ -135,11 +128,6 @@ class InjuryManager:
             return "⚡ KEY PLAYER"
         if market_value >= MARKET_VALUE_STARTER:
             return "🔵 STARTER"
-        return "⬜ ROTATION"
-
-    def _impact_label(self, minutes: int) -> str:
-        if minutes >= MIN_KEY_PLAYER_MINUTES: return "⚡ KEY PLAYER"
-        if minutes >= MIN_STARTER_MINUTES:   return "🔵 STARTER"
         return "⬜ ROTATION"
 
     # ── FETCH LINEUP — Free Live Football (semnătură NOUĂ v2.0) ──────────
@@ -267,38 +255,6 @@ class InjuryManager:
             f"Penalizare xG: {total_penalty*100:.1f}%"
         )
         logger.info("[Injuries] %s: %d absences, xG penalty=%.3f", team_name, len(absences), total_penalty)
-        return report
-
-    # ── Fallback din cache ─────────────────────────────────────────────────
-    def get_injury_report_from_cache(self, team_id: int | str, team_name: str) -> TeamInjuryReport:
-        report = TeamInjuryReport(team_name=team_name, team_id=team_id)
-        if not self._cache:
-            report.data_quality = "unavailable"; return report
-        cached = self._cache.get_injuries(team_id)
-        if not cached:
-            report.data_quality = "unavailable"
-            report.summary = "ℹ️ Date accidentări indisponibile"; return report
-        absences: list[PlayerAbsence] = []
-        for item in cached:
-            mv     = int(item.get("marketValue", 0) or 0)
-            abs_type = item.get("status", "injured")
-            cert   = ABSENCE_CERTAINTY.get(abs_type, 0.5)
-            pos    = item.get("position", "M")
-            impact = self._calc_impact_from_market_value(mv, pos, cert)
-            label  = self._impact_label_from_market_value(mv)
-            absences.append(PlayerAbsence(
-                player_id=item.get("id",""), name=item.get("name","Unknown"),
-                position=pos, minutes_played=0, market_value=mv,
-                absence_type=abs_type, certainty=cert,
-                xg_impact=impact, impact_label=label,
-                note=f"{label} | {abs_type} | xG: {impact*100:.1f}%",
-            ))
-        total_penalty = max(sum(a.xg_impact for a in absences), -MAX_TOTAL_TEAM_IMPACT)
-        has_key = any(a.market_value >= MARKET_VALUE_KEY_PLAYER for a in absences)
-        absences.sort(key=lambda a: a.xg_impact)
-        report.absences = absences; report.total_xg_penalty = round(total_penalty,4)
-        report.data_quality = "estimated"; report.has_key_absences = has_key
-        report.summary = f"{'⚠️' if has_key else 'ℹ️'} {len(absences)} absențe din cache | Penalizare: {total_penalty*100:.1f}%"
         return report
 
     # ── Apply penalty ─────────────────────────────────────────────────────
