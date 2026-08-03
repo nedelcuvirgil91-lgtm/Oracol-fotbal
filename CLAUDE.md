@@ -118,7 +118,7 @@ Cheile API sunt tratate ca infrastructură critică — nu ca detalii de configu
 ## Regulile Champion vs. Challenger (Learning Core)
 
 - Promovare doar din statusul `candidate_for_promotion`, doar dacă Brier + Log-loss + Accuracy sunt *simultan* semnificativ mai bune (vezi `shadow_testing.evaluate_experiment()`).
-- Promovarea automată (`auto_promotion_enabled=True`) contrazice azi ADR-002 și necesită un ADR nou dedicat înainte de activare — niciodată implicit pornită.
+- Promovarea automată (concept `auto_promotion_enabled`, propus DOAR ca design în `docs/04_LEARNING_CORE/LEARNING_CORE_ARCHITECTURE.md` §3.4 — corectat 2026-08-03, EPIC ML Activation Pasul 5: nu există azi ca flag citit de niciun cod, confirmat prin grep exhaustiv, `docs/00_GOVERNANCE/ML_ENGINE_AUDIT.md` §11/§13) contrazice azi ADR-002 și necesită un ADR nou dedicat înainte de orice implementare — niciodată implicit pornită.
 - Champion Manager mutabil exclusiv de Promotion Engine și Rollback Engine.
 - Niciun Challenger nu servește predicții live.
 

@@ -73,7 +73,8 @@ Migrările 014/015 sunt aplicate pe Supabase live de mult (`champion_health_eval
 | Workflow | Cron | Cod executat (de pe `main`) | Gated de |
 |---|---|---|---|
 | `daily.yml` | zilnic 03:00 UTC | `sync/run_daily.py` — neatins de ADR-037 | — |
-| `continuous_learning.yml` | `0 6 * * *` | `continuous_learning.run_cycle()` — 4 faze (A/B/D/C), Faza D gatată separat | `learning_core_enabled` (A/B/C), `champion_guardian_enabled` (D) |
+| `continuous_learning.yml` | **`workflow_dispatch` only** (corectat 2026-08-03, EPIC ML Activation Pasul 5 — secțiunea anterioară afirma `0 6 * * *`, depășită; cron-ul propriu a fost eliminat, consolidat în `night_sync.yml`, vezi rândul de mai jos) | `continuous_learning.run_cycle()` — 4 faze (A/B/D/C), Faza D gatată separat | `learning_core_enabled` (A/B/C), `champion_guardian_enabled` (D) |
+| `night_sync.yml` | zilnic 03:00 UTC | Etapa 8 („ML Refresh") apelează `continuous_learning.run_cycle()` — cadența reală de producție pentru Learning Core | Aceleași flag-uri ca rândul de mai sus |
 | `consensus_validation.yml` | `0 9 * * *` | `run_consensus_validation.py` | `consensus_validation_enabled` |
 
 **Stare canonică relevantă** (verificat live, 2026-07-28): `model_champions` — 4 rânduri, toate `gate_validation_test` (fixturi R1.8, niciun campion real `production_champion`/`xgboost_v1`); `challengers` — 5 rânduri, toate `gate_validation_test`, toate în stare terminală/test, zero challenger real activ; `decision_feed` = 0; `champion_health_evaluations` = 0; `shadow_predictions` = 0 (infrastructură activată azi, în așteptare de trafic real + un challenger real activ — vezi §3); `recalibration_log` = 0 (`auto_recalibration_enabled=False`, deliberat, neatins azi).
