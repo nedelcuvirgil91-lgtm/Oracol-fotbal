@@ -1,18 +1,17 @@
-# Functional Completion Report — Engine Completion (EPIC 1–4)
+# Functional Completion Report — Engine Completion (EPIC 1–5)
 
 **Status**: Final review completed. Implementation status:
 - P1 ✅ Implemented
 - P2 ✅ Implemented
 - P3 🟡 Deferred after architectural review — necesită `FOLLOW-UP-P3-01` înainte de orice implementare
 - P4 ✅ Implemented
+- P5 ✅ Implemented
 
 **Perioadă**: 2026-08-03 (sesiune unică).
 
 **Autor**: Claude, la cererea proprietarului produsului.
 
-**Scop**: raport formal de status pentru cele 4 puncte ale EPIC-ului „Functional Completion" (audit de bază: `docs/00_GOVERNANCE/FUNCTIONAL_COMPLETION_MASTER_PLAN.md`) — deschis explicit după închiderea Master Repair Plan-ului, cu ordine strictă de execuție impusă de proprietarul produsului: „Lucrăm strict în această ordine, fără să sărim peste pași." **Statusul final NU e uniform** — 3 din cele 4 puncte sunt închise (`IMPLEMENTED`), unul (Punctul 3) rămâne explicit **`DEFERRED`**, nu închis — vezi Rezumatul executiv de mai jos.
-
-**Ce NU acoperă acest raport**: Punctul 5 (curățare/îmbunătățire UI) — neînceput, condiționat explicit de aprobarea acestui document.
+**Scop**: raport formal de status pentru cele 5 puncte ale EPIC-ului „Functional Completion" (audit de bază: `docs/00_GOVERNANCE/FUNCTIONAL_COMPLETION_MASTER_PLAN.md`) — deschis explicit după închiderea Master Repair Plan-ului, cu ordine strictă de execuție impusă de proprietarul produsului: „Lucrăm strict în această ordine, fără să sărim peste pași." **Statusul final NU e uniform** — 4 din cele 5 puncte sunt închise (`IMPLEMENTED`), unul (Punctul 3) rămâne explicit **`DEFERRED`**, nu închis — vezi Rezumatul executiv de mai jos.
 
 ---
 
@@ -24,9 +23,9 @@
 | **P2** | Predictor Regression Suite | ✅ **IMPLEMENTED** |
 | **P3** | `flashscore_data_completeness` ca semnal de încredere | 🟡 **DEFERRED AFTER ARCHITECTURAL REVIEW** — vezi `FOLLOW-UP-P3-01` |
 | **P4** | Documentarea acoperirii reale a feature-urilor ML derivate | ✅ **IMPLEMENTED** |
-| **P5** | Curățare/îmbunătățire UI (Team DNA, Poisson vs. Monte Carlo) | ⬜ **NOT STARTED** — condiționat de aprobarea acestui raport |
+| **P5** | Curățare/îmbunătățire UI (Team DNA, Poisson vs. Monte Carlo) | ✅ **IMPLEMENTED** |
 
-**Stare globală „Engine Completion"**: **3 din 4 puncte închise complet** (P1, P2, P4) — infrastructură de protecție reală (rate-limiting), infrastructură de verificare reală (regression suite), și documentație de guvernanță actualizată cu date live. **1 punct amânat explicit, nu eșuat** (P3) — investigația a demonstrat că premisa inițială a EPIC-ului era invalidă, iar decizia corectă a fost să NU se implementeze nimic pe un semnal fără valoare informațională, nu să se forțeze o integrare. Zero regresie introdusă în cele 3 puncte implementate (1903→1976 teste trecute, +73 exact cât s-a adăugat). Oracle Engine, Predictorul, ML și UI rămân complet neatinse pe tot parcursul EPIC-ului P1–P4 — singurele schimbări de cod au fost în stratul de acces la provideri externi (`oracle_api.py`, `rate_limit_manager.py`) și în infrastructura de testare.
+**Stare globală „Engine Completion"**: **4 din 5 puncte închise complet** (P1, P2, P4, P5) — infrastructură de protecție reală (rate-limiting), infrastructură de verificare reală (regression suite), documentație de guvernanță actualizată cu date live, și prezentare UI îmbunătățită pentru date deja calculate. **1 punct amânat explicit, nu eșuat** (P3) — investigația a demonstrat că premisa inițială a EPIC-ului era invalidă, iar decizia corectă a fost să NU se implementeze nimic pe un semnal fără valoare informațională, nu să se forțeze o integrare. Zero regresie introdusă în cele 4 puncte implementate (1903→1976 teste trecute, +73 exact cât s-a adăugat — P5 n-a adăugat teste automate, vezi secțiunea proprie). Oracle Engine, Predictorul și ML rămân complet neatinse pe tot parcursul EPIC-ului P1–P5 — singurele schimbări de cod au fost în stratul de acces la provideri externi (`oracle_api.py`, `rate_limit_manager.py`), în infrastructura de testare, și, la P5, strict în prezentarea UI (`app.py`).
 
 ---
 
@@ -218,6 +217,52 @@ Secțiune nouă în `ML_ACTIVATION_GATE.md`, „Acoperirea reală a feature-uril
 
 ---
 
+## Punctul 5 — Curățare/îmbunătățire UI (Team DNA, Poisson vs. Monte Carlo)
+
+**Status**: ✅ IMPLEMENTED.
+
+### Problema inițială
+
+Două findings 🟡 Minor / 🔵 Cosmetic din `FUNCTIONAL_COMPLETION_MASTER_PLAN.md`: (1) `flashscore_team_dna.py` calculează 12+ câmpuri per echipă, dar `app.py` extrăgea explicit doar 7 pentru afișare — date reale, colectate, nefolosite vizibil; (2) panoul „Poisson vs. Monte Carlo" afișa două seturi de probabilități fără niciun context, risc de confuzie („două motoare independente" vs. realitatea — Monte Carlo verifică Poisson, nu îl contrazice).
+
+### Dovada că exista
+
+- `grep -n "matches_sampled\|players_sampled\|avg_goals_for\|avg_goals_against" app.py` → zero rezultate înainte de acest punct.
+- Din 8 câmpuri de clasament calculate (`rank`/`played`/`won`/`drawn`/`lost`/`goals_for`/`goals_against`/`goal_diff`/`points`), doar `rank` era afișat.
+- `app.py` (secțiunea Monte Carlo/Poisson, înainte de acest punct) — zero text explicativ, doar cifre brute.
+
+### Soluția implementată (aprobată explicit, cu ajustări, în `docs/00_GOVERNANCE/UI_IMPROVEMENT_PROPOSAL.md`)
+
+**Zona 1 — Team DNA Flashscore** (Opțiunea B, separare în 3 grupuri logice, plus 2 ajustări cerute explicit):
+- Tabelul de statistici extins cu `avg_goals_for`/`avg_goals_against` (rămâne omogen — toate rânduri „X per meci").
+- Caption nou, **adaptiv** (ascuns complet dacă nu există nicio dată): eșantion cu indicator vizual al încrederii datelor (`matches_sampled`) — 🟢 25+, 🟡 10–24, 🔴 sub 10 (ajustare cerută explicit, nu era în propunerea inițială).
+- Tabel nou, adaptiv, „Clasament complet" (9 câmpuri) — înlocuiește vechiul rând unic „Clasament" (doar rank).
+- Adaptivitate: fiecare grup nou dispare complet dacă ambele echipe nu au deloc date pentru el (nu secțiuni goale) — cerință explicită.
+
+**Zona 2 — Poisson vs. Monte Carlo** (Opțiunea A, caption static):
+- Text neutru, reformulat explicit la cerere pentru a evita implicația „diferență mare = eroare": *„Poisson calculează probabilitățile direct din xG. Monte Carlo simulează 10.000 de meciuri folosind aceleași valori xG, ca verificare a stabilității rezultatului. Valorile ar trebui să fie apropiate."*
+
+### Commit-uri relevante
+
+- `12fefa8` — `Implement UI improvements for Team DNA Flashscore and Poisson/Monte Carlo panel`.
+
+### Modul de validare
+
+- Sintaxă: `python -m py_compile app.py` — validă.
+- Logică de randare/adaptivitate testată izolat (script Python standalone, nu pytest): 4 cazuri — date complete, date complet goale, date parțiale, praguri exacte ale badge-ului (0/None/1/9/10/24/25/100) — toate corecte.
+- **Confirmare vizuală reală în browser** (nu doar cod citit): Streamlit rulat izolat, cu date sintetice, în afara aplicației principale (fără dependență de rețea/Supabase live), capturi de ecran Playwright pentru toate cele 3 cazuri (date complete ambele echipe, o echipă fără date Flashscore, ambele fără date) — comportamentul adaptiv și textul caption-ului confirmate exact ca în specificație.
+- Suită completă `pytest tests/` (după commit): 1976 passed / 2 skipped, aceleași 3 eșecuri preexistente și necorelate, neschimbate — `app.py` nu e atins de niciun test automat existent.
+
+### Riscuri rămase
+
+- `app.py` nu are acoperire de test automată (nu e un modul importabil testat de `pytest tests/`, e un script Streamlit) — validarea s-a bazat pe verificare vizuală manuală + logică izolată, nu pe o suită de regresie UI persistentă. O schimbare viitoare la acest fișier ar putea reintroduce o regresie vizuală neobservată dacă nu se repetă verificarea manuală.
+
+### Follow-up
+
+- Niciun follow-up obligatoriu — punctul e considerat complet închis.
+
+---
+
 ## Sumar final
 
 ### Fișiere modificate/create/șterse (agregat, toate cele 4 puncte)
@@ -239,6 +284,8 @@ Secțiune nouă în `ML_ACTIVATION_GATE.md`, „Acoperirea reală a feature-uril
 | `.github/workflows/predictor_regression_suite.yml` | 2 | Nou |
 | *(niciunul)* | 3 | — |
 | `docs/00_GOVERNANCE/ML_ACTIVATION_GATE.md` | 4 | Modificat |
+| `docs/00_GOVERNANCE/UI_IMPROVEMENT_PROPOSAL.md` | 5 | Nou |
+| `app.py` | 5 | Modificat |
 
 **Notă**: `docs/00_GOVERNANCE/FUNCTIONAL_COMPLETION_MASTER_PLAN.md` (auditul de bază al întregului EPIC) și acest raport nu sunt incluse în tabel — sunt documentele-cadru, nu livrabile ale unui punct individual.
 
@@ -248,7 +295,8 @@ Secțiune nouă în `ML_ACTIVATION_GATE.md`, „Acoperirea reală a feature-uril
 - Punctul 2: **61** teste noi.
 - Punctul 3: 0 (analiză, fără cod).
 - Punctul 4: 0 (document, fără cod).
-- **Total adăugat în acest EPIC: 73 teste.**
+- Punctul 5: 0 teste automate noi (`app.py` nu e acoperit de `pytest tests/`) — validat prin logică izolată + confirmare vizuală reală în browser (Playwright), nu prin suită de regresie persistentă.
+- **Total adăugat în acest EPIC: 73 teste automate** (P1+P2).
 
 ### Numărul total de teste după modificări
 
@@ -284,9 +332,10 @@ Secțiune nouă în `ML_ACTIVATION_GATE.md`, „Acoperirea reală a feature-uril
 | P2 | `9192526` |
 | P3 | — (Deferred, niciun commit de cod) |
 | P4 | `3335508` |
+| P5 | `12fefa8` |
 
 ---
 
 ## Ce urmează
 
-**Punctul 5** (curățare/îmbunătățire propunere UI — Team DNA, explicații Poisson vs. Monte Carlo, fără modificarea logicii Predictorului) rămâne neînceput, condiționat explicit de aprobarea acestui raport de către proprietarul produsului.
+EPIC „Functional Completion" (P1–P5) e închis, conform statusului din Rezumatul executiv: **4 puncte `IMPLEMENTED`** (P1, P2, P4, P5), **1 punct `DEFERRED`** (P3, urmărit prin `FOLLOW-UP-P3-01`, neaprobat, neînceput). Niciun nou EPIC nu pornește fără aprobarea explicită, separată, a proprietarului produsului.
