@@ -12,9 +12,13 @@ import pytest
 
 from providers.flashscore.adapter import FlashscoreAdapter
 from providers.flashscore.discovery import (
+    DEFAULT_LIMIT_PER_LEAGUE_AUTOMATED,
+    FLASHSCORE_LIMIT_PER_LEAGUE_CONFIG_KEY,
     FLASHSCORE_TRACKED_COMPETITIONS,
     DiscoveredMatch,
+    _discover_for_hub,
     discover_matches,
+    get_limit_per_league_automated,
     parse_match_links,
     run_foundation_data_layer_for_discovered_matches,
 )
@@ -154,3 +158,116 @@ def test_run_foundation_data_layer_skips_already_collected_match_delta_sync(monk
     assert reports[0] == {"match_id": None, "ok": True, "skipped": True, "reason": "already_collected", "match": seen}
     assert reports[1]["ok"] is True and not reports[1].get("skipped")
     assert fetch_calls == [{"match_base_url": "https://y", "mid": "new-mid"}]
+
+
+# ════════════════════════════════════════════════════════════════════════
+# _discover_for_hub — include_future_fixtures (Pasul 1 Master Repair Plan,
+# rafinat dupa feedback) — vezi docstring _discover_for_hub() pentru
+# justificarea completa: rularile automate NU mai incearca /fixtures/
+# deloc, in loc sa incerce o cross-referentiere fragila cu
+# scheduled_fixtures.
+# ════════════════════════════════════════════════════════════════════════
+
+_MATCH_HTML = '<a href="/match/football/team-a-AAAAAAAA/team-b-BBBBBBBB?mid=XYZ123"></a>'
+_EMPTY_HTML = "<html><body>no matches</body></html>"
+
+
+class _FakeResponse:
+    def __init__(self, status=200):
+        self.status = status
+
+
+class _FakePage:
+    """Fake Playwright page — `content_by_source` mapeaza `"results"`/
+    `"fixtures"` la HTML-ul intors dupa navigare la acel hub. Inregistreaza
+    fiecare `goto()` ca sa se poata verifica exact ce hub-uri au fost
+    incercate."""
+    def __init__(self, content_by_source: dict[str, str]):
+        self._content_by_source = content_by_source
+        self._current = ""
+        self.urls_visited: list[str] = []
+
+    def goto(self, url, wait_until=None, timeout=None):
+        self.urls_visited.append(url)
+        source = "results" if url.rstrip("/").endswith("/results") else "fixtures"
+        self._current = self._content_by_source.get(source, _EMPTY_HTML)
+        return _FakeResponse()
+
+    def wait_for_timeout(self, ms):
+        pass
+
+    def content(self):
+        return self._current
+
+
+def test_discover_for_hub_tries_fixtures_when_results_empty_and_future_allowed(monkeypatch):
+    monkeypatch.setattr("providers.flashscore.discovery.FLASHSCORE_MIN_DELAY_SECONDS", 0)
+    page = _FakePage({"results": _EMPTY_HTML, "fixtures": _MATCH_HTML})
+    matches = _discover_for_hub(page, "https://www.flashscore.com/football/x/y", "Premier League",
+                                 limit=None, include_future_fixtures=True)
+    assert len(matches) == 1
+    assert matches[0].source == "fixtures"
+    assert any(u.endswith("/fixtures/") for u in page.urls_visited)
+
+
+def test_discover_for_hub_skips_fixtures_when_future_fixtures_disabled(monkeypatch):
+    """[ADAUGAT Pasul 1 Master Repair Plan] Cauza radacina a celor 240 de
+    fixture-uri viitoare (audit 2026-08-03): cu include_future_fixtures=
+    False, /fixtures/ nu mai e incercat NICIODATA — liga cu /results/ gol
+    (in pauza competitionala) e sarita curat, 0 meciuri, nu 100+."""
+    monkeypatch.setattr("providers.flashscore.discovery.FLASHSCORE_MIN_DELAY_SECONDS", 0)
+    page = _FakePage({"results": _EMPTY_HTML, "fixtures": _MATCH_HTML})
+    matches = _discover_for_hub(page, "https://www.flashscore.com/football/x/y", "Premier League",
+                                 limit=None, include_future_fixtures=False)
+    assert matches == []
+    assert not any(u.endswith("/fixtures/") for u in page.urls_visited)
+    assert any(u.endswith("/results/") for u in page.urls_visited)
+
+
+def test_discover_for_hub_still_returns_results_when_future_fixtures_disabled(monkeypatch):
+    """Excluderea /fixtures/ nu atinge deloc /results/ — meciurile deja
+    terminate raman complet neafectate."""
+    monkeypatch.setattr("providers.flashscore.discovery.FLASHSCORE_MIN_DELAY_SECONDS", 0)
+    page = _FakePage({"results": _MATCH_HTML, "fixtures": _EMPTY_HTML})
+    matches = _discover_for_hub(page, "https://www.flashscore.com/football/x/y", "Champions League",
+                                 limit=None, include_future_fixtures=False)
+    assert len(matches) == 1
+    assert matches[0].source == "results"
+
+
+# ════════════════════════════════════════════════════════════════════════
+# get_limit_per_league_automated() — plafon configurabil (nu hardcodat),
+# Pasul 1 Master Repair Plan, rafinat dupa feedback.
+# ════════════════════════════════════════════════════════════════════════
+
+def test_get_limit_per_league_automated_uses_supabase_config_when_present(monkeypatch):
+    monkeypatch.setattr("supabase_client.load_config", lambda default: {FLASHSCORE_LIMIT_PER_LEAGUE_CONFIG_KEY: 45})
+    assert get_limit_per_league_automated() == 45
+
+
+def test_get_limit_per_league_automated_falls_back_to_default_when_key_missing(monkeypatch):
+    monkeypatch.setattr("supabase_client.load_config", lambda default: {})
+    assert get_limit_per_league_automated() == DEFAULT_LIMIT_PER_LEAGUE_AUTOMATED
+
+
+def test_get_limit_per_league_automated_falls_back_when_value_invalid(monkeypatch):
+    """Valoare configurata gresit (negativa/zero/nenumerica) -> fallback la
+    implicit, niciodata o eroare care blocheaza rularea automata."""
+    monkeypatch.setattr("supabase_client.load_config",
+                         lambda default: {FLASHSCORE_LIMIT_PER_LEAGUE_CONFIG_KEY: -5})
+    assert get_limit_per_league_automated() == DEFAULT_LIMIT_PER_LEAGUE_AUTOMATED
+
+
+def test_get_limit_per_league_automated_falls_back_on_exception(monkeypatch):
+    def _boom(default):
+        raise RuntimeError("simulated failure")
+    monkeypatch.setattr("supabase_client.load_config", _boom)
+    assert get_limit_per_league_automated() == DEFAULT_LIMIT_PER_LEAGUE_AUTOMATED
+
+
+def test_discover_matches_default_preserves_manual_cli_behavior(monkeypatch):
+    """include_future_fixtures implicit True — comportamentul CLI/manual
+    existent ramane identic, neafectat de acest task."""
+    import inspect
+    sig = inspect.signature(discover_matches)
+    assert sig.parameters["include_future_fixtures"].default is True

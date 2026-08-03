@@ -224,6 +224,7 @@ def get_finished_matches_missing_stats(
     date_from: str | None = None, date_to: str | None = None,
     league: str | None = None,
     require_referee: bool = False,
+    include_id: bool = False,
 ) -> list[dict]:
     """
     [ADAUGAT Sprint 1 — Match Statistics] Meciuri deja ÎNCHEIATE
@@ -250,6 +251,14 @@ def get_finished_matches_missing_stats(
     datele bogate" — un meci la care `home_possession` a fost deja completat
     de FreeLF (owner diferit, COALESCE-only, ADR-036) tot trebuie procesat
     de Soccer Football Info dacă `referee` încă lipsește.
+
+    `include_id` [ADAUGAT Pasul 1 Master Repair Plan, ADR-045] — implicit
+    False, comportament NESCHIMBAT pentru apelanții existenți. Adaugă `id`
+    la coloanele selectate, necesar exclusiv pentru
+    `sync/sync_match_statistics.py`, ca să verifice ulterior dacă Flashscore
+    are deja statistici complete pentru fiecare meci
+    (`get_match_ids_with_complete_flashscore_stats()`) înainte de a apela
+    Soccer Football Info/FreeLF (Single Owner, ADR-045).
     """
     client = get_client()
     if client is None:
@@ -258,9 +267,11 @@ def get_finished_matches_missing_stats(
     if date_from is None:
         date_from = (date.today() - timedelta(days=days_back)).isoformat()
     try:
+        select_cols = ("id,home_team,away_team,kickoff_date,league" if include_id
+                       else "home_team,away_team,kickoff_date,league")
         query = (
             client.table("match_history")
-            .select("home_team,away_team,kickoff_date,league")
+            .select(select_cols)
             .not_.is_("actual_home_goals", "null")
             .is_("superseded_by", "null")
             .gte("kickoff_date", date_from)
@@ -2083,6 +2094,101 @@ def get_data_completeness(match_ref: str) -> dict | None:
     except Exception as exc:
         logger.warning("[Queries] get_data_completeness failed pentru %s: %s", match_ref, exc)
         return None
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# SINGLE OWNER — verificari de completitudine Flashscore pentru Sync Layer
+# (ADR-045, Pasul 1 Master Repair Plan). Folosite EXCLUSIV de scripturile de
+# sync (statistics/H2H/standings) ca sa sara peste providerii fallback cand
+# Flashscore are deja date complete pentru acea categorie — niciun consumator
+# din Oracle Engine/Predictor/ML/UI nu citeste functiile de mai jos.
+# ════════════════════════════════════════════════════════════════════════════
+
+def get_match_ids_with_complete_flashscore_stats(match_ids: list[int]) -> set[int]:
+    """Subsetul din `match_ids` pentru care Flashscore a scris deja
+    statistici de baza complete (`flashscore_data_completeness.has_stats`).
+    Folosit de `sync/sync_match_statistics.py` — daca un meci apare in acest
+    set, Soccer Football Info/FreeLF NU mai sunt apelate pentru el (Single
+    Owner, ADR-045)."""
+    client = get_client()
+    if client is None or not match_ids:
+        return set()
+    try:
+        res = (
+            client.table("flashscore_data_completeness")
+            .select("match_id")
+            .in_("match_id", match_ids)
+            .eq("has_stats", True)
+            .execute()
+        )
+        return {r["match_id"] for r in (res.data or []) if r.get("match_id") is not None}
+    except Exception as exc:
+        logger.warning("[Queries] get_match_ids_with_complete_flashscore_stats failed: %s", exc)
+        return set()
+
+
+def get_flashscore_covered_standings_leagues(max_age_days: int = 7) -> set[str]:
+    """Numele canonice de ligi pentru care `flashscore_standings_snapshot`
+    are deja un clasament recent (in ultimele `max_age_days` zile). Folosit
+    de `sync/sync_team_form_footballdata.py`/`sync/sync_team_form_freelf.py`
+    — ligile din acest set NU mai sunt sincronizate de acei provideri
+    (Single Owner, ADR-045). Fereastra de recenta (nu doar "exista randul")
+    e deliberata — daca Flashscore nu mai reimprospateaza o liga, fallback-ul
+    trebuie sa reia automat, nu sa ramana blocat permanent pe date stale."""
+    client = get_client()
+    if client is None:
+        return set()
+    try:
+        from datetime import datetime, timedelta, timezone
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=max_age_days)).isoformat()
+        res = (
+            client.table("flashscore_standings_snapshot")
+            .select("competition")
+            .gte("captured_at", cutoff)
+            .execute()
+        )
+        return {r["competition"] for r in (res.data or []) if r.get("competition")}
+    except Exception as exc:
+        logger.warning("[Queries] get_flashscore_covered_standings_leagues failed: %s", exc)
+        return set()
+
+
+def has_flashscore_h2h_context(home_team_canonical: str, away_team_canonical: str) -> bool:
+    """True daca exista deja context H2H Flashscore (`flashscore_match_context`,
+    categoria `h2h_overall`) pentru aceasta pereche de echipe, indiferent de
+    ordinea acasa/oaspete — H2H e simetric intre cele doua echipe, nu legat
+    de meciul curent. Folosit de `sync/sync_h2h_freelf.py` — daca returneaza
+    True, FreeLF NU mai e interogat pentru acea pereche (Single Owner,
+    ADR-045)."""
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        pair_res = (
+            client.table("match_history")
+            .select("id")
+            .or_(
+                f"and(home_team.eq.{home_team_canonical},away_team.eq.{away_team_canonical}),"
+                f"and(home_team.eq.{away_team_canonical},away_team.eq.{home_team_canonical})"
+            )
+            .execute()
+        )
+        match_ids = [r["id"] for r in (pair_res.data or [])]
+        if not match_ids:
+            return False
+        context_res = (
+            client.table("flashscore_match_context")
+            .select("id")
+            .in_("context_match_id", match_ids)
+            .eq("category", "h2h_overall")
+            .limit(1)
+            .execute()
+        )
+        return bool(context_res.data)
+    except Exception as exc:
+        logger.warning("[Queries] has_flashscore_h2h_context failed pentru %s vs %s: %s",
+                        home_team_canonical, away_team_canonical, exc)
+        return False
 
 
 def get_match_events(match_id: int) -> list[dict]:

@@ -36,6 +36,16 @@ def _fixtures_needing_sync(days_ahead: int = 14) -> list[dict]:
     return get_freelf_fixtures_needing_h2h(days_ahead=days_ahead)
 
 
+def _already_has_flashscore_h2h(home_team: str, away_team: str) -> bool:
+    """[ADAUGAT Pasul 1 Master Repair Plan, ADR-045 — Single Owner] True
+    daca Flashscore are deja context H2H complet pentru aceasta pereche
+    (`flashscore_match_context`, categoria `h2h_overall`) — in acel caz
+    FreeLF nu mai e interogat pentru H2H (Single Owner). Fallback ramane
+    neschimbat pentru orice pereche unde Flashscore nu are inca date."""
+    from database.queries import has_flashscore_h2h_context
+    return has_flashscore_h2h_context(home_team, away_team)
+
+
 def _make_task_runner(adapter: FreelfH2hAdapter, home_team: str, away_team: str, freelf_event_id: str):
     def _run() -> None:
         raw = adapter.fetch({
@@ -55,10 +65,17 @@ def run(days_ahead: int = 14) -> list:
     fixtures = _fixtures_needing_sync(days_ahead)
     logger.info("[H2hFreelf] %d fixture-uri de sincronizat", len(fixtures))
 
+    skipped = 0
     for fx in fixtures:
         home_team = fx["home_team_canonical"]
         away_team = fx["away_team_canonical"]
         freelf_event_id = fx["freelf_event_id"]
+
+        # [ADAUGAT Pasul 1 Master Repair Plan, ADR-045 — Single Owner]
+        if _already_has_flashscore_h2h(home_team, away_team):
+            skipped += 1
+            continue
+
         task_name = f"h2h_freelf:{home_team}-vs-{away_team}"
         orchestrator.register_task(SyncTask(
             name=task_name,
@@ -69,6 +86,9 @@ def run(days_ahead: int = 14) -> list:
             # FreelfH2hAdapter.coverage_check().
             coverage_required=False,
         ))
+
+    if skipped:
+        logger.info("[H2hFreelf] %d perechi sărite — Flashscore are deja context H2H (Single Owner)", skipped)
 
     return orchestrator.run_pending()
 

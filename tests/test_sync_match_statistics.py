@@ -57,15 +57,33 @@ def test_matches_missing_stats_delegates_to_query(monkeypatch):
     docstring-ul `_matches_missing_stats()`: fără el, un meci deja completat
     de FreeLF cu possession+xG dispărea permanent din rezultat, iar Soccer
     Football Info nu mai apuca să încerce restul câmpurilor."""
-    rows = [dict(_MATCH)]
+    rows = [dict(_MATCH, id=1)]
     calls = []
     monkeypatch.setattr(
         "database.queries.get_finished_matches_missing_stats",
-        lambda days_back, require_referee=False: (calls.append((days_back, require_referee)), rows)[1],
+        lambda days_back, require_referee=False, include_id=False:
+            (calls.append((days_back, require_referee, include_id)), rows)[1],
     )
+    monkeypatch.setattr("database.queries.get_match_ids_with_complete_flashscore_stats", lambda match_ids: set())
     result = sync_match_statistics._matches_missing_stats(days_back=3)
     assert result == rows
-    assert calls == [(3, True)]
+    assert calls == [(3, True, True)]
+
+
+def test_matches_missing_stats_excludes_matches_already_complete_in_flashscore(monkeypatch):
+    """[ADAUGAT Pasul 1 Master Repair Plan, ADR-045 — Single Owner] Un meci
+    deja complet colectat de Flashscore (flashscore_data_completeness.
+    has_stats=True) NU mai ajunge in lista de task-uri — Soccer Football
+    Info/FreeLF nu mai sunt interogate degeaba pentru el. Meciurile pe care
+    Flashscore NU le-a colectat inca raman neschimbate in lista."""
+    rows = [dict(_MATCH, id=1), dict(_MATCH, id=2, home_team="Liverpool")]
+    monkeypatch.setattr(
+        "database.queries.get_finished_matches_missing_stats",
+        lambda days_back, require_referee=False, include_id=False: rows,
+    )
+    monkeypatch.setattr("database.queries.get_match_ids_with_complete_flashscore_stats", lambda match_ids: {1})
+    result = sync_match_statistics._matches_missing_stats(days_back=3)
+    assert result == [dict(_MATCH, id=2, home_team="Liverpool")]
 
 
 def test_provider_order_uses_choice_then_rest_of_fallback_chain(monkeypatch):

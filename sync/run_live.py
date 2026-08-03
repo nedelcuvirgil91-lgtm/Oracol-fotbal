@@ -87,8 +87,13 @@ def run(dry_run: bool = False) -> dict:
         print("   ℹ️  Sărit (dry run)")
     else:
         try:
+            # [ADAUGAT Pasul 1 Master Repair Plan, ADR-045; rafinat dupa
+            # feedback] Plafon configurabil + excludere meciuri viitoare —
+            # vezi comentariul complet din sync/run_night.py._stage_flashscore().
+            from providers.flashscore.discovery import get_limit_per_league_automated
             from providers.flashscore.run_foundation_data_layer import run as run_flashscore
-            exit_code = run_flashscore(leagues=None, limit_per_league=None, dry_run=False)
+            exit_code = run_flashscore(leagues=None, limit_per_league=get_limit_per_league_automated(),
+                                        dry_run=False, include_future_fixtures=False)
             result["flashscore"] = {"ok": exit_code == 0, "exit_code": exit_code}
             print("   ✅ OK" if exit_code == 0 else f"   ⚠️  exit_code={exit_code}")
         except Exception as exc:

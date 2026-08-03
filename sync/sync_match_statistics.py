@@ -103,9 +103,31 @@ def _matches_missing_stats(days_back: int = 2) -> list[dict]:
     mai apuca niciodată să încerce restul câmpurilor (shots/corners/fouls/
     cards/offsides/penalties/substitutions/lineup/manager/stadion/
     provider_raw_json), deși owner-ul lor rămâne exclusiv SFI și COALESCE-
-    only (ADR-036) nu risca nicio suprascriere."""
-    from database.queries import get_finished_matches_missing_stats
-    return get_finished_matches_missing_stats(days_back=days_back, require_referee=True)
+    only (ADR-036) nu risca nicio suprascriere.
+
+    [ADAUGAT Pasul 1 Master Repair Plan, ADR-045 — Single Owner] `include_id`
+    + filtrare finală prin `get_match_ids_with_complete_flashscore_stats()`:
+    un meci deja complet colectat de Flashscore (`flashscore_data_
+    completeness.has_stats=True`) NU mai ajunge în lista de task-uri —
+    Soccer Football Info/FreeLF nu mai sunt interogate degeaba pentru el.
+    Nu schimbă nimic pentru meciurile pe care Flashscore NU le-a colectat
+    încă (rămân în listă, provider_order normal, neschimbat)."""
+    from database.queries import (
+        get_finished_matches_missing_stats,
+        get_match_ids_with_complete_flashscore_stats,
+    )
+    matches = get_finished_matches_missing_stats(days_back=days_back, require_referee=True, include_id=True)
+    if not matches:
+        return matches
+    match_ids = [m["id"] for m in matches if m.get("id") is not None]
+    already_complete = get_match_ids_with_complete_flashscore_stats(match_ids)
+    if not already_complete:
+        return matches
+    skipped = [m for m in matches if m.get("id") in already_complete]
+    if skipped:
+        logger.info("[MatchStatistics] %d meciuri sărite — Flashscore are deja statistici complete (Single Owner)",
+                     len(skipped))
+    return [m for m in matches if m.get("id") not in already_complete]
 
 
 def _make_task_runner(match: dict, provider_order: list[str]):
