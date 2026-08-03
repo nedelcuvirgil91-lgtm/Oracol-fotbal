@@ -1132,6 +1132,17 @@ class FootballOracleEngine:
             data_source  = "neutral-defaults"
 
         # ── Form score ────────────────────────────────────────────────────
+        # Notă (documentat 2026-08-03, EPIC ML Activation & Oracle Evolution,
+        # Pasul 6, ORACLE_ENGINE_AUDIT.md §6.3): `results` (formă W/D/L, de
+        # mai jos) și `gf`/`ga` (goluri, folosite mai sus pentru off/def
+        # rating) provin din ACEEAȘI fereastră `last_n_fixtures` (implicit 5,
+        # vezi `last_n` mai sus) — nu e o duplicare de informație (rezultat
+        # W/D/L vs. scor brut sunt aspecte diferite), dar ambele semnale sunt
+        # derivate din aceeași fereastră temporală mică, ceea ce limitează
+        # diversitatea reală a semnalului de intrare. Observație cunoscută,
+        # fără acțiune de cod în acest EPIC — o eventuală extindere a
+        # `last_n_fixtures` sau diversificare a surselor ar necesita propriul
+        # test de ablație, nu o decizie tacită aici.
         form_score = compute_form_score(results)
 
         off_rating = min(off_rating, o_cap)

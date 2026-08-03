@@ -103,6 +103,12 @@ Migrările 014/015 sunt aplicate pe Supabase live de mult (`champion_health_eval
 
 **Nu e un bug** — flag oprit implicit, conform North Star #3 — dar un mecanism prezent în cod și în date, complet inert în formula servită. Documentat integral în `docs/00_GOVERNANCE/ORACLE_ENGINE_AUDIT.md` §4.3 și tratat explicit în `docs/00_GOVERNANCE/ML_ACTIVATION_IMPLEMENTATION_PLAN.md` §2.4/§6.2 (pasul 1: documentare, fără activare — decizia de a activa `auto_recalibration_enabled` rămâne separată, neluată în acest EPIC).
 
+## 8. Oracle Engine — suprapunere fereastră formă/goluri (EPIC „ML Activation & Oracle Evolution", verificat 2026-08-03)
+
+`oracle_engine._build_profile()`: `form_score` (rezultate W/D/L) și `off_rating`/`def_rating` (derivate din `avg_goals_for`/`avg_goals_against`) provin din **ACEEAȘI fereastră** `last_n_fixtures` (implicit 5 meciuri) — nu e o duplicare de informație (rezultat W/D/L vs. scor brut sunt aspecte diferite ale aceluiași set de meciuri), dar ambele semnale sunt derivate din aceeași fereastră temporală mică, ceea ce limitează diversitatea reală a semnalului de intrare în `calibrate_xg()`.
+
+**Nu e un bug** — observație de proiectare, documentată explicit (comentariu în cod, `oracle_engine.py`, secțiunea „Form score") ca să nu fie redescoperită ca „gol" într-o sesiune viitoare. Documentat integral în `docs/00_GOVERNANCE/ORACLE_ENGINE_AUDIT.md` §6.3 și tratat explicit în `docs/00_GOVERNANCE/ML_ACTIVATION_IMPLEMENTATION_PLAN.md` §2.7/§6.2 (pasul 6: documentare, fără acțiune de cod — o eventuală extindere a `last_n_fixtures` sau diversificare a surselor de semnal ar necesita propriul test de ablație, neinclusă în acest EPIC).
+
 ---
 
 ## Architecture State Report — convenția de raportare la începutul fiecărei etape
