@@ -37,17 +37,59 @@ def test_log_shadow_experiment_returns_false_when_disabled():
     assert result is False
 
 
-def test_log_shadow_experiment_called_exactly_once_in_evaluate_match():
-    """[ACTUALIZAT] log_shadow_experiment e acum apelat intentionat, o
-    singura data, in evaluate_match() (integrare API-Football) - nu mai e
-    'zero apeluri' (asta era starea INAINTE de integrare). Compatibilitatea
-    100% e garantata altfel acum: prin gating-ul shadow_mode_enabled, testat
-    separat mai jos - nu prin absenta apelului."""
+def test_log_shadow_experiment_enabled_flag_is_parameterized():
+    """[ADAUGAT — Faza 3] enabled_flag permite fiecărui experiment nou
+    propriul flag dedicat, fără să reutilizeze shadow_mode_enabled — implicit
+    rămâne shadow_mode_enabled (comportament neschimbat pentru apelul
+    existent apifootball_injuries_coaches)."""
+    class FakeEngine:
+        config = {"shadow_mode_enabled": True, "flashscore_shadow_logging_enabled": False}
+        log_shadow_experiment = oracle_engine.FootballOracleEngine.log_shadow_experiment
+
+    fake = FakeEngine()
+    # Flag-ul dedicat oprit -> False, chiar daca shadow_mode_enabled=True.
+    result = fake.log_shadow_experiment(
+        pred=None, experiment_name="flashscore_team_dna", experiment_version="v1",
+        home_xg=1.0, away_xg=1.0, prob_home=0.4, prob_draw=0.3, prob_away=0.3,
+        enabled_flag="flashscore_shadow_logging_enabled",
+    )
+    assert result is False
+    # Fara enabled_flag explicit -> foloseste shadow_mode_enabled (implicit),
+    # comportament identic cu apelul existent apifootball_injuries_coaches.
+    fake.config["shadow_mode_enabled"] = False
+    result = fake.log_shadow_experiment(
+        pred=None, experiment_name="apifootball_injuries_coaches", experiment_version="v1",
+        home_xg=1.0, away_xg=1.0, prob_home=0.4, prob_draw=0.3, prob_away=0.3,
+    )
+    assert result is False
+
+
+def test_log_shadow_experiment_called_exactly_twice_in_evaluate_match():
+    """[ACTUALIZAT — Faza 3, exceptie M4] log_shadow_experiment e acum
+    apelat de DOUA ori in evaluate_match(): apifootball_injuries_coaches
+    (integrare API-Football, existent) + flashscore_team_dna (Faza 3,
+    exceptie explicita aprobata de proprietarul produsului 2026-07-29 -
+    inainte de finalizarea M4). Compatibilitatea 100% e garantata prin
+    gating pe flag-uri DEDICATE per experiment (shadow_mode_enabled /
+    flashscore_shadow_logging_enabled), testat separat mai jos - nu prin
+    absenta apelului."""
     source = inspect.getsource(oracle_engine)
     def_count = source.count("def log_shadow_experiment(")
     call_count = source.count(".log_shadow_experiment(")
     assert def_count == 1
-    assert call_count == 1
+    assert call_count == 2
+
+
+def test_flashscore_shadow_experiment_uses_dedicated_flag_not_shadow_mode_enabled():
+    """Gardă directă: experimentul flashscore_team_dna NU trebuie să
+    reutilizeze shadow_mode_enabled (legat exclusiv de
+    apifootball_injuries_coaches) — ar activa/dezactiva ambele experimente
+    simultan la fiecare toggle, contrazicând disciplina flag-uri-dedicate
+    deja folosită de challenger_shadow_logging_enabled/consensus_capture_enabled."""
+    assert oracle_engine.DEFAULT_CONFIG["flashscore_shadow_logging_enabled"] is False
+    source = inspect.getsource(oracle_engine.FootballOracleEngine.evaluate_match)
+    assert 'enabled_flag="flashscore_shadow_logging_enabled"' in source
+    assert '"flashscore_team_dna"' in source
 
 
 def test_shadow_mode_disabled_means_production_predictions_unaffected():

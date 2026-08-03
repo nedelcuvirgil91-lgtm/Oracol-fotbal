@@ -159,6 +159,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # de learning_core_enabled (ADR-030, citit separat din model_config, nu
     # din acest dict). Implicit OPRIT.
     "consensus_capture_enabled": False,
+    # [ADAUGAT — Faza 3, exceptie explicita M4 aprobata de proprietarul
+    # produsului 2026-07-29, ML_ACTIVATION_GATE.md] Shadow logging pentru
+    # experimentul "flashscore_team_dna" — flag DEDICAT, separat de
+    # shadow_mode_enabled (legat exclusiv de apifootball_injuries_coaches)
+    # si de challenger_shadow_logging_enabled. Acelasi tipar exact ca
+    # apifootball_injuries_coaches: foloseste probabilitatile FINALE
+    # (productia), doar captureaza Team DNA ca feature_metadata pt analiza
+    # viitoare - nu propune inca o varianta alternativa de xG. Implicit
+    # OPRIT.
+    "flashscore_shadow_logging_enabled": False,
 }
 
 DEFAULT_WEIGHTS: dict[str, Any] = {
@@ -1646,6 +1656,23 @@ class FootballOracleEngine:
                 feature_metadata=apifootball_metadata, processing_stage="final",
             )
 
+        # [ADAUGAT — Faza 3, exceptie M4 aprobata explicit 2026-07-29] Shadow
+        # log pt Team DNA Flashscore (home/away_flashscore_dna, deja
+        # construite mai sus, Faza 2) - flag DEDICAT
+        # (flashscore_shadow_logging_enabled, implicit OPRIT), acelasi tipar
+        # exact ca apifootball_injuries_coaches: foloseste predictia FINALA
+        # (ph/pd/pa) - acest experiment inca nu propune o varianta
+        # alternativa de xG, doar captureaza contextul pt analiza viitoare
+        # (ablatie reala, cand exista volum suficient de meciuri reale
+        # colectate - vezi R-SYNC-FLASH-01_PREDICTOR_IMPACT_ANALYSIS.md §3).
+        if home_flashscore_dna or away_flashscore_dna:
+            self.log_shadow_experiment(
+                pred=pred, experiment_name="flashscore_team_dna", experiment_version="v1",
+                home_xg=home_xg, away_xg=away_xg, prob_home=ph, prob_draw=pd, prob_away=pa,
+                feature_metadata={"home_flashscore_dna": home_flashscore_dna, "away_flashscore_dna": away_flashscore_dna},
+                processing_stage="final", enabled_flag="flashscore_shadow_logging_enabled",
+            )
+
         # [ADAUGAT — Pasul 3, Implementation Contract Learning Core] Shadow
         # logging pt Challenger activ (daca exista) — flag DEDICAT
         # (challenger_shadow_logging_enabled, implicit False), separat de
@@ -1747,13 +1774,21 @@ class FootballOracleEngine:
         self, pred: MatchPrediction, experiment_name: str, experiment_version: str,
         home_xg: float, away_xg: float, prob_home: float, prob_draw: float, prob_away: float,
         feature_metadata: dict | None = None, processing_stage: str = "final",
-        experiment_group: str = "treatment",
+        experiment_group: str = "treatment", enabled_flag: str = "shadow_mode_enabled",
     ) -> bool:
-        """Nu face nimic dacă shadow_mode_enabled=False (implicit) — zero
-        impact asupra producției. `baseline_model_version` se calculează
+        """Nu face nimic dacă flag-ul din `enabled_flag` e False (implicit)
+        — zero impact asupra producției. `enabled_flag` (implicit
+        `shadow_mode_enabled`, comportament neschimbat pentru apelul
+        existent `apifootball_injuries_coaches`) — parametrizat explicit
+        [ADAUGAT Faza 3] ca fiecare experiment nou să aibă propriul flag
+        DEDICAT (la fel ca `challenger_shadow_logging_enabled`/
+        `consensus_capture_enabled`), fără să reutilizeze/conflice cu
+        flag-ul altui experiment — exact intenția documentată în docstring-ul
+        modulului acestei metode ("orice experiment viitor... să nu
+        reinventeze gating-ul"). `baseline_model_version` se calculează
         automat din predicția de producție curentă (pred), nu trebuie dat
         explicit de apelant."""
-        if not self.config.get("shadow_mode_enabled", False):
+        if not self.config.get(enabled_flag, False):
             return False
         try:
             import shadow_testing

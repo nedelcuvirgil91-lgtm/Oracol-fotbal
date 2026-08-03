@@ -48,6 +48,14 @@ Nicio bifă parțială — la fel ca disciplina `DEFINITION_OF_DONE.md` ("O căs
 
 *(Listă deschisă pentru extindere — alte verificări de pre-producție se adaugă aici pe măsură ce apar, fiecare cu propriul criteriu explicit de bifare.)*
 
+## Excepție acordată explicit (2026-07-29) — începere task-uri Faza 3 înainte de M4
+
+Proprietarul produsului a aprobat explicit, separat, excepția prevăzută la linia 6 mai sus: task-urile Faza 3 (Team DNA/Oracle Data Layer — deja complete în Faza 2 — plus integrarea în Predictor) pot **începe** înainte de finalizarea M4 (Night Sync complet, nerulat încă la data aprobării).
+
+**Ce acoperă excepția**: doar dreptul de a ÎNCEPE lucrul în zona Predictor/ML — NU elimină nicio condiție din secțiunea „Condiții obligatorii" de mai sus pentru **activarea** propriu-zisă (`ml_blending_enabled=true`). Acelea rămân neschimbate, toate patru, nebifate.
+
+**Implementare concretă a excepției**: experiment shadow nou, `flashscore_team_dna` (`oracle_engine.py`, flag dedicat `flashscore_shadow_logging_enabled`, implicit OPRIT) — identic ca mecanism cu `apifootball_injuries_coaches` deja existent (ADR-002): capturează Team DNA Flashscore ca `feature_metadata` alături de probabilitățile de PRODUCȚIE, nu propune (încă) o variantă alternativă de xG/blend. Zero atingere a Predictorului/blending-ului/confidence-ului servit — pur observațional, pentru acumularea datelor necesare unui test de ablație real (cerut oricum de a treia condiție de mai sus), odată ce volumul de meciuri Flashscore colectate e suficient.
+
 ## Notă despre `docs/00_GOVERNANCE/DEFINITION_OF_DONE.md`
 
 Acel document declară explicit propria regulă de schimbare: "se modifică DOAR printr-un ADR motivat" — nu a fost editat direct aici, ca să nu se încalce acea regulă în numele unei cereri de documentare ușoară. Dacă se dorește ca acest checkpoint să apară literal în checklist-ul Product DoD de acolo, e nevoie de un ADR mic, dedicat — neînceput, la cerere separată.
