@@ -35,7 +35,7 @@ Scope-ul M0 s-a extins oficial (decizie Product Owner) de la statistici de bază
 | | |
 |---|---|
 | Branch default (GitHub Actions rulează pe el) | `main` (verificat: `git remote show origin` → `HEAD branch: main`) |
-| `main` HEAD | `9bfb034` — fast-forward de pe `claude/continua-faza-1-adr5-o52jat`, `git push origin main`, 2026-08-03 (include audituri Etapa 1-3, `ML_ACTIVATION_IMPLEMENTATION_PLAN.md` post Architecture Review, Pașii 1-4 finalizați + **Pasul 5 finalizat** EPIC ML Activation — corectat cron depășit `continuous_learning.yml`/adăugat rând `night_sync.yml` (§4 de mai jos), clarificat în CLAUDE.md că `auto_promotion_enabled` e doar concept de design, nu flag real în cod; scop restrâns deliberat — ADR-uri, `PROMOTION_CONTRACT.md` (Frozen) și `LEARNING_CORE_ARCHITECTURE.md` (roadmap deja corect gatat) lăsate neatinse, aprobat explicit de proprietarul produsului) |
+| `main` HEAD | `61eda22` — fast-forward de pe `claude/continua-faza-1-adr5-o52jat`, `git push origin main`, 2026-08-03 (include audituri Etapa 1-3, `ML_ACTIVATION_IMPLEMENTATION_PLAN.md` post Architecture Review, Pașii 1-5 finalizați + **Pasul 6 finalizat** EPIC ML Activation — documentată suprapunerea ferestrei `last_n_fixtures` între `form_score` și `off_rating`/`def_rating` (§8 de mai jos), verificat direct în cod înainte de documentare, zero schimbare de comportament; separarea ferestrelor rămâne decizie separată, necesită analiză + benchmark + backtest dedicate, neinclusă în acest EPIC) |
 | Branch de lucru curent | `claude/continua-faza-1-adr5-o52jat` |
 | Commit-uri branch înaintea lui `main` | 0 (fast-forward complet — branch și `main` identice după merge) |
 | Commit-uri `main` înaintea branch-ului | 0 |
