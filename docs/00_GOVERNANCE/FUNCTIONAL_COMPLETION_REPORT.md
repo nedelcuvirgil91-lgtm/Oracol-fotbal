@@ -6,9 +6,23 @@
 
 **Autor**: Claude, la cererea proprietarului produsului.
 
-**Scop**: raport formal de închidere pentru cele 4 puncte ale EPIC-ului „Functional Completion" (audit de bază: `docs/00_GOVERNANCE/FUNCTIONAL_COMPLETION_MASTER_PLAN.md`) — deschis explicit după închiderea Master Repair Plan-ului, cu ordine strictă de execuție impusă de proprietarul produsului: „Lucrăm strict în această ordine, fără să sărim peste pași."
+**Scop**: raport formal de status pentru cele 4 puncte ale EPIC-ului „Functional Completion" (audit de bază: `docs/00_GOVERNANCE/FUNCTIONAL_COMPLETION_MASTER_PLAN.md`) — deschis explicit după închiderea Master Repair Plan-ului, cu ordine strictă de execuție impusă de proprietarul produsului: „Lucrăm strict în această ordine, fără să sărim peste pași." **Statusul final NU e uniform** — 3 din cele 4 puncte sunt închise (`IMPLEMENTED`), unul (Punctul 3) rămâne explicit **`DEFERRED`**, nu închis — vezi Rezumatul executiv de mai jos.
 
 **Ce NU acoperă acest raport**: Punctul 5 (curățare/îmbunătățire UI) — neînceput, condiționat explicit de aprobarea acestui document.
+
+---
+
+## Rezumat executiv
+
+| Punct | Titlu | Status |
+|---|---|---|
+| **P1** | Eliminarea fail-open din RateLimitManager | ✅ **IMPLEMENTED** |
+| **P2** | Predictor Regression Suite | ✅ **IMPLEMENTED** |
+| **P3** | `flashscore_data_completeness` ca semnal de încredere | 🟡 **DEFERRED AFTER ARCHITECTURAL REVIEW** — vezi `FOLLOW-UP-P3-01` |
+| **P4** | Documentarea acoperirii reale a feature-urilor ML derivate | ✅ **IMPLEMENTED** |
+| **P5** | Curățare/îmbunătățire UI (Team DNA, Poisson vs. Monte Carlo) | ⬜ **NOT STARTED** — condiționat de aprobarea acestui raport |
+
+**Stare globală „Engine Completion"**: **3 din 4 puncte închise complet** (P1, P2, P4) — infrastructură de protecție reală (rate-limiting), infrastructură de verificare reală (regression suite), și documentație de guvernanță actualizată cu date live. **1 punct amânat explicit, nu eșuat** (P3) — investigația a demonstrat că premisa inițială a EPIC-ului era invalidă, iar decizia corectă a fost să NU se implementeze nimic pe un semnal fără valoare informațională, nu să se forțeze o integrare. Zero regresie introdusă în cele 3 puncte implementate (1903→1976 teste trecute, +73 exact cât s-a adăugat). Oracle Engine, Predictorul, ML și UI rămân complet neatinse pe tot parcursul EPIC-ului P1–P4 — singurele schimbări de cod au fost în stratul de acces la provideri externi (`oracle_api.py`, `rate_limit_manager.py`) și în infrastructura de testare.
 
 ---
 
@@ -76,6 +90,8 @@ Nicio schimbare la `oracle_engine.py`, `feature_engine.py` sau la structura baze
 - Niciun fișier `golden`/`fixture`/snapshot pentru predicții găsit în repo înainte de acest punct.
 
 ### Soluția implementată
+
+**Acoperire explicită — ce testează suita, ce NU testează**: suita verifică strict **calea de bază a Oracle Engine** — Poisson (`_poisson_model`), Monte Carlo (`_monte_carlo`), ELO (`_elo_to_multiplier`/`_elo_to_defensive_multiplier`), Formă (`compute_form_score`) și H2H (`_build_h2h`/`compute_h2h_modifier`) — exact combinația care produce `home_xg`/`away_xg`/`ph`/`pd`/`pa`, ieșirile din snapshot. **NU** testează și **NU** acoperă: blending ML (`self.ml=None` în toate cele 20 de scenarii, `ml_blending_enabled` rămâne oricum `False` implicit), Team DNA Flashscore (`FLASHSCORE_TEAM_DNA_AVAILABLE=False`, mock-uit explicit oprit), injurii sau vreme (dezactivate uniform). O schimbare viitoare izolată în blending ML sau în Team DNA NU ar fi detectată de această suită — dacă/când acele căi devin active în producție, ele vor necesita propriile scenarii de regresie, separate.
 
 - `tests/predictor_regression_scenarios.py` — 20 de meciuri golden, input complet mock-uit (formă recentă, ELO, H2H), acoperind deliberat 10 ligi, cele 3 niveluri de calitate a datelor (ADR-035 D4: LIVE/ELO-only/NEUTRAL) și dinamici variate (favorit clar, meciuri strânse, semnale contradictorii ELO-vs-formă, istoric H2H real vs. inexistent). Rulează `FootballOracleEngine.evaluate_match()` REAL, mock-uind exact pe tiparul deja folosit în `test_oracle_engine_db_first_*.py` (patch pe namespace-ul `oracle_engine`) — zero rețea/Supabase reală.
 - `tests/predictor_regression_golden.json` — snapshot înghețat (`home_xg`, `away_xg`, `ph`, `pd`, `pa`) pentru cele 20 de scenarii.
@@ -146,12 +162,14 @@ Din cele 5 opțiuni prezentate (A–E, integrare directă / reparare definiție 
 
 ### Follow-up — EPIC separat necesar
 
+**Identificator**: **`FOLLOW-UP-P3-01` — „Flashscore Data Completeness Signal Redesign"**. Orice referire viitoară la acest follow-up (planificare, alt document de guvernanță, discuție) ar trebui să folosească acest identificator, ca să rămână trasabil direct la Punctul 3 din acest raport.
+
 **Un EPIC nou, dedicat, e necesar înainte de orice reevaluare a integrării**, acoperind minim:
 1. Redefinirea `compute_data_completeness()` — verificare de conținut minim relevant per tab, nu doar `bool(html)`.
 2. Modificarea `fetch()` (scraper) să permită persistarea unui `pages` parțial la eșecul unui tab individual, nu doar all-or-nothing.
 3. Acumularea de date reale cu variație demonstrată (nu presupusă) înainte de a propune din nou o integrare în Oracle Engine.
 
-Acest EPIC separat NU e autorizat de acest raport — necesită aprobare explicită, distinctă, a proprietarului produsului.
+Acest EPIC separat (`FOLLOW-UP-P3-01`) NU e autorizat de acest raport — necesită aprobare explicită, distinctă, a proprietarului produsului. Punctul 3 rămâne **DEFERRED**, niciodată „închis" — se consideră rezolvat abia când `FOLLOW-UP-P3-01` e finalizat și o nouă evaluare de integrare e făcută pe baza lui.
 
 ---
 
@@ -239,8 +257,18 @@ Secțiune nouă în `ML_ACTIVATION_GATE.md`, „Acoperirea reală a feature-uril
 
 ### Follow-up EPIC-uri
 
-1. **EPIC — Reproiectarea `flashscore_data_completeness` în Data Trust Layer** (Punctul 3, obligatoriu înainte de orice integrare viitoare în Oracle Engine ca semnal de încredere) — neaprobat, neînceput.
-2. **(Opțional, neaprobat)** Investigare/reparare a celor 3 eșecuri preexistente din `test_oracle_api_tsdb_per_league_gate.py`, dacă se dorește extinderea gate-ului CI de la Punctul 2 la întreaga suită `pytest tests/`.
+1. **`FOLLOW-UP-P3-01` — Reproiectarea `flashscore_data_completeness` în Data Trust Layer** (rezultat direct al Punctului 3, obligatoriu înainte de orice integrare viitoare în Oracle Engine ca semnal de încredere) — neaprobat, neînceput.
+2. **(Opțional, neaprobat, fără identificator alocat)** Investigare/reparare a celor 3 eșecuri preexistente din `test_oracle_api_tsdb_per_league_gate.py`, dacă se dorește extinderea gate-ului CI de la Punctul 2 la întreaga suită `pytest tests/`.
+
+---
+
+## Lessons Learned
+
+- **Verificarea live a răsturnat o premisă a EPIC-ului, nu doar a confirmat-o.** Punctul 3 pornea de la ipoteza implicită că `flashscore_data_completeness` e un semnal util, doar neconectat. Un singur query live (`count(DISTINCT coverage_percent) = 1`) a arătat că semnalul e o constantă structurală — filozofia „Verificat, nu presupus" (CLAUDE.md) și-a dovedit valoarea direct: fără acel query, riscul real era implementarea unei integrări care ar fi părut funcțională, dar fără conținut informațional.
+- **Un POC temporar cu dovadă live a găsit exact bug-ul pe care revizuirea de cod, singură, nu l-ar fi confirmat cu aceeași certitudine** (Punctul 1) — header-ele reale trimise de The Odds API/WeatherAPI nu puteau fi cunoscute din citirea codului sau din documentație presupusă, doar dintr-un apel HTTP real, prin exact punctul de intrare de producție.
+- **Urmărirea strictă a baseline-ului de teste (număr exact, nu aproximat) a făcut posibilă o afirmație fermă de „zero regresie"** la fiecare din cele 3 commit-uri de cod — fără acest obicei, „am rulat testele și au trecut" ar fi fost o afirmație mai slabă, ne-cuantificată.
+- **Separarea strictă „analiză" vs. „implementare" (Punctul 3) a prevenit o decizie prematură** — dacă implementarea ar fi fost făcută în aceeași sesiune cu analiza, presiunea de a „termina EPIC-ul" ar fi putut duce la integrarea semnalului constant doar ca să existe un rezultat de arătat.
+- **Documentarea explicită a limitelor unei soluții (ce NU acoperă) s-a dovedit la fel de valoroasă ca documentarea a ce acoperă** — atât `PREDICTOR_REGRESSION_SUITE.md` cât și `ML_ACTIVATION_GATE.md` au necesitat clarificări suplimentare, cerute explicit de proprietarul produsului, tocmai pentru că absența unei limite explicite lasă loc de interpretare optimistă ulterioară.
 
 ---
 
