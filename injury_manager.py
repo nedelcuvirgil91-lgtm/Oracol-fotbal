@@ -104,7 +104,13 @@ class InjuryManager:
         Formule:
           mv_share  = log10(market_value + 1) / log10(max_expected + 1)
           pos_w     = POSITION_WEIGHTS[position]
-          penalty   = min(mv_share * pos_w * certainty * 0.20, MAX_SINGLE)
+          penalty   = min(mv_share * pos_w * certainty * 0.25, MAX_SINGLE)
+
+        Notă (corectat 2026-08-03, EPIC ML Activation & Oracle Evolution, Pasul 2):
+        docstring-ul afirma anterior 0.20, dar codul folosea deja 0.25 — discrepanță
+        confirmată în ORACLE_ENGINE_AUDIT.md §4.5. Corecție doar de documentație;
+        valoarea 0.25 din cod NU s-a schimbat, nu există test de ablație care să fi
+        validat 0.20 vs. 0.25 (rămâne opțional, separat, neblocant pentru acest EPIC).
         """
         import math
         max_expected = 150_000_000  # €150M = Mbappé-level
