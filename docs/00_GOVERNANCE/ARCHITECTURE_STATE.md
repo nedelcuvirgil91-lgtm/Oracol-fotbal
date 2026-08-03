@@ -35,7 +35,7 @@ Scope-ul M0 s-a extins oficial (decizie Product Owner) de la statistici de bază
 | | |
 |---|---|
 | Branch default (GitHub Actions rulează pe el) | `main` (verificat: `git remote show origin` → `HEAD branch: main`) |
-| `main` HEAD | `c297a80` — fast-forward de pe `claude/continua-faza-1-adr5-o52jat`, `git push origin main`, 2026-08-03 (include audituri Etapa 1-3, `ML_ACTIVATION_IMPLEMENTATION_PLAN.md` post Architecture Review, Pașii 1-2 finalizați + **Pasul 3 finalizat** EPIC ML Activation — eliminare cod mort `injury_manager.py`: `get_injury_report_from_cache()`, `ABSENCE_CERTAINTY`, `_impact_label()` bazat pe minute, `MIN_STARTER_MINUTES`/`MIN_KEY_PLAYER_MINUTES`, toate confirmate fără apelanți prin grep exhaustiv, calea live neatinsă) |
+| `main` HEAD | `9697af6` — fast-forward de pe `claude/continua-faza-1-adr5-o52jat`, `git push origin main`, 2026-08-03 (include audituri Etapa 1-3, `ML_ACTIVATION_IMPLEMENTATION_PLAN.md` post Architecture Review, Pașii 1-3 finalizați + **Pasul 4 finalizat** EPIC ML Activation — `h2h_lookback_days` confirmat cod mort prin grep exhaustiv + verificare linie-cu-linie a celor 3 cascade H2H, ELIMINAT din `DEFAULT_CONFIG` și din `test_oracle_engine_compat.py` în același pas, conform noii reguli de proces: un pas se închide doar după rezolvarea completă a problemei găsite, nu doar după demonstrarea ei) |
 | Branch de lucru curent | `claude/continua-faza-1-adr5-o52jat` |
 | Commit-uri branch înaintea lui `main` | 0 (fast-forward complet — branch și `main` identice după merge) |
 | Commit-uri `main` înaintea branch-ului | 0 |
