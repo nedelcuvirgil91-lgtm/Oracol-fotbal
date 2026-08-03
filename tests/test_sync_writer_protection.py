@@ -51,6 +51,35 @@ def test_football_data_payload_has_no_elo_keys():
     assert row["actual_result"] == "D"
 
 
+def test_football_data_payload_includes_season_when_provider_offers_it():
+    """[FIX Pasul 3, Master Repair Plan] season era parsat din raspunsul real
+    al providerului dar niciodata inclus in dict-ul scris in match_history —
+    variabila locala calculata si aruncata. Testul foloseste doar startDate
+    (fara endDate), ca in fixture-ul real de mai sus — format "YYYY"."""
+    row = fd_parse(_fd_sample_match(), "Premier League")
+    assert row is not None
+    assert row["season"] == "2023"
+
+
+def test_football_data_payload_season_uses_start_and_end_year_when_both_present():
+    match = _fd_sample_match()
+    match["season"] = {"startDate": "2023-08-11", "endDate": "2024-05-19"}
+    row = fd_parse(match, "Premier League")
+    assert row is not None
+    assert row["season"] == "2023-2024"
+
+
+def test_football_data_payload_season_is_none_when_provider_omits_it():
+    match = _fd_sample_match()
+    del match["season"]
+    row = fd_parse(match, "Premier League")
+    assert row is not None
+    assert row["season"] is None, (
+        "Fara sezon oferit de provider, coloana ramane NULL — nicio "
+        "aproximare calendaristica (interzis explicit, season_cleanup.py)"
+    )
+
+
 def test_openfootball_payload_has_no_elo_keys():
     match = {
         "team1": {"name": "FCSB"},

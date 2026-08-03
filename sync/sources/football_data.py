@@ -136,7 +136,23 @@ def _parse_match(match: dict, league: str) -> dict | None:
         utc_date  = match.get("utcDate", "")
         kick_date = utc_date[:10] if utc_date else ""
         match_id  = match.get("id", "")
-        season    = (match.get("season") or {}).get("startDate", "")[:4]
+
+        # [FIX Pasul 3, Master Repair Plan] season era parsat din payload-ul
+        # real al providerului dar nu ajungea niciodata in dict-ul scris in
+        # match_history (variabila locala neutilizata) - de aceea season
+        # ramanea NULL pentru toate randurile football-data.org, desi
+        # providerul il oferea. Format "YYYY-YYYY", direct din startDate/
+        # endDate ale providerului (migratia 038) - nicio aproximare
+        # calendaristica proprie (interzis explicit, season_cleanup.py).
+        season_obj   = match.get("season") or {}
+        start_year   = (season_obj.get("startDate") or "")[:4]
+        end_year     = (season_obj.get("endDate") or "")[:4]
+        if start_year and end_year and start_year != end_year:
+            season = f"{start_year}-{end_year}"
+        elif start_year:
+            season = start_year
+        else:
+            season = None
 
         fixture_id = f"fd_{match_id}"
 
@@ -170,6 +186,7 @@ def _parse_match(match: dict, league: str) -> dict | None:
             "home_xg_pred":      home_xg,
             "away_xg_pred":      away_xg,
             "used_for_training": True,
+            "season":            season,
         }
     except Exception as exc:
         logger.debug("[FD] Parse error: %s", exc)
