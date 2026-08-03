@@ -1,0 +1,54 @@
+name: Football Oracle — Backfill Season (football-data.org)
+
+# Backfill dedicat pentru sync/backfill_season_football_data.py — vezi
+# docstring-ul modulului pentru motiv (season era parsat dar aruncat inainte
+# de scriere) si garantii de siguranta (COALESCE per coloana, cheie
+# naturala, idempotent). Master Repair Plan, Pasul 3.
+#
+# Workflow temporar de tip "backfill" (familia backfill_odds.yml/
+# backfill_match_stats.yml) - manual, workflow_dispatch, nu intra in
+# orchestrarea zilnica (night_sync.yml).
+#
+# [ADR-045 / Pasul 3] Fisierul exista aici DOAR ca sa fie inregistrat de
+# GitHub Actions (workflow_dispatch cere prezenta pe branch-ul default) -
+# codul care chiar ruleaza (sync/backfill_season_football_data.py) traieste
+# pe branch-ul de lucru, apelat explicit prin `ref` la dispatch, nu de aici.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (fără scriere în Supabase)"
+        required: false
+        default: "true"
+        type: boolean
+
+jobs:
+  backfill-season-football-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run season backfill
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+        run: |
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            python -m sync.backfill_season_football_data --dry-run
+          else
+            python -m sync.backfill_season_football_data
+          fi
