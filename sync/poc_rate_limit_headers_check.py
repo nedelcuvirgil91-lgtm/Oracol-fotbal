@@ -63,18 +63,14 @@ def main() -> None:
     print(f"TheSportsDB: raspuns primit={data is not None}")
     _print_headers("TheSportsDB (eventslast.php)", headers)
 
-    # 2. WeatherAPI
-    weather_key = km.get_headers("weatherapi")
-    api_key = None
-    # WeatherAPI foloseste query param "key", nu header — cautam in PROVIDERS direct
-    from key_manager import PROVIDERS
-    keys = PROVIDERS.get("weatherapi", {}).get("keys", [])
-    if keys:
-        api_key = keys[0]
+    # 2. WeatherAPI — [FIX] get_api_key_param(), NU acces direct la
+    #    PROVIDERS[...]["keys"][0] (acela e un dict {"key","limit","label"},
+    #    nu string-ul cheii — trimis gresit ca param, a produs 401 fals).
+    api_key = km.get_api_key_param("weatherapi")
     if api_key:
         data, headers = api._get(
             f"{WEATHER_URL}/current.json",
-            params={"key": api_key, "q": "London"},
+            params={"key": api_key, "q": "London", "aqi": "no"},
             return_headers=True,
         )
         print(f"\nWeatherAPI: raspuns primit={data is not None}")
@@ -82,13 +78,13 @@ def main() -> None:
     else:
         print("\nWeatherAPI: NICIO cheie configurata (WEATHER_API_KEY lipseste) — sarit.")
 
-    # 3. The Odds API
+    # 3. The Odds API — acelasi fix, get_api_key_param()
     sport_key = ODDS_SPORT_KEYS.get("Premier League")
-    odds_keys = PROVIDERS.get("oddsapi", {}).get("keys", [])
-    if sport_key and odds_keys:
+    odds_key = km.get_api_key_param("oddsapi")
+    if sport_key and odds_key:
         data, headers = api._get(
             f"{ODDS_API_URL}/sports/{sport_key}/scores",
-            params={"apiKey": odds_keys[0], "daysFrom": 3},
+            params={"apiKey": odds_key, "daysFrom": 3},
             return_headers=True,
         )
         print(f"\nThe Odds API: raspuns primit={data is not None}")
