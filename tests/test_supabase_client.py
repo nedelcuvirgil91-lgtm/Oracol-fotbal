@@ -7,13 +7,14 @@ class _FakeResult:
 
 
 class _FakeQuery:
-    """Simulează chain-ul real .table().select().not_.is_().order().range().execute()
-    din supabase-py, cu date paginate fabricate - confirmă logica de paginare
-    din get_training_data(), fără nevoie de credențiale reale."""
+    """Simulează chain-ul real .table().select().not_.is_().gt().order().limit()
+    .execute() din supabase-py (paginare keyset pe fixture_id) - confirmă
+    logica de paginare din get_training_data(), fără nevoie de credențiale
+    reale."""
     def __init__(self, all_rows):
         self._all_rows = all_rows
-        self._start = 0
-        self._end = None
+        self._cursor = None
+        self._limit = None
 
     def select(self, *a, **kw): return self
 
@@ -22,14 +23,23 @@ class _FakeQuery:
 
     def is_(self, *a, **kw): return self
 
+    def gt(self, col, value):
+        self._cursor = value
+        return self
+
     def order(self, *a, **kw): return self
 
-    def range(self, start, end):
-        self._start, self._end = start, end
+    def limit(self, n):
+        self._limit = n
         return self
 
     def execute(self):
-        page = self._all_rows[self._start:self._end + 1]
+        # Ordinea reala vine din ORDER BY fixture_id (server-side) - sortam
+        # aici ca sa simulam corect cursorul keyset peste date nesortate.
+        rows = sorted(self._all_rows, key=lambda r: r["fixture_id"])
+        if self._cursor is not None:
+            rows = [r for r in rows if r["fixture_id"] > self._cursor]
+        page = rows[:self._limit]
         return _FakeResult(page)
 
 
@@ -65,6 +75,31 @@ def test_get_training_data_stops_at_partial_last_page():
     try:
         result = sb.get_training_data(only_with_results=False)
         assert len(result) == 1543
+    finally:
+        sb.get_client = original_get_client
+
+
+def test_get_training_data_keyset_pagination_preserves_order_and_completeness():
+    """[Pasul 3, Master Repair Plan] Paginarea keyset (cursor pe fixture_id)
+    trebuie sa produca exact aceeasi multime si aceeasi ordine ca paginarea
+    OFFSET inlocuita - fiecare rand exact o data, in ordine crescatoare
+    stricta dupa fixture_id (ORDER BY fixture_id ASC din interogarea reala).
+    Datele fabricate sunt amestecate deliberat (ordinea de sosire a
+    randurilor din client NU trebuie sa conteze - server-ul sorteaza)."""
+    import random
+    fake_rows = [{"fixture_id": f"fx{i:05d}"} for i in range(2345)]
+    shuffled = fake_rows[:]
+    random.Random(42).shuffle(shuffled)
+    original_get_client = sb.get_client
+    sb.get_client = lambda: _FakeClient(shuffled)
+    try:
+        result = sb.get_training_data(only_with_results=False)
+        result_ids = [r["fixture_id"] for r in result]
+        expected_ids = sorted(r["fixture_id"] for r in fake_rows)
+        assert result_ids == expected_ids, (
+            "ordinea/multimea randurilor trebuie sa fie identica cu "
+            "ORDER BY fixture_id ASC, fara duplicate si fara lipsuri"
+        )
     finally:
         sb.get_client = original_get_client
 

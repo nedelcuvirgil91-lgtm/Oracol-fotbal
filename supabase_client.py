@@ -305,15 +305,22 @@ def get_training_data(only_with_results: bool = True) -> list[dict]:
     antrena mereu pe doar 1000 din cele 50000+ meciuri eligibile reale -
     gasit prin audit direct (count real vs samples_used din ml_model_status).
 
-    Acum pagineaza explicit cu .range(), in bucla, pana cand o pagina
-    intoarce mai putin decat page_size (semn ca s-a ajuns la ultima pagina).
+    [REPARAT Pasul 3, Master Repair Plan] Paginarea anterioara cu .range()
+    (OFFSET) avea cost patratic - fiecare pagina obliga Postgres sa reparcurga
+    de la inceput indexul fixture_id si sa arunce toate randurile paginilor
+    anterioare. Masurat live (EXPLAIN ANALYZE, aceeasi interogare): 26ms la
+    OFFSET 0 vs. 2558ms la OFFSET 50000 (buffers: 936 vs. 53895). Inlocuita cu
+    paginare keyset pe fixture_id (WHERE fixture_id > cursor) - fixture_id e
+    deja cheia unica indexata care stabilea si ordinea anterioara (.order
+    ("fixture_id")), deci selectia, ordinea si rezultatul raman identice; doar
+    costul per pagina scade la O(1) in loc de O(offset).
     """
     client = get_client()
     if client is None:
         return []
     page_size = 1000
     all_rows: list[dict] = []
-    start = 0
+    cursor: str | None = None
     try:
         while True:
             # [ADAUGAT] Exclude rândurile marcate superseded (ADR-025) — meciuri
@@ -324,13 +331,15 @@ def get_training_data(only_with_results: bool = True) -> list[dict]:
             q = client.table("match_history").select("*").is_("superseded_by", "null")
             if only_with_results:
                 q = q.not_.is_("actual_result", "null")
-            q = q.order("fixture_id").range(start, start + page_size - 1)
+            if cursor is not None:
+                q = q.gt("fixture_id", cursor)
+            q = q.order("fixture_id").limit(page_size)
             res = q.execute()
             page = res.data or []
             all_rows.extend(page)
             if len(page) < page_size:
                 break
-            start += page_size
+            cursor = page[-1]["fixture_id"]
         return all_rows
     except Exception as exc:
         logger.error("[Supabase] get_training_data failed (după %d rânduri): %s", len(all_rows), exc)
