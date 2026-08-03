@@ -35,7 +35,7 @@ Scope-ul M0 s-a extins oficial (decizie Product Owner) de la statistici de bază
 | | |
 |---|---|
 | Branch default (GitHub Actions rulează pe el) | `main` (verificat: `git remote show origin` → `HEAD branch: main`) |
-| `main` HEAD | `30c20da` — fast-forward de pe `claude/continua-faza-1-adr5-o52jat`, `git push origin main`, 2026-08-03 (include audituri Etapa 1-3, `ML_ACTIVATION_IMPLEMENTATION_PLAN.md` post Architecture Review, Pasul 1 EPIC ML Activation) |
+| `main` HEAD | `6259a61` — fast-forward de pe `claude/continua-faza-1-adr5-o52jat`, `git push origin main`, 2026-08-03 (include audituri Etapa 1-3, `ML_ACTIVATION_IMPLEMENTATION_PLAN.md` post Architecture Review, Pasul 1 + **Pasul 2 finalizat** EPIC ML Activation — corectare docstring impact accidentări 0.20→0.25 în `injury_manager.py`, doc-only, zero schimbare de comportament) |
 | Branch de lucru curent | `claude/continua-faza-1-adr5-o52jat` |
 | Commit-uri branch înaintea lui `main` | 0 (fast-forward complet — branch și `main` identice după merge) |
 | Commit-uri `main` înaintea branch-ului | 0 |
