@@ -1,0 +1,142 @@
+{
+  "bundesliga_conflicting_signals": {
+    "away_xg": 1.6632,
+    "home_xg": 0.8403,
+    "pa": 0.5688,
+    "pd": 0.2428,
+    "ph": 0.1883
+  },
+  "bundesliga_favorite_home": {
+    "away_xg": 0.7409,
+    "home_xg": 2.4448,
+    "pa": 0.0933,
+    "pd": 0.1578,
+    "ph": 0.7479
+  },
+  "elo_only_no_recent_form": {
+    "away_xg": 1.6927,
+    "home_xg": 1.8672,
+    "pa": 0.3545,
+    "pd": 0.2199,
+    "ph": 0.4254
+  },
+  "europa_league_mid_table": {
+    "away_xg": 0.8802,
+    "home_xg": 1.1437,
+    "pa": 0.2802,
+    "pd": 0.3026,
+    "ph": 0.4171
+  },
+  "laliga_away_favorite": {
+    "away_xg": 1.7477,
+    "home_xg": 0.6744,
+    "pa": 0.6321,
+    "pd": 0.2285,
+    "ph": 0.1393
+  },
+  "laliga_h2h_history": {
+    "away_xg": 0.9196,
+    "home_xg": 1.4703,
+    "pa": 0.2358,
+    "pd": 0.2643,
+    "ph": 0.4999
+  },
+  "ligue1_away_favorite": {
+    "away_xg": 2.2941,
+    "home_xg": 0.5542,
+    "pa": 0.7675,
+    "pd": 0.1586,
+    "ph": 0.0732
+  },
+  "ligue1_close_match": {
+    "away_xg": 1.0599,
+    "home_xg": 1.2628,
+    "pa": 0.3101,
+    "pd": 0.2802,
+    "ph": 0.4097
+  },
+  "mixed_one_team_elo_only": {
+    "away_xg": 1.2196,
+    "home_xg": 1.3852,
+    "pa": 0.33,
+    "pd": 0.2626,
+    "ph": 0.4074
+  },
+  "mls_close_match": {
+    "away_xg": 1.1409,
+    "home_xg": 1.6029,
+    "pa": 0.2712,
+    "pd": 0.248,
+    "ph": 0.4807
+  },
+  "neutral_defaults_unknown_teams": {
+    "away_xg": 0.933,
+    "home_xg": 1.0509,
+    "pa": 0.3144,
+    "pd": 0.3093,
+    "ph": 0.3763
+  },
+  "pl_close_match": {
+    "away_xg": 1.0769,
+    "home_xg": 1.4246,
+    "pa": 0.2851,
+    "pd": 0.265,
+    "ph": 0.4499
+  },
+  "pl_favorite_home_strong_form": {
+    "away_xg": 0.6495,
+    "home_xg": 2.4016,
+    "pa": 0.0818,
+    "pd": 0.1554,
+    "ph": 0.762
+  },
+  "seriea_defensive_battle": {
+    "away_xg": 0.8428,
+    "home_xg": 0.7854,
+    "pa": 0.3416,
+    "pd": 0.3494,
+    "ph": 0.309
+  },
+  "seriea_high_scoring": {
+    "away_xg": 1.8262,
+    "home_xg": 1.9532,
+    "pa": 0.3682,
+    "pd": 0.2131,
+    "ph": 0.4184
+  },
+  "superliga_h2h_history": {
+    "away_xg": 0.791,
+    "home_xg": 1.1097,
+    "pa": 0.259,
+    "pd": 0.3124,
+    "ph": 0.4286
+  },
+  "superliga_home_favorite": {
+    "away_xg": 0.6235,
+    "home_xg": 1.6478,
+    "pa": 0.1377,
+    "pd": 0.2397,
+    "ph": 0.6225
+  },
+  "ucl_evenly_matched": {
+    "away_xg": 1.4982,
+    "home_xg": 1.4859,
+    "pa": 0.3808,
+    "pd": 0.2437,
+    "ph": 0.3754
+  },
+  "ucl_giant_vs_underdog": {
+    "away_xg": 0.6162,
+    "home_xg": 2.6601,
+    "pa": 0.0629,
+    "pd": 0.1302,
+    "ph": 0.8052
+  },
+  "worldcup_neutral_venue": {
+    "away_xg": 1.3795,
+    "home_xg": 1.5428,
+    "pa": 0.3408,
+    "pd": 0.2458,
+    "ph": 0.4134
+  }
+}

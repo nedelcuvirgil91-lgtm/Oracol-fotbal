@@ -1,0 +1,45 @@
+name: Predictor Regression Suite (obligatoriu la merge)
+
+# [ADAUGAT — EPIC "Functional Completion", Punctul 2, aprobat explicit de
+# proprietarul produsului, 2026-08-03] Primul workflow din acest repo
+# declanșat pe push/pull_request — până acum toate workflow-urile erau
+# fie workflow_dispatch (manual), fie schedule (cron), niciunul nu rula pe
+# fiecare commit. Scop declarat explicit: "Nu vreau să existe posibilitatea
+# ca cineva să dea merge fără să ruleze regression suite."
+#
+# Scop DELIBERAT ÎNGUST — doar tests/test_predictor_regression_suite.py,
+# NU `pytest tests/` complet. Motiv: suita completă are azi 3 eșecuri
+# preexistente, necorelate, confirmate independent
+# (tests/test_oracle_api_tsdb_per_league_gate.py — verificate prin
+# `git stash` comparativ, neschimbate de nicio modificare din acest EPIC).
+# Un gate pe suita completă ar fi permanent roșu din motive din afara
+# scopului acestui EPIC — decizie separată, cu aprobare separată, dacă/când
+# proprietarul produsului vrea gating pe intreaga suită.
+
+on:
+  pull_request:
+    branches: ["main"]
+  push:
+    branches: ["main"]
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Predictor Regression Suite
+        run: |
+          python -m pytest tests/test_predictor_regression_suite.py -v
