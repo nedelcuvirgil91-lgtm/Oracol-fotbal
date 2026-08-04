@@ -42,6 +42,7 @@ efectiv. Engine-ul se construiește abia la primul predict() real.
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from learning_core.model_registry import TrainingRunResult
 from oracle_engine import FootballOracleEngine
@@ -115,3 +116,9 @@ class ProductionChampionAdapter:
             "wraps": "oracle_engine.FootballOracleEngine.evaluate_match",
             "engine_constructed": self._engine is not None,
         }
+
+    def get_trained_model(self) -> Any | None:
+        """Vezi LearningAlgorithm.get_trained_model() (model_registry.py) pentru
+        contractul complet. Niciodată un model real — fit() e no-op (vezi header-ul
+        modulului), campionul de producție nu se antrenează prin acest adaptor."""
+        return None

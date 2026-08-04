@@ -27,6 +27,9 @@ class _DummyAlgorithm:
     def describe(self):
         return {"algorithm_family": self.name}
 
+    def get_trained_model(self):
+        return None
+
 
 def test_register_and_get():
     algo = _DummyAlgorithm()

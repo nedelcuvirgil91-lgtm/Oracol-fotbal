@@ -76,26 +76,37 @@ de explicit — nu introdusă tăcut odată cu Pasul 2+.
 ## 3. Ownership
 
 **Owner-ul persistenței Model Artifact este Challenger Manager** — consistent
-cu Varianta B, deja aleasă și înghețată în designul domeniului: `train() →
-compare() → DACĂ îmbunătățire simultană → persist() → devine Challenger`.
-Persistarea are loc ca parte a tranziției unui `training_run` în stare de
-Challenger, nu necondiționat la fiecare antrenare.
+cu Varianta B, deja aleasă și înghețată în designul domeniului. **Amendat
+prin ADR-048 (Pasul 9, EPIC „ML Activation & Oracle Evolution")**: fluxul
+descris inițial aici (`train() → compare() → DACĂ îmbunătățire simultană →
+persist() → devine Challenger`) a fost scris înainte ca Challenger FSM-ul
+(ADR-016) și Orchestratorul (ADR-030) să fi fost efectiv implementate — nu
+corespunde arhitecturii reale, construite ulterior. Fluxul real:
+
+Persistarea are loc imediat după o antrenare reușită (`status == "trained"`),
+ca parte a `continuous_learning._phase_b_train_new()` (Faza B, Orchestrator),
+**înainte** de `challenger_manager.create_challenger()` (D2, ADR-048) — nu
+există un pas de comparație separat înainte de creare; comparația reală
+(verdict statistic) are loc ulterior, pe durata stării `EVALUATING`, pe baza
+traficului live acumulat în `shadow_predictions`. Vezi ADR-048 pentru
+justificarea completă, Failure Matrix-ul (§4) și invariantul de sistem INV-1
+(§5) garantate de această ordine.
 
 **Training Runner nu scrie niciodată artefacte.** Responsabilitatea lui se
 oprește la a produce modelul antrenat (în memorie) și metricile
 (`training_runs`, deja implementat prin ADR-015). Persistarea fizică a
-artefactului e strict a Challenger Manager (invocat, conform contractului
-Learning Orchestrator deja înghețat, exclusiv prin Orchestrator — niciodată
-component-la-component direct).
+artefactului e strict a Orchestratorului (`continuous_learning.py`), invocat
+conform contractului Learning Orchestrator deja înghețat — niciodată
+component-la-component direct (`challenger_manager.py` nu apelează
+`save_model_artifact()`, per D1, ADR-048).
 
-**Nu există nicio excepție temporară de bootstrap de declarat.** Verificat
-explicit (`grep -rn model_artifact_storage`): azi, **zero componente** apelează
-`save_model_artifact()` sau `load_model_artifact()` — modulul e complet
-izolat, exact cum cerea contractul Pasului 1. Deci nu există azi niciun
-scriitor, nici măcar Training Runner, nici măcar temporar. Primul scriitor
-real va fi introdus abia când Challenger Manager e implementat (Pasul 2+),
-respectând această regulă de ownership de la primul rând de cod scris — nu
-retroactiv, prin corectarea unui scriitor greșit deja existent.
+**Istoric — stare la închiderea Pasului 1** (păstrat ca înregistrare, nu mai
+reflectă starea curentă): verificat atunci explicit (`grep -rn
+model_artifact_storage`), zero componente apelau `save_model_artifact()` sau
+`load_model_artifact()` — modulul era complet izolat. **Primul scriitor real
+a fost introdus prin ADR-048/Pasul 9** — `continuous_learning._phase_b_train_new()`,
+respectând regula de ownership de mai sus de la primul rând de cod scris, nu
+retroactiv prin corectarea unui scriitor greșit deja existent.
 
 ## 4. Garbage Collection
 

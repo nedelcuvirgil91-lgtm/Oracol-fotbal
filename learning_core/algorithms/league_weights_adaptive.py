@@ -47,6 +47,7 @@ fiind participates_in_challenger_framework=False.
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from learning_core.model_registry import TrainingRunResult
 
@@ -115,3 +116,10 @@ class LeagueWeightsAdaptiveAlgorithm:
             "wraps": "recalibration.recalibrate_weights via sync.bootstrap_league_learning.run_bootstrap(dry_run=True)",
             "participates_in_challenger_framework": False,
         }
+
+    def get_trained_model(self) -> Any | None:
+        """Vezi LearningAlgorithm.get_trained_model() (model_registry.py) pentru
+        contractul complet. Niciodată un model real — un weights dict nu e
+        compatibil cu backend-ul de persistență (XGBoost), consecvent cu
+        participates_in_challenger_framework=False (ADR-028)."""
+        return None

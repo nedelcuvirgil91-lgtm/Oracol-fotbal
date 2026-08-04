@@ -69,6 +69,12 @@ def test_fit_zero_matches_processed_returns_insufficient_data(monkeypatch):
     assert result.samples_used == 0
 
 
+def test_get_trained_model_always_none():
+    """Weights dict, nu XGBoost-compatibil — niciodata persistabil (ADR-028,
+    ADR-048 Pasul 9)."""
+    assert LeagueWeightsAdaptiveAlgorithm().get_trained_model() is None
+
+
 def test_registrable_in_model_registry():
     model_registry._clear_registry_for_tests()
     try:

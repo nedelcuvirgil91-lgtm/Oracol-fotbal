@@ -50,7 +50,14 @@ import logging
 import automation_runs as ar
 import supabase_client as sb
 from database.queries import get_client
-from learning_core import challenger_evaluation, challenger_manager, champion_guardian, model_registry, rollback_service
+from learning_core import (
+    challenger_evaluation,
+    challenger_manager,
+    champion_guardian,
+    model_artifact_storage,
+    model_registry,
+    rollback_service,
+)
 from learning_core.promotion_service import promote_challenger
 from learning_core.training_runner import run_training
 from ml_predictor import MIN_SAMPLES_TO_TRAIN
@@ -305,6 +312,40 @@ def _phase_b_train_new(family: str, league: str, algorithm, version: str, target
         "samples_used": report.result.samples_used,
     })
 
+    # Persistare artefact — D1/D2/D3/INV-1 (ADR-048): apelul se face exclusiv
+    # din Orchestrator, imediat dupa antrenare reusita, INAINTE de crearea
+    # Challenger-ului. Daca persistarea esueaza (model lipsa sau storage),
+    # Challenger-ul NU se creeaza deloc — vezi ADR-048 §4/§5, Pasul 9
+    # Implementation Plan §2.1.
+    persist_run_id = ar.write_run(PRODUCER, "artifact_persistence", "T2", target_key=target_key)
+    if persist_run_id is None:
+        return
+    ar.start_run(persist_run_id)
+
+    model = algorithm.get_trained_model()
+    if model is None:
+        ar.fail_run(persist_run_id, "MODEL_NOT_AVAILABLE: algoritmul nu a produs un model persistabil desi status=='trained'")
+        return  # D3 — Challenger NU se creeaza
+
+    try:
+        artifact_path: str | None = model_artifact_storage.save_model_artifact(model, report.result.training_run_id)
+    except Exception as exc:
+        # De ce prindem Exception generic aici: save_model_artifact() e
+        # documentata best-effort si nu ridica azi nicio exceptie (vezi
+        # model_artifact_storage.py) — dar INV-1/D3 (ADR-048 §5) impun ca un
+        # Challenger sa nu fie NICIODATA creat fara artefact confirmat,
+        # indiferent de implementarea interna a modulului de storage, azi
+        # sau dupa o refactorizare viitoare. Exceptia e tratata identic cu
+        # artifact_path is None, niciodata propagata mai departe.
+        artifact_path = None
+        logger.error("[ContinuousLearning] save_model_artifact a ridicat exceptie neasteptata: %s", exc)
+
+    if artifact_path is None:
+        ar.fail_run(persist_run_id, "STORAGE_FAILURE: save_model_artifact a esuat sau a ridicat exceptie")
+        return  # D3 — Challenger NU se creeaza
+
+    ar.complete_run(persist_run_id, summary={"result": "SUCCESS", "artifact_path": artifact_path})
+
     try:
         challenger_manager.create_challenger(report.result.training_run_id, family, league)
         challenger_manager.transition(report.result.training_run_id, "WAITING")
@@ -313,7 +354,7 @@ def _phase_b_train_new(family: str, league: str, algorithm, version: str, target
         logger.error(
             "[ContinuousLearning] crearea/tranzitia Challenger-ului a esuat pentru %s: %s",
             report.result.training_run_id, exc,
-        )
+        )  # artefactul ramane orfan in Storage, acceptat (ADR-048 §4.1, randul 2)
 
 
 def _count_finished_matches(league: str, since: str | None = None) -> int:

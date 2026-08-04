@@ -63,6 +63,27 @@ class LearningAlgorithm(Protocol):
         """Hiperparametri / feature set — pentru persistare viitoare în training_runs."""
         ...
 
+    def get_trained_model(self) -> Any | None:
+        """Modelul antrenat, compatibil cu backend-ul curent de persistență
+        (XGBClassifier .save_model()/.load_model()/.predict_proba(), vezi
+        learning_core/model_artifact_storage.py) — NU orice obiect Python
+        arbitrar — sau None dacă algoritmul nu produce un artefact
+        persistabil real (vezi ADR-028).
+
+        Contract (ADR-048, Pasul 9 Implementation Plan §1):
+        - side-effect free — nu declanșează antrenare, nu modifică
+          is_trained/starea internă;
+        - idempotent — apeluri repetate între două fit() întorc aceeași
+          instanță (identitate, nu doar egalitate structurală);
+        - fără transfer de ownership — apelantul primește o referință, nu
+          o copie, și nu capătă dreptul de a muta/distruge obiectul;
+        - pentru un algoritm care participă la Challenger Framework
+          (`describe()["participates_in_challenger_framework"] != False`),
+          status == "trained" implică obligatoriu un rezultat non-None aici
+          — trained + None simultan e o stare incorectă a algoritmului, nu
+          un caz normal."""
+        ...
+
 
 _REGISTRY: dict[tuple[str, str], LearningAlgorithm] = {}
 

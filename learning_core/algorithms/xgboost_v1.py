@@ -16,6 +16,7 @@ din ml_predictor.FEATURE_COLUMNS — niciun format nou introdus.
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from learning_core.model_registry import TrainingRunResult
 from ml_predictor import MIN_SAMPLES_TO_TRAIN, MLPredictorEngine
@@ -69,3 +70,9 @@ class XGBoostV1Algorithm:
             "is_trained": self._engine.is_trained,
             "min_samples_to_train": MIN_SAMPLES_TO_TRAIN,
         }
+
+    def get_trained_model(self) -> Any | None:
+        """Vezi LearningAlgorithm.get_trained_model() (model_registry.py) pentru
+        contractul complet. self._engine.model e populat de MLPredictorEngine.train()
+        la fit() reușit — vezi ml_predictor.py, self.model/self.is_trained."""
+        return self._engine.model if self._engine.is_trained else None

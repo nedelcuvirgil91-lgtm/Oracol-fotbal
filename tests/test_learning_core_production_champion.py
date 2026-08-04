@@ -56,3 +56,11 @@ def test_production_champion_describe_does_not_construct_engine():
     assert d["wraps"] == "oracle_engine.FootballOracleEngine.evaluate_match"
     assert d["engine_constructed"] is False
     assert algo._engine is None
+
+
+def test_production_champion_get_trained_model_always_none():
+    """Niciodata un model real — fit() e no-op (ADR-048, Pasul 9)."""
+    algo = ProductionChampionAdapter()
+    assert algo.get_trained_model() is None
+    algo.fit()
+    assert algo.get_trained_model() is None

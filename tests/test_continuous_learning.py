@@ -37,6 +37,9 @@ class _FakeAlgorithm:
     def describe(self):
         return {}
 
+    def get_trained_model(self):
+        return "fake-trained-model"
+
 
 @pytest.fixture(autouse=True)
 def clean_registry():
@@ -259,6 +262,8 @@ def test_phase_b_end_to_end_with_all_scope_and_real_match_counting(recorder, mon
 
     monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
     monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact",
+                         lambda model, tid: f"model-artifacts/{tid}.json")
 
     created = {}
     monkeypatch.setattr(cl.challenger_manager, "create_challenger",
@@ -286,6 +291,8 @@ def test_phase_b_trains_and_creates_challenger_above_threshold(recorder, fake_al
     monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
     monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
     monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
+    monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact",
+                         lambda model, tid: f"model-artifacts/{tid}.json")
 
     created = {}
     transitions = []
@@ -299,6 +306,94 @@ def test_phase_b_trains_and_creates_challenger_above_threshold(recorder, fake_al
     assert result["trained"] == 1
     assert created["id"] == "tr_fake_1"
     assert transitions == ["WAITING", "EVALUATING"]
+
+
+def test_phase_b_model_not_available_skips_challenger_creation(recorder, fake_algorithm, monkeypatch):
+    """D3 (ADR-048): daca get_trained_model() intoarce None desi
+    status=='trained', Challenger-ul NU se creeaza deloc."""
+    monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
+    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
+    monkeypatch.setattr(fake_algorithm, "get_trained_model", lambda: None)
+
+    create_called = []
+    monkeypatch.setattr(cl.challenger_manager, "create_challenger",
+                         lambda tid, family, league: create_called.append(tid))
+
+    result = cl.run_cycle()
+
+    assert result["trained"] == 1
+    assert create_called == [], "Challenger nu trebuie creat cand modelul lipseste"
+    fail_calls = [c for c in recorder.calls if c[0] == "fail_run"]
+    assert any("MODEL_NOT_AVAILABLE" in c[2] for c in fail_calls)
+
+
+def test_phase_b_storage_failure_skips_challenger_creation(recorder, fake_algorithm, monkeypatch):
+    """D3: daca save_model_artifact() intoarce None, Challenger-ul NU se
+    creeaza."""
+    monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
+    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
+    monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact", lambda model, tid: None)
+
+    create_called = []
+    monkeypatch.setattr(cl.challenger_manager, "create_challenger",
+                         lambda tid, family, league: create_called.append(tid))
+
+    result = cl.run_cycle()
+
+    assert result["trained"] == 1
+    assert create_called == [], "Challenger nu trebuie creat cand persistarea esueaza"
+    fail_calls = [c for c in recorder.calls if c[0] == "fail_run"]
+    assert any("STORAGE_FAILURE" in c[2] for c in fail_calls)
+
+
+def test_phase_b_storage_exception_treated_as_failure(recorder, fake_algorithm, monkeypatch):
+    """D3: o exceptie neasteptata din save_model_artifact() e tratata identic
+    cu None — nu se propaga, Challenger-ul nu se creeaza."""
+    monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
+    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
+
+    def _raise(model, tid):
+        raise RuntimeError("storage unreachable")
+
+    monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact", _raise)
+
+    create_called = []
+    monkeypatch.setattr(cl.challenger_manager, "create_challenger",
+                         lambda tid, family, league: create_called.append(tid))
+
+    result = cl.run_cycle()  # nu trebuie sa propage exceptia
+
+    assert result["trained"] == 1
+    assert create_called == []
+    fail_calls = [c for c in recorder.calls if c[0] == "fail_run"]
+    assert any("STORAGE_FAILURE" in c[2] for c in fail_calls)
+
+
+def test_phase_b_persist_success_but_create_challenger_fails_leaves_no_challenger(recorder, fake_algorithm, monkeypatch):
+    """Failure Matrix (ADR-048 §4.1, randul 2): persistare reusita +
+    create_challenger() esueaza -> artefactul ramane orfan, dar niciun
+    Challenger nu exista, iar fluxul se opreste curat, fara exceptie
+    propagata."""
+    monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
+    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
+    monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact",
+                         lambda model, tid: f"model-artifacts/{tid}.json")
+
+    def _raise(tid, family, league):
+        raise cl.challenger_manager.ChallengerManagerError("index unic incalcat")
+
+    monkeypatch.setattr(cl.challenger_manager, "create_challenger", _raise)
+
+    result = cl.run_cycle()  # nu trebuie sa propage exceptia
+
+    assert result["trained"] == 1
+    complete_calls = [c for c in recorder.calls if c[0] == "complete_run"]
+    persist_success = [c for c in complete_calls if c[2] and c[2].get("result") == "SUCCESS"]
+    assert len(persist_success) == 1, "runul artifact_persistence trebuie sa ramana SUCCESS, nu se retrage retroactiv"
 
 
 def test_phase_a_candidate_for_promotion_creates_t3a_decision(recorder, fake_algorithm, monkeypatch):

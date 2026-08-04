@@ -23,3 +23,28 @@ def test_xgboost_adapter_describe():
     assert d["algorithm_family"] == "xgboost_v1"
     assert d["is_trained"] is False
     assert d["min_samples_to_train"] == 30
+
+
+def test_xgboost_adapter_get_trained_model_untrained_returns_none():
+    algo = XGBoostV1Algorithm()
+    assert algo.get_trained_model() is None
+
+
+def test_xgboost_adapter_get_trained_model_after_training_returns_model():
+    algo = XGBoostV1Algorithm()
+    sentinel_model = object()
+    algo._engine.model = sentinel_model
+    algo._engine.is_trained = True
+    assert algo.get_trained_model() is sentinel_model
+
+
+def test_xgboost_adapter_get_trained_model_repeated_calls_return_same_instance():
+    """Contract de identitate (ADR-048, Pasul 9 Implementation Plan §1):
+    apeluri repetate intre doua fit() intorc aceeasi instanta."""
+    algo = XGBoostV1Algorithm()
+    sentinel_model = object()
+    algo._engine.model = sentinel_model
+    algo._engine.is_trained = True
+    first = algo.get_trained_model()
+    second = algo.get_trained_model()
+    assert first is second is sentinel_model
