@@ -9,13 +9,38 @@ from datetime import datetime
 import pytest
 
 from providers.flashscore.pre_match_odds import (
+    _discover_league_fixtures_with_odds,
     _fetch_summary_and_odds,
+    _kickoff_confirmed_beyond_window,
     _within_window,
     discover_week_fixtures_with_odds,
     persist_week_odds,
     resolve_fixture_id,
     sync_week_odds_from_flashscore,
 )
+
+# ── fake-uri comune, reutilizate de mai multe secțiuni de mai jos ──────────
+
+class _FakeResponse:
+    def __init__(self, status=200):
+        self.status = status
+
+
+class _FakeLightPage:
+    """Fake Playwright page — inregistreaza fiecare URL vizitat, ca sa se
+    poata verifica exact ce taburi au fost cerute."""
+    def __init__(self):
+        self.urls_visited: list[str] = []
+
+    def goto(self, url, wait_until=None, timeout=None):
+        self.urls_visited.append(url)
+        return _FakeResponse()
+
+    def wait_for_timeout(self, ms):
+        pass
+
+    def content(self):
+        return "<html><body>fake</body></html>"
 
 
 # ── _within_window — pura ───────────────────────────────────────────────────
@@ -47,6 +72,45 @@ def test_within_window_true_at_exact_boundaries():
     now = datetime(2026, 8, 4, 12, 0, 0)
     assert _within_window("2026-08-04T12:00:00", days_ahead=7, now=now) is True
     assert _within_window("2026-08-11T12:00:00", days_ahead=7, now=now) is True
+
+
+def test_within_window_margin_absorbs_a_few_hours_of_timezone_drift():
+    """Marja de siguranta (_TIMEZONE_SAFETY_MARGIN) trebuie sa accepte un
+    kickoff cu cateva ore inainte de 'acum' sau dupa capatul ferestrei —
+    fara ea, testul de mai jos ar fi False."""
+    now = datetime(2026, 8, 4, 12, 0, 0)
+    assert _within_window("2026-08-04T08:00:00", days_ahead=7, now=now) is True   # 4h inainte de "acum"
+    assert _within_window("2026-08-11T15:00:00", days_ahead=7, now=now) is True   # 3h dupa capatul ferestrei
+
+
+def test_within_window_still_false_well_outside_margin():
+    now = datetime(2026, 8, 4, 12, 0, 0)
+    assert _within_window("2026-08-04T00:00:00", days_ahead=7, now=now) is False  # 12h inainte, dincolo de marja
+    assert _within_window("2026-08-12T12:00:00", days_ahead=7, now=now) is False  # 1 zi dupa capatul ferestrei
+
+
+# ── _kickoff_confirmed_beyond_window — garda de oprire timpurie ───────────
+
+def test_kickoff_confirmed_beyond_window_true_well_past_window():
+    now = datetime(2026, 8, 4, 12, 0, 0)
+    assert _kickoff_confirmed_beyond_window("2026-08-20T12:00:00", days_ahead=7, now=now) is True
+
+
+def test_kickoff_confirmed_beyond_window_false_inside_window():
+    now = datetime(2026, 8, 4, 12, 0, 0)
+    assert _kickoff_confirmed_beyond_window("2026-08-06T12:00:00", days_ahead=7, now=now) is False
+
+
+def test_kickoff_confirmed_beyond_window_false_inside_margin():
+    """Chiar imediat dupa capatul ferestrei, dar inca in marja — nu se
+    confirma 'dincolo de fereastra' (ar opri bucla prea devreme)."""
+    now = datetime(2026, 8, 4, 12, 0, 0)
+    assert _kickoff_confirmed_beyond_window("2026-08-11T15:00:00", days_ahead=7, now=now) is False
+
+
+def test_kickoff_confirmed_beyond_window_false_for_missing_or_unparseable():
+    assert _kickoff_confirmed_beyond_window(None, days_ahead=7) is False
+    assert _kickoff_confirmed_beyond_window("not-a-date", days_ahead=7) is False
 
 
 # ── resolve_fixture_id — pura ───────────────────────────────────────────────
@@ -139,29 +203,177 @@ def test_discover_week_fixtures_rejects_unknown_league():
         discover_week_fixtures_with_odds(leagues=["Liga Necunoscuta"])
 
 
-# ── _fetch_summary_and_odds — garda critica: DOAR 2 taburi, nu 7 ───────────
-
-class _FakeResponse:
-    def __init__(self, status=200):
-        self.status = status
-
-
-class _FakeLightPage:
-    """Fake Playwright page — inregistreaza fiecare URL vizitat, ca sa se
-    poata verifica exact ce taburi au fost cerute."""
+class _FakeBrowser:
+    """Inregistreaza daca a fost inchis (finally), indiferent de succes/esec."""
     def __init__(self):
-        self.urls_visited: list[str] = []
+        self.closed = False
 
-    def goto(self, url, wait_until=None, timeout=None):
-        self.urls_visited.append(url)
-        return _FakeResponse()
+    def new_page(self):
+        return _FakeLightPage()
 
-    def wait_for_timeout(self, ms):
-        pass
+    def close(self):
+        self.closed = True
 
-    def content(self):
-        return "<html><body>fake</body></html>"
 
+class _FakeChromium:
+    def __init__(self, browser):
+        self._browser = browser
+
+    def launch(self, headless=True, executable_path=None):
+        return self._browser
+
+
+class _FakePlaywright:
+    def __init__(self, browser):
+        self.chromium = _FakeChromium(browser)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+def test_discover_week_fixtures_isolates_one_failing_league(monkeypatch):
+    """O liga esuata nu trebuie sa piarda rezultatele deja stranse de la
+    celelalte — regresie directa pentru fix-ul de izolare per-liga."""
+    calls: list[str] = []
+
+    def _fake_discover_league(page, league, days_ahead, limit_per_league):
+        calls.append(league)
+        if league == "Champions League":
+            raise RuntimeError("protectie Flashscore simulata")
+        return [{"league": league, "mid": f"{league}-m1"}]
+
+    fake_browser = _FakeBrowser()
+    monkeypatch.setattr(
+        "providers.flashscore.pre_match_odds._discover_league_fixtures_with_odds", _fake_discover_league,
+    )
+    monkeypatch.setattr("playwright.sync_api.sync_playwright", lambda: _FakePlaywright(fake_browser))
+    monkeypatch.setattr("providers.flashscore.pre_match_odds.time.sleep", lambda s: None)
+
+    records = discover_week_fixtures_with_odds(
+        leagues=["Europa League", "Champions League", "Premier League"], days_ahead=7,
+    )
+
+    assert calls == ["Europa League", "Champions League", "Premier League"]
+    assert [r["mid"] for r in records] == ["Europa League-m1", "Premier League-m1"]
+    assert fake_browser.closed is True
+
+
+# ── _discover_league_fixtures_with_odds — o singura liga, control flow ────
+
+def _patch_discovery_internals(monkeypatch, pairs, identities, odds_by_mid=None):
+    """Monkeypatch-uri comune — izoleaza controlul de flux (break/continue/
+    collect) de parsarea HTML reala (deja acoperita separat, in normalizer
+    si discovery)."""
+    fetched_mids: list[str] = []
+
+    def _fake_fetch(page, base_url, mid):
+        fetched_mids.append(mid)
+        return {"summary": mid, "odds": mid}
+
+    monkeypatch.setattr("providers.flashscore.pre_match_odds._fetch_summary_and_odds", _fake_fetch)
+    monkeypatch.setattr(
+        "providers.flashscore.pre_match_odds.normalize_upcoming_match", lambda pages: identities[pages["summary"]],
+    )
+    monkeypatch.setattr(
+        "providers.flashscore.pre_match_odds.normalize_odds",
+        lambda pages: (odds_by_mid or {}).get(pages["odds"], []),
+    )
+    monkeypatch.setattr("providers.flashscore.pre_match_odds.parse_match_links", lambda html: pairs)
+    monkeypatch.setattr("providers.flashscore.pre_match_odds._dismiss_gdpr_if_present", lambda page: None)
+    monkeypatch.setattr("providers.flashscore.pre_match_odds._check_protection", lambda *a, **kw: None)
+    monkeypatch.setattr("providers.flashscore.pre_match_odds.time.sleep", lambda s: None)
+    return fetched_mids
+
+
+def test_discover_league_fixtures_stops_early_when_kickoff_confirmed_beyond_window(monkeypatch):
+    now = datetime(2026, 8, 4, 12, 0, 0)
+    pairs = [
+        ("https://www.flashscore.com/match/football/a", "m1"),
+        ("https://www.flashscore.com/match/football/b", "m2"),  # confirmat dincolo de fereastra -> break
+        ("https://www.flashscore.com/match/football/c", "m3"),  # nu trebuie niciodata fetch-uit
+    ]
+    identities = {
+        "m1": {"home_team": "A1", "away_team": "A2", "kickoff_date": "2026-08-05T12:00:00", "mid": "m1"},
+        "m2": {"home_team": "B1", "away_team": "B2", "kickoff_date": "2026-09-01T12:00:00", "mid": "m2"},
+        "m3": {"home_team": "C1", "away_team": "C2", "kickoff_date": "2026-08-06T12:00:00", "mid": "m3"},
+    }
+    fetched_mids = _patch_discovery_internals(monkeypatch, pairs, identities)
+
+    records = _discover_league_fixtures_with_odds(
+        _FakeLightPage(), "Europa League", days_ahead=7, limit_per_league=None, now=now,
+    )
+
+    assert fetched_mids == ["m1", "m2"]
+    assert [r["mid"] for r in records] == ["m1"]
+
+
+def test_discover_league_fixtures_collects_all_within_window(monkeypatch):
+    now = datetime(2026, 8, 4, 12, 0, 0)
+    pairs = [
+        ("https://www.flashscore.com/match/football/a", "m1"),
+        ("https://www.flashscore.com/match/football/b", "m2"),
+    ]
+    identities = {
+        "m1": {"home_team": "A1", "away_team": "A2", "kickoff_date": "2026-08-05T12:00:00", "mid": "m1"},
+        "m2": {"home_team": "B1", "away_team": "B2", "kickoff_date": "2026-08-06T12:00:00", "mid": "m2"},
+    }
+    odds_by_mid = {"m1": [{"bookmaker": "bet365", "home": 1.5, "draw": 3.5, "away": 6.0, "source": "flashscore"}]}
+    _patch_discovery_internals(monkeypatch, pairs, identities, odds_by_mid)
+
+    records = _discover_league_fixtures_with_odds(
+        _FakeLightPage(), "Europa League", days_ahead=7, limit_per_league=None, now=now,
+    )
+
+    assert [r["mid"] for r in records] == ["m1", "m2"]
+    assert records[0]["odds"] == odds_by_mid["m1"]
+    assert records[1]["odds"] == []
+
+
+def test_discover_league_fixtures_skips_unparseable_date_without_stopping(monkeypatch):
+    now = datetime(2026, 8, 4, 12, 0, 0)
+    pairs = [
+        ("https://www.flashscore.com/match/football/a", "m1"),  # data lipsa -> sarit, bucla continua
+        ("https://www.flashscore.com/match/football/b", "m2"),  # valid -> colectat
+    ]
+    identities = {
+        "m1": {"home_team": "A1", "away_team": "A2", "kickoff_date": None, "mid": "m1"},
+        "m2": {"home_team": "B1", "away_team": "B2", "kickoff_date": "2026-08-06T12:00:00", "mid": "m2"},
+    }
+    fetched_mids = _patch_discovery_internals(monkeypatch, pairs, identities)
+
+    records = _discover_league_fixtures_with_odds(
+        _FakeLightPage(), "Europa League", days_ahead=7, limit_per_league=None, now=now,
+    )
+
+    assert fetched_mids == ["m1", "m2"]
+    assert [r["mid"] for r in records] == ["m2"]
+
+
+def test_discover_league_fixtures_respects_limit_per_league(monkeypatch):
+    now = datetime(2026, 8, 4, 12, 0, 0)
+    pairs = [
+        ("https://www.flashscore.com/match/football/a", "m1"),
+        ("https://www.flashscore.com/match/football/b", "m2"),
+        ("https://www.flashscore.com/match/football/c", "m3"),
+    ]
+    identities = {
+        mid: {"home_team": f"{mid}-H", "away_team": f"{mid}-A", "kickoff_date": "2026-08-05T12:00:00", "mid": mid}
+        for mid, _ in [("m1", None), ("m2", None), ("m3", None)]
+    }
+    fetched_mids = _patch_discovery_internals(monkeypatch, pairs, identities)
+
+    records = _discover_league_fixtures_with_odds(
+        _FakeLightPage(), "Europa League", days_ahead=7, limit_per_league=2, now=now,
+    )
+
+    assert fetched_mids == ["m1", "m2"]
+    assert [r["mid"] for r in records] == ["m1", "m2"]
+
+
+# ── _fetch_summary_and_odds — garda critica: DOAR 2 taburi, nu 7 ───────────
 
 def test_fetch_summary_and_odds_visits_exactly_two_tabs_not_seven():
     page = _FakeLightPage()

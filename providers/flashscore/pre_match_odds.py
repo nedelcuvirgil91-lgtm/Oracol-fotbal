@@ -86,10 +86,22 @@ def _fetch_summary_and_odds(page, match_base_url: str, mid: str) -> dict[str, st
     return pages
 
 
+# [ADAUGAT — review, al 2-lea pas] Flashscore afișează ora de start FĂRĂ
+# fus explicit extras (`_extract_kickoff_iso()`, normalizer.py — datetime
+# naiv). Fusul real afișat (probabil CET, neverificat live) poate diverge
+# de UTC-ul rulării automate (GitHub Actions) cu câteva ore — marja de mai
+# jos absoarbe acel decalaj la marginea ferestrei, fără să pretindă că se
+# cunoaște exact fusul (asta ar cere o verificare live separată, nu o
+# presupunere). Lărgește fereastra simetric, niciodată nu o îngustează —
+# nu poate exclude un meci care era deja valid.
+_TIMEZONE_SAFETY_MARGIN = timedelta(hours=6)
+
+
 def _within_window(kickoff_iso: str | None, days_ahead: int, now: datetime | None = None) -> bool:
     """Pură — True doar dacă `kickoff_iso` cade în [acum, acum+days_ahead
-    zile]. Fără dată extrasă => False, niciodată aproximat ca fiind în
-    fereastră (North Star #8)."""
+    zile], lărgit cu `_TIMEZONE_SAFETY_MARGIN` la ambele capete. Fără dată
+    extrasă => False, niciodată aproximat ca fiind în fereastră (North
+    Star #8)."""
     if not kickoff_iso:
         return False
     try:
@@ -97,7 +109,73 @@ def _within_window(kickoff_iso: str | None, days_ahead: int, now: datetime | Non
     except ValueError:
         return False
     reference = now or datetime.now()
-    return reference <= kickoff <= reference + timedelta(days=days_ahead)
+    window_start = reference - _TIMEZONE_SAFETY_MARGIN
+    window_end = reference + timedelta(days=days_ahead) + _TIMEZONE_SAFETY_MARGIN
+    return window_start <= kickoff <= window_end
+
+
+def _kickoff_confirmed_beyond_window(kickoff_iso: str | None, days_ahead: int, now: datetime | None = None) -> bool:
+    """Pură — True DOAR dacă `kickoff_iso` e parsabil ȘI confirmat dincolo
+    de fereastră (+ aceeași marjă). Folosită exclusiv pentru oprire
+    timpurie pe `/fixtures/` (hub cronologic, documentat în
+    discovery.py — odată confirmat un meci prea departe, toate
+    următoarele de pe hub sunt și ele mai departe). Niciodată True pentru
+    dată lipsă/neparsabilă — acelea rămân ambigue, gestionate separat
+    (sărite, nu opresc bucla — ar putea fi un glitch izolat de pagină,
+    nu un semnal real că am trecut de fereastră)."""
+    if not kickoff_iso:
+        return False
+    try:
+        kickoff = datetime.fromisoformat(kickoff_iso)
+    except ValueError:
+        return False
+    reference = now or datetime.now()
+    return kickoff > reference + timedelta(days=days_ahead) + _TIMEZONE_SAFETY_MARGIN
+
+
+def _discover_league_fixtures_with_odds(
+    page, league: str, days_ahead: int, limit_per_league: int | None,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """O singură ligă — hub `/fixtures/` + fetch ușor per meci. Extrasă
+    separat (pattern identic `discovery._discover_for_hub()`) ca să poată
+    fi testată direct, fără Playwright real, ȘI izolată per-ligă de
+    apelant (`discover_week_fixtures_with_odds()`) — o ligă eșuată nu
+    trebuie să oprească restul. `now` — injectabil DOAR pentru teste
+    deterministe (vezi `_within_window`); implicit `None` => ceasul real,
+    comportament de producție neschimbat."""
+    country, competition = FLASHSCORE_TRACKED_COMPETITIONS[league]
+    hub_url = f"https://www.flashscore.com/football/{country}/{competition}/fixtures/"
+    resp = page.goto(hub_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
+    http_status = resp.status if resp else None
+    _dismiss_gdpr_if_present(page)
+    page.wait_for_timeout(POST_LOAD_WAIT_MS)
+    _check_protection(page, http_status, tag=f"{league}-fixtures-hub")
+    pairs = parse_match_links(page.content())
+    if limit_per_league is not None:
+        pairs = pairs[:limit_per_league]
+
+    records: list[dict[str, Any]] = []
+    for base_url, mid in pairs:
+        time.sleep(FLASHSCORE_MIN_DELAY_SECONDS)
+        pages = _fetch_summary_and_odds(page, base_url, mid)
+        identity = normalize_upcoming_match(pages)
+        kickoff = identity.get("kickoff_date")
+        if _kickoff_confirmed_beyond_window(kickoff, days_ahead, now=now):
+            # cronologic (hub /fixtures/) - restul sunt si mai departe,
+            # oprire aici economiseste fetch-uri inutile (politete Flashscore).
+            break
+        if not _within_window(kickoff, days_ahead, now=now):
+            continue
+        records.append({
+            "league": league,
+            "home_team": identity.get("home_team"),
+            "away_team": identity.get("away_team"),
+            "kickoff_date": kickoff,
+            "mid": identity.get("mid"),
+            "odds": normalize_odds(pages),
+        })
+    return records
 
 
 def discover_week_fixtures_with_odds(
@@ -105,9 +183,13 @@ def discover_week_fixtures_with_odds(
 ) -> list[dict[str, Any]]:
     """Punct de intrare — vizitează `/fixtures/` (meciuri viitoare) pentru
     fiecare ligă urmărită, extrage identitate + cote pentru meciurile din
-    fereastra `days_ahead`. Ridică `FlashscoreProtectionDetected` (din
-    `discovery.py`) și se oprește imediat la orice semn de protecție —
-    identic restul providerului, niciodată bypass."""
+    fereastra `days_ahead`. `FlashscoreProtectionDetected` (din
+    discovery.py) sau orice altă eroare pe o ligă e logată și acea ligă e
+    sărită — restul continuă, izolare per-ligă (identic principiul deja
+    aplicat în `continuous_learning.py`: o ligă eșuată nu trebuie să
+    piardă rezultatele deja strânse de la celelalte). Niciodată bypass la
+    protecție — oprirea per-ligă rămâne imediată, doar nu se propagă la
+    ligile încă neîncercate."""
     targets = leagues if leagues is not None else list(FLASHSCORE_TRACKED_COMPETITIONS.keys())
     unknown = [lg for lg in targets if lg not in FLASHSCORE_TRACKED_COMPETITIONS]
     if unknown:
@@ -124,34 +206,13 @@ def discover_week_fixtures_with_odds(
         page = browser.new_page()
         try:
             for i, league in enumerate(targets):
-                country, competition = FLASHSCORE_TRACKED_COMPETITIONS[league]
-                hub_url = f"https://www.flashscore.com/football/{country}/{competition}/fixtures/"
                 if i > 0:
                     time.sleep(FLASHSCORE_MIN_DELAY_SECONDS)
-                resp = page.goto(hub_url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
-                http_status = resp.status if resp else None
-                _dismiss_gdpr_if_present(page)
-                page.wait_for_timeout(POST_LOAD_WAIT_MS)
-                _check_protection(page, http_status, tag=f"{league}-fixtures-hub")
-                pairs = parse_match_links(page.content())
-                if limit_per_league is not None:
-                    pairs = pairs[:limit_per_league]
-                for base_url, mid in pairs:
-                    time.sleep(FLASHSCORE_MIN_DELAY_SECONDS)
-                    pages = _fetch_summary_and_odds(page, base_url, mid)
-                    identity = normalize_upcoming_match(pages)
-                    if not identity.get("kickoff_date"):
-                        continue
-                    if not _within_window(identity["kickoff_date"], days_ahead):
-                        continue
-                    records.append({
-                        "league": league,
-                        "home_team": identity.get("home_team"),
-                        "away_team": identity.get("away_team"),
-                        "kickoff_date": identity.get("kickoff_date"),
-                        "mid": identity.get("mid"),
-                        "odds": normalize_odds(pages),
-                    })
+                try:
+                    records.extend(_discover_league_fixtures_with_odds(page, league, days_ahead, limit_per_league))
+                except Exception as exc:
+                    logger.warning("[PreMatchOdds] liga '%s' eșuată, sar la următoarea: %s", league, exc)
+                    continue
         finally:
             browser.close()
     return records
