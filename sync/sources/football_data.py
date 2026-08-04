@@ -21,6 +21,8 @@ Competiții disponibile pe plan gratuit:
   BL1 = Bundesliga
   FL1 = Ligue 1
   CL  = Champions League
+  PPL = Primeira Liga (Portugalia)
+  DED = Eredivisie (Olanda)
 ================================================================================
 """
 from __future__ import annotations
@@ -47,6 +49,13 @@ COMPETITION_CODES: dict[str, str] = {
     "Bundesliga":       "BL1",
     "Ligue 1":          "FL1",
     "Champions League": "CL",
+    # [ADAUGAT 2026-08-04] Coduri VERIFICATE LIVE (workflow_dispatch
+    # poc_new_leagues_verification.yml, run 30958350888) — aceleași coduri
+    # deja folosite în mappings.FD_COMPETITIONS. Turcia/Croația rămân
+    # excluse deliberat — confirmat live, absente din planul gratuit
+    # football-data.org (/v4/competitions, lista completă).
+    "Primeira Liga":    "PPL",
+    "Eredivisie":       "DED",
 }
 
 # Sezoane disponibile (format football-data.org: YYYY)
