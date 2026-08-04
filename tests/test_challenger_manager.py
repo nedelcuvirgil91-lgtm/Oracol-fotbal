@@ -287,16 +287,22 @@ def test_module_has_single_known_importer():
     Learning) adauga learning_core/continuous_learning.py — orchestratorul
     decuplat care apeleaza create_challenger()/transition() la momentul
     corect (prag de volum atins, verdict de evaluare disponibil), exact
-    rolul anticipat. Garda ramane utila sub o forma mai stricta: NIMENI
-    altcineva nu are voie sa importe modulul direct — un scriitor
-    necontrolat, in afara acestor module Learning Core cunoscute, ar
-    reintroduce exact problema de ownership dublu pe care ADR-016 o
-    elimina."""
+    rolul anticipat. Pasul 13 (ADR-050) adauga
+    learning_core/blend_challenger_shadow.py — DOAR citire
+    (get_active_challenger), simetric cu challenger_shadow.py dar pentru
+    Challenger-ul de tip Blend (algorithm_family="blend_v1"); cele doua
+    module de shadow raman separate (verificat in
+    tests/test_blend_challenger_shadow_logging.py). Garda ramane utila sub
+    o forma mai stricta: NIMENI altcineva nu are voie sa importe modulul
+    direct — un scriitor necontrolat, in afara acestor module Learning
+    Core cunoscute, ar reintroduce exact problema de ownership dublu pe
+    care ADR-016 o elimina."""
     import ast
     import pathlib
 
     ALLOWED_IMPORTERS = {"challenger_shadow.py", "challenger_evaluation.py", "promotion_service.py",
-                         "continuous_learning.py"}  # ADR-030 — orchestratorul decuplat
+                         "continuous_learning.py",  # ADR-030 — orchestratorul decuplat
+                         "blend_challenger_shadow.py"}  # ADR-050/Pasul 13 — Shadow Adapter pt Challenger Blend
 
     root = pathlib.Path(__file__).resolve().parent.parent
     offenders = []

@@ -74,6 +74,9 @@ Migrările 014/015 sunt aplicate pe Supabase live de mult (`champion_health_eval
 **ADR-017 (Challenger Shadow Logging)**, independent de ambele de mai sus:
 - `challenger_shadow_logging_enabled` = **`True`** — **activat 2026-07-28** (Sprint 3, audit complet). Verificat live: `oracle_engine._log_challenger_shadow()` scrie exclusiv în `shadow_predictions`, nu modifică predicția servită, nu atinge `model_champions`/`weights.json` (before/after Supabase confirmat: `model_champions`/`challengers`/`model_weights` neschimbate). Suita `test_challenger_shadow_logging.py` + `test_challenger_shadow_adapter.py` (15/15 verde) confirmă comportamentul.
 
+**ADR-050 (Pasul 13 — extensia Challenger Framework pentru algoritmi compuși, ex. Blend)**, independent de flag-ul de mai sus:
+- `blend_challenger_shadow_logging_enabled` = **`False`** (implicit, cheie absentă din `model_config`) — codul e pe `main` (`learning_core/algorithms/blend_v1.py`, `learning_core/blend_challenger_shadow.py`, `oracle_engine._log_blend_challenger_shadow()`), dar activarea shadow logging-ului rămâne o decizie deliberată, separată, neluată încă (Pasul 14 — „Evaluare shadow → decizie de promovare"). `challenger_shadow_logging_enabled` (xgboost_v1) rămâne complet neatins de acest pas — verificat prin gardă structurală AST (`tests/test_blend_challenger_shadow_logging.py`).
+
 ### 3.1 Calibrare post-hoc ML (ADR-049) — Pasul 10a/10b
 
 **ADR-049 (ACCEPTED)**: decizia de a corecta supraîncrederea sistematică a modelului ML (diagnosticată empiric, `ORACLE_VS_ML_REPORT.md` §3.2 — gap de 24.3pp între încredere raportată și acuratețe reală, binul `[0.70, 1.01)`) prin Temperature Scaling, ales față de Platt Scaling/Isotonic Regression pe baza tiparului diagnosticat, cerinței minime de date și proprietății de a păstra `argmax` neschimbat.

@@ -11,5 +11,7 @@ def test_register_default_algorithms_idempotent():
         available = model_registry.list_available()
         assert ("xgboost_v1", "1") in available
         assert ("production_champion", "1") in available
+        assert ("league_weights_adaptive", "1") in available
+        assert ("blend_v1", "1") in available
     finally:
         model_registry._clear_registry_for_tests()

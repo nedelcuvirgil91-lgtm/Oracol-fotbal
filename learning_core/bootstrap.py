@@ -12,6 +12,7 @@ Idempotent: apeluri repetate nu aruncă eroare.
 from __future__ import annotations
 
 from learning_core import model_registry
+from learning_core.algorithms.blend_v1 import BlendV1Algorithm
 from learning_core.algorithms.league_weights_adaptive import LeagueWeightsAdaptiveAlgorithm
 from learning_core.algorithms.production_champion import ProductionChampionAdapter
 from learning_core.algorithms.xgboost_v1 import XGBoostV1Algorithm
@@ -32,3 +33,8 @@ def register_default_algorithms() -> None:
         model_registry.get("league_weights_adaptive", "1")
     except KeyError:
         model_registry.register(LeagueWeightsAdaptiveAlgorithm())
+
+    try:
+        model_registry.get("blend_v1", "1")
+    except KeyError:
+        model_registry.register(BlendV1Algorithm())

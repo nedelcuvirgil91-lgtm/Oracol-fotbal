@@ -168,6 +168,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # viitoare - nu propune inca o varianta alternativa de xG. Implicit
     # OPRIT.
     "flashscore_shadow_logging_enabled": False,
+    # Shadow logging pt Challenger-ul Blend (ADR-050/Pasul 13) — flag
+    # dedicat, separat de challenger_shadow_logging_enabled. Implicit OPRIT.
+    "blend_challenger_shadow_logging_enabled": False,
 }
 
 DEFAULT_WEIGHTS: dict[str, Any] = {
@@ -1694,6 +1697,12 @@ class FootballOracleEngine:
             pred, home_p, away_p, h2h, home_xg, away_xg, ph, pd, pa, mc, w_pen,
         )
 
+        # Shadow logging pt Challenger-ul Blend (ADR-050/Pasul 13) — flag
+        # dedicat, separat de cel de mai sus. Nu modifica `pred`.
+        self._log_blend_challenger_shadow(
+            pred, home_p, away_p, h2h, home_xg, away_xg, ph, pd, pa, mc, w_pen,
+        )
+
         # [ADAUGAT — ADR-033, Faza 1] Captură observațională a ieșirilor
         # brute (raw_predictions, ADR-031) — flag DEDICAT
         # (consensus_capture_enabled, implicit False), separat de
@@ -1862,6 +1871,37 @@ class FootballOracleEngine:
             )
         except Exception as exc:
             logger.debug("[ChallengerShadow] _log_challenger_shadow failed: %s", exc)
+            return False
+
+    def _log_blend_challenger_shadow(
+        self, pred: MatchPrediction, home_p: TeamProfile, away_p: TeamProfile,
+        h2h: H2HRecord, home_xg: float, away_xg: float,
+        ph: float, pd_: float, pa: float, mc: dict, weather_penalty: float,
+    ) -> bool:
+        """Simetric cu _log_challenger_shadow(), dar pentru Challenger-ul
+        Blend (algorithm_family="blend_v1"); flag propriu, neschimbat de
+        challenger_shadow_logging_enabled (vezi ADR-050). Flag oprit = zero
+        cost. Nu modifică NICIODATĂ `pred`. Orice eșec e prins aici,
+        niciodată propagat mai departe."""
+        if not self.config.get("blend_challenger_shadow_logging_enabled", False):
+            return False
+        try:
+            from ml_predictor import _LEAGUE_SCOPE
+            from learning_core.blend_challenger_shadow import log_shadow_for_active_blend_challenger
+
+            ml_features = self._build_ml_features(
+                home_p, away_p, h2h, home_xg, away_xg, ph, pd_, pa, mc, weather_penalty,
+            )
+            return log_shadow_for_active_blend_challenger(
+                league_scope=_LEAGUE_SCOPE,
+                oracle_probs=(pred.prob_home_win, pred.prob_draw, pred.prob_away_win),
+                features=ml_features,
+                fixture_id=pred.fixture_id, home_xg=home_xg, away_xg=away_xg,
+                league=pred.league, home_team=pred.home_team, away_team=pred.away_team,
+                kickoff_date=pred.kickoff_date,
+            )
+        except Exception as exc:
+            logger.debug("[BlendChallengerShadow] _log_blend_challenger_shadow failed: %s", exc)
             return False
 
     # [ADAUGAT — ADR-033, Faza 1] Singura frontieră spre infrastructura
