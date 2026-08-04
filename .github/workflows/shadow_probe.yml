@@ -1,0 +1,66 @@
+name: Football Oracle — Shadow Probe (utilitar operațional)
+
+# Utilitar PERMANENT de operare/mentenanță — NU un job programat, NU un
+# POC. Rulare manuală (workflow_dispatch) oricând e nevoie de o dovadă
+# reală, end-to-end, că shadow logging-ul (orice familie deja activă în
+# model_config — xgboost_v1, blend_v1, sau una viitoare) funcționează.
+# Vezi scripts/shadow_probe.py pentru garanțiile de izolare de producție.
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Număr de meciuri reale de probat"
+        required: false
+        default: "3"
+      confirm:
+        description: 'Scrie exact "yes" pentru execuție reală (altfel: dry-run, doar plan, nicio scriere)'
+        required: true
+        default: "no"
+      list_probes:
+        description: 'Scrie exact "yes" pentru a lista (read-only) toate rândurile create vreodată de acest tool, în loc să ruleze o probă nouă'
+        required: false
+        default: "no"
+
+concurrency:
+  group: shadow-probe
+  cancel-in-progress: false
+
+jobs:
+  shadow-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Shadow Probe
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          if [ "${{ github.event.inputs.list_probes }}" = "yes" ]; then
+            python scripts/shadow_probe.py --list-probes --output-json shadow_probe_result.json
+          elif [ "${{ github.event.inputs.confirm }}" = "yes" ]; then
+            python scripts/shadow_probe.py --limit "${{ github.event.inputs.limit }}" --confirm --output-json shadow_probe_result.json
+          else
+            python scripts/shadow_probe.py --limit "${{ github.event.inputs.limit }}"
+          fi
+
+      - name: Upload result JSON
+        if: github.event.inputs.confirm == 'yes' || github.event.inputs.list_probes == 'yes'
+        uses: actions/upload-artifact@v4
+        with:
+          name: shadow-probe-result
+          path: shadow_probe_result.json
+          retention-days: 90
