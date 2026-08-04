@@ -12,6 +12,8 @@
 
 **Actualizare punctuală, 2026-08-04 (2)**: `main` HEAD = `e5d5606` (§1) — Pasul 10b EPIC „ML Activation & Oracle Evolution" ÎNCHIS: ADR-049 complet implementat — wiring de servire live prin `champion_loader.py`/`oracle_engine.py`. Champion-ul live servește azi probabilități calibrate ori de câte ori artefactul de calibrare există pentru `training_run_id`-ul activ. Vezi §3.1 (actualizat) pentru detalii.
 
+**Actualizare punctuală, 2026-08-04 (3)**: Pasul 11 EPIC „ML Activation & Oracle Evolution" ÎNCHIS — validare experimentală (nu arhitectură): re-rulare a benchmark-ului Etapa 3 pe date live curente (1500 meciuri, 2025-08-23→2026-08-03), comparație perechi ML necalibrat vs. calibrat pe aceleași fold-uri/margini. Toate cele 5 criterii de succes prestabilite TREC — accuracy identică (invariant `argmax` confirmat empiric), log-loss/Brier/ECE îmbunătățite substanțial, overhead runtime +1.81% (neglijabil). Raport complet: `docs/00_GOVERNANCE/ETAPA3_RERUN_AFTER_ADR049.md`. Tooling committed, reutilizabil: `scripts/rerun_etapa3_benchmark.py`. `docs/00_GOVERNANCE/ORACLE_VS_ML_REPORT.md` (Etapa 3 originală) rămâne complet neatins — document istoric, imuabil; trimiterea către raportul nou se face exclusiv de aici, niciodată din interiorul raportului original.
+
 ---
 
 ## 0. Critical Path oficial curent (2026-07-29)
