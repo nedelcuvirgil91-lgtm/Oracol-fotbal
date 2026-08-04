@@ -24,7 +24,15 @@ class XGBClassifier:
         self._majority_class = int(vals[np.argmax(counts)])
         return self
 
-    def predict(self, X):
+    def predict(self, X, output_margin=False):
+        if output_margin:
+            # Pseudo-margini: log(predict_proba()) — softmax(log(p)/1) == p
+            # exact la T=1, suficient pentru testarea structurală a căii de
+            # calibrare (ADR-049, Pasul 10a), fără pretenție de fidelitate
+            # reală XGBoost (stub-ul nu antrenează un model real, vezi
+            # header-ul fișierului).
+            probs = self.predict_proba(X)
+            return np.log(np.clip(probs, 1e-9, None))
         return np.full(len(X), self._majority_class)
 
     def predict_proba(self, X):

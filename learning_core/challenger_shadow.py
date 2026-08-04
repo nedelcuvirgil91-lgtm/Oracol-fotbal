@@ -46,10 +46,18 @@ logger = logging.getLogger("FootballOracle.LearningCore.ChallengerShadow")
 def predict_with_challenger(features: dict, training_run_id: str) -> tuple[float, float, float] | None:
     """Probabilitățile (prob_home, prob_draw, prob_away) ale Challenger-ului
     identificat prin training_run_id, pentru `features` (dict cu cheile din
-    ml_predictor.FEATURE_COLUMNS). None la orice eșec."""
+    ml_predictor.FEATURE_COLUMNS). None la orice eșec.
+
+    [ADAUGAT — ADR-049, Pasul 10a] Dacă există o calibrare validă
+    (Temperature Scaling) pentru același training_run_id, se aplică pe
+    marginile brute ale modelului — altfel cade grațios pe predict_proba()
+    nativă, exact calea de dinainte de acest pas. Absența calibrării NU
+    oprește shadow logging-ul (spre deosebire de gate-ul de la creare,
+    continuous_learning.py) — degradare grațioasă, nu blocare, fiindcă
+    funcția rulează la fiecare predicție live (ADR-049 §8/§9)."""
     try:
-        from learning_core import model_artifact_storage
-        from ml_predictor import FEATURE_COLUMNS
+        from learning_core import calibration_artifact_storage, model_artifact_storage
+        from ml_predictor import FEATURE_COLUMNS, _softmax_with_temperature
         import numpy as np
         import pandas as pd
 
@@ -60,7 +68,14 @@ def predict_with_challenger(features: dict, training_run_id: str) -> tuple[float
         row = pd.DataFrame([{c: features.get(c, np.nan) for c in FEATURE_COLUMNS}])
         row = row.astype(float)
         row = row.fillna(row.median(numeric_only=True)).fillna(0.0)
-        probs = model.predict_proba(row)[0]
+
+        temperature = calibration_artifact_storage.load_calibration_artifact(training_run_id)
+        if temperature is not None:
+            margins = model.predict(row, output_margin=True)
+            probs = _softmax_with_temperature(margins, temperature)[0]
+        else:
+            probs = model.predict_proba(row)[0]
+
         return float(probs[0]), float(probs[1]), float(probs[2])
     except Exception as exc:
         logger.warning("[ChallengerShadow] predict_with_challenger eșuat pentru %s: %s",

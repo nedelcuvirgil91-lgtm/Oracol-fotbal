@@ -7,12 +7,20 @@ coerente indiferent dacă modelul provine din train() local sau dintr-un
 Champion încărcat, iar status_summary() trebuie să reflecte EXCLUSIV
 modelul care servește efectiv — niciodată o sursă concurentă.
 """
+import numpy as np
+import pytest
+
 import ml_predictor
 
 
 class _FakeModel:
     def predict_proba(self, X):
         return [[0.4, 0.3, 0.3]]
+
+    def predict(self, X, output_margin=False):
+        if output_margin:
+            return [[1.0, 0.5, 0.2]]
+        return [0]
 
 
 def test_seed_from_champion_sets_all_descriptive_fields():
@@ -57,6 +65,24 @@ def test_seeded_engine_predict_uses_seeded_model():
     assert pred is not None
     assert pred.samples_used == 500
     assert pred.model_version == 1
+
+
+# ── temperature (ADR-049, Pasul 10a) — parametru aditiv, opțional ───────
+
+def test_seed_from_champion_without_temperature_leaves_it_none():
+    """Backward compatibility: apel fără `temperature` (cazul de azi, Pasul
+    10b neimplementat încă) — self.temperature rămâne None, exact
+    comportamentul unui model necalibrat."""
+    engine = ml_predictor.MLPredictorEngine()
+    engine.seed_from_champion(_FakeModel(), samples_used=500)
+    assert engine.temperature is None
+
+
+def test_seed_from_champion_stores_explicit_temperature():
+    engine = ml_predictor.MLPredictorEngine()
+    engine.seed_from_champion(_FakeModel(), samples_used=500, temperature=1.4)
+    assert engine.temperature == 1.4
+    assert engine.get_calibration_temperature() == 1.4
 
 
 def test_seed_from_champion_sets_champion_metadata():
@@ -140,3 +166,110 @@ def test_predict_byte_identical_regardless_of_provenance():
     assert pred_local.prob_draw == pred_champion.prob_draw
     assert pred_local.prob_away == pred_champion.prob_away
     assert pred_local.confidence == pred_champion.confidence
+
+
+# ── Calibrare (Temperature Scaling, ADR-049, Pasul 10a) ──────────────────
+
+def test_predict_without_temperature_is_byte_identical_to_pre_calibration_path():
+    """Regresie explicită, cerută în PASUL10A_IMPLEMENTATION_PLAN.md §5:
+    fără calibrare (self.temperature is None), predict() trebuie să
+    producă exact aceleași probabilități ca predict_proba() nativă —
+    nicio schimbare de comportament pentru cazul necalibrat."""
+    engine = ml_predictor.MLPredictorEngine()
+    engine.seed_from_champion(_FakeModel(), samples_used=500)  # temperature=None implicit
+    features = {c: 1.0 for c in ml_predictor.FEATURE_COLUMNS}
+
+    pred = engine.predict(features)
+
+    assert (pred.prob_home, pred.prob_draw, pred.prob_away) == (0.4, 0.3, 0.3)
+
+
+def test_predict_with_temperature_uses_calibrated_path():
+    engine = ml_predictor.MLPredictorEngine()
+    engine.seed_from_champion(_FakeModel(), samples_used=500, temperature=2.0)
+    features = {c: 1.0 for c in ml_predictor.FEATURE_COLUMNS}
+
+    pred = engine.predict(features)
+
+    # Cu T=2.0 aplicat pe marginile [1.0, 0.5, 0.2] din _FakeModel, rezultatul
+    # NU mai e [0.4, 0.3, 0.3] (calea predict_proba nativă) — trebuie sa
+    # difere, dovedind ca a fost folosita calea calibrata, nu cea veche.
+    assert (pred.prob_home, pred.prob_draw, pred.prob_away) != (0.4, 0.3, 0.3)
+    assert abs(pred.prob_home + pred.prob_draw + pred.prob_away - 1.0) < 1e-6
+
+
+def test_predict_with_temperature_preserves_argmax():
+    """Proprietatea centrală care a motivat alegerea Temperature Scaling
+    (ADR-049 §2.4/§3): argmax-ul probabilităților nu se schimbă niciodată,
+    indiferent de T — verificat direct pe marginile din _FakeModel
+    ([1.0, 0.5, 0.2], home e deja dominant), pentru mai multe valori de T."""
+    features = {c: 1.0 for c in ml_predictor.FEATURE_COLUMNS}
+
+    baseline = ml_predictor.MLPredictorEngine()
+    baseline.seed_from_champion(_FakeModel(), samples_used=500)  # necalibrat
+    baseline_pred = baseline.predict(features)
+    baseline_argmax = max(
+        ("prob_home", baseline_pred.prob_home),
+        ("prob_draw", baseline_pred.prob_draw),
+        ("prob_away", baseline_pred.prob_away),
+        key=lambda kv: kv[1],
+    )[0]
+
+    for T in (0.5, 1.0, 2.0, 5.0):
+        engine = ml_predictor.MLPredictorEngine()
+        engine.seed_from_champion(_FakeModel(), samples_used=500, temperature=T)
+        pred = engine.predict(features)
+        argmax = max(
+            ("prob_home", pred.prob_home),
+            ("prob_draw", pred.prob_draw),
+            ("prob_away", pred.prob_away),
+            key=lambda kv: kv[1],
+        )[0]
+        assert argmax == baseline_argmax, f"argmax schimbat la T={T}"
+
+
+class _ConsistentFakeModel:
+    """Spre deosebire de _FakeModel (unde predict_proba() și predict(...,
+    output_margin=True) întorc valori independente, arbitrare — suficient
+    pentru testele de mai sus, care doar verifică ce cale de cod rulează),
+    acest model garantează predict_proba() == softmax(margini) exact, ca
+    să poată verifica egalitate NUMERICĂ reală, nu doar "calea corectă"."""
+
+    _margins = np.array([[2.0, 1.0, 0.5]])
+
+    def predict_proba(self, X):
+        shifted = self._margins - self._margins.max(axis=1, keepdims=True)
+        exp = np.exp(shifted)
+        probs = exp / exp.sum(axis=1, keepdims=True)
+        return probs.tolist()
+
+    def predict(self, X, output_margin=False):
+        if output_margin:
+            return self._margins
+        return [0]
+
+
+def test_predict_with_temperature_equal_to_one_is_identical_to_predict_proba():
+    """[ADAUGAT — review Pasul 10a, observația 5, opțională] T=1.0 trebuie
+    să producă exact același rezultat ca predict_proba() nativă — verificat
+    la nivelul MLPredictorEngine.predict(), nu doar la nivelul funcției pure
+    _softmax_with_temperature() (deja acoperit de
+    test_softmax_with_temperature_t_equals_one_matches_plain_softmax).
+    T=1.0 e o valoare persistată explicit (nu None), deci calea de cod
+    parcursă e cea CALIBRATĂ (_softmax_with_temperature), nu fallback-ul
+    necalibrat — testul dovedește că cele două căi coincid numeric la T=1."""
+    model = _ConsistentFakeModel()
+    features = {c: 1.0 for c in ml_predictor.FEATURE_COLUMNS}
+
+    engine = ml_predictor.MLPredictorEngine()
+    engine.seed_from_champion(model, samples_used=500, temperature=1.0)
+    pred = engine.predict(features)
+
+    expected = model.predict_proba(None)[0]
+
+    # predict() rotunjește la 4 zecimale (comportament existent, neschimbat
+    # de calibrare) — toleranța reflectă exact acea rotunjire, nu o
+    # aproximare numerică a calibrării în sine.
+    assert pred.prob_home == pytest.approx(expected[0], abs=5e-5)
+    assert pred.prob_draw == pytest.approx(expected[1], abs=5e-5)
+    assert pred.prob_away == pytest.approx(expected[2], abs=5e-5)

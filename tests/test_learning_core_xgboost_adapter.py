@@ -48,3 +48,14 @@ def test_xgboost_adapter_get_trained_model_repeated_calls_return_same_instance()
     first = algo.get_trained_model()
     second = algo.get_trained_model()
     assert first is second is sentinel_model
+
+
+def test_xgboost_adapter_get_calibration_temperature_untrained_returns_none():
+    algo = XGBoostV1Algorithm()
+    assert algo.get_calibration_temperature() is None
+
+
+def test_xgboost_adapter_get_calibration_temperature_after_fitting():
+    algo = XGBoostV1Algorithm()
+    algo._engine.temperature = 1.42
+    assert algo.get_calibration_temperature() == 1.42

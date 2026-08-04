@@ -122,3 +122,8 @@ class ProductionChampionAdapter:
         contractul complet. Niciodată un model real — fit() e no-op (vezi header-ul
         modulului), campionul de producție nu se antrenează prin acest adaptor."""
         return None
+
+    def get_calibration_temperature(self) -> float | None:
+        """Vezi LearningAlgorithm.get_calibration_temperature() (model_registry.py).
+        Niciodată o calibrare reală — simetric cu get_trained_model()."""
+        return None

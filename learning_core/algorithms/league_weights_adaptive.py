@@ -123,3 +123,8 @@ class LeagueWeightsAdaptiveAlgorithm:
         compatibil cu backend-ul de persistență (XGBoost), consecvent cu
         participates_in_challenger_framework=False (ADR-028)."""
         return None
+
+    def get_calibration_temperature(self) -> float | None:
+        """Vezi LearningAlgorithm.get_calibration_temperature() (model_registry.py).
+        Niciodată o calibrare reală — simetric cu get_trained_model()."""
+        return None

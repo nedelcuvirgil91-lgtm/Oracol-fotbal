@@ -84,6 +84,15 @@ class LearningAlgorithm(Protocol):
           un caz normal."""
         ...
 
+    def get_calibration_temperature(self) -> float | None:
+        """Parametrul de calibrare post-hoc (Temperature Scaling, ADR-049)
+        al modelului curent — None dacă algoritmul nu produce o calibrare
+        validă (fie nu participă la Challenger Framework, fie fitting-ul
+        calibrării a eșuat pe setul out-of-fold). Aceleași proprietăți de
+        contract ca `get_trained_model()` (side-effect free, idempotent,
+        fără transfer de ownership) — vezi ADR-049 §1/§7."""
+        ...
+
 
 _REGISTRY: dict[tuple[str, str], LearningAlgorithm] = {}
 

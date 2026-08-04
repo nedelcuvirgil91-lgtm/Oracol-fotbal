@@ -51,6 +51,7 @@ import automation_runs as ar
 import supabase_client as sb
 from database.queries import get_client
 from learning_core import (
+    calibration_artifact_storage,
     challenger_evaluation,
     challenger_manager,
     champion_guardian,
@@ -346,6 +347,38 @@ def _phase_b_train_new(family: str, league: str, algorithm, version: str, target
 
     ar.complete_run(persist_run_id, summary={"result": "SUCCESS", "artifact_path": artifact_path})
 
+    # Persistare calibrator — extensie INV-1 (ADR-049 §9): imediat dupa
+    # persistarea artefactului de model, INAINTE de crearea Challenger-ului.
+    # Daca calibrarea esueaza (fitting sau storage), Challenger-ul NU se
+    # creeaza deloc — vezi ADR-049 §9, Pasul 10a Implementation Plan §2.1.
+    persist_calib_run_id = ar.write_run(PRODUCER, "calibration_persistence", "T2", target_key=target_key)
+    if persist_calib_run_id is None:
+        return
+    ar.start_run(persist_calib_run_id)
+
+    temperature = algorithm.get_calibration_temperature()
+    if temperature is None:
+        ar.fail_run(persist_calib_run_id, "CALIBRATION_NOT_AVAILABLE: algoritmul nu a produs o calibrare valida")
+        return  # extensie D3 — Challenger NU se creeaza
+
+    try:
+        calibration_path = calibration_artifact_storage.save_calibration_artifact(
+            temperature, report.result.training_run_id,
+        )
+    except Exception as exc:
+        # Aceeasi justificare ca la persistarea modelului (de mai sus):
+        # save_calibration_artifact() e best-effort si nu ridica azi nicio
+        # exceptie, dar D3 trebuie respectat indiferent de implementarea
+        # interna a modulului de storage.
+        calibration_path = None
+        logger.error("[ContinuousLearning] save_calibration_artifact a ridicat exceptie neasteptata: %s", exc)
+
+    if calibration_path is None:
+        ar.fail_run(persist_calib_run_id, "CALIBRATION_STORAGE_FAILURE: save_calibration_artifact a esuat")
+        return  # extensie D3 — Challenger NU se creeaza
+
+    ar.complete_run(persist_calib_run_id, summary={"result": "SUCCESS", "temperature": temperature})
+
     try:
         challenger_manager.create_challenger(report.result.training_run_id, family, league)
         challenger_manager.transition(report.result.training_run_id, "WAITING")
@@ -354,7 +387,9 @@ def _phase_b_train_new(family: str, league: str, algorithm, version: str, target
         logger.error(
             "[ContinuousLearning] crearea/tranzitia Challenger-ului a esuat pentru %s: %s",
             report.result.training_run_id, exc,
-        )  # artefactul ramane orfan in Storage, acceptat (ADR-048 §4.1, randul 2)
+        )  # ambele artefacte (model + calibrare) raman orfane in Storage,
+           # acceptat, fara cleanup ad-hoc (ADR-048 §4.1 randul 2; ADR-049 §9,
+           # Pasul 10a Implementation Plan §2.1/§6)
 
 
 def _count_finished_matches(league: str, since: str | None = None) -> int:

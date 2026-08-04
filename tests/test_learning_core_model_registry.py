@@ -30,6 +30,9 @@ class _DummyAlgorithm:
     def get_trained_model(self):
         return None
 
+    def get_calibration_temperature(self):
+        return None
+
 
 def test_register_and_get():
     algo = _DummyAlgorithm()

@@ -93,3 +93,40 @@ def test_walk_forward_empty_result_when_all_folds_too_small():
     if not result["folds"]:
         assert result["avg_accuracy"] is None
         assert result["avg_brier_score"] is None
+
+
+# ── oof_margins/oof_labels (ADR-049, Pasul 10a) — chei aditive ──────────
+
+def test_walk_forward_returns_oof_margins_and_labels():
+    """[ADAUGAT — ADR-049, Pasul 10a] _walk_forward_validate() trebuie sa
+    intoarca suplimentar predictiile out-of-fold (margini + etichete),
+    sursa de date pentru calibrare (ADR-049 §5) — fara sa schimbe cheile
+    deja existente."""
+    X, y = _make_chronological_dataset(300)
+    result = MLPredictorEngine._walk_forward_validate(X, y, n_folds=5)
+
+    assert "oof_margins" in result
+    assert "oof_labels" in result
+    assert result["oof_margins"].shape[0] == result["oof_labels"].shape[0]
+    assert result["oof_margins"].shape[0] > 0
+    assert result["oof_margins"].shape[1] == 3  # 3 clase (H/D/A)
+
+    # chei preexistente neschimbate
+    assert set(result.keys()) >= {"folds", "avg_accuracy", "avg_log_loss", "avg_brier_score"}
+
+
+def test_walk_forward_oof_labels_match_validation_segments():
+    """Numarul total de etichete OOF trebuie sa fie exact suma val_size-urilor
+    fold-urilor pastrate — nicio dublare, nicio pierdere."""
+    X, y = _make_chronological_dataset(300)
+    result = MLPredictorEngine._walk_forward_validate(X, y, n_folds=5)
+    expected_n = sum(f["val_size"] for f in result["folds"])
+    assert result["oof_labels"].shape[0] == expected_n
+
+
+def test_walk_forward_oof_empty_when_all_folds_too_small():
+    X, y = _make_chronological_dataset(10)
+    result = MLPredictorEngine._walk_forward_validate(X, y, n_folds=5)
+    if not result["folds"]:
+        assert result["oof_margins"].shape[0] == 0
+        assert result["oof_labels"].shape[0] == 0

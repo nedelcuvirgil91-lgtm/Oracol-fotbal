@@ -76,3 +76,9 @@ class XGBoostV1Algorithm:
         contractul complet. self._engine.model e populat de MLPredictorEngine.train()
         la fit() reușit — vezi ml_predictor.py, self.model/self.is_trained."""
         return self._engine.model if self._engine.is_trained else None
+
+    def get_calibration_temperature(self) -> float | None:
+        """Vezi LearningAlgorithm.get_calibration_temperature() (model_registry.py).
+        self._engine.temperature e populat de MLPredictorEngine.train() —
+        None dacă fitting-ul calibrării a eșuat (ADR-049 §9)."""
+        return self._engine.temperature

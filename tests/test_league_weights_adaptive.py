@@ -75,6 +75,11 @@ def test_get_trained_model_always_none():
     assert LeagueWeightsAdaptiveAlgorithm().get_trained_model() is None
 
 
+def test_get_calibration_temperature_always_none():
+    """Niciodata o calibrare reala (ADR-028, ADR-049 Pasul 10a)."""
+    assert LeagueWeightsAdaptiveAlgorithm().get_calibration_temperature() is None
+
+
 def test_registrable_in_model_registry():
     model_registry._clear_registry_for_tests()
     try:

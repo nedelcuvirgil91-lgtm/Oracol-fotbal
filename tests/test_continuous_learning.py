@@ -40,6 +40,9 @@ class _FakeAlgorithm:
     def get_trained_model(self):
         return "fake-trained-model"
 
+    def get_calibration_temperature(self):
+        return 1.25
+
 
 @pytest.fixture(autouse=True)
 def clean_registry():
@@ -264,6 +267,8 @@ def test_phase_b_end_to_end_with_all_scope_and_real_match_counting(recorder, mon
     monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
     monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact",
                          lambda model, tid: f"model-artifacts/{tid}.json")
+    monkeypatch.setattr(cl.calibration_artifact_storage, "save_calibration_artifact",
+                         lambda temperature, tid: f"model-artifacts/{tid}.calibration.json")
 
     created = {}
     monkeypatch.setattr(cl.challenger_manager, "create_challenger",
@@ -293,6 +298,8 @@ def test_phase_b_trains_and_creates_challenger_above_threshold(recorder, fake_al
     monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
     monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact",
                          lambda model, tid: f"model-artifacts/{tid}.json")
+    monkeypatch.setattr(cl.calibration_artifact_storage, "save_calibration_artifact",
+                         lambda temperature, tid: f"model-artifacts/{tid}.calibration.json")
 
     created = {}
     transitions = []
@@ -382,6 +389,8 @@ def test_phase_b_persist_success_but_create_challenger_fails_leaves_no_challenge
     monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
     monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact",
                          lambda model, tid: f"model-artifacts/{tid}.json")
+    monkeypatch.setattr(cl.calibration_artifact_storage, "save_calibration_artifact",
+                         lambda temperature, tid: f"model-artifacts/{tid}.calibration.json")
 
     def _raise(tid, family, league):
         raise cl.challenger_manager.ChallengerManagerError("index unic incalcat")
@@ -393,7 +402,82 @@ def test_phase_b_persist_success_but_create_challenger_fails_leaves_no_challenge
     assert result["trained"] == 1
     complete_calls = [c for c in recorder.calls if c[0] == "complete_run"]
     persist_success = [c for c in complete_calls if c[2] and c[2].get("result") == "SUCCESS"]
-    assert len(persist_success) == 1, "runul artifact_persistence trebuie sa ramana SUCCESS, nu se retrage retroactiv"
+    assert len(persist_success) == 2, (
+        "ambele runuri (artifact_persistence + calibration_persistence) trebuie sa ramana "
+        "SUCCESS, nu se retrag retroactiv (ADR-049 §9, Pasul 10a Implementation Plan §2.1/§6)"
+    )
+
+
+def test_phase_b_calibration_not_available_skips_challenger_creation(recorder, fake_algorithm, monkeypatch):
+    """Extensie D3 (ADR-049 §9): daca get_calibration_temperature() intoarce
+    None dupa persistarea reusita a modelului, Challenger-ul NU se creeaza
+    deloc."""
+    monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
+    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
+    monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact",
+                         lambda model, tid: f"model-artifacts/{tid}.json")
+    monkeypatch.setattr(fake_algorithm, "get_calibration_temperature", lambda: None)
+
+    create_called = []
+    monkeypatch.setattr(cl.challenger_manager, "create_challenger",
+                         lambda tid, family, league: create_called.append(tid))
+
+    result = cl.run_cycle()
+
+    assert result["trained"] == 1
+    assert create_called == [], "Challenger nu trebuie creat cand calibrarea lipseste"
+    fail_calls = [c for c in recorder.calls if c[0] == "fail_run"]
+    assert any("CALIBRATION_NOT_AVAILABLE" in c[2] for c in fail_calls)
+
+
+def test_phase_b_calibration_storage_failure_skips_challenger_creation(recorder, fake_algorithm, monkeypatch):
+    """Extensie D3: daca save_calibration_artifact() intoarce None, Challenger-ul
+    NU se creeaza."""
+    monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
+    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
+    monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact",
+                         lambda model, tid: f"model-artifacts/{tid}.json")
+    monkeypatch.setattr(cl.calibration_artifact_storage, "save_calibration_artifact",
+                         lambda temperature, tid: None)
+
+    create_called = []
+    monkeypatch.setattr(cl.challenger_manager, "create_challenger",
+                         lambda tid, family, league: create_called.append(tid))
+
+    result = cl.run_cycle()
+
+    assert result["trained"] == 1
+    assert create_called == [], "Challenger nu trebuie creat cand persistarea calibrarii esueaza"
+    fail_calls = [c for c in recorder.calls if c[0] == "fail_run"]
+    assert any("CALIBRATION_STORAGE_FAILURE" in c[2] for c in fail_calls)
+
+
+def test_phase_b_calibration_storage_exception_treated_as_failure(recorder, fake_algorithm, monkeypatch):
+    """Extensie D3: o exceptie neasteptata din save_calibration_artifact()
+    e tratata identic cu None — nu se propaga, Challenger-ul nu se creeaza."""
+    monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
+    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
+    monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact",
+                         lambda model, tid: f"model-artifacts/{tid}.json")
+
+    def _raise(temperature, tid):
+        raise RuntimeError("storage unreachable")
+
+    monkeypatch.setattr(cl.calibration_artifact_storage, "save_calibration_artifact", _raise)
+
+    create_called = []
+    monkeypatch.setattr(cl.challenger_manager, "create_challenger",
+                         lambda tid, family, league: create_called.append(tid))
+
+    result = cl.run_cycle()  # nu trebuie sa propage exceptia
+
+    assert result["trained"] == 1
+    assert create_called == []
+    fail_calls = [c for c in recorder.calls if c[0] == "fail_run"]
+    assert any("CALIBRATION_STORAGE_FAILURE" in c[2] for c in fail_calls)
 
 
 def test_phase_a_candidate_for_promotion_creates_t3a_decision(recorder, fake_algorithm, monkeypatch):

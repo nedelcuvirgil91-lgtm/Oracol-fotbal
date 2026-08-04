@@ -123,6 +123,25 @@ FEATURE_COLUMNS = [
 RESULT_TO_LABEL = {"H": 0, "D": 1, "A": 2}
 LABEL_TO_RESULT = {0: "H", 1: "D", 2: "A"}
 
+# [ADAUGAT — ADR-049, Pasul 10a] Interval de căutare pentru T (Temperature
+# Scaling) — exclude T<=0 prin construcție (matematic invalid, softmax(z/T)
+# nedefinit). Vezi PASUL10A_IMPLEMENTATION_PLAN.md §1.
+_TEMPERATURE_SEARCH_BOUNDS = (0.05, 10.0)
+
+
+def _softmax_with_temperature(margins: np.ndarray, temperature: float) -> np.ndarray:
+    """Softmax calibrat: softmax(margini / T), în formă numeric stabilă
+    (logit shifting — se scade maximul pe fiecare rând înainte de
+    exponențiere; matematic identic cu forma neshiftată, dar fără risc de
+    overflow). `margins`: (n_samples, n_classes). `temperature` trebuie
+    strict pozitiv — validat aici, nu presupus valid de apelant."""
+    if temperature is None or temperature <= 0:
+        raise ValueError(f"temperature trebuie să fie strict pozitivă, primit: {temperature!r}")
+    scaled = np.asarray(margins, dtype=float) / temperature
+    shifted = scaled - np.max(scaled, axis=1, keepdims=True)
+    exp = np.exp(shifted)
+    return exp / np.sum(exp, axis=1, keepdims=True)
+
 
 @dataclass
 class MLTrainingResult:
@@ -153,6 +172,11 @@ class MLPredictorEngine:
         self.samples_used: int = 0
         self.is_trained: bool = False
         self.last_train_status: str = "not_trained"
+        # [ADAUGAT — ADR-049, Pasul 10a] Parametru de Temperature Scaling,
+        # antrenat din predicțiile OOF ale walk-forward-ului (§5 ADR-049).
+        # None = necalibrat — predict() cade grațios pe predict_proba()
+        # nativă, exact comportamentul de dinainte de acest pas.
+        self.temperature: float | None = None
         # [ADAUGAT — Pasul 7B] Metadate specifice sursei Champion — citite
         # DOAR de status_summary() când last_train_status ==
         # "trained_from_champion", ca să nu raporteze niciodată statisticile
@@ -174,7 +198,13 @@ class MLPredictorEngine:
     def seed_from_champion(
         self, model, samples_used: int, model_version: int = 1,
         accuracy: float | None = None, log_loss: float | None = None, trained_at: str | None = None,
+        temperature: float | None = None,
     ) -> None:
+        # [ADAUGAT — ADR-049, Pasul 10a] Parametru aditiv, opțional — Pasul
+        # 10a nu are niciun apelant care să-l transmită cu o valoare reală
+        # (champion_loader.py rămâne neatins, per scope Pasul 10b); pregătit
+        # aici ca MLPredictorEngine să fie complet capabil de calibrare ca
+        # unitate autonomă, indiferent cine îi transmite parametrul.
         self.model = model
         self.model_version = model_version
         self.samples_used = samples_used
@@ -184,6 +214,7 @@ class MLPredictorEngine:
         self.champion_accuracy = accuracy
         self.champion_log_loss = log_loss
         self.champion_trained_at = trained_at
+        self.temperature = temperature
 
     # ── Pregătire date ──────────────────────────────────────────────────
     def _fetch_training_dataframe(self) -> pd.DataFrame | None:
@@ -241,6 +272,14 @@ class MLPredictorEngine:
         X, y trebuie sa fie deja ordonate cronologic (index resetat, 0..n-1).
         Imparte in n_folds+1 segmente egale; fold k = antrenare pe segmentele
         [0..k), validare pe segmentul k. Returneaza metrici per-fold si medii.
+
+        [ADAUGAT — ADR-049, Pasul 10a] Capturează suplimentar marginile
+        brute (`output_margin=True`) și etichetele reale ale fiecărui fold
+        de validare, concatenate în `oof_margins`/`oof_labels` — exact
+        eșantionul walk-forward-safe (fiecare fold validează STRICT pe date
+        ulterioare antrenării lui) folosit pentru fitting-ul calibrării
+        (ADR-049 §5, opțiunea 1). Chei aditive — `folds`/`avg_accuracy`/
+        `avg_log_loss`/`avg_brier_score` neschimbate.
         """
         from xgboost import XGBClassifier
         from sklearn.metrics import accuracy_score, log_loss as sk_log_loss
@@ -251,6 +290,8 @@ class MLPredictorEngine:
         # deci n_folds+2 puncte de granita, nu n_folds+1.
         boundaries = np.linspace(0, n, n_folds + 2, dtype=int)
         fold_metrics = []
+        oof_margins_parts: list[np.ndarray] = []
+        oof_labels_parts: list[np.ndarray] = []
 
         for k in range(1, n_folds + 1):
             val_start, val_end = boundaries[k], boundaries[k + 1]
@@ -283,8 +324,18 @@ class MLPredictorEngine:
                 "brier_score": round(brier, 4),
             })
 
+            fold_margins = fold_model.predict(X_val, output_margin=True)
+            oof_margins_parts.append(np.asarray(fold_margins, dtype=float))
+            oof_labels_parts.append(y_val.to_numpy())
+
+        oof_margins = np.concatenate(oof_margins_parts, axis=0) if oof_margins_parts else np.empty((0, 3))
+        oof_labels = np.concatenate(oof_labels_parts, axis=0) if oof_labels_parts else np.empty((0,), dtype=int)
+
         if not fold_metrics:
-            return {"folds": [], "avg_accuracy": None, "avg_log_loss": None, "avg_brier_score": None}
+            return {
+                "folds": [], "avg_accuracy": None, "avg_log_loss": None, "avg_brier_score": None,
+                "oof_margins": oof_margins, "oof_labels": oof_labels,
+            }
 
         avg_acc = float(np.mean([f["accuracy"] for f in fold_metrics]))
         valid_ll = [f["log_loss"] for f in fold_metrics if f["log_loss"] is not None]
@@ -296,7 +347,67 @@ class MLPredictorEngine:
             "avg_accuracy": round(avg_acc, 4),
             "avg_log_loss": round(avg_ll, 4) if avg_ll is not None else None,
             "avg_brier_score": round(avg_brier, 4),
+            "oof_margins": oof_margins,
+            "oof_labels": oof_labels,
         }
+
+    # ── Calibrare post-hoc (Temperature Scaling, ADR-049) ───────────────────
+    @staticmethod
+    def _fit_temperature(oof_margins: np.ndarray, oof_labels: np.ndarray) -> float | None:
+        """Estimează scalarul T care minimizează log-loss-ul lui
+        softmax(margini/T) față de etichetele reale out-of-fold. None dacă
+        setul OOF e degenerat (prea mic, o singură clasă reprezentată) sau
+        optimizarea eșuează — niciodată o valoare aproximată/implicită
+        (Regula North Star #8, "nicio stare necunoscută nu se aproximează").
+
+        [ADAUGAT — review Pasul 10a, observația 4] Gardă explicită față de
+        baseline: T optimizat e acceptat DOAR dacă log-loss-ul lui e strict
+        mai bun decât la T=1.0 (transformare identitate, echivalentă cu
+        necalibrat) — altfel se întoarce T=1.0, nu valoarea găsită de
+        optimizator. Previne persistarea unei "calibrări" care de fapt nu
+        îmbunătățește nimic față de zgomotul statistic al setului OOF.
+        """
+        from scipy.optimize import minimize_scalar
+        from sklearn.metrics import log_loss as sk_log_loss
+
+        if oof_margins.shape[0] < 20 or len(np.unique(oof_labels)) < 2:
+            return None
+
+        def _neg_log_likelihood(t: float) -> float:
+            try:
+                probs = _softmax_with_temperature(oof_margins, t)
+                return sk_log_loss(oof_labels, probs, labels=[0, 1, 2])
+            except Exception:
+                return float("inf")
+
+        baseline_nll = _neg_log_likelihood(1.0)
+        if not np.isfinite(baseline_nll):
+            return None
+
+        try:
+            result = minimize_scalar(
+                _neg_log_likelihood, bounds=_TEMPERATURE_SEARCH_BOUNDS, method="bounded",
+            )
+        except Exception as exc:
+            logger.warning("[ML] _fit_temperature: optimizare eșuată: %s", exc)
+            return None
+
+        if not result.success or not np.isfinite(result.fun):
+            return None
+
+        if result.fun >= baseline_nll:
+            logger.info(
+                "[ML] _fit_temperature: T optimizat (%.4f, log-loss=%.4f) nu îmbunătățește "
+                "baseline-ul T=1.0 (log-loss=%.4f) — se păstrează T=1.0.",
+                result.x, result.fun, baseline_nll,
+            )
+            return 1.0
+
+        logger.info(
+            "[ML] _fit_temperature: T=%.4f (log-loss calibrat=%.4f, baseline T=1.0 log-loss=%.4f).",
+            result.x, result.fun, baseline_nll,
+        )
+        return float(result.x)
 
     # ── Antrenare ─────────────────────────────────────────────────────────
     def train(self) -> MLTrainingResult:
@@ -372,6 +483,16 @@ class MLPredictorEngine:
             self.is_trained = True
             self.last_train_status = "trained"
 
+            # [ADAUGAT — ADR-049, Pasul 10a] Calibrare post-hoc (Temperature
+            # Scaling), antrenată din setul out-of-fold al walk-forward-ului
+            # de mai sus — nu pe date de antrenare ale modelului de
+            # producție (ar leak-ui, ADR-049 §5, opțiunea 3, respinsă
+            # explicit). None dacă setul OOF e degenerat sau optimizarea
+            # eșuează — stare explicită, nu aproximată.
+            self.temperature = self._fit_temperature(wf["oof_margins"], wf["oof_labels"])
+            if self.temperature is None:
+                logger.warning("[ML] Calibrare (Temperature Scaling) eșuată — modelul rămâne necalibrat.")
+
             fold_summary = "; ".join(
                 f"fold{f['fold']}: acc={f['accuracy']} brier={f['brier_score']}"
                 for f in wf["folds"]
@@ -434,7 +555,17 @@ class MLPredictorEngine:
             # antrenare (regim inconsistent, nu doar o valoare aproximată).
             row = pd.DataFrame([{c: features.get(c, np.nan) for c in self.feature_names}])
             row = row.astype(float)
-            probs = self.model.predict_proba(row)[0]
+            # [ADAUGAT — ADR-049, Pasul 10a] Dacă modelul are o calibrare
+            # validă (self.temperature), se aplică Temperature Scaling pe
+            # marginile brute. Altfel, cale identică cu cea de dinainte de
+            # acest pas — predict_proba() nativă, fără nicio schimbare de
+            # comportament pentru cazul necalibrat (regresie explicit
+            # verificată, PASUL10A_IMPLEMENTATION_PLAN.md §5).
+            if self.temperature is not None:
+                margins = self.model.predict(row, output_margin=True)
+                probs = _softmax_with_temperature(margins, self.temperature)[0]
+            else:
+                probs = self.model.predict_proba(row)[0]
             ph, pd_, pa = float(probs[0]), float(probs[1]), float(probs[2])
             confidence = float(max(ph, pd_, pa))
             return MLPrediction(
@@ -445,6 +576,12 @@ class MLPredictorEngine:
         except Exception as exc:
             logger.warning("[ML] predict() failed: %s", exc)
             return None
+
+    # [ADAUGAT — ADR-049, Pasul 10a] Accesor pentru Orchestrator
+    # (continuous_learning.py), simetric cu XGBoostV1Algorithm.get_trained_model()
+    # (ADR-048). None dacă modelul nu are o calibrare validă.
+    def get_calibration_temperature(self) -> float | None:
+        return self.temperature
 
     # ── Status pentru UI ─────────────────────────────────────────────────
     def status_summary(self) -> dict:

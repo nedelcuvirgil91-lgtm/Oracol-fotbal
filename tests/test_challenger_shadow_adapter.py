@@ -122,3 +122,60 @@ def test_shadow_testing_error_does_not_propagate(monkeypatch):
 
     result = challenger_shadow.log_shadow_for_active_challenger(**_base_kwargs())
     assert result is False
+
+
+# ── predict_with_challenger() — calibrare (ADR-049, Pasul 10a) ──────────
+
+class _FakeChallengerModel:
+    def predict_proba(self, X):
+        return [[0.5, 0.3, 0.2]]
+
+    def predict(self, X, output_margin=False):
+        if output_margin:
+            return [[3.0, 1.0, 0.0]]
+        return [0]
+
+
+def test_predict_with_challenger_falls_back_to_predict_proba_without_calibration(monkeypatch):
+    """Degradare grațioasă (ADR-049 §8/§9) — fără calibrare disponibilă,
+    calea rămâne exact predict_proba() nativă, ca înainte de acest pas."""
+    monkeypatch.setattr(
+        "learning_core.model_artifact_storage.load_model_artifact",
+        lambda run_id: _FakeChallengerModel(),
+    )
+    monkeypatch.setattr(
+        "learning_core.calibration_artifact_storage.load_calibration_artifact",
+        lambda run_id: None,
+    )
+
+    result = challenger_shadow.predict_with_challenger({"home_elo": 1500}, "run-xyz")
+
+    assert result == (0.5, 0.3, 0.2)
+
+
+def test_predict_with_challenger_uses_calibrated_path_when_available(monkeypatch):
+    monkeypatch.setattr(
+        "learning_core.model_artifact_storage.load_model_artifact",
+        lambda run_id: _FakeChallengerModel(),
+    )
+    monkeypatch.setattr(
+        "learning_core.calibration_artifact_storage.load_calibration_artifact",
+        lambda run_id: 2.0,
+    )
+
+    result = challenger_shadow.predict_with_challenger({"home_elo": 1500}, "run-xyz")
+
+    # cu T=2.0 aplicat pe marginile [3.0, 1.0, 0.0], rezultatul difera de
+    # calea necalibrata (0.5, 0.3, 0.2) — dovedeste ca s-a folosit calea
+    # calibrata, nu predict_proba() nativa
+    assert result != (0.5, 0.3, 0.2)
+    assert abs(sum(result) - 1.0) < 1e-6
+
+
+def test_predict_with_challenger_none_when_model_missing(monkeypatch):
+    monkeypatch.setattr(
+        "learning_core.model_artifact_storage.load_model_artifact",
+        lambda run_id: None,
+    )
+    result = challenger_shadow.predict_with_challenger({"home_elo": 1500}, "run-xyz")
+    assert result is None

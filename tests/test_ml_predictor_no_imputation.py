@@ -52,7 +52,9 @@ class _RecordingXGBClassifier:
         self.y_fit = y.copy()
         return self
 
-    def predict(self, X):
+    def predict(self, X, output_margin=False):
+        if output_margin:
+            return np.zeros((len(X), 3), dtype=float)
         return np.zeros(len(X), dtype=int)
 
     def predict_proba(self, X):

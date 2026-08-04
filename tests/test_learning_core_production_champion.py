@@ -64,3 +64,11 @@ def test_production_champion_get_trained_model_always_none():
     assert algo.get_trained_model() is None
     algo.fit()
     assert algo.get_trained_model() is None
+
+
+def test_production_champion_get_calibration_temperature_always_none():
+    """Niciodata o calibrare reala (ADR-049, Pasul 10a)."""
+    algo = ProductionChampionAdapter()
+    assert algo.get_calibration_temperature() is None
+    algo.fit()
+    assert algo.get_calibration_temperature() is None
