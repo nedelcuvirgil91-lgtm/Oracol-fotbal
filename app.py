@@ -121,7 +121,9 @@ COMPETITIONS_META = [
     {"key":"Bundesliga",        "icon":"🇩🇪","label":"Bundesliga",      "color":"#e67e22"},
     {"key":"Ligue 1",           "icon":"🇫🇷","label":"Ligue 1",         "color":"#3498db"},
     {"key":"Europa League",     "icon":"🟠","label":"Europa League",   "color":"#e67e22"},
+    {"key":"Conference League", "icon":"🔵","label":"Conference League","color":"#1abc9c"},
     {"key":"Romania SuperLiga", "icon":"🇷🇴","label":"SuperLiga",       "color":"#e74c3c"},
+    {"key":"MLS",               "icon":"🇺🇸","label":"MLS",             "color":"#2c3e50"},
 ]
 
 @st.cache_resource(show_spinner=False)

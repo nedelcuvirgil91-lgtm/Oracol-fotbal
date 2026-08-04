@@ -802,12 +802,30 @@ def normalize_odds(pages: dict[str, str]) -> list[dict[str, Any]]:
     return rows_out
 
 
-def normalize_upcoming_match(raw_record: dict) -> dict[str, Any]:
-    """[Afara scope M0] Pre-Match Sync - fereastra 7 zile, upcoming_matches/
-    upcoming_lineups/upcoming_match_features (design §3.5) - nu face parte
-    din Critical Path M0-M4 (doar meciuri finalizate, capturate). Ramane
-    neimplementat deliberat."""
-    raise NotImplementedError(
-        "R-Sync-FLASH-01: afara scope M0 (Pre-Match Sync, nu Bootstrap/Night "
-        "Sync pe meciuri finalizate) - vezi docs/06_UDAL/R-SYNC-FLASH-01_DESIGN.md."
-    )
+def normalize_upcoming_match(pages: dict[str, str]) -> dict[str, Any]:
+    """[IMPLEMENTAT — flux separat Pre-Match Odds, vezi
+    providers/flashscore/pre_match_odds.py] Identitatea unui meci NEJUCAT
+    (`league`/`home_team`/`away_team`/`kickoff_date`/`mid`), extrasă din
+    tab-ul "summary" (singurul cerut de acest flux — statisticile/H2H/
+    lineups rămân, pentru un meci nejucat, fără valoare, exact regula deja
+    documentată în `discovery.py::_discover_for_hub()`; acest flux nu le
+    cere niciodată).
+
+    Deliberat DOAR identitate — niciun scor/statistică (un meci nejucat nu
+    are, `_extract_final_score()` întoarce corect `(None, None)`, nicio
+    ramură specială necesară). Cotele (`normalize_odds()`, funcție separată,
+    neschimbată) sunt combinate cu rezultatul acestei funcții de apelant,
+    nu aici — păstrează fiecare funcție cu o singură responsabilitate."""
+    html = pages.get("summary")
+    if not html:
+        return {}
+    soup = BeautifulSoup(html, "html.parser")
+    home_team, away_team = _extract_team_names(soup)
+    kickoff_date = _extract_kickoff_iso(soup)
+    mid = _extract_mid(soup)
+    return {
+        "mid": mid,
+        "home_team": home_team,
+        "away_team": away_team,
+        "kickoff_date": kickoff_date,
+    }

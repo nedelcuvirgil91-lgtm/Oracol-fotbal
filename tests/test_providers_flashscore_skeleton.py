@@ -118,8 +118,8 @@ def test_build_match_ref_stable_and_slugified():
     assert _build_match_ref(None, None, None) == "unknown__unknown__unknown"
 
 
-def test_normalize_upcoming_match_still_out_of_scope():
-    """[Afara scope M0/Foundation Data Layer] Pre-Match Sync - singura
-    functie normalizer.py ramasa neimplementata."""
-    with pytest.raises(NotImplementedError):
-        normalize_upcoming_match({})
+def test_normalize_upcoming_match_empty_without_summary_tab():
+    """[Implementat — flux Pre-Match Odds, providers/flashscore/pre_match_odds.py]
+    Fara tab-ul "summary", functia ramane pura si nu aproximeaza nimic."""
+    assert normalize_upcoming_match({}) == {}
+    assert normalize_upcoming_match({"odds": "<html></html>"}) == {}

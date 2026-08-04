@@ -1,0 +1,69 @@
+name: Football Oracle — Sync Pre-Match Odds (Flashscore, verificare)
+
+# Rulare MANUALĂ (workflow_dispatch) — verificare live, la scară mică, a
+# fluxului nou `providers/flashscore/pre_match_odds.py` (ADR-043,
+# fallback de cote pentru meciuri viitoare). NU e cablat în orchestrarea
+# automată (night_sync.yml/live_sync.yml) — rămâne separat, deliberat,
+# cât timp scrierea e în etapa de verificare. Scrie DOAR în
+# `odds_fallback_flashscore` (tabelă nouă, fără niciun cititor încă) —
+# niciodată `odds_history` (Frozen).
+
+on:
+  workflow_dispatch:
+    inputs:
+      leagues:
+        description: "Ligi separate prin virgulă (implicit: toate din FLASHSCORE_TRACKED_COMPETITIONS)"
+        required: false
+        default: "Europa League"
+      days_ahead:
+        description: "Fereastră (zile) pentru meciuri viitoare"
+        required: false
+        default: "7"
+      limit_per_league:
+        description: "Plafon meciuri per ligă (verificare mică)"
+        required: false
+        default: "3"
+
+jobs:
+  sync-pre-match-odds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Run Pre-Match Odds Sync
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          RAPIDAPI_KEY_FREELIVEFOOTBALL: ${{ secrets.RAPIDAPI_KEY_FREELIVEFOOTBALL }}
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        run: |
+          python -m sync.sync_pre_match_odds \
+            --leagues "${{ github.event.inputs.leagues }}" \
+            --days-ahead "${{ github.event.inputs.days_ahead }}" \
+            --limit-per-league "${{ github.event.inputs.limit_per_league }}"
+
+      - name: Upload sync logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pre-match-odds-logs-${{ github.run_id }}
+          path: logs/
+          retention-days: 14
+          if-no-files-found: ignore

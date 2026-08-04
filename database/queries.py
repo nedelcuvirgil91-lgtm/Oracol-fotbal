@@ -1767,6 +1767,35 @@ def upsert_data_completeness(
         return False
 
 
+def upsert_odds_fallback_flashscore(
+    fixture_id: str, bookmaker: str, home: float | None, draw: float | None, away: float | None,
+) -> bool:
+    """`odds_fallback_flashscore` (migratia 032, ADR-043) — fallback
+    TEMPORAR de cote, folosit de Predictor DOAR cand `odds_history`
+    (Frozen, sursa oficiala) nu are niciun rand pentru `fixture_id`
+    (regula de citire, ADR-043 §Decizie pct. 3 — implementata separat,
+    la cititor, nu aici). `on_conflict="fixture_id,bookmaker"` — cea mai
+    recenta captura Flashscore inlocuieste randul anterior pentru aceeasi
+    pereche (fallback-ul nu are nuanta opening/closing a `odds_history`,
+    doar valoarea curenta conteaza, per ADR-043 §Consecinte)."""
+    client = get_client()
+    if client is None:
+        return False
+    payload = {
+        "fixture_id": fixture_id, "bookmaker": bookmaker,
+        "home": home, "draw": draw, "away": away,
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        client.table("odds_fallback_flashscore").upsert(
+            payload, on_conflict="fixture_id,bookmaker",
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.error("[Queries] upsert_odds_fallback_flashscore failed (%s/%s): %s", fixture_id, bookmaker, exc)
+        return False
+
+
 def upsert_match_and_get_id(row: dict) -> int | None:
     """Ca `upsert_match()`, dar returneaza id-ul canonic rezolvat (insert
     SAU update) - necesar pentru scrierile FK-dependente ale Foundation
