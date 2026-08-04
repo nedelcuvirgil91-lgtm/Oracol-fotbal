@@ -1,0 +1,40 @@
+name: Football Oracle — Backfill istoric meciuri (ligi explicite)
+
+# Rulare MANUALĂ (workflow_dispatch) — backfill istoric restrâns la o listă
+# explicită de ligi (football-data.org + openfootball), fără să atingă
+# restul pipeline-ului zilnic (night_sync.yml). Vezi
+# sync/backfill_league_matches.py pentru justificarea completă.
+
+on:
+  workflow_dispatch:
+    inputs:
+      leagues:
+        description: "Ligi separate prin virgulă"
+        required: true
+        default: "Primeira Liga,Eredivisie,Super Lig"
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run backfill
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+        run: |
+          python sync/backfill_league_matches.py --leagues "${{ github.event.inputs.leagues }}"
