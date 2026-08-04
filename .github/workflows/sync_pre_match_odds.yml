@@ -1,18 +1,37 @@
-name: Football Oracle — Sync Pre-Match Odds (Flashscore, verificare)
+name: Football Oracle — Sync Pre-Match Odds (Flashscore)
 
-# Rulare MANUALĂ (workflow_dispatch) — verificare live, la scară mică, a
-# fluxului nou `providers/flashscore/pre_match_odds.py` (ADR-043,
-# fallback de cote pentru meciuri viitoare). NU e cablat în orchestrarea
-# automată (night_sync.yml/live_sync.yml) — rămâne separat, deliberat,
-# cât timp scrierea e în etapa de verificare. Scrie DOAR în
-# `odds_fallback_flashscore` (tabelă nouă, fără niciun cititor încă) —
-# niciodată `odds_history` (Frozen).
+# [ACTIVAT — Faza finalizare ADR-043, 2026-08-04] Flux SEPARAT, izolat
+# deliberat de night_sync.yml/live_sync.yml — nu procesează meciuri
+# finalizate (semantică diferită: acelea sunt "ce s-a jucat", acesta e
+# "ce urmează să se joace, cu ce cote"). Scrie DOAR în
+# `odds_fallback_flashscore` (ADR-043) — niciodată `odds_history`
+# (Frozen). Vezi docstring modul `providers/flashscore/pre_match_odds.py`
+# pentru justificarea completă a separării.
+#
+# Cadență: de 2 ori/zi (08:00 și 20:00 UTC) — cotele se mișcă în timp și
+# beneficiază de reîmprospătare mai deasă decât o rulare unică/zi;
+# programul evită deliberat orele night_sync.yml (03:00 UTC) și
+# live_sync.yml (02/06/10/14/18/22 UTC), ca să nu suprapună trafic
+# Flashscore simultan din workflow-uri diferite.
+#
+# Declanșare programată (schedule) vs. manuală (workflow_dispatch) diferă
+# în domeniul de acoperire, intenționat: rularea programată acoperă
+# TOATE ligile din FLASHSCORE_TRACKED_COMPETITIONS, fără plafon
+# (producție reală) — `github.event.inputs` nu există la evenimente
+# `schedule`, deci pasul de mai jos omite complet flag-urile
+# `--leagues`/`--limit-per-league` în acel caz (CLI: fără ele =
+# acoperire completă). Rularea manuală păstrează implicit valorile mici
+# de verificare (o singură ligă, plafon 3) — pot fi schimbate din UI
+# pentru un test mai larg, fără să afecteze rularea automată.
 
 on:
+  schedule:
+    - cron: "0 8 * * *"
+    - cron: "0 20 * * *"
   workflow_dispatch:
     inputs:
       leagues:
-        description: "Ligi separate prin virgulă (implicit: toate din FLASHSCORE_TRACKED_COMPETITIONS)"
+        description: "Ligi separate prin virgulă (gol = toate din FLASHSCORE_TRACKED_COMPETITIONS)"
         required: false
         default: "Europa League"
       days_ahead:
@@ -20,14 +39,18 @@ on:
         required: false
         default: "7"
       limit_per_league:
-        description: "Plafon meciuri per ligă (verificare mică)"
+        description: "Plafon meciuri per ligă (gol = fără plafon)"
         required: false
         default: "3"
+
+concurrency:
+  group: sync-pre-match-odds
+  cancel-in-progress: false
 
 jobs:
   sync-pre-match-odds:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
@@ -54,10 +77,14 @@ jobs:
           FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
         run: |
-          python -m sync.sync_pre_match_odds \
-            --leagues "${{ github.event.inputs.leagues }}" \
-            --days-ahead "${{ github.event.inputs.days_ahead }}" \
-            --limit-per-league "${{ github.event.inputs.limit_per_league }}"
+          ARGS=(--days-ahead "${{ github.event.inputs.days_ahead || '7' }}")
+          if [ -n "${{ github.event.inputs.leagues }}" ]; then
+            ARGS+=(--leagues "${{ github.event.inputs.leagues }}")
+          fi
+          if [ -n "${{ github.event.inputs.limit_per_league }}" ]; then
+            ARGS+=(--limit-per-league "${{ github.event.inputs.limit_per_league }}")
+          fi
+          python -m sync.sync_pre_match_odds "${ARGS[@]}"
 
       - name: Upload sync logs
         if: always()
