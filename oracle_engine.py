@@ -108,6 +108,12 @@ try:
 except ModuleNotFoundError:
     ML_MODULE_AVAILABLE = False
 
+try:
+    from blend_engine import BlendConfig, BlendEngine, EngineOutput
+    BLEND_ENGINE_MODULE_AVAILABLE = True
+except ModuleNotFoundError:
+    BLEND_ENGINE_MODULE_AVAILABLE = False
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  [%(levelname)s]  %(name)s — %(message)s",
@@ -171,6 +177,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Shadow logging pt Challenger-ul Blend (ADR-050/Pasul 13) — flag
     # dedicat, separat de challenger_shadow_logging_enabled. Implicit OPRIT.
     "blend_challenger_shadow_logging_enabled": False,
+    # Afișare UI a predicției Blend Engine (ADR-051/ADR-052, Vision Shift)
+    # — flag dedicat, neînrudit cu cel de mai sus (acela ramane strict
+    # shadow logging pt Challenger-ul blend_v1). Populeaza doar
+    # pred.blend_engine_prediction. Implicit OPRIT.
+    "blend_engine_display_enabled": False,
+    # Config public al BlendEngine (ADR-052) — strategie + ponderi per
+    # motor, citit de orchestrator si pasat ca BlendConfig. Implicit:
+    # strategia V1 (medie ponderata), nicio pondere explicita (=> 1.0,
+    # neutru, pt orice motor).
+    "blend_engine_config": {"strategy": "weighted_average", "weights": {}},
 }
 
 DEFAULT_WEIGHTS: dict[str, Any] = {
@@ -395,6 +411,15 @@ class MatchPrediction:
     # aproximează).
     home_flashscore_dna:      dict | None = None
     away_flashscore_dna:      dict | None = None
+    # ── Blend Engine (ADR-051/ADR-052, Vision Shift) ──────────────────────
+    # Câmp SEPARAT, dedicat, izolat de `raw_predictions` (ADR-031) în mod
+    # deliberat — consensus_validation.compute_metrics() presupune azi
+    # exact 2 motoare în raw_predictions (`a, b = engines[0], engines[1]`);
+    # o a treia intrare acolo ar rupe acel cod. Populat de BlendEngine
+    # (blend_engine.py, motor independent, zero coupling cu Champion/
+    # Shadow/Promotion/ADR-031/ADR-033). None dacă flag-ul de afișare e
+    # oprit — nu se aproximează.
+    blend_engine_prediction:  dict | None = None
 
 
 def build_raw_predictions(
@@ -454,6 +479,17 @@ class FootballOracleEngine:
         # separat, in Sync Layer (sync/sync_team_health.py, apifootball_health_adapter.py).
 
         self._initialize_ml()
+
+        # [ADAUGAT — ADR-051/ADR-052, Vision Shift] BlendEngine — motor
+        # independent (blend_engine.py), instanțiat o dată, reutilizat per
+        # predicție, exact tiparul lui self.ml de mai sus. Zero coupling:
+        # blend_engine.py nu importă acest fișier. Config public, tipizat
+        # (BlendConfig), citit din model_config (self.config) — modulul
+        # însuși rămâne fără I/O.
+        self.blend = (
+            BlendEngine(BlendConfig.from_dict(self.config.get("blend_engine_config")))
+            if BLEND_ENGINE_MODULE_AVAILABLE else None
+        )
 
         logger.info(
             "FootballOracleEngine v3.0 ready. Supabase=%s Injuries=%s Cache=%s KeyMgr=%s ML=%s ml_source=%s champion_status=%s",
@@ -1712,6 +1748,18 @@ class FootballOracleEngine:
         # metode e ignorat de apelant.
         self._log_consensus_capture(pred)
 
+        # [ADAUGAT — ADR-051/ADR-052, Vision Shift] BlendEngine — motor
+        # independent (blend_engine.py), afișat simultan cu Oracle, fără
+        # niciun selector/fallback. Flag dedicat
+        # (blend_engine_display_enabled). Singura mutație:
+        # pred.blend_engine_prediction (câmp izolat, fără alt cititor) —
+        # nu atinge raw_predictions/prob_home_win/shadow_predictions.
+        # Astăzi doar Oracle e furnizor (BlendEngine.predict() cu un
+        # singur EngineOutput == acel output); un viitor ML Engine se
+        # adaugă aici, aditiv, ca al doilea EngineOutput — zero schimbare
+        # în blend_engine.py.
+        pred.blend_engine_prediction = self._get_blend_engine_prediction(pred)
+
         return pred
 
     # ── Utility methods ───────────────────────────────────────────────────
@@ -1903,6 +1951,30 @@ class FootballOracleEngine:
         except Exception as exc:
             logger.debug("[BlendChallengerShadow] _log_blend_challenger_shadow failed: %s", exc)
             return False
+
+    def _get_blend_engine_prediction(self, pred: MatchPrediction) -> dict | None:
+        """[ADAUGAT — ADR-051/ADR-052, Vision Shift] Predicția BlendEngine
+        (blend_engine.py, motor independent) pentru AFIȘARE în UI —
+        read-only, nu scrie NIMIC în shadow_predictions/raw_predictions.
+        Flag propriu (blend_engine_display_enabled). Flag oprit sau
+        self.blend indisponibil = zero cost, None. Azi construiește un
+        singur EngineOutput (Oracle, din pred deja servit) — un viitor ML
+        Engine se adaugă aici ca al doilea EngineOutput, aditiv, fără
+        nicio schimbare în blend_engine.py. Orice eșec e prins aici,
+        niciodată propagat mai departe."""
+        if not self.config.get("blend_engine_display_enabled", False):
+            return None
+        if self.blend is None:
+            return None
+        try:
+            outputs = [EngineOutput(
+                engine="oracle",
+                prob_home=pred.prob_home_win, prob_draw=pred.prob_draw, prob_away=pred.prob_away_win,
+            )]
+            return self.blend.predict(outputs)
+        except Exception as exc:
+            logger.debug("[BlendEngine] _get_blend_engine_prediction failed: %s", exc)
+            return None
 
     # [ADAUGAT — ADR-033, Faza 1] Singura frontieră spre infrastructura
     # proprie de eșantionare Consensus Validation — trece exclusiv prin

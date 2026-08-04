@@ -88,6 +88,18 @@ Scope-ul complet a fost împărțit deliberat în două sub-pași, cu granițe d
 
 ADR-049 e acum **complet implementat**, de la antrenare până la servire live. Fișiere confirmate neatinse pe tot parcursul 10a+10b (`git diff --stat`, gol): `promotion_service.py`, `training_runner.py`, `challenger_manager.py`, `model_artifact_storage.py`, `RUNTIME_CONTRACT.md`.
 
+### 3.2 Blend Engine (`blend_engine.py`) — stare tehnică curentă, coexistență cu mecanismele legacy
+
+Descriere strict factuală a codului existent azi — nu o decizie arhitecturală nouă, nu modifică ADR-051 (rămâne documentul de referință al viziunii).
+
+Coexistă azi în cod **trei mecanisme distincte** care ating cuvântul „blend", fără nicio relație de dependență între ele:
+
+1. **Blend legacy inline** (`oracle_engine.py:1589`, gatat de `ml_blending_enabled`, implicit `False`) — ar influența predicția LIVE dacă activat; neatins de implementarea de mai jos.
+2. **`blend_v1` Challenger** (ADR-050, Pasul 13/14, `learning_core/blend_challenger_shadow.py`) — shadow-only, cu propriul ciclu de antrenare/evaluare/promovare prin Challenger Framework; neatins de implementarea de mai jos.
+3. **`blend_engine.py`** (nou, ADR-051 §2.3) — modul pur, fără I/O, fără antrenare (`BlendEngine`/`BlendConfig`/`EngineOutput`), instanțiat în `oracle_engine.py` (`self.blend`) exclusiv pentru **afișare UI** (`blend_engine_display_enabled`, implicit `False`), populează `MatchPrediction.blend_engine_prediction`, izolat complet de `raw_predictions`/ADR-031 și de `shadow_predictions`/ADR-033. Azi primește un singur `EngineOutput` (Oracle) — o medie cu un singur termen. Zero coupling verificat static (`tests/test_blend_engine.py`) cu `learning_core.*`/`oracle_engine`-ul intern/celelalte două mecanisme de mai sus.
+
+ADR-051 §6 identifica, la momentul acceptării, o „dualitate Blend" (mecanismele 1 și 2) ca întrebare deschisă, nerezolvată deliberat. Adăugarea mecanismului 3 nu rezolvă acea întrebare — extinde starea tehnică de la două la trei mecanisme coexistente. Relația definitivă dintre ele (dacă vreunul înlocuiește altul, sau rămân distincte) rămâne, ca și înainte, subiectul unui ADR viitor dedicat — nedecisă aici.
+
 ## 4. Ce rulează efectiv în producție azi (verificat live)
 
 | Workflow | Cron | Cod executat (de pe `main`) | Gated de |

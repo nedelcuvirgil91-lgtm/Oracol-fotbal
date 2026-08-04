@@ -293,7 +293,7 @@ def _render_match_card(match: dict, engine) -> None:
     </div>""", unsafe_allow_html=True)
 
     # ── Probabilități ─────────────────────────────────────────────────────
-    st.markdown('<span class="sub-label">Probabilități (compus)</span>', unsafe_allow_html=True)
+    st.markdown('<span class="sub-label">🧮 Oracle</span>', unsafe_allow_html=True)
     st.markdown(
         '<div style="padding:0 1.5rem;">'
         + _prob_bar(f"🏠 {home[:14]}", pred.prob_home_win, "#4a9eff")
@@ -301,6 +301,25 @@ def _render_match_card(match: dict, engine) -> None:
         + _prob_bar(f"✈️ {away[:14]}", pred.prob_away_win, "#ff3d57")
         + "</div>", unsafe_allow_html=True
     )
+
+    # [ADAUGAT — ADR-051/ADR-052, Vision Shift] Blend Engine — motor
+    # independent (blend_engine.py), afișat simultan cu Oracle de mai sus
+    # (niciun motor ascuns). Populat de
+    # oracle_engine._get_blend_engine_prediction() DOAR dacă
+    # blend_engine_display_enabled=True ȘI self.blend e disponibil —
+    # altfel None, secțiunea nu apare deloc (nu se aproximează). Nu există
+    # niciun selector/fallback — ambele predicții rămân vizibile,
+    # independent, fără să se influențeze reciproc.
+    if pred.blend_engine_prediction:
+        bp = pred.blend_engine_prediction
+        st.markdown('<span class="sub-label">🔀 Blend</span>', unsafe_allow_html=True)
+        st.markdown(
+            '<div style="padding:0 1.5rem;">'
+            + _prob_bar(f"🏠 {home[:14]}", bp["prob_home"], "#4a9eff")
+            + _prob_bar("Egal",            bp["prob_draw"], "#ffb300")
+            + _prob_bar(f"✈️ {away[:14]}", bp["prob_away"], "#ff3d57")
+            + "</div>", unsafe_allow_html=True
+        )
 
     # [ADAUGAT — ADR-031] N-way Serving: ieșirile brute, separate, per motor
     # — aditiv, view-ul compus de mai sus rămâne implicit, neschimbat.
