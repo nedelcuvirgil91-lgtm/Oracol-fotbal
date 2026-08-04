@@ -45,22 +45,17 @@ Guvernanța (ADR-uri, documente Frozen, promovare manuală) e tratată ca avanta
 9. Orice rezultat — predicție, evaluare, promovare — trebuie trasabil complet până la sursă.
 10. Nicio dependință „în sus" între straturile arhitecturale — servirea live nu depinde niciodată de infrastructura de învățare.
 
-## Viziune pe termen lung — Oracle și ML (constrângere permanentă, adăugată 2026-08-03)
+## Viziune pe termen lung — trei motoare independente (ADR-051, 2026-08-04, înlocuiește parțial constrângerea din 2026-08-03)
 
-Oracle rămâne motorul principal în prezent datorită performanței demonstrate (verificat prin benchmark, `docs/00_GOVERNANCE/ORACLE_VS_ML_REPORT.md`) — nu din inerție sau preferință.
+**Football Oracle nu mai e construit în jurul Oracle Engine.** E o platformă cu trei motoare independente de predicție, permanent comparabile — niciunul nu are prioritate structurală. Vezi `docs/00_GOVERNANCE/ADR-051-three-independent-engines-vision.md` pentru contextul complet și golurile identificate în documentele care încă presupun Oracle primar.
 
-**ML nu este un experiment abandonat și nu este un fallback.** Obiectivul proiectului e dezvoltarea unui sistem ML autonom care:
+- **Oracle Engine** — expert determinist (Poisson, xG, ajustări, reguli, experiență fotbalistică codificată). Produce propria predicție. Nu e „adevărul" — e doar una dintre vocile sistemului.
+- **Machine Learning Engine** — NU e „XGBoost". XGBoost e primul algoritm folosit, nu definiția motorului (contractul `learning_core.model_registry.LearningAlgorithm`, deja generic, face posibilă orice generație viitoare — CatBoost, LightGBM, rețele neuronale, Transformer, Reinforcement Learning — fără o decizie arhitecturală nouă per algoritm). Obiectivul lui nu e să reproducă Oracle: descoperă tipare noi, observă relații pe care Oracle nu le vede, identifică contexte speciale, estimează risc, învață continuu din istoricul complet + meciurile noi + propriile predicții anterioare.
+- **Blend Engine** — nu e un compromis provizoriu, e un motor propriu, cu identitate proprie (`blend_v1`, ADR-050 — `algorithm_family` separat în Model Registry, propriul ciclu Challenger, propria antrenare, propriul shadow logging, nu o ramură de cod în interiorul Oracle Engine). Combină informația Oracle+ML; poate deveni adaptiv în viitor.
 
-- învață continuu din istoricul complet;
-- învață incremental din meciurile noi;
-- își calibrează automat modelele;
-- își monitorizează performanța;
-- își generează propriile predicții, independente de Oracle;
-- afișează permanent aceste predicții în UI;
-- permite compararea Oracle vs. ML;
-- poate deveni în timp predictorul principal, DACĂ dovezile statistice demonstrează superioritatea sa (North Star #2 — dovadă simultană pe metrici multiple, niciodată o singură metrică sau intuiție).
+**Niciun motor nu e primar prin construcție** — poziția de lider e mereu doar un fapt empiric curent, verificabil (azi: Oracle, per `docs/00_GOVERNANCE/ORACLE_VS_ML_REPORT.md`), niciodată o garanție structurală. Rămân valabile, neschimbate din viziunea anterioară: ML nu e experiment abandonat, obligația de învățare continuă, cerința de comparație explicită, afișarea permanentă în UI (extinsă acum la toate cele trei motoare, nu doar Oracle vs. ML) — North Star #2 (dovadă statistică simultană pe metrici multiple) rămâne singurul criteriu valid pentru orice schimbare de motor principal.
 
-Această viziune fixează direcția pe termen lung a proiectului și previne „optimizarea" proiectului prin eliminarea ML — orice propunere viitoare de a simplifica arhitectura prin renunțarea la stratul ML trebuie evaluată explicit împotriva acestei viziuni, nu decisă tacit.
+Orice propunere viitoare de a simplifica proiectul prin eliminarea ML sau Blend trebuie evaluată explicit împotriva acestei viziuni, niciodată decisă tacit. Un document existent care presupune Oracle ca motor unic/implicit primar nu se editează tacit — se actualizează printr-un ADR dedicat (vezi lista de goluri identificate în ADR-051 §6).
 
 ## Knowledge Map — rolul fiecărui modul
 
