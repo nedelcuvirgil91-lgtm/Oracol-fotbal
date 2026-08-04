@@ -44,6 +44,11 @@ class ChampionLoadResult:
     accuracy: float | None
     log_loss: float | None
     trained_at: str | None
+    # [ADAUGAT — ADR-049, Pasul 10b] None dacă artefactul de calibrare
+    # lipsește/e invalid — degradare grațioasă, NU participă la decizia de
+    # utilizabilitate a Champion-ului (cele 6 condiții, RUNTIME_CONTRACT.md,
+    # rămân neschimbate).
+    temperature: float | None
 
 
 def load_champion_or_none(algorithm_family: str, league_scope: str) -> ChampionLoadResult | None:
@@ -83,6 +88,14 @@ def load_champion_or_none(algorithm_family: str, league_scope: str) -> ChampionL
 
         walk_forward_metrics = training_run.get("walk_forward_metrics") or {}
 
+        # [ADAUGAT — ADR-049, Pasul 10b] Încărcare DUPĂ Condiția 5 (deserializare
+        # funcțională confirmată) — best-effort, load_calibration_artifact()
+        # întoarce None (niciodată excepție) la orice eșec; nu afectează
+        # utilizabilitatea Champion-ului deja decisă mai sus.
+        from learning_core import calibration_artifact_storage
+
+        temperature = calibration_artifact_storage.load_calibration_artifact(champion["training_run_id"])
+
         return ChampionLoadResult(
             training_run_id=champion["training_run_id"],
             model=model,
@@ -93,6 +106,7 @@ def load_champion_or_none(algorithm_family: str, league_scope: str) -> ChampionL
             accuracy=walk_forward_metrics.get("accuracy"),
             log_loss=walk_forward_metrics.get("log_loss"),
             trained_at=training_run.get("created_at"),
+            temperature=temperature,
         )
     except Exception as exc:
         logger.warning("[ChampionLoader] load_champion_or_none eșuat pentru %s/%s: %s",

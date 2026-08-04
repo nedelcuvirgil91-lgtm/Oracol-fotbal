@@ -535,6 +535,7 @@ class FootballOracleEngine:
             self.ml.seed_from_champion(
                 result.model, result.samples_used,
                 accuracy=result.accuracy, log_loss=result.log_loss, trained_at=result.trained_at,
+                temperature=result.temperature,  # [ADAUGAT — ADR-049, Pasul 10b]
             )
             return result
         except Exception as exc:

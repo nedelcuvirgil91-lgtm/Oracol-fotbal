@@ -39,6 +39,9 @@ def happy_path(monkeypatch):
     monkeypatch.setattr("supabase_client.get_active_champion", lambda family, scope: _valid_champion())
     monkeypatch.setattr("supabase_client.get_training_run", lambda tid: _valid_training_run())
     monkeypatch.setattr("learning_core.model_artifact_storage.load_model_artifact", lambda tid: _FakeModel())
+    monkeypatch.setattr(
+        "learning_core.calibration_artifact_storage.load_calibration_artifact", lambda tid: None,
+    )
 
 
 def test_returns_result_when_all_six_conditions_met(happy_path):
@@ -67,6 +70,61 @@ def test_result_metadata_missing_gracefully_defaults_to_none(monkeypatch):
     assert result.accuracy is None
     assert result.log_loss is None
     assert result.trained_at is None
+
+
+# ── Calibrare (ADR-049, Pasul 10b) ───────────────────────────────────────
+
+def test_result_includes_temperature_when_calibration_available(monkeypatch):
+    monkeypatch.setattr("supabase_client.get_active_champion", lambda family, scope: _valid_champion())
+    monkeypatch.setattr("supabase_client.get_training_run", lambda tid: _valid_training_run())
+    monkeypatch.setattr("learning_core.model_artifact_storage.load_model_artifact", lambda tid: _FakeModel())
+    monkeypatch.setattr(
+        "learning_core.calibration_artifact_storage.load_calibration_artifact", lambda tid: 1.37,
+    )
+
+    result = cl.load_champion_or_none("xgboost_v1", "all")
+
+    assert result is not None
+    assert result.temperature == 1.37
+
+
+def test_result_has_none_temperature_when_calibration_unavailable(happy_path):
+    """Degradare grațioasă (ADR-049 §8/§9): fără calibrare disponibilă,
+    Champion-ul TOT se consideră utilizabil — doar `temperature` e None,
+    nu invalidează niciuna dintre cele 6 condiții de utilizabilitate."""
+    result = cl.load_champion_or_none("xgboost_v1", "all")
+
+    assert result is not None
+    assert result.temperature is None
+
+
+def test_unexpected_calibration_exception_is_swallowed_by_outer_guard(monkeypatch):
+    """load_calibration_artifact() nu ridica niciodata exceptie in mod
+    normal (contract testat exhaustiv la Pasul 10a) -- acest test acopera
+    defensiv scenariul unei incalcari a acelui contract. champion_loader.py
+    NU adauga un try/except dedicat pentru apelul de calibrare (decizie
+    explicita, Implementation Plan 10b §2.1) -- o exceptie neasteptata aici
+    e prinsa de garda existenta a intregii functii, care intoarce None
+    pentru TOT rezultatul, nu un ChampionLoadResult partial cu temperature
+    lipsa. Comportament acceptat: o incalcare de contract la calibrare
+    degradeaza intreg Champion-ul la indisponibil, nu doar calibrarea.
+
+    [PRECIZARE — review Pasul 10b] Acest caz NU poate aparea in
+    implementarea normala — load_calibration_artifact() nu ridica
+    niciodata exceptie (contract testat exhaustiv la Pasul 10a, orice esec
+    intoarce None). Testul e strict defensiv, pentru o incalcare
+    ipotetica a acelui contract, NU un flux normal de degradare gratioasa
+    (acela e acoperit de test_result_has_none_temperature_when_calibration_unavailable,
+    unde load_calibration_artifact() intoarce None, nu ridica exceptie)."""
+    def _boom(tid):
+        raise RuntimeError("eroare neasteptata in calibration_artifact_storage")
+
+    monkeypatch.setattr("supabase_client.get_active_champion", lambda family, scope: _valid_champion())
+    monkeypatch.setattr("supabase_client.get_training_run", lambda tid: _valid_training_run())
+    monkeypatch.setattr("learning_core.model_artifact_storage.load_model_artifact", lambda tid: _FakeModel())
+    monkeypatch.setattr("learning_core.calibration_artifact_storage.load_calibration_artifact", _boom)
+
+    assert cl.load_champion_or_none("xgboost_v1", "all") is None
 
 
 def test_returns_none_when_no_active_champion(monkeypatch):

@@ -24,11 +24,12 @@ class _FakeModel:
         return [[0.5, 0.3, 0.2]]
 
 
-def _fake_champion_result(training_run_id="run-1", samples_used=999):
+def _fake_champion_result(training_run_id="run-1", samples_used=999, temperature=None):
     return ChampionLoadResult(
         training_run_id=training_run_id, model=_FakeModel(), samples_used=samples_used,
         algorithm_family="xgboost_v1", algorithm_version="1", league_scope="all",
         accuracy=0.55, log_loss=0.95, trained_at="2026-07-14T00:00:00Z",
+        temperature=temperature,
     )
 
 
@@ -184,6 +185,58 @@ def test_resolve_champion_leaves_ml_untouched_when_unavailable(monkeypatch):
     assert result is None
     assert engine.ml.is_trained is False
     assert engine.ml.model is None
+
+
+# ── Propagare temperatură (ADR-049, Pasul 10b) ──────────────────────────────
+
+def test_resolve_champion_propagates_temperature_to_seed_from_champion(monkeypatch):
+    monkeypatch.setattr(
+        "learning_core.champion_loader.load_champion_or_none",
+        lambda family, scope: _fake_champion_result(temperature=1.37),
+    )
+
+    engine = _FakeEngine(use_supabase=True)
+    engine.ml = ml_predictor.MLPredictorEngine()
+    result = engine._resolve_champion()
+
+    assert result is not None
+    assert engine.ml.temperature == 1.37
+    assert engine.ml.get_calibration_temperature() == 1.37
+
+
+def test_resolve_champion_propagates_none_temperature_when_calibration_unavailable(monkeypatch):
+    """Degradare grațioasă (ADR-049 §8/§9) — fără calibrare disponibilă
+    pentru Champion, self.ml.temperature rămâne None, comportament identic
+    cu cel dinainte de Pasul 10b. Champion-ul tot servește (result nu e
+    None), doar probabilitățile rămân brute."""
+    monkeypatch.setattr(
+        "learning_core.champion_loader.load_champion_or_none",
+        lambda family, scope: _fake_champion_result(temperature=None),
+    )
+
+    engine = _FakeEngine(use_supabase=True)
+    engine.ml = ml_predictor.MLPredictorEngine()
+    result = engine._resolve_champion()
+
+    assert result is not None
+    assert engine.ml.temperature is None
+
+
+def test_initialize_ml_end_to_end_carries_temperature_through_to_engine(monkeypatch):
+    """Test de integrare (Implementation Plan 10b §3) — firul complet
+    loader -> _resolve_champion() -> seed_from_champion() ->
+    MLPredictorEngine, verificat prin punctul de intrare real
+    (_initialize_ml()), nu doar prin _resolve_champion() izolat."""
+    monkeypatch.setattr(
+        "learning_core.champion_loader.load_champion_or_none",
+        lambda family, scope: _fake_champion_result(temperature=2.1),
+    )
+
+    engine = _FakeEngine(use_supabase=True)
+    engine._initialize_ml()
+
+    assert engine.ml_source == "champion"
+    assert engine.ml.temperature == 2.1
 
 
 def test_resolve_champion_never_raises(monkeypatch):
