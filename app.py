@@ -124,6 +124,10 @@ COMPETITIONS_META = [
     {"key":"Conference League", "icon":"🔵","label":"Conference League","color":"#1abc9c"},
     {"key":"Romania SuperLiga", "icon":"🇷🇴","label":"SuperLiga",       "color":"#e74c3c"},
     {"key":"MLS",               "icon":"🇺🇸","label":"MLS",             "color":"#2c3e50"},
+    {"key":"Primeira Liga",     "icon":"🇵🇹","label":"Primeira Liga",   "color":"#c0392b"},
+    {"key":"Eredivisie",        "icon":"🇳🇱","label":"Eredivisie",      "color":"#f39c12"},
+    {"key":"Super Lig",         "icon":"🇹🇷","label":"Süper Lig",       "color":"#d35400"},
+    {"key":"HNL",               "icon":"🇭🇷","label":"HNL",             "color":"#2980b9"},
 ]
 
 @st.cache_resource(show_spinner=False)

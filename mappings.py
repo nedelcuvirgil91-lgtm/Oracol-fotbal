@@ -593,6 +593,58 @@ LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
             "soccerfootballinfo": True,
         },
     ),
+    # [ADAUGAT] Cerere explicită proprietar produs, 2026-08-04 — 4 ligi noi.
+    # Toate provider_ids de mai jos VERIFICATE LIVE (workflow_dispatch
+    # poc_new_leagues_verification.yml, run 30958350888, 2026-08-04) —
+    # tsdb/espn/football_data/odds prin apel real (chei reale unde e cazul),
+    # niciunul presupus. api_football/soccerfootballinfo — apeluri reale
+    # făcute, dar rezultat neconcludent (răspuns gol, fără eroare — motiv
+    # neclar, nu poate fi tratat ca "confirmat absent"), rămân "necunoscut".
+    "Primeira Liga": LeagueDefinition(
+        name="Primeira Liga",
+        provider_ids={"football_data": "PPL", "espn": "por.1", "tsdb": "4344",
+                       "odds": "soccer_portugal_primeira_liga", "freelf": None, "api_football": None,
+                       "soccerfootballinfo": None},
+        supported={"football_data": True, "espn": True, "tsdb": True,
+                    "odds": True, "freelf": "necunoscut", "api_football": "necunoscut",
+                    "soccerfootballinfo": "necunoscut"},
+    ),
+    "Eredivisie": LeagueDefinition(
+        name="Eredivisie",
+        provider_ids={"football_data": "DED", "espn": "ned.1", "tsdb": "4337",
+                       "odds": "soccer_netherlands_eredivisie", "freelf": None, "api_football": None,
+                       "soccerfootballinfo": None},
+        supported={"football_data": True, "espn": True, "tsdb": True,
+                    "odds": True, "freelf": "necunoscut", "api_football": "necunoscut",
+                    "soccerfootballinfo": "necunoscut"},
+    ),
+    "Super Lig": LeagueDefinition(
+        name="Super Lig",
+        # football_data=False — CONFIRMAT live, /v4/competitions (lista
+        # completa a planului gratuit) nu include Turcia (run 30958350888).
+        provider_ids={"football_data": None, "espn": "tur.1", "tsdb": "4339",
+                       "odds": "soccer_turkey_super_league", "freelf": None, "api_football": None,
+                       "soccerfootballinfo": None},
+        supported={"football_data": False, "espn": True, "tsdb": True,
+                    "odds": True, "freelf": "necunoscut", "api_football": "necunoscut",
+                    "soccerfootballinfo": "necunoscut"},
+    ),
+    "HNL": LeagueDefinition(
+        name="HNL",
+        # espn=None — CONFIRMAT live absent: 3 candidați testați (cro.1/
+        # hrv.1/croatia.1), toți HTTP 400 (run 30958350888). football_data=
+        # False — CONFIRMAT live, /v4/competitions nu include Croația.
+        # odds=None — CONFIRMAT live, /v4/sports (căutare exhaustivă) nu
+        # conține niciun sport_key pentru Croația. Sursă reală unică azi:
+        # TheSportsDB (id=4629, "Croatian First Football League" — nume
+        # confirmat live, nu presupus).
+        provider_ids={"football_data": None, "espn": None, "tsdb": "4629",
+                       "odds": None, "freelf": None, "api_football": None,
+                       "soccerfootballinfo": None},
+        supported={"football_data": False, "espn": False, "tsdb": True,
+                    "odds": False, "freelf": "necunoscut", "api_football": "necunoscut",
+                    "soccerfootballinfo": "necunoscut"},
+    ),
 }
 
 # ── Dictionare derivate — generate, NU scrise manual (elimina desincronizarea) ──
@@ -829,7 +881,20 @@ LEAGUE_BASELINES: dict[str, float] = {
     "Premier League": 1.35, "La Liga": 1.20, "Serie A": 1.25,
     "Bundesliga": 1.40, "Ligue 1": 1.30, "Champions League": 1.20,
     "Europa League": 1.15, "Romania SuperLiga": 1.15,
-    "World Cup 2026": 1.25, "MLS": 1.40, "default": 1.25,
+    "World Cup 2026": 1.25, "MLS": 1.40,
+    # [ADAUGAT 2026-08-04] Baseline = (total goluri sezon / meciuri) / 2 —
+    # aceeași formulă implicită deja folosită mai sus (ex. Premier League
+    # 1.35 ≈ 2.70/2). Date reale, sezonul 2024-25 complet (nu presupuse):
+    #   Primeira Liga: 786 goluri / 306 meciuri = 2.57 → 1.28 (Wikipedia,
+    #     2024–25 Primeira Liga)
+    #   Eredivisie: 914 goluri / 306 meciuri = 2.99 → 1.49 (footystats.org,
+    #     2024–25 Eredivisie)
+    #   Super Lig: 942 goluri / 324 meciuri = 2.91 → 1.45 (ESPN, 2024-25
+    #     Turkish Super Lig scoring stats)
+    #   HNL: 424 goluri / 180 meciuri = 2.36 → 1.18 (Wikipedia, 2024–25
+    #     Croatian Football League)
+    "Primeira Liga": 1.28, "Eredivisie": 1.49, "Super Lig": 1.45, "HNL": 1.18,
+    "default": 1.25,
 }
 
 FREE_LF_LEAGUE_IDS: dict[str, int] = {
@@ -919,7 +984,9 @@ LEAGUE_ALIASES: dict[str, list[str]] = {
     #    fara sursa activa de import istoric — pastrate pentru extensibilitate
     "MLS":               ["USA", "Major League Soccer"],
     "Eredivisie":        ["N1", "Netherlands"],
-    "Primeira Liga":     ["P1", "Portugal"],
+    "Primeira Liga":     ["P1", "Portugal", "Liga Portugal", "Liga Portugal Betclic"],
+    "Super Lig":         ["Turkey", "Turkish Super Lig", "Süper Lig"],
+    "HNL":               ["Croatia", "Prva HNL", "Croatian First Football League", "1. HNL"],
 }
 
 ALIAS_TO_CANONICAL_LEAGUE: dict[str, str] = {}

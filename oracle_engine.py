@@ -206,6 +206,18 @@ DEFAULT_WEIGHTS: dict[str, Any] = {
         "Romania SuperLiga": {"form_weight":0.65,"base_weight":0.35,"goals_weight":0.48,"shots_ot_weight":0.28,"possession_weight":0.24,"home_advantage":1.09,"away_penalty":0.93,"sample_count":0},
         "World Cup 2026":    {"form_weight":0.55,"base_weight":0.45,"goals_weight":0.44,"shots_ot_weight":0.30,"possession_weight":0.26,"home_advantage":1.03,"away_penalty":0.97,"sample_count":0},
         "MLS":               {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.08,"away_penalty":0.94,"sample_count":0},
+        # [ADAUGAT 2026-08-04] 4 ligi noi — valori IDENTICE cu "default" de
+        # mai jos (deliberat, nu o omisiune): nicio calibrare per-ligă reală
+        # nu există încă (sample_count=0 peste tot, oricum inert azi — vezi
+        # docstring resolve_league_weights(), feature_engine.py). Prezența
+        # explicită aici e doar structurală (paritate vizibilă cu restul
+        # ligilor înregistrate), NU o schimbare de parametru matematic —
+        # regula "orice recalibrare = experiment separat, aprobare
+        # explicită" (CLAUDE.md) rămâne respectată: nimic nu e recalibrat.
+        "Primeira Liga":     {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95,"sample_count":0},
+        "Eredivisie":        {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95,"sample_count":0},
+        "Super Lig":         {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95,"sample_count":0},
+        "HNL":               {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95,"sample_count":0},
         "default":           {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95,"sample_count":0},
     },
 }

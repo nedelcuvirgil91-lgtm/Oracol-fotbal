@@ -40,6 +40,10 @@ def test_tracked_competitions_only_contains_verified_slugs():
         "Ligue 1": ("france", "ligue-1"),
         "Europa League": ("europe", "europa-league"),
         "MLS": ("usa", "mls"),
+        "Primeira Liga": ("portugal", "liga-portugal"),
+        "Eredivisie": ("netherlands", "eredivisie"),
+        "Super Lig": ("turkey", "super-lig"),
+        "HNL": ("croatia", "hnl"),
     }
 
 
