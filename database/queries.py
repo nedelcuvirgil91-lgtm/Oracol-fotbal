@@ -1796,6 +1796,62 @@ def upsert_odds_fallback_flashscore(
         return False
 
 
+def get_odds_fallback_for_missing_fixtures(fixture_ids: list[str]) -> dict[str, dict]:
+    """Regula de citire ADR-043 §Decizie pct. 3, implementata intr-un
+    singur punct: intai `odds_history` (Frozen, sursa oficiala) - orice
+    `fixture_id` cu macar un rand acolo NU primeste fallback, chiar daca
+    fetch-ul live curent (`oracle_api._attach_odds()`) tocmai a esuat pe
+    acel meci (un rand mai vechi in `odds_history` tot inseamna "sursa
+    primara are date pentru acest meci", per ADR-043 §5 - reversibilitate
+    automata, fara cod nou, cand providerul oficial revine). DOAR
+    fixture-urile complet absente din `odds_history` (niciun rand,
+    niciodata) sunt cautate in `odds_fallback_flashscore`. Cand exista mai
+    multe case de pariuri pentru acelasi fixture, se alege cea mai recenta
+    captura (`captured_at`) - o singura pereche coerenta de cote per meci,
+    niciodata amestecate intre case de pariuri diferite. Returneaza DOAR
+    fixture-urile gasite in fallback - niciun rand pentru un fixture
+    inseamna "nicio cota disponibila", niciodata aproximat (North Star
+    #8)."""
+    if not fixture_ids:
+        return {}
+    client = get_client()
+    if client is None:
+        return {}
+    try:
+        primary_res = (
+            client.table("odds_history").select("fixture_id").in_("fixture_id", fixture_ids).execute()
+        )
+        covered = {row["fixture_id"] for row in (primary_res.data or [])}
+    except Exception as exc:
+        logger.warning("[Queries] get_odds_fallback_for_missing_fixtures: citire odds_history esuata: %s", exc)
+        return {}
+
+    missing = [fid for fid in fixture_ids if fid not in covered]
+    if not missing:
+        return {}
+
+    try:
+        fallback_res = (
+            client.table("odds_fallback_flashscore")
+            .select("fixture_id,bookmaker,home,draw,away,captured_at")
+            .in_("fixture_id", missing)
+            .execute()
+        )
+    except Exception as exc:
+        logger.warning(
+            "[Queries] get_odds_fallback_for_missing_fixtures: citire odds_fallback_flashscore esuata: %s", exc,
+        )
+        return {}
+
+    best: dict[str, dict] = {}
+    for row in (fallback_res.data or []):
+        fid = row["fixture_id"]
+        current = best.get(fid)
+        if current is None or (row.get("captured_at") or "") > (current.get("captured_at") or ""):
+            best[fid] = row
+    return best
+
+
 def upsert_match_and_get_id(row: dict) -> int | None:
     """Ca `upsert_match()`, dar returneaza id-ul canonic rezolvat (insert
     SAU update) - necesar pentru scrierile FK-dependente ale Foundation
