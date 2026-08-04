@@ -4,17 +4,26 @@ FOOTBALL ORACLE v4.0 — OpenFootball Data Source
 ================================================================================
 Module: sync/sources/openfootball.py
 
-Descarcă rezultate istorice din repo-ul public openfootball/football pe GitHub.
-Fișierele sunt în format text simplu (.txt), parsate și transformate în
-dicționare compatibile cu schema match_history din Supabase.
+Descarcă rezultate istorice din repo-ul public openfootball/football.json
+pe GitHub, format JSON, parsate și transformate în dicționare compatibile
+cu schema match_history din Supabase.
 
-Surse disponibile:
-  - Premier League (eng.1)
+Surse disponibile (VERIFICATE LIVE 2026-08-04, după ce URL-urile vechi au
+început să dea 404 — vezi nota [FIX 2026-08-04] de mai jos):
+  - Premier League (en.1)
   - La Liga (es.1)
   - Bundesliga (de.1)
   - Serie A (it.1)
   - Ligue 1 (fr.1)
   - Champions League (uefa.cl)
+  - Primeira Liga (pt.1)
+  - Eredivisie (nl.1)
+  - Super Lig (tr.1)
+
+NU disponibile în acest dataset (verificat live, HTTP 404 pe fișierul
+real, nu presupus) — Romania SuperLiga, HNL (Croația). Pentru HNL,
+Flashscore Foundation Data Layer (`FLASHSCORE_TRACKED_COMPETITIONS`)
+rămâne sursa reală, deja activă.
 
 Rate limit: GitHub raw content nu are rate limit semnificativ pentru
 fișiere publice — putem descărca toate sezoanele fără restricții.
@@ -32,50 +41,59 @@ import requests
 
 logger = logging.getLogger("FootballOracle.Sync.OpenFootball")
 
-# URL-uri raw GitHub pentru openfootball/football
+# URL raw GitHub pentru openfootball/football.json (branch master, obligatoriu
+# în path pentru raw.githubusercontent.com).
 GITHUB_RAW = "https://raw.githubusercontent.com/openfootball/football.json/master"
 
-# Mapare ligă Football Oracle → path openfootball
+# Mapare ligă Football Oracle → cod fișier openfootball. [FIX 2026-08-04]
+# Repo-ul sursă și-a schimbat COMPLET layout-ul de fișiere ȘI formatul JSON
+# de la implementarea inițială — confirmat live, nu presupus:
+#   - vechi: {season}/{path}/{file} (ex. "2024-25/en/1-premierleague.json"),
+#     JSON {"name":..., "rounds":[{"matches":[...]}]}  — TOATE dădeau 404.
+#   - nou:   {season}/{code}.json (ex. "2024-25/en.1.json"),
+#     JSON {"name":..., "matches":[...]} flat, fără "rounds".
+# Fiecare "code" de mai jos verificat live (HTTP 200 + "name" plauzibil).
 LEAGUE_PATHS: dict[str, dict] = {
     "Premier League": {
-        "path": "en",
+        "code": "en.1",
         "seasons": ["2021-22", "2022-23", "2023-24", "2024-25"],
-        "file": "1-premierleague.json",
     },
     "La Liga": {
-        "path": "es",
+        "code": "es.1",
         "seasons": ["2021-22", "2022-23", "2023-24", "2024-25"],
-        "file": "1-liga.json",
     },
     "Bundesliga": {
-        "path": "de",
+        "code": "de.1",
         "seasons": ["2021-22", "2022-23", "2023-24", "2024-25"],
-        "file": "1-bundesliga.json",
     },
     "Serie A": {
-        "path": "it",
+        "code": "it.1",
         "seasons": ["2021-22", "2022-23", "2023-24", "2024-25"],
-        "file": "1-calcio.json",
     },
     "Ligue 1": {
-        "path": "fr",
+        "code": "fr.1",
         "seasons": ["2021-22", "2022-23", "2023-24", "2024-25"],
-        "file": "1-ligue1.json",
     },
     "Champions League": {
-        "path": "uefa.cl",
+        "code": "uefa.cl",
         "seasons": ["2021-22", "2022-23", "2023-24", "2024-25"],
-        "file": "cl.json",
     },
-    "Romania SuperLiga": {
-        "path": "ro",
+    # [ADAUGAT 2026-08-04] 3 ligi noi — cod verificat live. Romania SuperLiga
+    # (fostă aici, "ro") și HNL NU sunt în acest dataset — confirmat live,
+    # HTTP 404 pe fișierul real, niciun cod ghicit alternativ presupus.
+    "Primeira Liga": {
+        "code": "pt.1",
         "seasons": ["2021-22", "2022-23", "2023-24", "2024-25"],
-        "file": "1-liga.json",
+    },
+    "Eredivisie": {
+        "code": "nl.1",
+        "seasons": ["2021-22", "2022-23", "2023-24", "2024-25"],
+    },
+    "Super Lig": {
+        "code": "tr.1",
+        "seasons": ["2021-22", "2022-23", "2023-24", "2024-25"],
     },
 }
-
-# Fallback: URL alternativ folosind openfootball/football (format diferit)
-GITHUB_RAW_ALT = "https://raw.githubusercontent.com/openfootball/football.json"
 
 
 def _fetch_url(url: str, retries: int = 3) -> dict | list | None:
@@ -192,18 +210,12 @@ def fetch_league_season(
         logger.warning("[OpenFootball] Ligă necunoscută: %s", league)
         return []
 
-    # Construim URL-ul pentru sezonul respectiv
-    path = config["path"]
-    file = config["file"]
-
-    # Încearcă formatul principal
-    url = f"{GITHUB_RAW_ALT}/{season}/{path}/{file}"
+    # [FIX 2026-08-04] URL unic, verificat live — {season}/{code}.json direct
+    # sub root-ul sezonului, fără subfolder de țară (fostul path/file nested
+    # nu mai există în repo, dădea 404 pentru toate cele 6 ligi vechi).
+    code = config["code"]
+    url = f"{GITHUB_RAW}/{season}/{code}.json"
     data = _fetch_url(url)
-
-    # Fallback — format alternativ de URL
-    if data is None:
-        url_alt = f"{GITHUB_RAW_ALT}/master/{season}/{path}/{file}"
-        data = _fetch_url(url_alt)
 
     if data is None:
         logger.warning(
@@ -211,14 +223,15 @@ def fetch_league_season(
         )
         return []
 
-    # Parseăm meciurile
+    # [FIX 2026-08-04] Formatul REAL curent (verificat live): {"name":...,
+    # "matches":[...]} — flat, fără wrapper "rounds". Fallback pe formatul
+    # vechi păstrat defensiv, nu presupus necesar azi.
     matches_raw: list[dict] = []
-
-    # Formatul JSON openfootball: {"name": "...", "rounds": [{"matches": [...]}]}
     if isinstance(data, dict):
-        rounds = data.get("rounds", [])
-        for round_data in rounds:
-            matches_raw.extend(round_data.get("matches", []))
+        matches_raw = data.get("matches", [])
+        if not matches_raw:
+            for round_data in data.get("rounds", []):
+                matches_raw.extend(round_data.get("matches", []))
     elif isinstance(data, list):
         matches_raw = data
 
