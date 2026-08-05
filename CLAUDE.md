@@ -168,11 +168,12 @@ python sync/run_daily.py --dry-run     # simulare sincronizare zilnică, fără 
 streamlit run app.py                   # UI local
 ```
 
-## Acces live — GitHub + Supabase
+## Acces live — GitHub + Supabase + aplicație
 
 - Branch de lucru: `claude/fotbal-oracle-repo-j4rlqo`. Niciodată push direct pe `main` fără aprobare explicită.
 - Niciun commit/push fără să fi fost cerut.
 - Supabase (`Prediction`, `eu-central-1`) conectat prin MCP — vezi „Regulile bazelor de date" mai sus.
+- Aplicația live (Streamlit Cloud, deploy automat din `main`): `oracol-fotbal-7vp422diucqvparx6monei.streamlit.app` (confirmat de proprietarul produsului, 2026-08-06).
 
 ## Infrastructura de skill-uri
 
