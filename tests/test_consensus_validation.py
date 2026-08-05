@@ -54,6 +54,22 @@ def test_compute_metrics_same_argmax_different_probabilities():
     assert 0.0 < result["agreement_score"] < 1.0
 
 
+def test_compute_metrics_none_with_three_engines():
+    """[CORECTAT — audit final ADR-051/052] Metrica e definită doar pentru o
+    PERECHE (distanță L1 între doi vectori) — cu 3+ motoare disponibile,
+    trebuie să întoarcă explicit None (Regula #8), nu să aleagă tacit
+    primele două și să ignore restul. Nu se întâmplă azi în producție
+    (build_raw_predictions() nu adaugă niciodată mai mult de Oracle+ML),
+    dar codul trebuie să rămână corect indiferent de asta — gardă
+    structurală, nu doar comportamentală."""
+    three = [
+        {"family": "rule_based", "engine": "oracle_protocol", "prob_home": 0.5, "prob_draw": 0.3, "prob_away": 0.2},
+        {"family": "ml", "engine": "xgboost_v1", "prob_home": 0.4, "prob_draw": 0.35, "prob_away": 0.25},
+        {"family": "blend", "engine": "blend_v1", "prob_home": 0.45, "prob_draw": 0.32, "prob_away": 0.23},
+    ]
+    assert cv.compute_metrics(three) is None
+
+
 # ── _bootstrap_independent_groups() — funcție pură ──────────────────────────
 
 def test_bootstrap_independent_groups_detects_clear_difference():

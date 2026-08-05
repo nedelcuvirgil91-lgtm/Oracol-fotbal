@@ -28,7 +28,6 @@ reală, doar conformitate structurală. Întoarce probabilitățile ML brute
 """
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from learning_core.model_registry import TrainingRunResult
@@ -49,15 +48,26 @@ class BlendV1Algorithm:
 
     def fit(self, training_data: object = None) -> TrainingRunResult:
         """`training_data` ignorat — identic `XGBoostV1Algorithm.fit()`,
-        `MLPredictorEngine.train()` își extrage singur datele din Supabase."""
+        `MLPredictorEngine.train()` își extrage singur datele din Supabase.
+
+        [CORECTAT — audit final ADR-051/052] training_run_id refolosește
+        self._engine.last_record_run_id — id-ul EXACT al rândului deja
+        persistat intern de MLPredictorEngine.train() (via
+        ml_predictor._record_training_run(), apelat necondiționat, pe orice
+        status). Înainte se genera aici un uuid.uuid4() nou, disjunct de
+        acel rând — training_runner.run_training() persista apoi un AL
+        DOILEA rând, cu id diferit, pentru aceeași tentativă reală de
+        antrenare (același gol ca la XGBoostV1Algorithm.fit(), descoperit
+        separat la audit, nu presupus — tipar identic, fix identic)."""
         result = self._engine.train()
         return TrainingRunResult(
-            training_run_id=str(uuid.uuid4()),
+            training_run_id=self._engine.last_record_run_id,
             status=result.status,
             samples_used=result.samples_used,
             walk_forward_metrics={
                 "accuracy": result.accuracy,
                 "log_loss": result.log_loss,
+                "brier_score": result.brier_score,
             },
             message=result.message,
         )

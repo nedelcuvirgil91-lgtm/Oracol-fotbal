@@ -161,6 +161,62 @@ def test_train_produces_distinct_last_training_run_id_each_call(engine, isolated
     assert first != second
 
 
+def test_train_success_result_includes_brier_score(engine, isolated_learning_core):
+    """[ADAUGAT — audit final ADR-051/052] brier_score era calculat intern
+    (wf["avg_brier_score"]) dar niciodată expus pe MLTrainingResult — gol
+    descoperit, nu presupus. Metodologia standard a proiectului cere
+    Brier+Log-loss+Accuracy simultan (North Star #2)."""
+    result = engine.train()
+    assert result.status == "trained"
+    assert result.brier_score is not None
+    assert 0.0 <= result.brier_score <= 2.0
+
+
+def test_last_record_run_id_set_on_unavailable(monkeypatch, isolated_learning_core):
+    """[ADAUGAT — audit final ADR-051/052] last_record_run_id (spre
+    deosebire de last_training_run_id, strict legat de modelul curent)
+    trebuie populat pe ORICE ramură — inclusiv unavailable — ca
+    XGBoostV1Algorithm.fit() să poată refolosi mereu id-ul intern deja
+    persistat, indiferent de rezultat."""
+    engine = ml_predictor.MLPredictorEngine()
+    monkeypatch.setattr(ml_predictor.sb, "is_available", lambda: False)
+    result = engine.train()
+    assert result.status == "unavailable"
+    assert engine.last_record_run_id is not None
+    assert engine.last_training_run_id is None, "nu s-a antrenat niciun model - nu trebuie setat"
+
+
+def test_last_record_run_id_set_on_insufficient_data(engine, isolated_learning_core, monkeypatch):
+    monkeypatch.setattr(ml_predictor.sb, "get_training_data", lambda only_with_results=True: [])
+    result = engine.train()
+    assert result.status == "insufficient_data"
+    assert engine.last_record_run_id is not None
+    assert engine.last_training_run_id is None
+
+
+def test_last_record_run_id_set_on_error(engine, isolated_learning_core, monkeypatch):
+    """Ramura "error" e în interiorul try/except-ului real din train() —
+    declanșată aici printr-o valoare necastabilă la float pe o coloană
+    FEATURE_COLUMNS (scenariu realist de date corupte), nu printr-o
+    excepție simulată la nivel de get_training_data() (acela nu aruncă
+    niciodată — vezi supabase_client.get_training_data(), try/except
+    intern pe toată paginarea, întoarce mereu o listă)."""
+    bad_rows = _synthetic_rows()
+    bad_rows[0]["home_offensive_rating"] = "nu-e-numar"
+    monkeypatch.setattr(ml_predictor.sb, "get_training_data", lambda only_with_results=True: bad_rows)
+    result = engine.train()
+    assert result.status == "error"
+    assert engine.last_record_run_id is not None
+    assert engine.last_training_run_id is None
+
+
+def test_last_record_run_id_updated_to_success_value_after_trained(engine, isolated_learning_core):
+    """La succes, last_record_run_id și last_training_run_id trebuie să
+    coincidă — ambele reflectă rularea care a produs modelul curent."""
+    engine.train()
+    assert engine.last_record_run_id == engine.last_training_run_id
+
+
 def test_last_training_run_id_survives_recording_failure(engine, isolated_learning_core, monkeypatch):
     """Chiar daca storage.save_training_run() esueaza (Cerinta #5 - train()
     tot reuseste), run_id-ul generat tot trebuie retinut - il identifica pe

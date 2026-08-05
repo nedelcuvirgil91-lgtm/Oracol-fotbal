@@ -62,14 +62,25 @@ def is_enabled() -> bool:
 
 
 def compute_metrics(raw_predictions: list[dict]) -> dict | None:
-    """Calculează cele trei metrici candidate dintr-o pereche de ieșiri
-    brute (ADR-031). None dacă există mai puțin de 2 motoare — stare
-    legitimă (ml_active=False), nu eroare; eșantionul nu e utilizabil
-    pentru consens (nimic de comparat).
+    """Calculează cele trei metrici candidate dintr-o PERECHE de ieșiri
+    brute (ADR-031). None dacă nu există EXACT 2 motoare disponibile —
+    fie mai puțin de 2 (stare legitimă, ex. ML indisponibil pentru acest
+    meci, nimic de comparat), fie mai mult de 2.
+
+    [CORECTAT — audit final ADR-051/052] Verificarea era `< 2` (doar prag
+    minim), nu `!= 2` — dacă raw_predictions ar fi ajuns vreodată să conțină
+    3+ motoare (nu se întâmplă azi: build_raw_predictions() adaugă cel mult
+    Oracle+ML, niciodată Blend), `a, b = engines[0], engines[1]` ar fi ales
+    tacit primele două și ar fi ignorat restul — o aproximare silențioasă,
+    interzisă explicit de Regula #8 (CLAUDE.md, „nicio stare necunoscută nu
+    se aproximează"). Metrica agreement_score/divergence_score e definită
+    matematic doar pentru o pereche (distanță L1 între doi vectori) — o
+    versiune N-way ar fi o metrică NOUĂ, decizie de design separată, nu un
+    fix mecanic; până atunci, N>2 întoarce explicit None, nu o aproximare.
 
     Funcție pură, fără I/O — reutilizabilă direct în teste."""
     engines = [p for p in raw_predictions if all(k in p for k in ("prob_home", "prob_draw", "prob_away"))]
-    if len(engines) < 2:
+    if len(engines) != 2:
         return None
     a, b = engines[0], engines[1]
 

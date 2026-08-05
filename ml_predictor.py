@@ -156,6 +156,13 @@ class MLTrainingResult:
     samples_used: int = 0
     accuracy: float | None = None
     log_loss: float | None = None
+    # [ADAUGAT — audit final ADR-051/052] Brier era deja calculat intern
+    # (wf["avg_brier_score"]) și folosit în mesajul de log/notes, dar
+    # niciodată expus pe contractul public — XGBoostV1Algorithm.fit() nu
+    # putea deci include brier_score în walk_forward_metrics, deși
+    # metodologia standard a proiectului cere Brier+Log-loss+Accuracy
+    # simultan (North Star #2). Gol descoperit, nu presupus.
+    brier_score: float | None = None
     message: str = ""
 
 
@@ -189,6 +196,17 @@ class MLPredictorEngine:
         # nu îl setează niciodată — trasabilitatea aceea vine din
         # champion_diagnostic, sursă separată, mai completă).
         self.last_training_run_id: str | None = None
+        # [ADAUGAT — audit final ADR-051/052] Id-ul ULTIMEI înregistrări
+        # training_runs generate de acest proces, INDIFERENT de status
+        # (trained/insufficient_data/error/unavailable) — spre deosebire de
+        # last_training_run_id (setat DOAR la succes, legat strict de
+        # self.model curent din memorie). Sursă unică pentru
+        # XGBoostV1Algorithm.fit() (learning_core/algorithms/xgboost_v1.py)
+        # — înainte genera propriul uuid.uuid4(), disjunct de rândul deja
+        # scris aici intern, ceea ce producea DOUĂ rânduri training_runs cu
+        # id-uri diferite pentru O SINGURĂ tentativă reală de antrenare
+        # (gol descoperit la audit, nu presupus).
+        self.last_record_run_id: str | None = None
         # [ADAUGAT — ADR-049, Pasul 10a] Parametru de Temperature Scaling,
         # antrenat din predicțiile OOF ale walk-forward-ului (§5 ADR-049).
         # None = necalibrat — predict() cade grațios pe predict_proba()
@@ -413,8 +431,9 @@ class MLPredictorEngine:
     def train(self) -> MLTrainingResult:
         if not sb.is_available():
             self.last_train_status = "unavailable"
-            _record_training_run("unavailable", 0, {},
-                                  "Supabase indisponibil — verifică SUPABASE_URL / SUPABASE_SECRET_KEY în secrets.")
+            self.last_record_run_id = _record_training_run(
+                "unavailable", 0, {},
+                "Supabase indisponibil — verifică SUPABASE_URL / SUPABASE_SECRET_KEY în secrets.")
             return MLTrainingResult(
                 status="unavailable",
                 message="Supabase indisponibil — verifică SUPABASE_URL / SUPABASE_SECRET_KEY în secrets.",
@@ -425,7 +444,7 @@ class MLPredictorEngine:
             n = 0 if df is None else len(df)
             self.last_train_status = "insufficient_data"
             msg = f"Doar {n} meciuri cu rezultat cunoscut — minim {MIN_SAMPLES_TO_TRAIN} necesare pentru antrenare ML."
-            _record_training_run("insufficient_data", n, {}, msg)
+            self.last_record_run_id = _record_training_run("insufficient_data", n, {}, msg)
             return MLTrainingResult(status="insufficient_data", samples_used=n, message=msg)
 
         try:
@@ -523,21 +542,23 @@ class MLPredictorEngine:
                 f"Model antrenat pe {self.samples_used} meciuri. "
                 f"Validare walk-forward: {len(wf['folds'])} folds, Brier mediu={brier}."
             )
-            self.last_training_run_id = _record_training_run(
+            run_id = _record_training_run(
                 "trained", self.samples_used,
                 {"accuracy": acc, "log_loss": ll, "brier_score": brier},
                 train_message,
             )
+            self.last_record_run_id = run_id
+            self.last_training_run_id = run_id
             return MLTrainingResult(
                 status="trained", samples_used=self.samples_used,
-                accuracy=acc, log_loss=ll,
+                accuracy=acc, log_loss=ll, brier_score=brier,
                 message=train_message,
             )
 
         except Exception as exc:
             logger.error("[ML] Training failed: %s", exc)
             self.last_train_status = "error"
-            _record_training_run("error", 0, {}, str(exc))
+            self.last_record_run_id = _record_training_run("error", 0, {}, str(exc))
             return MLTrainingResult(status="error", message=str(exc))
 
     # ── Predicție ─────────────────────────────────────────────────────────

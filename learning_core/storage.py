@@ -39,7 +39,25 @@ def save_training_run(
 ) -> Path:
     """Persistă local un training_run — un fișier JSON per rulare, numit
     după training_run_id — și, best-effort, în Supabase (`training_runs`).
-    Întoarce calea fișierului local scris (garantată, indiferent de Supabase)."""
+    Întoarce calea fișierului local scris (garantată, indiferent de Supabase).
+
+    [ADAUGAT — audit final ADR-051/052] Idempotent pe training_run_id: dacă
+    fișierul local există deja, întoarce calea fără să rescrie/reîncerce
+    scrierea remote — necesar de când XGBoostV1Algorithm.fit() refolosește
+    training_run_id-ul deja persistat intern de MLPredictorEngine.train()
+    (ml_predictor._record_training_run()), ca training_runner.run_training()
+    să nu mai producă un al doilea INSERT pe același training_run_id
+    (constraint UNIQUE, migrația 002) — ar fi eșuat oricum remote (prins,
+    logat), dar rândul local mai complet (are brier_score) ar fi fost
+    suprascris de unul mai sărac. Pentru orice alt apelant, care nu a
+    persistat deja acest id, comportamentul rămâne neschimbat."""
+    safe_id = result.training_run_id.replace("/", "_")
+    path = STORAGE_DIR / f"{safe_id}.json"
+    if path.exists():
+        logger.debug("[LearningCore] training_run_id %s deja persistat — scriere idempotentă, sărită.",
+                      result.training_run_id)
+        return path
+
     row = {
         "training_run_id": result.training_run_id,
         "algorithm_name": algorithm_name,
@@ -51,8 +69,6 @@ def save_training_run(
         "message": result.message,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    safe_id = result.training_run_id.replace("/", "_")
-    path = STORAGE_DIR / f"{safe_id}.json"
     path.write_text(json.dumps(row, indent=2, ensure_ascii=False), encoding="utf-8")
 
     try:

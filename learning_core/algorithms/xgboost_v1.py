@@ -15,7 +15,6 @@ din ml_predictor.FEATURE_COLUMNS — niciun format nou introdus.
 """
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from learning_core.model_registry import TrainingRunResult
@@ -38,15 +37,28 @@ class XGBoostV1Algorithm:
         azi. Parametrul rămâne în semnătură pentru conformitate cu
         LearningAlgorithm — pregătit pentru Dataset Registry (etapă
         ulterioară), când antrenarea va primi un dataset_id versionat
-        explicit, nu va mai citi direct din Supabase."""
+        explicit, nu va mai citi direct din Supabase.
+
+        [CORECTAT — audit final ADR-051/052] training_run_id refolosește
+        self._engine.last_record_run_id — id-ul EXACT al rândului deja
+        persistat intern de MLPredictorEngine.train() (prin
+        ml_predictor._record_training_run(), apelat necondiționat, pe orice
+        status). Înainte se genera aici un uuid.uuid4() nou, disjunct de
+        acel rând — training_runner.run_training() persista apoi un AL
+        DOILEA rând, cu id diferit, pentru aceeași tentativă reală de
+        antrenare (gol descoperit la audit, nu presupus). Acum ambele
+        scrieri (aici + train()) convin asupra aceluiași id — vezi
+        learning_core/storage.save_training_run(), care a devenit idempotent
+        exact pentru acest caz."""
         result = self._engine.train()
         return TrainingRunResult(
-            training_run_id=str(uuid.uuid4()),
+            training_run_id=self._engine.last_record_run_id,
             status=result.status,
             samples_used=result.samples_used,
             walk_forward_metrics={
                 "accuracy": result.accuracy,
                 "log_loss": result.log_loss,
+                "brier_score": result.brier_score,
             },
             message=result.message,
         )
