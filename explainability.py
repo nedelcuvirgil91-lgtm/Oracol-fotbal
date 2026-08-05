@@ -5,10 +5,17 @@ FOOTBALL ORACLE — Explainability (v0.1)
 Module: explainability.py
 
 Descompune o predicție deja calculată (MatchPrediction) în contribuții per
-factor — ELO, formă, avantaj teren, H2H, vreme, accidentări, blend ML —
-prin ablație cumulativă REALĂ, nu estimare: recalculează xG → Poisson la
-fiecare treaptă, folosind exact aceleași funcții pure din feature_engine.py
-pe care oracle_engine.py le folosește deja pentru predicția live.
+factor — ELO, formă, avantaj teren, H2H, vreme, accidentări — prin ablație
+cumulativă REALĂ, nu estimare: recalculează xG → Poisson la fiecare treaptă,
+folosind exact aceleași funcții pure din feature_engine.py pe care
+oracle_engine.py le folosește deja pentru predicția live.
+
+Explică EXCLUSIV motorul Oracle — de la ADR-051/052 (eliminarea blend-ului
+legacy in-place), Oracle rămâne mereu pur, deci ultima treaptă a cascadei
+coincide mereu cu pred.prob_home_win. ML e un motor independent, cu propria
+predicție (pred.ml_engine_prediction) și propria afișare în UI ("🤖 ML") —
+NU face parte din această cascadă, care explică un singur motor, nu o
+combinare de motoare.
 
 Nu modifică oracle_engine.py. Nu apelează nicio metodă privată — doar funcții
 pure din feature_engine.py + câmpuri deja publice pe MatchPrediction/
@@ -218,34 +225,4 @@ def explain_prediction(pred, weights: dict, config: dict) -> MatchExplanation | 
         home_team: f"{home_inj_n} titular(i) indisponibil(i)" if home_inj_n else "fără absențe raportate",
         away_team: f"{away_inj_n} titular(i) indisponibil(i)" if away_inj_n else "fără absențe raportate",
     })
-    ph_current, pd_current, pa_current = ph_inj, pd_inj, pa_inj
-
-    # + Blend ML (dacă activ) — folosește exact blend_predictions() real.
-    if pred.ml_active:
-        from ml_predictor import MLPrediction, blend_predictions
-        ml_pred = MLPrediction(
-            prob_home=pred.ml_prob_home, prob_draw=pred.ml_prob_draw, prob_away=pred.ml_prob_away,
-            confidence=pred.ml_confidence, model_version=0, samples_used=pred.ml_samples_used,
-        )
-        ml_weight = float(config.get("ml_blend_weight", 0.35))
-        ph_final, _, _, _ = blend_predictions((ph_current, pd_current, pa_current), ml_pred, ml_weight)
-        ml_detail = {
-            "samples antrenare": str(pred.ml_samples_used),
-            "încredere model":   f"{pred.ml_confidence*100:.0f}%",
-        }
-        # [ADAUGAT — ADR-013] Feature-urile derivate active în model (ADR-012:
-        # corner_dominance/card_diff; ADR-013: foul_diff) — aceleași formule
-        # ca oracle_engine._build_ml_features(). "necunoscut" dacă istoricul
-        # real lipsește pentru oricare echipă (Regula #8, nu se aproximează).
-        if home_p.avg_corners is not None and away_p.avg_corners is not None:
-            ml_detail["corner_dominance"] = f"{home_p.avg_corners - away_p.avg_corners:+.1f}"
-        if home_p.avg_yellow_cards is not None and away_p.avg_yellow_cards is not None:
-            ml_detail["card_diff"] = f"{away_p.avg_yellow_cards - home_p.avg_yellow_cards:+.1f}"
-        if home_p.avg_fouls is not None and away_p.avg_fouls is not None:
-            ml_detail["foul_diff"] = f"{away_p.avg_fouls - home_p.avg_fouls:+.1f}"
-        # [ADAUGAT — ADR-021, P7.1] shot_dominance, aceeași disciplină.
-        if home_p.avg_shots is not None and away_p.avg_shots is not None:
-            ml_detail["shot_dominance"] = f"{home_p.avg_shots - away_p.avg_shots:+.1f}"
-        _add("Model ML", ph_final, detail=ml_detail)
-
     return MatchExplanation(stages=stages, final_prob_home=round(prev_ph, 4))

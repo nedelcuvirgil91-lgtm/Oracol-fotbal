@@ -16,7 +16,9 @@ def test_default_config_preserves_all_previous_keys():
         "recency_half_life_days": 365, "elo_blend_weight": 0.35,
         "elo_sigmoid_scale": 400.0, "elo_reference": 1500.0,
         "h2h_weight": 0.15,
-        "monte_carlo_simulations": 10000, "ml_blend_weight": 0.35,
+        "monte_carlo_simulations": 10000,
+        # ml_blend_weight ELIMINAT deliberat (ADR-051/052, eliminare blend
+        # legacy in-place) — nu mai e o "cheie preexistentă" de păstrat.
     }
     for key, value in expected_preexisting.items():
         assert oracle_engine.DEFAULT_CONFIG[key] == value, f"{key} s-a schimbat fata de original"

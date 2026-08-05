@@ -11,12 +11,15 @@ publică nouă în oracle_engine.py, nu modifică nimic din fișierul respectiv.
 
 Decizie de proiectare (aprobată explicit, vezi istoricul deciziei): acest
 adaptor NU reprezintă doar Poisson/Monte Carlo izolat — reprezintă întregul
-blend care rulează azi în producție (Poisson → Monte Carlo → blend ELO/ML →
-de-vig → value betting), exact ce servește predicții live. Motivul: Learning
-Core trebuie să compare orice challenger cu ceea ce rulează efectiv în
-producție, nu cu un algoritm istoric sau izolat artificial. Indiferent cum
-va evolua intern oracle_engine.py peste ani, acest adaptor rămâne definiția
-"campionului curent" — nu se schimbă contractul, doar ce e în spatele lui.
+lanț Oracle care rulează azi în producție (Poisson → Monte Carlo → ELO →
+de-vig → value betting), exact ce servește predicții live. De la ADR-051/052
+(eliminarea blend-ului legacy in-place): Oracle rămâne mereu pur — ML e un
+motor independent, servit separat (pred.ml_engine_prediction), niciodată
+amestecat aici. Motivul: Learning Core trebuie să compare orice challenger cu
+ceea ce rulează efectiv în producție, nu cu un algoritm istoric sau izolat
+artificial. Indiferent cum va evolua intern oracle_engine.py peste ani, acest
+adaptor rămâne definiția "campionului curent" — nu se schimbă contractul,
+doar ce e în spatele lui.
 
 `fit()` e no-op intenționat: campionul de producție nu se antrenează separat
 prin acest adaptor — starea lui (weights.json/model_config, modelul ML deja
@@ -96,11 +99,11 @@ class ProductionChampionAdapter:
             return (0.0, 0.0, 0.0, {"error": f"context de meci invalid/incomplet: {exc}"})
         if pred is None:
             return (0.0, 0.0, 0.0, {"error": "evaluate_match a eșuat sau meci invalid"})
+        ml_pred = pred.ml_engine_prediction
         metadata = {
             "home_xg": pred.home_xg,
             "away_xg": pred.away_xg,
-            "ml_active": pred.ml_active,
-            "ml_blend_label": pred.ml_blend_label,
+            "ml_engine_available": bool(ml_pred and ml_pred.get("available")),
             "confidence_score": pred.confidence_score,
             "data_quality_home": pred.data_quality_home,
             "data_quality_away": pred.data_quality_away,

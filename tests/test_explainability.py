@@ -17,7 +17,6 @@ from feature_engine import (
     poisson_model,
     resolve_league_weights,
 )
-from ml_predictor import MLPrediction, blend_predictions
 from oracle_engine import DEFAULT_CONFIG, DEFAULT_WEIGHTS, H2HRecord, MatchPrediction, TeamProfile
 
 from explainability import explain_prediction
@@ -37,8 +36,7 @@ def _profile(name, elo, form_score, gf=1.5, ga=1.0, sot=5.0, poss=52.0):
 
 
 def _independent_ground_truth(home_p, away_p, h2h, weights, config, league=LEAGUE,
-                               weather_penalty=0.0, home_xg_override=None, away_xg_override=None,
-                               ml_active=False, ml_probs=(0.0, 0.0, 0.0), ml_samples=0):
+                               weather_penalty=0.0, home_xg_override=None, away_xg_override=None):
     """Recalculează prob_home_win DIRECT din feature_engine.py, independent de
     explainability.py — sursă de adevăr separată pentru comparație."""
     lw = resolve_league_weights(weights, league)
@@ -76,16 +74,10 @@ def _independent_ground_truth(home_p, away_p, h2h, weights, config, league=LEAGU
 
     ph, pd, pa, _ = poisson_model(home_xg, away_xg, config["max_goals_poisson"])
 
-    if ml_active:
-        ml_pred = MLPrediction(prob_home=ml_probs[0], prob_draw=ml_probs[1], prob_away=ml_probs[2],
-                                confidence=max(ml_probs), model_version=1, samples_used=ml_samples)
-        ph, pd, pa, _ = blend_predictions((ph, pd, pa), ml_pred, config["ml_blend_weight"])
-
     return round(ph, 4), home_xg, away_xg, home_xg_pre, away_xg_pre
 
 
-def _make_pred(home_p, away_p, h2h, weights, config, weather_penalty=0.0,
-                inject_injury=False, ml_active=False, ml_probs=(0.0, 0.0, 0.0), ml_samples=0):
+def _make_pred(home_p, away_p, h2h, weights, config, weather_penalty=0.0, inject_injury=False):
     _, home_xg, away_xg, _, _ = _independent_ground_truth(
         home_p, away_p, h2h, weights, config, weather_penalty=weather_penalty,
     )
@@ -97,10 +89,6 @@ def _make_pred(home_p, away_p, h2h, weights, config, weather_penalty=0.0,
         home_xg_post, away_xg_post = home_xg, away_xg
 
     ph, pd, pa, _ = poisson_model(home_xg_post, away_xg_post, config["max_goals_poisson"])
-    if ml_active:
-        ml_pred = MLPrediction(prob_home=ml_probs[0], prob_draw=ml_probs[1], prob_away=ml_probs[2],
-                                confidence=max(ml_probs), model_version=1, samples_used=ml_samples)
-        ph, pd, pa, _ = blend_predictions((ph, pd, pa), ml_pred, config["ml_blend_weight"])
 
     return MatchPrediction(
         fixture_id="fx1", home_team=home_p.team_name, away_team=away_p.team_name, league=LEAGUE,
@@ -115,12 +103,6 @@ def _make_pred(home_p, away_p, h2h, weights, config, weather_penalty=0.0,
         data_quality_home=home_p.data_quality, data_quality_away=away_p.data_quality,
         home_injury_report=None, away_injury_report=None, injury_note="",
         home_xg_pre_injury=home_xg, away_xg_pre_injury=away_xg,
-        ml_active=ml_active,
-        ml_prob_home=ml_probs[0] if ml_active else 0.0,
-        ml_prob_draw=ml_probs[1] if ml_active else 0.0,
-        ml_prob_away=ml_probs[2] if ml_active else 0.0,
-        ml_confidence=max(ml_probs) if ml_active else 0.0,
-        ml_samples_used=ml_samples,
     )
 
 
@@ -137,22 +119,9 @@ def test_explanation_final_stage_matches_real_probability_no_ml_no_weather():
     assert explanation is not None
     assert explanation.final_prob_home == pred.prob_home_win
     assert explanation.stages[-1].prob_home_after == pred.prob_home_win
-    # fara ML activ -> ultima treaptă e "Accidentări", nu "Model ML"
+    # Oracle e mereu pur (ADR-051/052, niciun blend legacy in-place) ->
+    # ultima treaptă e mereu "Accidentări".
     assert explanation.stages[-1].factor == "Accidentări"
-
-
-def test_explanation_includes_ml_stage_when_active_and_matches_final():
-    home_p = _profile("Home FC", elo=1550, form_score=0.55)
-    away_p = _profile("Away FC", elo=1580, form_score=0.60)
-    h2h = H2HRecord.empty("Home FC", "Away FC")
-    pred = _make_pred(home_p, away_p, h2h, DEFAULT_WEIGHTS, DEFAULT_CONFIG,
-                       ml_active=True, ml_probs=(0.5, 0.25, 0.25), ml_samples=120)
-
-    explanation = explain_prediction(pred, DEFAULT_WEIGHTS, DEFAULT_CONFIG)
-
-    assert explanation is not None
-    assert explanation.stages[-1].factor == "Model ML"
-    assert explanation.final_prob_home == pred.prob_home_win
 
 
 def test_explanation_includes_injury_delta_when_xg_reduced():
@@ -230,20 +199,6 @@ def test_explanation_h2h_stage_shows_meetings_and_record():
     h2h_stage = next(s for s in explanation.stages if s.factor == "H2H")
     assert h2h_stage.detail["întâlniri directe"] == "5"
     assert h2h_stage.detail["bilanț (gazdă V-E-Î)"] == "3-1-1"
-
-
-def test_explanation_ml_stage_shows_samples_and_confidence():
-    home_p = _profile("Home FC", elo=1600, form_score=0.5)
-    away_p = _profile("Away FC", elo=1580, form_score=0.5)
-    pred = _make_pred(home_p, away_p, H2HRecord.empty("Home FC", "Away FC"), DEFAULT_WEIGHTS, DEFAULT_CONFIG,
-                       ml_active=True, ml_probs=(0.5, 0.25, 0.25), ml_samples=180)
-    pred.ml_confidence = 0.71
-
-    explanation = explain_prediction(pred, DEFAULT_WEIGHTS, DEFAULT_CONFIG)
-
-    ml_stage = next(s for s in explanation.stages if s.factor == "Model ML")
-    assert ml_stage.detail["samples antrenare"] == "180"
-    assert ml_stage.detail["încredere model"] == "71%"
 
 
 def test_explanation_injury_stage_shows_real_absence_count():

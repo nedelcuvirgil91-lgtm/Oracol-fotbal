@@ -95,7 +95,7 @@ def _call(engine, pred=None):
     home_p = _make_team_profile("Home FC")
     away_p = _make_team_profile("Away FC")
     return engine._get_ml_engine_prediction(
-        pred, home_p, away_p, None, pred.home_xg, pred.away_xg,
+        home_p, away_p, None, pred.home_xg, pred.away_xg,
         pred.prob_home_win, pred.prob_draw, pred.prob_away_win, _make_mc(), 0.0,
     )
 

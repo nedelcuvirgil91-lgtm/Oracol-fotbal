@@ -106,7 +106,7 @@ _PROTECTION_MARKERS = (
 # plafoneaza.
 #
 # Configurabil, NU hardcodat - citit din `model_config.data` (Supabase,
-# rand unic id=1, acelasi tipar deja folosit de `ml_blending_enabled`/
+# rand unic id=1, acelasi tipar deja folosit de `blend_engine_display_enabled`/
 # `flashscore_shadow_logging_enabled`/etc.), cheia
 # `FLASHSCORE_LIMIT_PER_LEAGUE_CONFIG_KEY`. Valoarea de mai jos e DOAR
 # fallback-ul folosit cand cheia lipseste din config (implicit azi, nicio

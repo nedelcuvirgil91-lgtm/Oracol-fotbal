@@ -162,10 +162,18 @@ def test_blend_engine_module_has_no_ml_specific_code():
 # ── Ordine: ml_engine_prediction calculat inaintea blend_engine_prediction ──
 
 def test_ml_engine_prediction_computed_before_blend_in_evaluate_match_source():
+    """De la eliminarea blend-ului legacy in-place (ADR-051/052), ML e
+    calculat DEVREME în evaluate_match() — variabila locală
+    `ml_engine_prediction` (folosită și pentru raw_predictions, ADR-031) e
+    populată prin self._get_ml_engine_prediction(), apoi transmisă direct la
+    construcția `pred` (kwarg `ml_engine_prediction=ml_engine_prediction`).
+    Blend rămâne calculat DUPĂ, pe `pred` deja construit — gardă structurală
+    pe ordinea reală, nu doar pe valoare."""
     source = inspect.getsource(oracle_engine.FootballOracleEngine.evaluate_match)
-    ml_pos = source.index("pred.ml_engine_prediction = self._get_ml_engine_prediction(")
+    ml_pos = source.index("ml_engine_prediction = self._get_ml_engine_prediction(")
+    construct_pos = source.index("ml_engine_prediction=ml_engine_prediction,")
     blend_pos = source.index("pred.blend_engine_prediction = self._get_blend_engine_prediction(pred)")
-    assert ml_pos < blend_pos, (
-        "pred.ml_engine_prediction trebuie calculat INAINTE de "
+    assert ml_pos < construct_pos < blend_pos, (
+        "ml_engine_prediction trebuie calculat si asignat pe pred INAINTE de "
         "pred.blend_engine_prediction, altfel Blend nu poate include ML"
     )

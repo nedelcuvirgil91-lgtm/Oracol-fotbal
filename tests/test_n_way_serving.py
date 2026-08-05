@@ -77,4 +77,6 @@ def test_composite_fields_unaffected_by_raw_predictions_addition():
     assert "prob_home_win" in fields
     assert "prob_draw" in fields
     assert "prob_away_win" in fields
-    assert "ml_prob_home" in fields  # neschimbat, coexistă cu raw_predictions
+    # ml_engine_prediction (ADR-051/052) coexistă cu raw_predictions — sursa
+    # canonică unică a ieșirii ML, înlocuiește ml_prob_home legacy (eliminat).
+    assert "ml_engine_prediction" in fields

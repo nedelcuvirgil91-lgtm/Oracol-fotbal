@@ -103,7 +103,7 @@ except ModuleNotFoundError:
     FLASHSCORE_TEAM_DNA_AVAILABLE = False
 
 try:
-    from ml_predictor import MLPredictorEngine, blend_predictions
+    from ml_predictor import MLPredictorEngine
     ML_MODULE_AVAILABLE = True
 except ModuleNotFoundError:
     ML_MODULE_AVAILABLE = False
@@ -144,13 +144,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "elo_reference":               1500.0,
     "h2h_weight":                  0.15,
     "monte_carlo_simulations":     10000,
-    "ml_blend_weight":             0.35,
-    # [ADAUGAT — R-ARCH-REVIEW-01] Control manual, separat de is_trained —
-    # ML se antrenează/salvează zilnic indiferent de acest flag; doar
-    # influența lui asupra predicției finale (blend_predictions()) e
-    # gatată aici. Implicit OPRIT — Predictorul rămâne 100% Poisson/ELO/
-    # formă până la activare explicită.
-    "ml_blending_enabled":         False,
     # [ADAUGAT] Shadow testing - vezi architecture/ADR-002-shadow-testing.md.
     # Implicit OPRIT - nicio schimbare de comportament fara activare explicita.
     "shadow_mode_enabled":         False,
@@ -177,10 +170,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Shadow logging pt Challenger-ul Blend (ADR-050/Pasul 13) — flag
     # dedicat, separat de challenger_shadow_logging_enabled. Implicit OPRIT.
     "blend_challenger_shadow_logging_enabled": False,
-    # Afișare UI a predicției Blend Engine (ADR-051/ADR-052, Vision Shift)
-    # — flag dedicat, neînrudit cu cel de mai sus (acela ramane strict
-    # shadow logging pt Challenger-ul blend_v1). Populeaza doar
-    # pred.blend_engine_prediction. Implicit OPRIT.
+    # Afișare UI a predicției Blend Engine (ADR-051/ADR-052) — flag dedicat,
+    # neînrudit cu cel de mai sus (acela ramane strict shadow logging pt
+    # Challenger-ul blend_v1). Populeaza doar pred.blend_engine_prediction.
+    # Implicit OPRIT.
     "blend_engine_display_enabled": False,
     # Config public al BlendEngine (ADR-052) — strategie + ponderi per
     # motor, citit de orchestrator si pasat ca BlendConfig. Implicit:
@@ -188,9 +181,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # neutru, pt orice motor).
     "blend_engine_config": {"strategy": "weighted_average", "weights": {}},
     # Afișare UI a predicției ML Engine (ADR-051, Phase 1) — flag dedicat,
-    # neînrudit cu ml_blending_enabled (acela influențează predicția Oracle
-    # servită; acesta niciodată). Populează doar pred.ml_engine_prediction.
-    # Implicit OPRIT.
+    # singura cale prin care ML influențează ce se afișează (motorul Oracle
+    # servit prin prob_home_win/prob_draw/prob_away_win rămâne mereu pur —
+    # nu mai există blend legacy in-place, eliminat ADR-051/052). Populează
+    # doar pred.ml_engine_prediction. Implicit OPRIT.
     "ml_engine_display_enabled": False,
     # Validation Framework (ADR-052) — colectare automată, per meci, a
     # ieșirilor Oracle/ML/Blend în engine_comparison_snapshots, pentru
@@ -400,14 +394,6 @@ class MatchPrediction:
     prob_double_chance_home:  float = 0.0
     prob_double_chance_away:  float = 0.0
     special_value_bets:       list  = field(default_factory=list)
-    # ── ML (v3.0) ────────────────────────────────────────────────────────
-    ml_active:                bool  = False
-    ml_prob_home:             float = 0.0
-    ml_prob_draw:             float = 0.0
-    ml_prob_away:             float = 0.0
-    ml_confidence:            float = 0.0
-    ml_blend_label:           str   = "poisson-only"
-    ml_samples_used:          int   = 0
     # ── De-vig (Prioritatea #2 — Value Betting Engine) ────────────────────
     # Probabilitatea "fair" (fara marja bookmaker-ului), separata explicit
     # de impl_*_pct (bruta, 1/cota) - vezi _devig_probabilities(). Suma
@@ -422,13 +408,12 @@ class MatchPrediction:
     # nu câmpuri fixe — N-way-ready fără hardcodare la exact 2 motoare.
     # Ordine deterministă: sortată (familie, nume), niciodată ordine de
     # calcul/iterare internă. Fiecare view compus e derivat PUR din aceste
-    # ieșiri brute (blend_predictions() neschimbat) — nu execută niciun
-    # motor suplimentar.
+    # ieșiri brute — nu execută niciun motor suplimentar.
     raw_predictions:          list  = field(default_factory=list)
     # ── Flashscore Team DNA (Faza 2, ADR-044 §5) ──────────────────────────
     # Context SUPLIMENTAR, aditiv — xG real/posesie reală/pase/dueluri/
     # tackle-uri/apărări/rating jucători/clasament, din Foundation Data
-    # Layer. NU alimentează home_profile/away_profile/blend_predictions -
+    # Layer. NU alimentează home_profile/away_profile/predicția Oracle -
     # doar informativ, ca H2H/injury_report de mai sus. None dacă
     # Flashscore n-a colectat încă date pentru acea echipă (nu se
     # aproximează).
@@ -894,7 +879,7 @@ class FootballOracleEngine:
         offside, apărări portar, cartonașe roșii, statistici EAV (pase/
         dueluri/tackle-uri), rating mediu jucători, clasament curent.
         Context SUPLIMENTAR, pur informativ — NU intră în TeamProfile, NU
-        atinge compute_team_offdef_rating()/FEATURE_COLUMNS/blend_predictions.
+        atinge compute_team_offdef_rating()/FEATURE_COLUMNS/predicția Oracle servită.
 
         Returnează None dacă modulele necesare lipsesc (degradare identică
         cu restul cascadei _build_profile) — apelantul afișează "—",
@@ -1491,7 +1476,7 @@ class FootballOracleEngine:
 
         # [Faza 2, ADR-044 §5] Context suplimentar, pur informativ — NU
         # intră în home_p/away_p/h2h de mai sus, deci nu poate atinge
-        # blend_predictions()/confidence.
+        # predicția Oracle servită/confidence.
         home_flashscore_dna = self._build_flashscore_dna(home_name, league)
         away_flashscore_dna = self._build_flashscore_dna(away_name, league)
 
@@ -1599,9 +1584,10 @@ class FootballOracleEngine:
         ph, pd, pa, top_scores = self._poisson_model(home_xg, away_xg)
         # [ADAUGAT — ADR-031] Instantaneu al ieșirii brute a motorului
         # rule-based (Poisson + Monte Carlo + ELO, deja blendat intern la
-        # acest punct), ÎNAINTE de eventualul blend cu ML de mai jos —
-        # blend_predictions() rescrie ph/pd/pa in-place, deci fără acest
-        # instantaneu ieșirea "brută" a motorului A ar fi pierdută.
+        # acest punct) — Oracle rămâne mereu pur de aici încolo (niciun
+        # blend legacy in-place, eliminat ADR-051/052), deci rb_ph/rb_pd/rb_pa
+        # sunt identice cu ph/pd/pa finale. Păstrat explicit, separat, ca
+        # sursă dedicată pentru raw_predictions (ADR-031) — nu implicit.
         rb_ph, rb_pd, rb_pa = ph, pd, pa
 
         # ── Monte Carlo ───────────────────────────────────────────────────
@@ -1609,36 +1595,20 @@ class FootballOracleEngine:
         mc            = self._monte_carlo(home_xg, away_xg, n_sim)
         special_vbets = self._special_value_bets(mc, match)
 
-        # ── ML blend (v3.0) ───────────────────────────────────────────────
-        ml_active       = False
-        ml_prob_home    = 0.0
-        ml_prob_draw    = 0.0
-        ml_prob_away    = 0.0
-        ml_confidence   = 0.0
-        ml_blend_label  = "poisson-only"
-        ml_samples_used = 0
-
-        # [R-ARCH-REVIEW-01] Control mutat de la is_trained (are ML un
-        # model?) la ml_blending_enabled (decizie manuala, model_config) -
-        # antrenarea/salvarea modelului raman complet neatinse de acest
-        # flag, doar influenta asupra predictiei finale e gatata aici.
-        if self.ml and self.ml.is_trained and self.config.get("ml_blending_enabled", False):
-            try:
-                ml_features = self._build_ml_features(
-                    home_p, away_p, h2h, home_xg, away_xg, ph, pd, pa, mc, w_pen,
-                )
-                ml_pred = self.ml.predict(ml_features)
-                ml_weight = float(self.config.get("ml_blend_weight", 0.35))
-                ph, pd, pa, ml_blend_label = blend_predictions((ph, pd, pa), ml_pred, ml_weight)
-                if ml_pred:
-                    ml_active       = True
-                    ml_prob_home    = ml_pred.prob_home
-                    ml_prob_draw    = ml_pred.prob_draw
-                    ml_prob_away    = ml_pred.prob_away
-                    ml_confidence   = ml_pred.confidence
-                    ml_samples_used = ml_pred.samples_used
-            except Exception as exc:
-                logger.warning("[ML] Blend failed, fallback la Poisson: %s", exc)
+        # [ADAUGAT — ADR-051/052] ML Engine — a treia voce independentă,
+        # calculată aici (nu doar mai jos, la finalul funcției) ca să poată
+        # alimenta atât raw_predictions (ADR-031) cât și pred.ml_engine_prediction
+        # direct la construcție. Oracle (ph/pd/pa) rămâne mereu pur — niciun
+        # blend legacy in-place aici; singurul Blend din arhitectura finală
+        # e blend_engine.py, motor separat (vezi _get_blend_engine_prediction()
+        # mai jos, apelat după construcția pred).
+        ml_engine_prediction = self._get_ml_engine_prediction(
+            home_p, away_p, h2h, home_xg, away_xg, ph, pd, pa, mc, w_pen,
+        )
+        ml_active    = bool(ml_engine_prediction and ml_engine_prediction.get("available"))
+        ml_prob_home = ml_engine_prediction["prob_home"] if ml_active else 0.0
+        ml_prob_draw = ml_engine_prediction["prob_draw"] if ml_active else 0.0
+        ml_prob_away = ml_engine_prediction["prob_away"] if ml_active else 0.0
 
         bk_h = float(match.get("home_odds") or 0.0)
         bk_d = float(match.get("draw_odds") or 0.0)
@@ -1720,12 +1690,8 @@ class FootballOracleEngine:
             prob_double_chance_home=mc["prob_double_chance_home"],
             prob_double_chance_away=mc["prob_double_chance_away"],
             special_value_bets=special_vbets,
-            # ML
-            ml_active=ml_active,
-            ml_prob_home=ml_prob_home, ml_prob_draw=ml_prob_draw, ml_prob_away=ml_prob_away,
-            ml_confidence=ml_confidence, ml_blend_label=ml_blend_label,
-            ml_samples_used=ml_samples_used,
             raw_predictions=raw_predictions,
+            ml_engine_prediction=ml_engine_prediction,
             home_flashscore_dna=home_flashscore_dna, away_flashscore_dna=away_flashscore_dna,
         )
         self._cache_prediction(pred, home_p, away_p, h2h, w_pen, mc)
@@ -1783,16 +1749,6 @@ class FootballOracleEngine:
         # construită complet, nu o modifică niciodată, rezultatul acestei
         # metode e ignorat de apelant.
         self._log_consensus_capture(pred)
-
-        # [ADAUGAT — ADR-051, Phase 1] ML Engine — a treia voce independentă,
-        # afișare read-only, gatată de flag propriu (ml_engine_display_enabled).
-        # Calculat ÎNAINTE de Blend (mai jos) — de la ADR-052, Blend citește
-        # pred.ml_engine_prediction ca să decidă dacă include ML în combinare.
-        # Singura mutație: pred.ml_engine_prediction (câmp izolat) — nu atinge
-        # raw_predictions/prob_home_win/shadow_predictions.
-        pred.ml_engine_prediction = self._get_ml_engine_prediction(
-            pred, home_p, away_p, h2h, home_xg, away_xg, ph, pd, pa, mc, w_pen,
-        )
 
         # [ADAUGAT — ADR-051/ADR-052] BlendEngine — motor independent
         # (blend_engine.py, algoritm neschimbat), afișat simultan cu
@@ -2059,21 +2015,19 @@ class FootballOracleEngine:
             return False
 
     def _get_ml_engine_prediction(
-        self, pred: MatchPrediction, home_p: TeamProfile, away_p: TeamProfile, h2h: H2HRecord,
+        self, home_p: TeamProfile, away_p: TeamProfile, h2h: H2HRecord,
         home_xg: float, away_xg: float, ph: float, pd_: float, pa: float, mc: dict, w_pen: float,
     ) -> dict | None:
-        """[ADAUGAT — ADR-051, Phase 1] Predicția ML Engine (self.ml, deja
-        Champion-aware prin _resolve_champion()) pentru AFIȘARE independentă
-        în UI — read-only, nu scrie NIMIC în shadow_predictions/
-        raw_predictions, nu modifică pred.prob_home_win/prob_draw/
-        prob_away_win. Flag propriu (ml_engine_display_enabled), complet
-        independent de ml_blending_enabled (legacy — acela influențează
-        predicția Oracle servită, acesta niciodată).
+        """[ADR-051/052] Predicția ML Engine (self.ml, deja Champion-aware
+        prin _resolve_champion()) — sursa canonică unică a ieșirii ML în
+        arhitectura finală: alimentează atât pred.ml_engine_prediction
+        (afișare UI) cât și raw_predictions (ADR-031) și Blend
+        (_get_blend_engine_prediction()). Read-only — nu modifică ph/pd_/pa
+        primite, nu scrie nimic în shadow_predictions. Flag propriu
+        (ml_engine_display_enabled) — niciun mecanism paralel de blend
+        in-place mai există în oracle_engine.py.
 
-        Apel NOU la self.ml.predict(): self.ml NU are o predicție deja
-        calculată pentru acest meci în afara blocului legacy (gatat de
-        ml_blending_enabled, implicit oprit) — acest wrapper își face
-        propriul apel, cu exact aceleași feature-uri
+        Apel propriu la self.ml.predict(), cu exact aceleași feature-uri
         (_build_ml_features(), neschimbată). Zero al doilea apel către
         champion_loader — self.ml e deja rezolvat o singură dată, la
         construcția procesului (_resolve_champion()).
