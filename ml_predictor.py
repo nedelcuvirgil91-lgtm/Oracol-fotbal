@@ -30,6 +30,7 @@ import numpy as np
 import pandas as pd
 
 import supabase_client as sb
+from ml_feature_pipeline import compute_derived_dominance_features
 
 logger = logging.getLogger("FootballOracle.ML")
 
@@ -222,28 +223,11 @@ class MLPredictorEngine:
         if not rows:
             return None
         df = pd.DataFrame(rows)
-        # [ADAUGAT — ADR-012] corner_dominance/card_diff se calculează din
-        # cele 4 coloane brute, nu se citesc direct — dacă lipsesc brutele
-        # (meci fără istoric de cornere/cartonașe), rezultă NaN, gestionat
-        # nativ de XGBoost (missing-value split), niciodată aproximat.
-        if "home_corner_avg_recent" in df.columns and "away_corner_avg_recent" in df.columns:
-            df["corner_dominance"] = df["home_corner_avg_recent"] - df["away_corner_avg_recent"]
-        else:
-            df["corner_dominance"] = np.nan
-        if "home_card_avg_recent" in df.columns and "away_card_avg_recent" in df.columns:
-            df["card_diff"] = df["away_card_avg_recent"] - df["home_card_avg_recent"]
-        else:
-            df["card_diff"] = np.nan
-        # [ADAUGAT — ADR-013] foul_diff, aceeași disciplină ca mai sus.
-        if "home_foul_avg_recent" in df.columns and "away_foul_avg_recent" in df.columns:
-            df["foul_diff"] = df["away_foul_avg_recent"] - df["home_foul_avg_recent"]
-        else:
-            df["foul_diff"] = np.nan
-        # [ADAUGAT — ADR-021, P7.1] shot_dominance, aceeași disciplină.
-        if "home_shot_avg_recent" in df.columns and "away_shot_avg_recent" in df.columns:
-            df["shot_dominance"] = df["home_shot_avg_recent"] - df["away_shot_avg_recent"]
-        else:
-            df["shot_dominance"] = np.nan
+        # [MUTAT — Phase 2, ML_IMPLEMENTATION_ROADMAP.md, ADR-051] Calculul
+        # corner_dominance/card_diff/foul_diff/shot_dominance a fost extras
+        # în ml_feature_pipeline.py — decuplare comportament-identică,
+        # aceeași formulă (ADR-012/013/021), zero feature nou.
+        df = compute_derived_dominance_features(df)
         missing = [c for c in FEATURE_COLUMNS if c not in df.columns]
         for c in missing:
             df[c] = np.nan
