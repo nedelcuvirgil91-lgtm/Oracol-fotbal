@@ -143,6 +143,39 @@ def test_comparison_works_when_champion_exists(engine, isolated_learning_core, m
     assert report.simultaneous_improvement is True  # modelul fabricat "champion" e mult mai slab
 
 
+def test_train_stores_last_training_run_id_on_success(engine, isolated_learning_core):
+    """Trasabilitate ML (ADR-052) — self.last_training_run_id trebuie sa
+    identifice EXACT rularea persistata in training_runs, nu doar sa fie
+    non-None generic."""
+    engine.train()
+    persisted_ids = {r["training_run_id"] for r in storage.list_training_runs()}
+    assert engine.last_training_run_id is not None
+    assert engine.last_training_run_id in persisted_ids
+
+
+def test_train_produces_distinct_last_training_run_id_each_call(engine, isolated_learning_core):
+    engine.train()
+    first = engine.last_training_run_id
+    engine.train()
+    second = engine.last_training_run_id
+    assert first != second
+
+
+def test_last_training_run_id_survives_recording_failure(engine, isolated_learning_core, monkeypatch):
+    """Chiar daca storage.save_training_run() esueaza (Cerinta #5 - train()
+    tot reuseste), run_id-ul generat tot trebuie retinut - il identifica pe
+    self.ml chiar daca nu a ajuns persistat (best-effort, docstring
+    _record_training_run())."""
+    def boom(*a, **kw):
+        raise RuntimeError("simulated failure in recording layer")
+
+    monkeypatch.setattr("learning_core.storage.save_training_run", boom)
+    result = engine.train()
+
+    assert result.status == "trained"
+    assert engine.last_training_run_id is not None
+
+
 def test_predictor_result_contract_unaffected_by_recording_failure(engine, isolated_learning_core, monkeypatch):
     """Cerinta #5 — daca inregistrarea (storage/comparatie) esueaza complet,
     MLTrainingResult ramane exact acelasi contract, train() nu se opreste."""

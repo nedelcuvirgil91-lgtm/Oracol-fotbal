@@ -48,18 +48,23 @@ _LEAGUE_SCOPE       = "all"
 
 
 def _record_training_run(status: str, samples_used: int, walk_forward_metrics: dict,
-                          message: str) -> None:
+                          message: str) -> str:
     """Înregistrează rularea în training_runs (local + Supabase best-effort)
     și compară cu campionul activ, dacă există — pur informativ, loghează
     rezultatul. Nu decide, nu promovează, nu întrerupe niciodată train():
     orice eșec aici e prins și logat, fără să afecteze MLTrainingResult
-    returnat apelantului."""
+    returnat apelantului.
+
+    Întoarce ÎNTOTDEAUNA run_id-ul generat — chiar dacă persistarea/
+    comparația de mai jos eșuează (best-effort, prins în try/except intern)
+    — apelantul (train()) îl reține pe self.last_training_run_id pentru
+    trasabilitate (ADR-052), independent de succesul scrierii în DB."""
+    import uuid
+    run_id = str(uuid.uuid4())
     try:
-        import uuid
         from learning_core import champion_comparison, storage
         from learning_core.model_registry import TrainingRunResult
 
-        run_id = str(uuid.uuid4())
         storage.save_training_run(
             TrainingRunResult(
                 training_run_id=run_id, status=status, samples_used=samples_used,
@@ -83,6 +88,7 @@ def _record_training_run(status: str, samples_used: int, walk_forward_metrics: d
                          run_id, status)
     except Exception as exc:
         logger.warning("[ML] Înregistrare training_run eșuată (nu afectează antrenarea): %s", exc)
+    return run_id
 
 FEATURE_COLUMNS = [
     # [ELIMINAT — audit de feature importance, permutation importance
@@ -173,6 +179,16 @@ class MLPredictorEngine:
         self.samples_used: int = 0
         self.is_trained: bool = False
         self.last_train_status: str = "not_trained"
+        # [ADAUGAT — trasabilitate ML Engine, ADR-052] training_run_id al
+        # ULTIMEI antrenări locale reușite (train(), nu seed_from_champion())
+        # — folosit ca fallback de trasabilitate în oracle_engine.py cand
+        # self.ml_source=="local" (niciun Champion real promovat încă, dar
+        # modelul local chiar produce predicții — sursă reală, nu aproximată,
+        # Regula #8). None dacă nu s-a antrenat încă local în acest proces,
+        # sau dacă modelul curent vine dintr-un Champion (seed_from_champion()
+        # nu îl setează niciodată — trasabilitatea aceea vine din
+        # champion_diagnostic, sursă separată, mai completă).
+        self.last_training_run_id: str | None = None
         # [ADAUGAT — ADR-049, Pasul 10a] Parametru de Temperature Scaling,
         # antrenat din predicțiile OOF ale walk-forward-ului (§5 ADR-049).
         # None = necalibrat — predict() cade grațios pe predict_proba()
@@ -507,7 +523,7 @@ class MLPredictorEngine:
                 f"Model antrenat pe {self.samples_used} meciuri. "
                 f"Validare walk-forward: {len(wf['folds'])} folds, Brier mediu={brier}."
             )
-            _record_training_run(
+            self.last_training_run_id = _record_training_run(
                 "trained", self.samples_used,
                 {"accuracy": acc, "log_loss": ll, "brier_score": brier},
                 train_message,

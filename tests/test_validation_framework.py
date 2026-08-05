@@ -165,10 +165,14 @@ def test_save_snapshot_does_not_mutate_pred():
 
 class _FakeEngine:
     _log_validation_snapshot = oracle_engine.FootballOracleEngine._log_validation_snapshot
+    _resolve_ml_traceability = oracle_engine.FootballOracleEngine._resolve_ml_traceability
 
-    def __init__(self, config: dict, champion_diagnostic: dict | None = None):
+    def __init__(self, config: dict, champion_diagnostic: dict | None = None,
+                 ml_source: str = "none", ml=None):
         self.config = config
         self.champion_diagnostic = champion_diagnostic or {"status": "unavailable"}
+        self.ml_source = ml_source
+        self.ml = ml
 
 
 def test_validation_framework_disabled_by_default():
@@ -208,6 +212,75 @@ def test_log_validation_snapshot_swallows_exception(monkeypatch):
     monkeypatch.setattr(validation_framework, "save_snapshot", _boom)
     engine = _FakeEngine(config={"validation_framework_enabled": True})
     assert engine._log_validation_snapshot(_make_pred()) is False
+
+
+# ── _resolve_ml_traceability — fallback pe antrenarea locală ────────────────
+# (gol descoperit la verificarea live: azi, în producție, niciun Champion
+# real nu e promovat — model_champions conține exclusiv fixturi
+# gate_validation_test — deci self.ml_source=="local". Fără acest fallback,
+# ml_training_run_id ar rămâne None chiar și când ML chiar produce
+# predicții reale, dintr-un model local antrenat cu succes.)
+
+class _FakeMLWithLocalRun:
+    def __init__(self, last_training_run_id):
+        self.last_training_run_id = last_training_run_id
+
+
+def test_resolve_ml_traceability_prefers_champion_when_available():
+    diagnostic = {"status": "validated", "training_run_id": "champ-run", "algorithm_version": "3"}
+    engine = _FakeEngine(config={}, champion_diagnostic=diagnostic,
+                          ml_source="local", ml=_FakeMLWithLocalRun("local-run"))
+    assert engine._resolve_ml_traceability() == diagnostic
+
+
+def test_resolve_ml_traceability_falls_back_to_local_training_run():
+    """Stare curentă reală în producție: niciun Champion promovat
+    (champion_diagnostic status="unavailable", training_run_id=None), dar
+    self.ml chiar s-a antrenat local cu succes — trebuie folosit
+    self.ml.last_training_run_id, nu None."""
+    diagnostic = {"status": "unavailable", "reason": "no_valid_champion", "training_run_id": None}
+    engine = _FakeEngine(config={}, champion_diagnostic=diagnostic,
+                          ml_source="local", ml=_FakeMLWithLocalRun("local-run-abc"))
+    result = engine._resolve_ml_traceability()
+    assert result["training_run_id"] == "local-run-abc"
+    import ml_predictor
+    assert result["algorithm_version"] == ml_predictor._ALGORITHM_VERSION
+
+
+def test_resolve_ml_traceability_none_when_no_champion_and_no_local_run():
+    """Niciun Champion, niciun training_run local încă (self.ml.is_trained
+    ar fi False în acest caz, dar chiar și logic — nimic de raportat) —
+    rămâne onest: training_run_id=None din champion_diagnostic original."""
+    diagnostic = {"status": "unavailable", "reason": "no_valid_champion", "training_run_id": None}
+    engine = _FakeEngine(config={}, champion_diagnostic=diagnostic,
+                          ml_source="local", ml=_FakeMLWithLocalRun(None))
+    assert engine._resolve_ml_traceability() == diagnostic
+
+
+def test_resolve_ml_traceability_none_when_ml_source_not_local():
+    """ml_source=="none" (self.ml indisponibil/Supabase indisponibil) —
+    fallback-ul local nu se aplică, indiferent de starea lui self.ml."""
+    diagnostic = {"status": "unavailable", "reason": "no_supabase", "training_run_id": None}
+    engine = _FakeEngine(config={}, champion_diagnostic=diagnostic, ml_source="none", ml=None)
+    assert engine._resolve_ml_traceability() == diagnostic
+
+
+def test_log_validation_snapshot_uses_resolved_traceability_not_raw_champion_diagnostic(monkeypatch):
+    """Integrare completă a golului închis: _log_validation_snapshot NU mai
+    trimite direct self.champion_diagnostic — trimite rezultatul
+    _resolve_ml_traceability(), care poate diferi (fallback local)."""
+    calls = []
+    monkeypatch.setattr(validation_framework, "save_snapshot",
+                         lambda pred, champion_diagnostic=None: calls.append(champion_diagnostic) or True)
+
+    raw_diagnostic = {"status": "unavailable", "reason": "no_valid_champion", "training_run_id": None}
+    engine = _FakeEngine(config={"validation_framework_enabled": True}, champion_diagnostic=raw_diagnostic,
+                          ml_source="local", ml=_FakeMLWithLocalRun("local-run-xyz"))
+
+    engine._log_validation_snapshot(_make_pred())
+
+    assert calls[0]["training_run_id"] == "local-run-xyz"
+    assert calls[0] != raw_diagnostic
 
 
 def test_log_validation_snapshot_called_exactly_once_in_evaluate_match():

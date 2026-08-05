@@ -1996,6 +1996,27 @@ class FootballOracleEngine:
             logger.debug("[BlendEngine] _get_blend_engine_prediction failed: %s", exc)
             return None
 
+    def _resolve_ml_traceability(self) -> dict:
+        """[ADAUGAT — trasabilitate ML Engine, ADR-052/North Star #9]
+        training_run_id/algorithm_version pentru rândul Validation
+        Framework. Sursa PREFERATĂ e Champion-ul rezolvat
+        (self.champion_diagnostic — completă, include validated_at). Dacă
+        acela nu are training_run_id (niciun Champion real promovat încă —
+        stare curentă în producție azi, self.ml_source=="local") ȘI modelul
+        local chiar a antrenat cu succes în acest proces
+        (self.ml.last_training_run_id), se folosește acela ca fallback —
+        sursă reală (identifică exact rularea de antrenare care a produs
+        modelul curent), nu aproximată. Fără fallback, rândul rămâne
+        onest: training_run_id=None (Regula #8, nu se aproximează)."""
+        if self.champion_diagnostic.get("training_run_id"):
+            return self.champion_diagnostic
+        if self.ml_source == "local" and self.ml is not None:
+            local_run_id = getattr(self.ml, "last_training_run_id", None)
+            if local_run_id:
+                from ml_predictor import _ALGORITHM_VERSION
+                return {"training_run_id": local_run_id, "algorithm_version": _ALGORITHM_VERSION}
+        return self.champion_diagnostic
+
     def _log_validation_snapshot(self, pred: MatchPrediction) -> bool:
         """[ADAUGAT — ADR-052] Validation Framework — colectare automată,
         per meci, a ieșirilor disponibile Oracle/ML/Blend, pentru analize
@@ -2003,17 +2024,18 @@ class FootballOracleEngine:
         (validation_framework_enabled, implicit OPRIT), separat de toate
         celelalte. NU ia decizii, NU optimizează, NU promovează — pur
         observațional (ADR-052 §2.3). Nu modifică pred. Transmite
-        self.champion_diagnostic (populat o singură dată per proces de
-        _resolve_champion(), fără al doilea apel către champion_loader) —
-        trasabilitate ML completă (training_run_id/algorithm_version,
-        migrația 007) pe rândul persistat. Orice eșec (modul indisponibil,
-        Supabase indisponibil, eroare neprevăzută) e prins aici, niciodată
-        propagat către evaluate_match()."""
+        _resolve_ml_traceability() (Champion dacă disponibil, altfel
+        fallback pe antrenarea locală curentă) — trasabilitate ML completă
+        (training_run_id/algorithm_version, migrația 007) pe rândul
+        persistat, indiferent dacă ML-ul activ vine dintr-un Champion
+        promovat sau dintr-o antrenare locală. Orice eșec (modul
+        indisponibil, Supabase indisponibil, eroare neprevăzută) e prins
+        aici, niciodată propagat către evaluate_match()."""
         if not self.config.get("validation_framework_enabled", False):
             return False
         try:
             import validation_framework
-            return validation_framework.save_snapshot(pred, self.champion_diagnostic)
+            return validation_framework.save_snapshot(pred, self._resolve_ml_traceability())
         except Exception as exc:
             logger.debug("[ValidationFramework] _log_validation_snapshot failed: %s", exc)
             return False
