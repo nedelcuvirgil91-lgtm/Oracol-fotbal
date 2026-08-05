@@ -1,0 +1,108 @@
+name: Football Oracle — Flashscore Weekly Fixtures Discovery
+
+# [ADAUGAT 2026-08-05, cerere explicita proprietar produs] Singurul workflow
+# AUTOMAT care descopera meciuri VIITOARE prin Flashscore. night_sync.yml si
+# live_sync.yml apeleaza amandoua run_foundation_data_layer.run() cu
+# include_future_fixtures=False (ADR-045, motiv: fara valoare pt.
+# statistici/H2H/lineups pe un meci nejucat) - dar asta lasa neacoperita
+# simpla EXISTENTA a meciului (identitate: echipe/liga/data), diferita de
+# imbogatirea lui cu statistici. Gaura a fost demonstrata live (audit
+# 2026-08-05): Eredivisie/Primeira Liga aveau 0 meciuri gasite de providerii
+# API pt. saptamana urmatoare, 9-10 gasite de Flashscore. Acest workflow
+# umple exact acea gaura, fara sa atinga night_sync.yml/live_sync.yml
+# (raman neschimbate, cum a cerut proprietarul produsului).
+#
+# Refoloseste 100% codul existent, testat (providers/flashscore/
+# run_foundation_data_layer.py, discover_matches(include_future_fixtures=
+# True) implicit + run_foundation_data_layer_for_discovered_matches(),
+# Delta Sync inclus) - niciun script nou, niciun mecanism nou de
+# fetch/persist (Single Owner, ADR-045). Tab-urile stats/lineups/player_
+# stats/h2h/standings vor fi goale pt. un meci nejucat - normalizat deja
+# corect (Data Completeness Score), nu un caz nou de tratat.
+#
+# Cadenta: nocturn, 00:00 UTC (03:00 Romania, EEST) - inainte de night_sync.
+# yml (03:00 UTC) SI inainte de live_sync.yml (prima rulare 02:00 UTC),
+# gap de minim 30 min garantat de timeout-minutes: 90 (aceeasi disciplina
+# de "fara suprapunere prin programare, nu prin lock" ca restul workflow-
+# urilor Flashscore - vezi live_sync.yml). O sesiune Playwright Flashscore
+# per fereastra orara, niciodata doua simultan.
+#
+# limit-per-league: 25 - dimensiunea reala a hub-ului /fixtures/ (16-28
+# meciuri unice, verificat live, fara paginare dincolo de randarea
+# initiala - vezi discovery.py) acopera confortabil o saptamana intreaga
+# per competitie fara sa ceara mai mult decat hub-ul poate intoarce.
+#
+# timeout-minutes: 90 — prima rulare (backlog initial, fara Delta Sync
+# in spate) poate atinge acest plafon si opri inainte sa termine toate
+# cele 14 ligi — sigur, nu distructiv (fiecare meci se persista atomic,
+# secvential; o oprire la mijloc nu corupe nimic, doar lasa restul pt.
+# rularile urmatoare). Acelasi tipar deja documentat si observat real la
+# live_sync.yml (rularile #15/#16, backlog absorbit in cateva nopti
+# succesive, nu dintr-o rulare). Nu marim timeout-ul peste 90 min ca sa
+# pastram marja fata de live_sync.yml (02:00 UTC).
+
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+    inputs:
+      leagues:
+        description: "Competiții (separate prin virgulă; gol = toate din FLASHSCORE_TRACKED_COMPETITIONS)"
+        required: false
+        default: ""
+      limit_per_league:
+        description: "Limită meciuri descoperite per competiție"
+        required: false
+        default: "25"
+      dry_run:
+        description: "Doar Discovery — fără fetch/persist"
+        required: false
+        default: "false"
+        type: boolean
+
+jobs:
+  flashscore-weekly-fixtures:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Run Flashscore Weekly Fixtures Discovery
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then DRY_RUN_FLAG="--dry-run"; fi
+
+          LEAGUES_ARG=()
+          if [ -n "${{ github.event.inputs.leagues }}" ]; then
+            IFS=',' read -ra LEAGUES_ARG <<< "${{ github.event.inputs.leagues }}"
+          fi
+
+          # include_future_fixtures ramane True (implicit) - NU se trece
+          # --no-future-fixtures, spre deosebire de night_sync.yml/live_sync.yml.
+          if [ ${#LEAGUES_ARG[@]} -gt 0 ]; then
+            python -m providers.flashscore.run_foundation_data_layer \
+              --leagues "${LEAGUES_ARG[@]}" \
+              --limit-per-league "${{ github.event.inputs.limit_per_league || '25' }}" \
+              $DRY_RUN_FLAG
+          else
+            python -m providers.flashscore.run_foundation_data_layer \
+              --limit-per-league "${{ github.event.inputs.limit_per_league || '25' }}" \
+              $DRY_RUN_FLAG
+          fi
