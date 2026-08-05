@@ -2002,14 +2002,18 @@ class FootballOracleEngine:
         periodice (zilnice/săptămânale/lunare) ulterioare. Flag DEDICAT
         (validation_framework_enabled, implicit OPRIT), separat de toate
         celelalte. NU ia decizii, NU optimizează, NU promovează — pur
-        observațional (ADR-052 §2.3). Nu modifică pred. Orice eșec (modul
-        indisponibil, Supabase indisponibil, eroare neprevăzută) e prins
-        aici, niciodată propagat către evaluate_match()."""
+        observațional (ADR-052 §2.3). Nu modifică pred. Transmite
+        self.champion_diagnostic (populat o singură dată per proces de
+        _resolve_champion(), fără al doilea apel către champion_loader) —
+        trasabilitate ML completă (training_run_id/algorithm_version,
+        migrația 007) pe rândul persistat. Orice eșec (modul indisponibil,
+        Supabase indisponibil, eroare neprevăzută) e prins aici, niciodată
+        propagat către evaluate_match()."""
         if not self.config.get("validation_framework_enabled", False):
             return False
         try:
             import validation_framework
-            return validation_framework.save_snapshot(pred)
+            return validation_framework.save_snapshot(pred, self.champion_diagnostic)
         except Exception as exc:
             logger.debug("[ValidationFramework] _log_validation_snapshot failed: %s", exc)
             return False

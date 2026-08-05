@@ -34,14 +34,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger("FootballOracle.ValidationFramework")
 
 
-def _build_snapshot_row(pred: "MatchPrediction") -> dict:
+def _build_snapshot_row(pred: "MatchPrediction", champion_diagnostic: dict | None = None) -> dict:
     """Extrage, din `pred` deja construit complet, exact ce e nevoie pentru
     un rând `engine_comparison_snapshots`. Oracle e întotdeauna prezent
     (motorul principal, servește mereu). ML/Blend sunt prezente doar dacă
     erau deja disponibile pe `pred` la momentul apelului (flag-urile lor
-    proprii, independente de acest modul)."""
+    proprii, independente de acest modul).
+
+    `champion_diagnostic` (opțional — `self.champion_diagnostic`,
+    oracle_engine.py, populat o singură dată per proces de
+    `_resolve_champion()`, fără al doilea apel către champion_loader)
+    alimentează trasabilitatea ML (migrația 007) — training_run_id/
+    algorithm_version. Populate DOAR când ml_available=True: un
+    training_run_id fără o predicție ML reală atribuibilă ar fi o asociere
+    înșelătoare, nu o stare necunoscută corectă (Regula #8, CLAUDE.md)."""
     mp = pred.ml_engine_prediction
     bp = pred.blend_engine_prediction
+    cd = champion_diagnostic or {}
 
     ml_available = bool(mp and mp.get("available"))
     blend_available = bp is not None
@@ -57,6 +66,8 @@ def _build_snapshot_row(pred: "MatchPrediction") -> dict:
         "ml_prob_home":     mp["prob_home"] if ml_available else None,
         "ml_prob_draw":     mp["prob_draw"] if ml_available else None,
         "ml_prob_away":     mp["prob_away"] if ml_available else None,
+        "ml_training_run_id":   cd.get("training_run_id") if ml_available else None,
+        "ml_algorithm_version": cd.get("algorithm_version") if ml_available else None,
         "blend_available":  blend_available,
         "blend_prob_home":  bp["prob_home"] if blend_available else None,
         "blend_prob_draw":  bp["prob_draw"] if blend_available else None,
@@ -64,7 +75,7 @@ def _build_snapshot_row(pred: "MatchPrediction") -> dict:
     }
 
 
-def save_snapshot(pred: "MatchPrediction") -> bool:
+def save_snapshot(pred: "MatchPrediction", champion_diagnostic: dict | None = None) -> bool:
     """Persistă, pentru un singur meci, ieșirile disponibile ale celor trei
     motoare. Idempotent per fixture_id (upsert, vezi migrația 006) — o
     reanalizare a aceluiași meci actualizează rândul, nu creează duplicate.
@@ -72,7 +83,7 @@ def save_snapshot(pred: "MatchPrediction") -> bool:
     Întoarce False la orice eșec (Supabase indisponibil, scriere eșuată,
     eroare neprevăzută) — niciodată excepție propagată către apelant."""
     try:
-        row = _build_snapshot_row(pred)
+        row = _build_snapshot_row(pred, champion_diagnostic)
     except Exception as exc:
         logger.debug("[ValidationFramework] construire rând eșuată: %s", exc)
         return False

@@ -74,6 +74,34 @@ def test_build_snapshot_row_ml_none_flag_off():
     assert row["ml_prob_home"] is None
 
 
+# ── Trasabilitate ML (migrația 007) ─────────────────────────────────────────
+
+def test_build_snapshot_row_ml_traceability_populated_when_available():
+    pred = _make_pred(ml_engine_prediction={"available": True, "prob_home": 0.6, "prob_draw": 0.2, "prob_away": 0.2})
+    diagnostic = {"status": "validated", "training_run_id": "run-123", "algorithm_version": "3"}
+    row = validation_framework._build_snapshot_row(pred, diagnostic)
+    assert row["ml_training_run_id"] == "run-123"
+    assert row["ml_algorithm_version"] == "3"
+
+
+def test_build_snapshot_row_ml_traceability_none_when_ml_unavailable():
+    """Un training_run_id fara o predictie ML reala atribuibila ar fi o
+    asociere inselatoare, nu o stare necunoscuta corecta (Regula #8) - chiar
+    daca un champion_diagnostic valid e transmis."""
+    pred = _make_pred(ml_engine_prediction={"available": False, "reason": "predictie_esuata"})
+    diagnostic = {"status": "validated", "training_run_id": "run-123", "algorithm_version": "3"}
+    row = validation_framework._build_snapshot_row(pred, diagnostic)
+    assert row["ml_training_run_id"] is None
+    assert row["ml_algorithm_version"] is None
+
+
+def test_build_snapshot_row_ml_traceability_none_when_diagnostic_omitted():
+    pred = _make_pred(ml_engine_prediction={"available": True, "prob_home": 0.6, "prob_draw": 0.2, "prob_away": 0.2})
+    row = validation_framework._build_snapshot_row(pred)  # champion_diagnostic implicit None
+    assert row["ml_training_run_id"] is None
+    assert row["ml_algorithm_version"] is None
+
+
 def test_build_snapshot_row_blend_present():
     pred = _make_pred(blend_engine_prediction={"prob_home": 0.5, "prob_draw": 0.25, "prob_away": 0.25})
     row = validation_framework._build_snapshot_row(pred)
@@ -138,8 +166,9 @@ def test_save_snapshot_does_not_mutate_pred():
 class _FakeEngine:
     _log_validation_snapshot = oracle_engine.FootballOracleEngine._log_validation_snapshot
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, champion_diagnostic: dict | None = None):
         self.config = config
+        self.champion_diagnostic = champion_diagnostic or {"status": "unavailable"}
 
 
 def test_validation_framework_disabled_by_default():
@@ -148,7 +177,8 @@ def test_validation_framework_disabled_by_default():
 
 def test_log_validation_snapshot_noop_when_flag_disabled(monkeypatch):
     calls = []
-    monkeypatch.setattr(validation_framework, "save_snapshot", lambda pred: calls.append(pred) or True)
+    monkeypatch.setattr(validation_framework, "save_snapshot",
+                         lambda pred, champion_diagnostic=None: calls.append(pred) or True)
 
     engine = _FakeEngine(config={"validation_framework_enabled": False})
     result = engine._log_validation_snapshot(_make_pred())
@@ -159,18 +189,20 @@ def test_log_validation_snapshot_noop_when_flag_disabled(monkeypatch):
 
 def test_log_validation_snapshot_calls_module_when_enabled(monkeypatch):
     calls = []
-    monkeypatch.setattr(validation_framework, "save_snapshot", lambda pred: calls.append(pred) or True)
+    monkeypatch.setattr(validation_framework, "save_snapshot",
+                         lambda pred, champion_diagnostic=None: calls.append((pred, champion_diagnostic)) or True)
 
-    engine = _FakeEngine(config={"validation_framework_enabled": True})
+    diagnostic = {"status": "validated", "training_run_id": "run-123", "algorithm_version": "3"}
+    engine = _FakeEngine(config={"validation_framework_enabled": True}, champion_diagnostic=diagnostic)
     pred = _make_pred()
     result = engine._log_validation_snapshot(pred)
 
     assert result is True
-    assert calls == [pred]
+    assert calls == [(pred, diagnostic)]
 
 
 def test_log_validation_snapshot_swallows_exception(monkeypatch):
-    def _boom(pred):
+    def _boom(pred, champion_diagnostic=None):
         raise RuntimeError("eroare simulata in validation_framework")
 
     monkeypatch.setattr(validation_framework, "save_snapshot", _boom)
