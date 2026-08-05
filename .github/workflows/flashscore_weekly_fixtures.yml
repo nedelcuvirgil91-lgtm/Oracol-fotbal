@@ -20,12 +20,14 @@ name: Football Oracle — Flashscore Weekly Fixtures Discovery
 # stats/h2h/standings vor fi goale pt. un meci nejucat - normalizat deja
 # corect (Data Completeness Score), nu un caz nou de tratat.
 #
-# Cadenta: nocturn, 00:00 UTC (03:00 Romania, EEST) - inainte de night_sync.
-# yml (03:00 UTC) SI inainte de live_sync.yml (prima rulare 02:00 UTC),
-# gap de minim 30 min garantat de timeout-minutes: 90 (aceeasi disciplina
-# de "fara suprapunere prin programare, nu prin lock" ca restul workflow-
-# urilor Flashscore - vezi live_sync.yml). O sesiune Playwright Flashscore
-# per fereastra orara, niciodata doua simultan.
+# Cadenta: SAPTAMANAL (nu nocturn/zilnic - corectat 2026-08-05, clarificare
+# proprietar produs), luni 00:00 UTC (03:00 Romania, EEST) - acopera
+# saptamana intreaga (luni-duminica) dintr-o singura rulare. Inainte de
+# night_sync.yml (03:00 UTC) SI de live_sync.yml (prima rulare a zilei,
+# 02:00 UTC), gap de minim 30 min garantat de timeout-minutes: 90 (aceeasi
+# disciplina de "fara suprapunere prin programare, nu prin lock" ca restul
+# workflow-urilor Flashscore - vezi live_sync.yml). O sesiune Playwright
+# Flashscore per fereastra orara, niciodata doua simultan.
 #
 # limit-per-league: 25 - dimensiunea reala a hub-ului /fixtures/ (16-28
 # meciuri unice, verificat live, fara paginare dincolo de randarea
@@ -43,7 +45,7 @@ name: Football Oracle — Flashscore Weekly Fixtures Discovery
 
 on:
   schedule:
-    - cron: "0 0 * * *"
+    - cron: "0 0 * * 1"
   workflow_dispatch:
     inputs:
       leagues:
