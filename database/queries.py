@@ -10,7 +10,7 @@ Folosit de sync/ și de oracle_engine.py.
 """
 from __future__ import annotations
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from mappings import normalize_team_name
@@ -2558,13 +2558,32 @@ def get_team_standings_row(team: str, competition: str) -> dict | None:
 def is_flashscore_match_already_collected(mid: str) -> bool:
     """Delta Sync (Faza 2, §7 din task) — verifică ÎNAINTE de fetch dacă
     acest meci (identificat prin `mid`-ul Flashscore, cunoscut deja la
-    Discovery, înaintea oricărui fetch) a fost deja persistat canonic.
+    Discovery, înaintea oricărui fetch) a fost deja persistat canonic ȘI
+    complet (nu doar un rând „schelet" scris pentru un meci încă nejucat).
 
     `normalize_match_statistics()` scrie `fixture_id = f"flashscore_{mid}"`
     pe `match_history` (același `mid` extras din URL-ul hub-ului de
     Discovery și din og:url-ul paginii de meci — aceeași identitate,
     confirmată direct în cod). Un `True` aici înseamnă cu certitudine
-    "am scris deja canonic acest meci Flashscore" — niciun fals-pozitiv.
+    "am scris deja canonic acest meci Flashscore, complet" — niciun
+    fals-pozitiv.
+
+    [FIX 2026-08-05, găsit în timpul implementării flashscore_weekly_
+    fixtures.yml] Înainte, verifica DOAR existența rândului — pentru un
+    meci descoperit ca fixture VIITOR (`flashscore_weekly_fixtures.yml`,
+    `future_fixtures_only=True`), rândul exista deja (echipe/ligă/dată,
+    fără scor) încă înainte să se joace meciul. O rulare ulterioară
+    (`night_sync.yml`/`live_sync.yml`, care descoperă același meci prin
+    `/results/` DUPĂ ce s-a jucat) l-ar fi sărit definitiv prin Delta
+    Sync, lăsând `actual_result`/scorul NULL la nesfârșit — Flashscore nu
+    s-ar mai fi întors niciodată să-l completeze. Acum: dacă rândul are
+    deja `actual_result`, tot True (comportament neschimbat, cazul normal).
+    Dacă NU are `actual_result` ȘI `kickoff_date` e clar în trecut
+    (dincolo de marja de siguranță de fus orar, identică celei din
+    `pre_match_odds.py::_TIMEZONE_SAFETY_MARGIN`), întoarce False — se
+    reîncearcă fetch/persist, ca meciul să poată fi completat. Dacă
+    `kickoff_date` e încă în viitor (sau lipsă/neparsabil), rămâne True —
+    nu are rost să reîncercăm un meci care încă nu s-a jucat.
 
     Un `False` NU înseamnă cu certitudine "niciodată colectat" — dacă
     meciul exista deja în `match_history` cu `fixture_id` de la alt
@@ -2578,12 +2597,30 @@ def is_flashscore_match_already_collected(mid: str) -> bool:
     try:
         res = (
             client.table("match_history")
-            .select("id")
+            .select("id,kickoff_date,actual_result")
             .eq("fixture_id", f"flashscore_{mid}")
             .limit(1)
             .execute()
         )
-        return bool(res.data)
+        rows = res.data or []
+        if not rows:
+            return False
+        row = rows[0]
+        if row.get("actual_result") is not None:
+            return True
+        kickoff_raw = row.get("kickoff_date")
+        if not kickoff_raw:
+            return True  # fara data cunoscuta - nu putem decide, comportament neschimbat
+        try:
+            kickoff = datetime.fromisoformat(kickoff_raw)
+        except ValueError:
+            return True
+        now = datetime.now(kickoff.tzinfo) if kickoff.tzinfo else datetime.now()
+        # kickoff inca in viitor (cu marja de siguranta de fus orar) -> normal sa nu aiba
+        # inca rezultat, sarim (True). Kickoff trecut, tot fara rezultat -> reincercam (False).
+        if kickoff + timedelta(hours=6) > now:
+            return True
+        return False
     except Exception as exc:
         logger.warning("[Queries] is_flashscore_match_already_collected failed pentru mid=%s: %s", mid, exc)
         return False

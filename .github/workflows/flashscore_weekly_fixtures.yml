@@ -13,12 +13,30 @@ name: Football Oracle — Flashscore Weekly Fixtures Discovery
 # (raman neschimbate, cum a cerut proprietarul produsului).
 #
 # Refoloseste 100% codul existent, testat (providers/flashscore/
-# run_foundation_data_layer.py, discover_matches(include_future_fixtures=
-# True) implicit + run_foundation_data_layer_for_discovered_matches(),
-# Delta Sync inclus) - niciun script nou, niciun mecanism nou de
-# fetch/persist (Single Owner, ADR-045). Tab-urile stats/lineups/player_
-# stats/h2h/standings vor fi goale pt. un meci nejucat - normalizat deja
-# corect (Data Completeness Score), nu un caz nou de tratat.
+# run_foundation_data_layer.py, discover_matches() + run_foundation_data_
+# layer_for_discovered_matches(), Delta Sync inclus) - niciun script nou,
+# niciun mecanism nou de fetch/persist (Single Owner, ADR-045). Tab-urile
+# stats/lineups/player_stats/h2h/standings vor fi goale pt. un meci
+# nejucat - normalizat deja corect (Data Completeness Score), nu un caz
+# nou de tratat.
+#
+# [FIX 2026-08-05, gasit in timpul implementarii] --future-fixtures-only
+# (nu doar include_future_fixtures implicit) - fara el, discover_matches()
+# incearca /results/ INTAI si verifica /fixtures/ DOAR daca /results/ e
+# gol (comportament CLI/manual, neschimbat pt. restul apelantilor). Pt.
+# orice liga activa, /results/ are aproape mereu continut (night_sync.yml/
+# live_sync.yml il acopera deja acolo) - deci /fixtures/ nu ar fi fost
+# aproape niciodata verificat, anuland scopul acestui workflow. --future-
+# fixtures-only cere /fixtures/ necondiționat - vezi discovery.py
+# (_discover_for_hub, future_fixtures_only) pentru detaliu complet.
+#
+# [FIX 2026-08-05, complementar] database.queries.is_flashscore_match_
+# already_collected() a fost corectat sa nu mai sara la nesfarsit un meci
+# "schelet" (scris aici, fara scor inca) - verifica acum si actual_result/
+# kickoff_date, nu doar existenta randului. Fara acel fix, night_sync.yml/
+# live_sync.yml (care descopera acelasi meci mai tarziu, prin /results/,
+# dupa ce s-a jucat) l-ar fi sarit definitiv prin Delta Sync, lasand
+# scorul NULL permanent.
 #
 # Cadenta: SAPTAMANAL (nu nocturn/zilnic - corectat 2026-08-05, clarificare
 # proprietar produs), luni 00:00 UTC (03:00 Romania, EEST) - acopera
@@ -96,15 +114,18 @@ jobs:
             IFS=',' read -ra LEAGUES_ARG <<< "${{ github.event.inputs.leagues }}"
           fi
 
-          # include_future_fixtures ramane True (implicit) - NU se trece
-          # --no-future-fixtures, spre deosebire de night_sync.yml/live_sync.yml.
+          # --future-fixtures-only: cere /fixtures/ necondiționat (vezi
+          # comentariul din capul fișierului) - spre deosebire de
+          # night_sync.yml/live_sync.yml, care nu trec deloc acest flag.
           if [ ${#LEAGUES_ARG[@]} -gt 0 ]; then
             python -m providers.flashscore.run_foundation_data_layer \
               --leagues "${LEAGUES_ARG[@]}" \
               --limit-per-league "${{ github.event.inputs.limit_per_league || '25' }}" \
+              --future-fixtures-only \
               $DRY_RUN_FLAG
           else
             python -m providers.flashscore.run_foundation_data_layer \
               --limit-per-league "${{ github.event.inputs.limit_per_league || '25' }}" \
+              --future-fixtures-only \
               $DRY_RUN_FLAG
           fi

@@ -277,7 +277,7 @@ def parse_match_links(html: str) -> list[tuple[str, str]]:
 
 def _discover_for_hub(
     page, hub_url: str, league: str, limit: int | None,
-    include_future_fixtures: bool = True,
+    include_future_fixtures: bool = True, future_fixtures_only: bool = False,
 ) -> list[DiscoveredMatch]:
     """`hub_url` fara `/results/`/`/fixtures/` - ambele incercate,
     `/results/` intai (identic POC-ului 10-matches, deja verificat live);
@@ -299,8 +299,26 @@ def _discover_for_hub(
     descoperit deja fixture-ul sau nu — nu mai era nevoie de o
     cross-referentiere fragila (slug URL -> nume canonic) cu
     `scheduled_fixtures`, care ar fi cerut fie o schimbare de schema, fie
-    o potrivire de nume nesigura."""
-    sources = ("results", "fixtures") if include_future_fixtures else ("results",)
+    o potrivire de nume nesigura.
+
+    `future_fixtures_only` [ADAUGAT 2026-08-05, fix descoperit in timpul
+    implementarii flashscore_weekly_fixtures.yml] — cand True, `/results/`
+    NU mai e incercat deloc, DOAR `/fixtures/`. Motiv: pentru orice liga
+    activa, `/results/` are aproape mereu meciuri (night_sync.yml/
+    live_sync.yml le acopera deja la cadenta lor) — cu `include_future_
+    fixtures=True` obisnuit, `/fixtures/` e doar FALLBACK, deci NU e
+    incercat niciodata cand `/results/` are continut, exact opusul a ceea
+    ce are nevoie un workflow dedicat descoperirii de meciuri viitoare.
+    `future_fixtures_only=True` ignora complet `include_future_fixtures`
+    (cere `/fixtures/` necondiționat) — folosit DOAR de flashscore_weekly_
+    fixtures.yml, restul apelantilor (CLI manual, flashscore_foundation_
+    data_layer.yml) raman pe implicit False, comportament neschimbat."""
+    if future_fixtures_only:
+        sources = ("fixtures",)
+    elif include_future_fixtures:
+        sources = ("results", "fixtures")
+    else:
+        sources = ("results",)
     for source in sources:
         url = f"{hub_url.rstrip('/')}/{source}/"
         resp = page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
@@ -322,7 +340,7 @@ def _discover_for_hub(
 
 def discover_matches(
     leagues: list[str] | None = None, limit_per_league: int | None = None,
-    include_future_fixtures: bool = True,
+    include_future_fixtures: bool = True, future_fixtures_only: bool = False,
 ) -> list[DiscoveredMatch]:
     """Punct de intrare M1 - o singura sesiune Playwright, un singur
     browser, pacing explicit intre hub-uri succesive
@@ -331,8 +349,9 @@ def discover_matches(
     si se opreste imediat la orice semn de protectie, nu incearca sa
     ocoleasca - identic restul acestui provider.
 
-    `include_future_fixtures` — vezi docstring `_discover_for_hub()`.
-    Implicit True (comportament CLI/manual neschimbat)."""
+    `include_future_fixtures`/`future_fixtures_only` — vezi docstring
+    `_discover_for_hub()`. Implicit True/False (comportament CLI/manual
+    neschimbat)."""
     targets = leagues if leagues is not None else list(FLASHSCORE_TRACKED_COMPETITIONS.keys())
     unknown = [lg for lg in targets if lg not in FLASHSCORE_TRACKED_COMPETITIONS]
     if unknown:
@@ -353,7 +372,8 @@ def discover_matches(
                 hub_url = f"https://www.flashscore.com/football/{country}/{competition}"
                 if i > 0:
                     polite_delay()
-                results.extend(_discover_for_hub(page, hub_url, league, limit_per_league, include_future_fixtures))
+                results.extend(_discover_for_hub(page, hub_url, league, limit_per_league,
+                                                  include_future_fixtures, future_fixtures_only))
         finally:
             browser.close()
     return results

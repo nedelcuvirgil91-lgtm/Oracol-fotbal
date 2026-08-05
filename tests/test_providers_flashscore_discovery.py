@@ -240,6 +240,31 @@ def test_discover_for_hub_still_returns_results_when_future_fixtures_disabled(mo
     assert matches[0].source == "results"
 
 
+def test_discover_for_hub_future_fixtures_only_ignores_nonempty_results(monkeypatch):
+    """[FIX 2026-08-05, gasit in timpul implementarii flashscore_weekly_
+    fixtures.yml] future_fixtures_only=True cere /fixtures/ NECONDITIONAT
+    - /results/ nu trebuie nici macar incercat, chiar daca are continut
+    (comportamentul normal, include_future_fixtures=True, l-ar fi luat pe
+    acela si s-ar fi oprit acolo, fara sa mai ajunga la /fixtures/)."""
+    monkeypatch.setattr("providers.flashscore.discovery.polite_delay", lambda: None)
+    page = _FakePage({"results": _MATCH_HTML, "fixtures": _MATCH_HTML})
+    matches = _discover_for_hub(page, "https://www.flashscore.com/football/x/y", "Premier League",
+                                 limit=None, include_future_fixtures=True, future_fixtures_only=True)
+    assert len(matches) == 1
+    assert matches[0].source == "fixtures"
+    assert not any(u.endswith("/results/") for u in page.urls_visited)
+    assert any(u.endswith("/fixtures/") for u in page.urls_visited)
+
+
+def test_discover_for_hub_future_fixtures_only_empty_when_no_fixtures(monkeypatch):
+    monkeypatch.setattr("providers.flashscore.discovery.polite_delay", lambda: None)
+    page = _FakePage({"results": _MATCH_HTML, "fixtures": _EMPTY_HTML})
+    matches = _discover_for_hub(page, "https://www.flashscore.com/football/x/y", "Premier League",
+                                 limit=None, include_future_fixtures=True, future_fixtures_only=True)
+    assert matches == []
+    assert not any(u.endswith("/results/") for u in page.urls_visited)
+
+
 # ════════════════════════════════════════════════════════════════════════
 # get_limit_per_league_automated() — plafon configurabil (nu hardcodat),
 # Pasul 1 Master Repair Plan, rafinat dupa feedback.
