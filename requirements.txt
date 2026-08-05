@@ -1,4 +1,14 @@
 streamlit>=1.32.0
+# [ADAUGAT — incident 2026-08-05] streamlit==1.61.0 (lansat 2026-08-04) vine
+# cu server.web.starlette_gzip_middleware._MediaAwareGZipResponder, care
+# apelează super().__init__(app, minimum_size, compresslevel=...) FĂRĂ
+# noul argument obligatoriu thread_minimum_size — introdus exact în
+# starlette==1.4.0 (verificat direct: 1.3.1 nu îl are, 1.4.0 îl are).
+# Fără acest pin, orice cerere către aplicație eșua cu TypeError, aplicația
+# complet indisponibilă (crash loop confirmat în logurile Streamlit Cloud).
+# De eliminat doar după ce Streamlit publică o versiune compatibilă cu
+# starlette>=1.4.0 (verificat, nu presupus).
+starlette<1.4.0
 pandas>=2.0.0
 numpy>=1.26.0
 scipy>=1.12.0
