@@ -187,6 +187,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # strategia V1 (medie ponderata), nicio pondere explicita (=> 1.0,
     # neutru, pt orice motor).
     "blend_engine_config": {"strategy": "weighted_average", "weights": {}},
+    # Afișare UI a predicției ML Engine (ADR-051, Phase 1) — flag dedicat,
+    # neînrudit cu ml_blending_enabled (acela influențează predicția Oracle
+    # servită; acesta niciodată). Populează doar pred.ml_engine_prediction.
+    # Implicit OPRIT.
+    "ml_engine_display_enabled": False,
 }
 
 DEFAULT_WEIGHTS: dict[str, Any] = {
@@ -432,6 +437,16 @@ class MatchPrediction:
     # Shadow/Promotion/ADR-031/ADR-033). None dacă flag-ul de afișare e
     # oprit — nu se aproximează.
     blend_engine_prediction:  dict | None = None
+    # ── ML Engine (ADR-051, Phase 1) ───────────────────────────────────────
+    # Câmp SEPARAT, izolat, mirror exact al blend_engine_prediction de mai
+    # sus — NU raw_predictions (ADR-031), NU shadow_predictions. Populat de
+    # self.ml (deja Champion-aware prin _resolve_champion()) via
+    # _get_ml_engine_prediction(), doar dacă ml_engine_display_enabled=True.
+    # Trei stări, niciodată aproximate: None (flag oprit sau eroare
+    # neprevăzută), {"available": False, "reason": ...} (ML indisponibil
+    # sau predicție eșuată pentru acest meci), {"available": True,
+    # "prob_home"/"prob_draw"/"prob_away": ...} (succes).
+    ml_engine_prediction:     dict | None = None
 
 
 def build_raw_predictions(
@@ -1772,6 +1787,15 @@ class FootballOracleEngine:
         # în blend_engine.py.
         pred.blend_engine_prediction = self._get_blend_engine_prediction(pred)
 
+        # [ADAUGAT — ADR-051, Phase 1] ML Engine — a treia voce independentă,
+        # afișare read-only, gatată de flag propriu (ml_engine_display_enabled).
+        # Simetric cu blocul Blend de mai sus: niciun selector/fallback, ambele
+        # rămân vizibile independent. Singura mutație: pred.ml_engine_prediction
+        # (câmp izolat) — nu atinge raw_predictions/prob_home_win/shadow_predictions.
+        pred.ml_engine_prediction = self._get_ml_engine_prediction(
+            pred, home_p, away_p, h2h, home_xg, away_xg, ph, pd, pa, mc, w_pen,
+        )
+
         return pred
 
     # ── Utility methods ───────────────────────────────────────────────────
@@ -1986,6 +2010,48 @@ class FootballOracleEngine:
             return self.blend.predict(outputs)
         except Exception as exc:
             logger.debug("[BlendEngine] _get_blend_engine_prediction failed: %s", exc)
+            return None
+
+    def _get_ml_engine_prediction(
+        self, pred: MatchPrediction, home_p: TeamProfile, away_p: TeamProfile, h2h: H2HRecord,
+        home_xg: float, away_xg: float, ph: float, pd_: float, pa: float, mc: dict, w_pen: float,
+    ) -> dict | None:
+        """[ADAUGAT — ADR-051, Phase 1] Predicția ML Engine (self.ml, deja
+        Champion-aware prin _resolve_champion()) pentru AFIȘARE independentă
+        în UI — read-only, nu scrie NIMIC în shadow_predictions/
+        raw_predictions, nu modifică pred.prob_home_win/prob_draw/
+        prob_away_win. Flag propriu (ml_engine_display_enabled), complet
+        independent de ml_blending_enabled (legacy — acela influențează
+        predicția Oracle servită, acesta niciodată).
+
+        Apel NOU la self.ml.predict(): self.ml NU are o predicție deja
+        calculată pentru acest meci în afara blocului legacy (gatat de
+        ml_blending_enabled, implicit oprit) — acest wrapper își face
+        propriul apel, cu exact aceleași feature-uri
+        (_build_ml_features(), neschimbată). Zero al doilea apel către
+        champion_loader — self.ml e deja rezolvat o singură dată, la
+        construcția procesului (_resolve_champion()).
+
+        Trei stări distincte, niciodată aproximate: flag oprit sau eroare
+        neprevăzută -> None; ML activ dar indisponibil/predicție eșuată ->
+        dict cu motiv explicit; succes -> dict cu probabilități."""
+        if not self.config.get("ml_engine_display_enabled", False):
+            return None
+        if self.ml is None or not self.ml.is_trained:
+            return {"available": False, "reason": "model_indisponibil"}
+        try:
+            ml_features = self._build_ml_features(
+                home_p, away_p, h2h, home_xg, away_xg, ph, pd_, pa, mc, w_pen,
+            )
+            ml_pred = self.ml.predict(ml_features)
+            if ml_pred is None:
+                return {"available": False, "reason": "predictie_esuata"}
+            return {
+                "available": True,
+                "prob_home": ml_pred.prob_home, "prob_draw": ml_pred.prob_draw, "prob_away": ml_pred.prob_away,
+            }
+        except Exception as exc:
+            logger.debug("[MLEngine] _get_ml_engine_prediction failed: %s", exc)
             return None
 
     # [ADAUGAT — ADR-033, Faza 1] Singura frontieră spre infrastructura
