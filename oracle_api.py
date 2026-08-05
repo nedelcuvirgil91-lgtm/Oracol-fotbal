@@ -15,6 +15,7 @@ Surse de date:
 """
 from __future__ import annotations
 import json, logging, random, sys, time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 from requests import Session
@@ -1601,13 +1602,43 @@ class FootballOracleAPI:
         logger.info("[WeekLoop] football-data.org done")
 
         # 4. ESPN fallback
-        for i in range(min(days_ahead, 7)):
-            target = (today + timedelta(days=i)).isoformat()
-            for league in comps:
-                if ESPN_LEAGUE_SLUGS.get(league):
-                    logger.info("[WeekLoop] ESPN start: %s / %s", league, target)
-                    _add(self._fetch_matches_espn(league, target))
-                    logger.info("[WeekLoop] ESPN done:  %s / %s", league, target)
+        # [PARALELIZAT — fix "aplicația pornește foarte greu, partea 2"]
+        # Bucla zi×ligă (până la 7×~14 = ~98 cereri) rula secvențial —
+        # confirmat live, singura cauză reală rămasă a pornirii lente după
+        # eliminarea reantrenării ML sincrone (fix separat). Sigur de
+        # paralelizat: ESPN nu are throttle static (_STATIC_THROTTLE_
+        # INTERVAL_SECONDS, doar "thesportsdb") și nu trimite header-e
+        # x-ratelimit-* recunoscute (RateLimitManager rămâne fail-open
+        # pentru "espn" — niciodată populat), deci nicio stare mutabilă
+        # comună de rate-limiting/throttling nu e expusă unei curse.
+        # Cache-ul (cache_manager.set(), scriere atomică prin tmp+replace)
+        # e sigur — fiecare thread scrie pe o cheie distinctă (zi+ligă).
+        # _add()/seen_keys rămân single-threaded — colectate din
+        # future.result() DUPĂ ce toate thread-urile termină, niciodată
+        # mutate concurent. FreeLF (bucla de mai sus) rămâne NEATINSĂ — are
+        # stare reală de rate-limiting (posibile header-e x-ratelimit-*,
+        # RapidAPI) care ar necesita locking dedicat înainte de paralelizat,
+        # scop separat.
+        espn_tasks = [
+            (league, (today + timedelta(days=i)).isoformat())
+            for i in range(min(days_ahead, 7))
+            for league in comps
+            if ESPN_LEAGUE_SLUGS.get(league)
+        ]
+        if espn_tasks:
+            logger.info("[WeekLoop] ESPN: %d cereri, paralelizate (max 6 simultan)", len(espn_tasks))
+            with ThreadPoolExecutor(max_workers=6) as executor:
+                futures = {
+                    executor.submit(self._fetch_matches_espn, league, target): (league, target)
+                    for league, target in espn_tasks
+                }
+                for future in as_completed(futures):
+                    league, target = futures[future]
+                    try:
+                        _add(future.result())
+                    except Exception as exc:
+                        logger.warning("[WeekLoop] ESPN %s / %s a eșuat neașteptat: %s", league, target, exc)
+            logger.info("[WeekLoop] ESPN done — toate cele %d cereri finalizate", len(espn_tasks))
 
         # 5. TheSportsDB fallback — condiție PER LIGĂ (HOTFIX interimar,
         #    operațional, separat de ADR-034 — NU evoluție de arhitectură).
