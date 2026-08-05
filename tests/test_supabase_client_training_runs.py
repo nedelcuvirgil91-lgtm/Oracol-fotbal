@@ -131,3 +131,101 @@ def test_get_active_champion_returns_active_row(monkeypatch):
     _patch_client(monkeypatch, client)
     champ = sb.get_active_champion("xgboost_v1", "all")
     assert champ["training_run_id"] == "run-1"
+
+
+# ── get_latest_challenger / list_recent_training_runs ──────────────────────
+# [ADAUGAT — fix bug Continuous Learning + fix "aplicatia porneste foarte greu"]
+# Ambele necesita .order().limit() dupa .eq() — _FakeSelectQuery de mai sus
+# nu le suporta (nu erau folosite pana acum) — fake dedicat, minimal, aici.
+
+class _FakeOrderedQuery:
+    def __init__(self, rows):
+        self._rows = list(rows)
+
+    def select(self, *a, **kw):
+        return self
+
+    def eq(self, key, value):
+        self._rows = [r for r in self._rows if r.get(key) == value]
+        return self
+
+    def order(self, key, desc=False):
+        self._rows = sorted(self._rows, key=lambda r: r.get(key, ""), reverse=desc)
+        return self
+
+    def limit(self, n):
+        self._rows = self._rows[:n]
+        return self
+
+    def execute(self):
+        return _FakeResult(list(self._rows))
+
+
+class _FakeOrderedClient:
+    def __init__(self, tables: dict):
+        self.tables = tables
+
+    def table(self, name):
+        return _FakeOrderedQuery(self.tables.get(name, []))
+
+
+def test_get_latest_challenger_returns_most_recent_any_state(monkeypatch):
+    client = _FakeOrderedClient(tables={
+        "challengers": [
+            {"training_run_id": "old", "algorithm_family": "xgboost_v1", "league_scope": "all",
+             "state": "REJECTED", "created_at": "2026-07-01T00:00:00Z"},
+            {"training_run_id": "new", "algorithm_family": "xgboost_v1", "league_scope": "all",
+             "state": "EVALUATING", "created_at": "2026-08-01T00:00:00Z"},
+        ],
+    })
+    _patch_client(monkeypatch, client)
+    result = sb.get_latest_challenger("xgboost_v1", "all")
+    assert result["training_run_id"] == "new"
+
+
+def test_get_latest_challenger_none_when_no_challenger_yet(monkeypatch):
+    client = _FakeOrderedClient(tables={"challengers": []})
+    _patch_client(monkeypatch, client)
+    assert sb.get_latest_challenger("xgboost_v1", "all") is None
+
+
+def test_get_latest_challenger_graceful_without_supabase():
+    assert sb.get_latest_challenger("xgboost_v1", "all") is None
+
+
+def test_list_recent_training_runs_ordered_newest_first(monkeypatch):
+    client = _FakeOrderedClient(tables={
+        "training_runs": [
+            {"training_run_id": "r1", "algorithm_name": "xgboost_v1", "league_scope": "all",
+             "created_at": "2026-07-01T00:00:00Z"},
+            {"training_run_id": "r2", "algorithm_name": "xgboost_v1", "league_scope": "all",
+             "created_at": "2026-08-01T00:00:00Z"},
+        ],
+    })
+    _patch_client(monkeypatch, client)
+    rows = sb.list_recent_training_runs("xgboost_v1", "all")
+    assert [r["training_run_id"] for r in rows] == ["r2", "r1"]
+
+
+def test_list_recent_training_runs_respects_limit(monkeypatch):
+    client = _FakeOrderedClient(tables={
+        "training_runs": [
+            {"training_run_id": f"r{i}", "algorithm_name": "xgboost_v1", "league_scope": "all",
+             "created_at": f"2026-08-{i:02d}T00:00:00Z"}
+            for i in range(1, 6)
+        ],
+    })
+    _patch_client(monkeypatch, client)
+    rows = sb.list_recent_training_runs("xgboost_v1", "all", limit=2)
+    assert len(rows) == 2
+    assert [r["training_run_id"] for r in rows] == ["r5", "r4"]
+
+
+def test_list_recent_training_runs_empty_when_none_trained(monkeypatch):
+    client = _FakeOrderedClient(tables={"training_runs": []})
+    _patch_client(monkeypatch, client)
+    assert sb.list_recent_training_runs("xgboost_v1", "all") == []
+
+
+def test_list_recent_training_runs_graceful_without_supabase():
+    assert sb.list_recent_training_runs("xgboost_v1", "all") == []

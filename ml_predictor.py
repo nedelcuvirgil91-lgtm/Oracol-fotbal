@@ -220,6 +220,17 @@ class MLPredictorEngine:
         self.champion_accuracy: float | None = None
         self.champion_log_loss: float | None = None
         self.champion_trained_at: str | None = None
+        # [ADAUGAT — fix „aplicația pornește foarte greu"] Metadate specifice
+        # sursei Local Model Cache (learning_core.local_model_cache) — citite
+        # DOAR de status_summary() când last_train_status ==
+        # "trained_from_cache", simetric cu champion_accuracy/champion_log_loss/
+        # champion_trained_at de mai sus, dar pentru un model NEVALIDAT
+        # statistic (nu a trecut prin Shadow Evaluation, spre deosebire de
+        # un Champion promovat) — doar încărcat dintr-o antrenare reușită
+        # anterioară, fără nicio antrenare inline la pornirea motorului.
+        self.cache_accuracy: float | None = None
+        self.cache_log_loss: float | None = None
+        self.cache_trained_at: str | None = None
 
     # [ADAUGAT — Pasul 6, Implementation Contract Learning Core] Populează
     # starea internă dintr-un model deja antrenat, încărcat dintr-un
@@ -249,6 +260,36 @@ class MLPredictorEngine:
         self.champion_accuracy = accuracy
         self.champion_log_loss = log_loss
         self.champion_trained_at = trained_at
+        self.temperature = temperature
+
+    # [ADAUGAT — fix „aplicația pornește foarte greu"] Populează starea
+    # internă dintr-un model deja antrenat, încărcat din Local Model Cache
+    # (learning_core.local_model_cache) — al doilea nivel de servire, sub
+    # Champion, folosit exclusiv când niciun Champion nu e disponibil.
+    # Oglindește exact seed_from_champion() de mai sus, cu o singură
+    # diferență semnificativă: setează explicit last_training_run_id, ca
+    # oracle_engine._resolve_ml_traceability() (ml_source=="local") să
+    # identifice corect rularea reală din spatele modelului servit — spre
+    # deosebire de seed_from_champion(), care nu are nevoie de asta
+    # (trasabilitatea Champion vine din champion_diagnostic, sursă separată).
+    # last_train_status distinct ("trained_from_cache", nu "trained_from_champion"
+    # și nu "trained") — un model din cache NU a trecut prin Shadow
+    # Evaluation, nu i se atribuie nicio semnificație de validare (Regula #8).
+    def seed_from_cache(
+        self, model, samples_used: int, training_run_id: str, model_version: int = 1,
+        accuracy: float | None = None, log_loss: float | None = None, trained_at: str | None = None,
+        temperature: float | None = None,
+    ) -> None:
+        self.model = model
+        self.model_version = model_version
+        self.samples_used = samples_used
+        self.feature_names = list(FEATURE_COLUMNS)
+        self.is_trained = True
+        self.last_train_status = "trained_from_cache"
+        self.last_training_run_id = training_run_id
+        self.cache_accuracy = accuracy
+        self.cache_log_loss = log_loss
+        self.cache_trained_at = trained_at
         self.temperature = temperature
 
     # ── Pregătire date ──────────────────────────────────────────────────
@@ -622,6 +663,23 @@ class MLPredictorEngine:
                 "last_trained_at": self.champion_trained_at,
                 "accuracy": self.champion_accuracy,
                 "log_loss": self.champion_log_loss,
+                "min_samples_required": MIN_SAMPLES_TO_TRAIN,
+            }
+        # [ADAUGAT — fix „aplicația pornește foarte greu"] Simetric cu ramura
+        # Champion de mai sus — un model din Local Model Cache nu a fost
+        # antrenat ÎN ACEST PROCES, deci ml_model_status (remote, scris doar
+        # de train() real) ar putea reflecta o antrenare diferită/mai veche
+        # decât modelul chiar servit; cache_accuracy/cache_log_loss/
+        # cache_trained_at vin din EXACT rularea al cărei artefact a fost
+        # încărcat (seed_from_cache()), nicio a doua sursă de adevăr.
+        if self.last_train_status == "trained_from_cache":
+            return {
+                "is_trained_this_session": self.is_trained,
+                "model_version": self.model_version,
+                "samples_used": self.samples_used,
+                "last_trained_at": self.cache_trained_at,
+                "accuracy": self.cache_accuracy,
+                "log_loss": self.cache_log_loss,
                 "min_samples_required": MIN_SAMPLES_TO_TRAIN,
             }
         remote = sb.get_ml_status()

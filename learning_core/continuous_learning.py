@@ -277,15 +277,27 @@ def _phase_b_train_new(family: str, league: str, algorithm, version: str, target
         return
     ar.start_run(run_id)
 
-    last_run = sb.get_latest_training_run(family, league)
-    if last_run is None:
+    # [CORECTAT — audit "de ce nu s-a creat niciodată un Challenger xgboost_v1"]
+    # Ancora era get_latest_training_run(family, league) — dar training_runs
+    # conține și antrenări din afara Challenger Framework (antrenarea locală
+    # de servire din oracle_engine._initialize_ml(), acum eliminată; retrain
+    # manual, retrain_ml_model()). Fiecare din acestea reseta ceasul "meciuri
+    # noi de la ultima antrenare" la "acum", mult mai des decât se pot
+    # acumula MIN_SAMPLES_TO_TRAIN meciuri noi reale — pragul nu era atins
+    # NICIODATĂ, confirmat live: automation_runs arăta threshold_check
+    # "skipped" zilnic timp de 17 zile pentru xgboost_v1, deși existau
+    # 50.000+ meciuri eligibile. get_latest_challenger() ancorează exclusiv
+    # pe challengers, scris DOAR de această fază (mai jos) — imun la orice
+    # antrenare din afara fluxului Challenger.
+    last_challenger = sb.get_latest_challenger(family, league)
+    if last_challenger is None:
         n_matches = _count_finished_matches(league)
         should_train = n_matches >= MIN_SAMPLES_TO_TRAIN
-        reason = f"prima antrenare — {n_matches} meciuri disponibile (prag {MIN_SAMPLES_TO_TRAIN})"
+        reason = f"primul Challenger — {n_matches} meciuri disponibile (prag {MIN_SAMPLES_TO_TRAIN})"
     else:
-        n_new = _count_finished_matches(league, since=last_run.get("created_at"))
+        n_new = _count_finished_matches(league, since=last_challenger.get("created_at"))
         should_train = n_new >= MIN_SAMPLES_TO_TRAIN
-        reason = f"{n_new} meciuri noi de la ultima antrenare (prag {MIN_SAMPLES_TO_TRAIN})"
+        reason = f"{n_new} meciuri noi de la ultimul Challenger (prag {MIN_SAMPLES_TO_TRAIN})"
 
     if not should_train:
         ar.skip_run(run_id, f"prag de volum neatins ({reason})")

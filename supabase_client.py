@@ -588,6 +588,70 @@ def get_latest_training_run(algorithm_name: str, league_scope: str) -> dict | No
         return None
 
 
+def list_recent_training_runs(algorithm_name: str, league_scope: str, limit: int = 10) -> list[dict]:
+    """[ADAUGAT — Local Model Cache, fix retraining la fiecare restart]
+    Ultimele `limit` rulări de antrenare pentru (algorithm_name,
+    league_scope), cele mai noi primele. Spre deosebire de
+    get_latest_training_run() (un singur rând), folosită acolo unde cea mai
+    recentă rulare ar putea să nu aibă artefact servabil (ex. un retrain
+    manual care nu persistă model_artifact_storage) — apelantul poate
+    încerca rândurile în ordine până găsește primul cu artefact încărcabil.
+    Listă goală dacă nu s-a antrenat niciodată sau Supabase indisponibil —
+    stare legitimă, nu eroare (Regula #8)."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("training_runs")
+            .select("*")
+            .eq("algorithm_name", algorithm_name)
+            .eq("league_scope", league_scope)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.warning("[Supabase] list_recent_training_runs failed pentru %s/%s: %s",
+                        algorithm_name, league_scope, exc)
+        return []
+
+
+def get_latest_challenger(algorithm_family: str, league_scope: str) -> dict | None:
+    """[ADR-030, fix bug Continuous Learning] Cel mai recent Challenger
+    creat pentru (algorithm_family, league_scope), în ORICE stare (spre
+    deosebire de get_active_challenger(), care exclude stările terminale).
+    Folosit exclusiv ca ancoră temporală pentru pragul de volum din Faza B
+    (continuous_learning._phase_b_train_new) — training_runs conține și
+    antrenări care NU sunt Challengeri (retrain manual, antrenare locală
+    de servire), care ar contamina ceasul „meciuri noi de la ultima
+    antrenare" dacă ar fi folosite ca ancoră. challengers e scris EXCLUSIV
+    de Faza B însăși (challenger_manager.create_challenger), deci ancora
+    rămâne curată indiferent de orice altă antrenare din afara fluxului
+    Challenger. None dacă nu există niciun Challenger încă — stare
+    legitimă (Regula #8)."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (
+            client.table("challengers")
+            .select("*")
+            .eq("algorithm_family", algorithm_family)
+            .eq("league_scope", league_scope)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        return rows[0] if rows else None
+    except Exception as exc:
+        logger.warning("[Supabase] get_latest_challenger failed pentru %s/%s: %s",
+                        algorithm_family, league_scope, exc)
+        return None
+
+
 # ════════════════════════════════════════════════════════════════════════════
 # VALIDATION FRAMEWORK — engine_comparison_snapshots (ADR-052)
 # ════════════════════════════════════════════════════════════════════════════

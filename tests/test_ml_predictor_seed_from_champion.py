@@ -95,6 +95,63 @@ def test_seed_from_champion_sets_champion_metadata():
     assert engine.champion_trained_at == "2026-07-14T00:00:00Z"
 
 
+# ── seed_from_cache() — fix "aplicatia porneste foarte greu" ────────────────
+
+def test_seed_from_cache_sets_all_descriptive_fields():
+    engine = ml_predictor.MLPredictorEngine()
+    model = _FakeModel()
+
+    engine.seed_from_cache(model, samples_used=12345, training_run_id="cache-run-1")
+
+    assert engine.model is model
+    assert engine.is_trained is True
+    assert engine.samples_used == 12345
+    assert engine.model_version == 1
+    assert engine.feature_names == list(ml_predictor.FEATURE_COLUMNS)
+    assert engine.last_train_status == "trained_from_cache"
+
+
+def test_seed_from_cache_sets_last_training_run_id_for_traceability():
+    """Spre deosebire de seed_from_champion() (trasabilitatea vine din
+    champion_diagnostic, sursă separată), _resolve_ml_traceability() cu
+    ml_source=="local" citește self.ml.last_training_run_id direct —
+    seed_from_cache() TREBUIE să-l populeze, altfel Validation Framework
+    ar pierde trasabilitatea pentru un model servit din cache."""
+    engine = ml_predictor.MLPredictorEngine()
+    engine.seed_from_cache(_FakeModel(), samples_used=100, training_run_id="cache-run-xyz")
+    assert engine.last_training_run_id == "cache-run-xyz"
+
+
+def test_seed_from_cache_sets_cache_metadata():
+    engine = ml_predictor.MLPredictorEngine()
+    engine.seed_from_cache(
+        _FakeModel(), samples_used=500, training_run_id="cache-run-1",
+        accuracy=0.52, log_loss=1.02, trained_at="2026-08-01T00:00:00Z",
+    )
+    assert engine.cache_accuracy == 0.52
+    assert engine.cache_log_loss == 1.02
+    assert engine.cache_trained_at == "2026-08-01T00:00:00Z"
+
+
+def test_seed_from_cache_stores_explicit_temperature():
+    engine = ml_predictor.MLPredictorEngine()
+    engine.seed_from_cache(_FakeModel(), samples_used=500, training_run_id="cache-run-1", temperature=1.4)
+    assert engine.temperature == 1.4
+    assert engine.get_calibration_temperature() == 1.4
+
+
+def test_seed_from_cache_does_not_touch_champion_metadata():
+    """seed_from_cache() nu trebuie sa scrie champion_accuracy/champion_log_loss/
+    champion_trained_at — ramanele None distinge corect un model din cache
+    de unul dintr-un Champion real (status_summary() se bazeaza pe
+    last_train_status, nu pe aceste campuri, dar rămân onest neatinse)."""
+    engine = ml_predictor.MLPredictorEngine()
+    engine.seed_from_cache(_FakeModel(), samples_used=500, training_run_id="cache-run-1", accuracy=0.5)
+    assert engine.champion_accuracy is None
+    assert engine.champion_log_loss is None
+    assert engine.champion_trained_at is None
+
+
 # ── status_summary() — Defectul B, Architecture Gate 7B ─────────────────────
 
 def test_status_summary_uses_champion_metadata_when_seeded_from_champion(monkeypatch):
@@ -116,6 +173,31 @@ def test_status_summary_uses_champion_metadata_when_seeded_from_champion(monkeyp
     assert summary["accuracy"] == 0.61
     assert summary["log_loss"] == 0.88
     assert summary["last_trained_at"] == "2026-07-01T00:00:00Z"
+    assert summary["samples_used"] == 321
+    assert summary["model_version"] == 1
+
+
+def test_status_summary_uses_cache_metadata_when_seeded_from_cache(monkeypatch):
+    """Simetric cu test_status_summary_uses_champion_metadata_when_seeded_from_champion
+    (fix "aplicatia porneste foarte greu") — un model din Local Model Cache
+    nu a fost antrenat in acest proces, deci status_summary() nu trebuie sa
+    citeasca deloc ml_model_status (ar putea reflecta o antrenare diferita)."""
+    def _fail_if_called():
+        raise AssertionError("sb.get_ml_status() nu trebuie apelat cand sursa e Local Model Cache")
+
+    monkeypatch.setattr(ml_predictor.sb, "get_ml_status", _fail_if_called)
+
+    engine = ml_predictor.MLPredictorEngine()
+    engine.seed_from_cache(
+        _FakeModel(), samples_used=321, training_run_id="cache-run-1",
+        accuracy=0.61, log_loss=0.88, trained_at="2026-08-01T00:00:00Z",
+    )
+
+    summary = engine.status_summary()
+
+    assert summary["accuracy"] == 0.61
+    assert summary["log_loss"] == 0.88
+    assert summary["last_trained_at"] == "2026-08-01T00:00:00Z"
     assert summary["samples_used"] == 321
     assert summary["model_version"] == 1
 

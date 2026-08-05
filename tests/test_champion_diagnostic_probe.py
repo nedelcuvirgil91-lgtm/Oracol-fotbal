@@ -17,6 +17,7 @@ import textwrap
 import ml_predictor
 import oracle_engine
 from learning_core.champion_loader import ChampionLoadResult
+from learning_core.local_model_cache import LocalCacheLoadResult
 
 
 class _FakeModel:
@@ -33,11 +34,21 @@ def _fake_champion_result(training_run_id="run-1", samples_used=999, temperature
     )
 
 
+def _fake_cache_result(training_run_id="cache-run-1", samples_used=500, temperature=None):
+    return LocalCacheLoadResult(
+        training_run_id=training_run_id, model=_FakeModel(), samples_used=samples_used,
+        algorithm_family="xgboost_v1", algorithm_version="1", league_scope="all",
+        accuracy=0.52, log_loss=0.99, trained_at="2026-08-01T00:00:00Z",
+        temperature=temperature,
+    )
+
+
 class _FakeEngine:
     """Instanță minimală, fără Supabase/API real — identic ca tipar cu
     FakeEngine din tests/test_oracle_engine_compat.py."""
     _initialize_ml = oracle_engine.FootballOracleEngine._initialize_ml
     _resolve_champion = oracle_engine.FootballOracleEngine._resolve_champion
+    _resolve_local_cache = oracle_engine.FootballOracleEngine._resolve_local_cache
     _champion_diagnostic_unavailable = staticmethod(
         oracle_engine.FootballOracleEngine._champion_diagnostic_unavailable
     )
@@ -76,38 +87,63 @@ def test_champion_wins_over_local_train_never_called(monkeypatch):
     assert isinstance(engine.ml.model, _FakeModel)
 
 
-def test_falls_back_to_local_when_champion_unavailable(monkeypatch):
+def _fail_if_train_called(self):
+    raise AssertionError(
+        "train() NU trebuie apelat niciodata din _initialize_ml() — antrenarea "
+        "sincrona a fost eliminata complet din calea de servire (fix "
+        "\"aplicatia porneste foarte greu\"); singurul fallback sub Champion "
+        "e Local Model Cache (incarcare, nu antrenare)."
+    )
+
+
+def test_falls_back_to_local_cache_when_champion_unavailable(monkeypatch):
     monkeypatch.setattr("learning_core.champion_loader.load_champion_or_none", lambda family, scope: None)
-
-    def _fake_train(self):
-        self.model = _FakeModel()
-        self.is_trained = True
-        self.samples_used = 500
-        self.last_train_status = "trained"
-        return ml_predictor.MLTrainingResult(status="trained", samples_used=500, message="ok")
-
-    monkeypatch.setattr(ml_predictor.MLPredictorEngine, "train", _fake_train)
+    monkeypatch.setattr(
+        "learning_core.local_model_cache.load_latest_trained_model_or_none",
+        lambda family, scope: _fake_cache_result(),
+    )
+    monkeypatch.setattr(ml_predictor.MLPredictorEngine, "train", _fail_if_train_called)
 
     engine = _FakeEngine(use_supabase=True)
-    engine._initialize_ml()
+    engine._initialize_ml()  # nu trebuie sa ridice AssertionError
 
     assert engine.ml_source == "local"
     assert engine.ml.is_trained is True
+    assert engine.ml.last_train_status == "trained_from_cache"
 
 
-def test_no_ml_when_champion_and_local_both_fail(monkeypatch):
+def test_no_ml_when_champion_and_cache_both_fail(monkeypatch):
     monkeypatch.setattr("learning_core.champion_loader.load_champion_or_none", lambda family, scope: None)
-
-    def _fake_train(self):
-        return ml_predictor.MLTrainingResult(status="insufficient_data", samples_used=0, message="prea putine date")
-
-    monkeypatch.setattr(ml_predictor.MLPredictorEngine, "train", _fake_train)
+    monkeypatch.setattr(
+        "learning_core.local_model_cache.load_latest_trained_model_or_none", lambda family, scope: None,
+    )
+    monkeypatch.setattr(ml_predictor.MLPredictorEngine, "train", _fail_if_train_called)
 
     engine = _FakeEngine(use_supabase=True)
-    engine._initialize_ml()
+    engine._initialize_ml()  # nu trebuie sa ridice AssertionError
 
     assert engine.ml_source == "none"
     assert engine.ml.is_trained is False
+
+
+def test_train_never_called_from_initialize_ml_in_any_scenario(monkeypatch):
+    """[ADAUGAT — fix "aplicatia porneste foarte greu"] Regresie centrala:
+    indiferent de scenariu (Champion disponibil, doar cache disponibil,
+    niciunul disponibil), _initialize_ml() nu antreneaza NICIODATA sincron —
+    eliminat complet din calea de servire, mutat exclusiv in
+    continuous_learning.py (Faza B, decuplat, in fundal)."""
+    monkeypatch.setattr(ml_predictor.MLPredictorEngine, "train", _fail_if_train_called)
+
+    scenarios = {
+        "champion": (lambda family, scope: _fake_champion_result(), lambda family, scope: _fake_cache_result()),
+        "cache_only": (lambda family, scope: None, lambda family, scope: _fake_cache_result()),
+        "neither": (lambda family, scope: None, lambda family, scope: None),
+    }
+    for name, (champion_fn, cache_fn) in scenarios.items():
+        monkeypatch.setattr("learning_core.champion_loader.load_champion_or_none", champion_fn)
+        monkeypatch.setattr("learning_core.local_model_cache.load_latest_trained_model_or_none", cache_fn)
+        engine = _FakeEngine(use_supabase=True)
+        engine._initialize_ml()  # nu trebuie sa ridice AssertionError in niciun scenariu
 
 
 def test_no_supabase_means_no_ml_and_no_champion_attempt(monkeypatch):
@@ -187,6 +223,69 @@ def test_resolve_champion_leaves_ml_untouched_when_unavailable(monkeypatch):
     assert engine.ml.model is None
 
 
+# ── _resolve_local_cache() în izolare (fix "aplicatia porneste foarte greu") ──
+
+def test_resolve_local_cache_seeds_self_ml(monkeypatch):
+    monkeypatch.setattr(
+        "learning_core.local_model_cache.load_latest_trained_model_or_none",
+        lambda family, scope: _fake_cache_result(samples_used=333),
+    )
+
+    engine = _FakeEngine(use_supabase=True)
+    engine.ml = ml_predictor.MLPredictorEngine()
+    result = engine._resolve_local_cache()
+
+    assert result is not None
+    assert engine.ml.is_trained is True
+    assert engine.ml.samples_used == 333
+    assert engine.ml.last_train_status == "trained_from_cache"
+
+
+def test_resolve_local_cache_sets_last_training_run_id_for_traceability(monkeypatch):
+    """Spre deosebire de Champion (trasabilitatea vine din champion_diagnostic),
+    _resolve_ml_traceability() cu ml_source=="local" citeste
+    self.ml.last_training_run_id direct — seed_from_cache() trebuie sa-l
+    populeze, altfel Validation Framework ar pierde trasabilitatea pentru
+    un model servit din cache."""
+    monkeypatch.setattr(
+        "learning_core.local_model_cache.load_latest_trained_model_or_none",
+        lambda family, scope: _fake_cache_result(training_run_id="cache-run-xyz"),
+    )
+
+    engine = _FakeEngine(use_supabase=True)
+    engine.ml = ml_predictor.MLPredictorEngine()
+    engine._resolve_local_cache()
+
+    assert engine.ml.last_training_run_id == "cache-run-xyz"
+
+
+def test_resolve_local_cache_leaves_ml_untouched_when_unavailable(monkeypatch):
+    monkeypatch.setattr(
+        "learning_core.local_model_cache.load_latest_trained_model_or_none", lambda family, scope: None,
+    )
+
+    engine = _FakeEngine(use_supabase=True)
+    engine.ml = ml_predictor.MLPredictorEngine()
+    result = engine._resolve_local_cache()
+
+    assert result is None
+    assert engine.ml.is_trained is False
+    assert engine.ml.model is None
+
+
+def test_resolve_local_cache_never_raises(monkeypatch):
+    def _boom(*a, **kw):
+        raise RuntimeError("eroare simulata")
+
+    monkeypatch.setattr("learning_core.local_model_cache.load_latest_trained_model_or_none", _boom)
+
+    engine = _FakeEngine(use_supabase=True)
+    engine.ml = ml_predictor.MLPredictorEngine()
+    result = engine._resolve_local_cache()
+
+    assert result is None
+
+
 # ── Propagare temperatură (ADR-049, Pasul 10b) ──────────────────────────────
 
 def test_resolve_champion_propagates_temperature_to_seed_from_champion(monkeypatch):
@@ -255,8 +354,10 @@ def test_resolve_champion_never_raises(monkeypatch):
 # ── Schema fixă champion_diagnostic ──────────────────────────────────────────
 
 def test_champion_diagnostic_schema_is_fixed_in_all_scenarios(monkeypatch):
-    monkeypatch.setattr(ml_predictor.MLPredictorEngine, "train",
-                         lambda self: ml_predictor.MLTrainingResult(status="insufficient_data", message=""))
+    monkeypatch.setattr(ml_predictor.MLPredictorEngine, "train", _fail_if_train_called)
+    monkeypatch.setattr(
+        "learning_core.local_model_cache.load_latest_trained_model_or_none", lambda family, scope: None,
+    )
 
     scenarios = {
         "champion": lambda family, scope: _fake_champion_result(),

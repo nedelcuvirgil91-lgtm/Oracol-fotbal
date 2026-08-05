@@ -538,6 +538,19 @@ class FootballOracleEngine:
     # statisticile antrenării locale, chiar dacă Champion e cel care
     # servește efectiv (Defectul A, găsit la audit).
     def _initialize_ml(self) -> None:
+        # [CORECTAT — fix „aplicația pornește foarte greu"] Antrenarea
+        # sincronă (self.ml.train()) a fost ELIMINATĂ complet din calea de
+        # servire. Înainte, absența unui Champion promovat însemna un
+        # antrenament XGBoost complet (6 fit-uri — 5 fold-uri walk-forward +
+        # final, pe 50.000+ meciuri, cu paginare Supabase completă) la
+        # FIECARE construcție de motor (fiecare restart de container, fiecare
+        # „Clear cache" din Streamlit) — 3-5 minute de blocaj confirmat live.
+        # Acum: Champion (nivel 1) -> Local Model Cache (nivel 2, încarcă
+        # ultimul artefact antrenat cu succes, fără nicio antrenare) -> fără
+        # ML (Oracle-only), niciodată blocare. Antrenarea reală rămâne
+        # exclusiv responsabilitatea learning_core/continuous_learning.py
+        # (Faza B, ADR-030), decuplată, în fundal (cron GitHub Actions),
+        # NICIODATĂ în calea de servire — vezi local_model_cache.py.
         self.ml = MLPredictorEngine() if ML_MODULE_AVAILABLE else None
 
         champion_result = None
@@ -548,8 +561,12 @@ class FootballOracleEngine:
             self.ml_source = "champion"
             self.champion_diagnostic = self._champion_diagnostic_from_result(champion_result)
         elif self.ml and self.use_supabase:
-            train_result = self.ml.train()
-            logger.info("[ML] Inițializare: %s — %s", train_result.status, train_result.message)
+            cache_result = self._resolve_local_cache()
+            logger.info(
+                "[ML] Inițializare: %s",
+                f"cache încărcat (training_run_id={cache_result.training_run_id})"
+                if cache_result is not None else "niciun artefact servabil în cache — Oracle-only",
+            )
             self.ml_source = "local" if self.ml.is_trained else "none"
             self.champion_diagnostic = self._champion_diagnostic_unavailable("no_valid_champion")
         else:
@@ -600,6 +617,37 @@ class FootballOracleEngine:
             return result
         except Exception as exc:
             logger.warning("[Champion] Rezolvare eșuată neașteptat — fallback pe antrenare locală: %s", exc)
+            return None
+
+    # [ADAUGAT — fix „aplicația pornește foarte greu"] Al doilea nivel de
+    # rezolvare ML, sub Champion — oglindește exact _resolve_champion() de
+    # mai sus (un singur apel per construcție, seedează self.ml DIRECT, None
+    # dacă indisponibil, apelantul cade mai departe). Diferența: sursa e
+    # local_model_cache.load_latest_trained_model_or_none() (ultimul artefact
+    # antrenat cu succes, INDIFERENT dacă a devenit vreodată Champion), nu
+    # get_active_champion(). NICIODATĂ nu antrenează — doar încarcă un
+    # artefact deja persistat. Dacă și cache-ul e indisponibil (bootstrap,
+    # niciun training_run reușit încă), apelantul servește Oracle-only,
+    # NICIODATĂ nu antrenează sincron în calea de servire (eliminat complet
+    # — antrenarea rămâne exclusiv learning_core/continuous_learning.py,
+    # decuplată, în fundal).
+    def _resolve_local_cache(self):
+        try:
+            from learning_core.local_model_cache import load_latest_trained_model_or_none
+            from ml_predictor import _ALGORITHM_FAMILY, _LEAGUE_SCOPE
+
+            result = load_latest_trained_model_or_none(_ALGORITHM_FAMILY, _LEAGUE_SCOPE)
+            if result is None:
+                return None
+
+            self.ml.seed_from_cache(
+                result.model, result.samples_used, result.training_run_id,
+                accuracy=result.accuracy, log_loss=result.log_loss, trained_at=result.trained_at,
+                temperature=result.temperature,
+            )
+            return result
+        except Exception as exc:
+            logger.warning("[LocalModelCache] Rezolvare eșuată neașteptat — servire fără ML: %s", exc)
             return None
 
     def _persist_weights(self) -> None:

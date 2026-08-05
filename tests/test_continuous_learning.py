@@ -264,7 +264,7 @@ def test_phase_b_end_to_end_with_all_scope_and_real_match_counting(recorder, mon
     monkeypatch.setattr(cl, "get_client", lambda: fake_client)
 
     monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
-    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl.sb, "get_latest_challenger", lambda family, league: None)
     monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact",
                          lambda model, tid: f"model-artifacts/{tid}.json")
     monkeypatch.setattr(cl.calibration_artifact_storage, "save_calibration_artifact",
@@ -282,9 +282,72 @@ def test_phase_b_end_to_end_with_all_scope_and_real_match_counting(recorder, mon
     assert created["id"] == "tr_fake_1"
 
 
+def test_phase_b_not_contaminated_by_training_runs_outside_challenger_flow(recorder, fake_algorithm, monkeypatch):
+    """[ADAUGAT — fix bug real descoperit live] Regresie centrală: antrenări
+    din afara fluxului Challenger (retrain manual, fosta antrenare locală de
+    servire — eliminată separat) NU mai trebuie să reseteze ceasul "meciuri
+    noi de la ultima antrenare". Ancora e get_latest_challenger() (scris
+    EXCLUSIV de Faza B), nu get_latest_training_run() (contaminat) — testul
+    simulează exact scenariul confirmat live: niciun Challenger încă
+    (get_latest_challenger -> None), dar training_runs conține deja rânduri
+    recente (get_latest_training_run, NEATINS aici — dovadă că nu mai e
+    citit deloc de Faza B). Cu suficiente meciuri disponibile de la
+    începutul istoriei, antrenarea tot pornește — înainte de fix, ar fi
+    rămas blocată la nesfârșit dacă get_latest_training_run ar fi fost
+    ancora."""
+    monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
+    monkeypatch.setattr(cl.sb, "get_latest_challenger", lambda family, league: None)
+
+    def _fail_if_called(*a, **kw):
+        raise AssertionError(
+            "get_latest_training_run nu mai trebuie citit de Faza B — ancora e get_latest_challenger"
+        )
+
+    monkeypatch.setattr(cl.sb, "get_latest_training_run", _fail_if_called)
+    monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
+    monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact",
+                         lambda model, tid: f"model-artifacts/{tid}.json")
+    monkeypatch.setattr(cl.calibration_artifact_storage, "save_calibration_artifact",
+                         lambda temperature, tid: f"model-artifacts/{tid}.calibration.json")
+    monkeypatch.setattr(cl.challenger_manager, "create_challenger",
+                         lambda tid, family, league: {"training_run_id": tid})
+    monkeypatch.setattr(cl.challenger_manager, "transition", lambda tid, to_state, rejection_reason=None: None)
+
+    result = cl.run_cycle()
+    assert result["trained"] == 1
+
+
+def test_phase_b_anchors_on_latest_challenger_not_latest_training_run(recorder, fake_algorithm, monkeypatch):
+    """Cu un Challenger deja existent (creat, sa zicem, acum mult timp),
+    pragul se calculeaza de la created_at-ul ACELUIA, nu de la un
+    training_run mai recent care nu a devenit niciodata Challenger."""
+    monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
+    monkeypatch.setattr(cl.sb, "get_latest_challenger",
+                         lambda family, league: {"created_at": "2026-01-01T00:00:00Z"})
+
+    captured_since = {}
+
+    def _count(league, since=None):
+        captured_since["since"] = since
+        return 500
+
+    monkeypatch.setattr(cl, "_count_finished_matches", _count)
+    monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact",
+                         lambda model, tid: f"model-artifacts/{tid}.json")
+    monkeypatch.setattr(cl.calibration_artifact_storage, "save_calibration_artifact",
+                         lambda temperature, tid: f"model-artifacts/{tid}.calibration.json")
+    monkeypatch.setattr(cl.challenger_manager, "create_challenger",
+                         lambda tid, family, league: {"training_run_id": tid})
+    monkeypatch.setattr(cl.challenger_manager, "transition", lambda tid, to_state, rejection_reason=None: None)
+
+    result = cl.run_cycle()
+    assert result["trained"] == 1
+    assert captured_since["since"] == "2026-01-01T00:00:00Z"
+
+
 def test_phase_b_skips_training_below_threshold(recorder, fake_algorithm, monkeypatch):
     monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
-    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl.sb, "get_latest_challenger", lambda family, league: None)
     monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 5)  # sub prag
     result = cl.run_cycle()
     assert result["trained"] == 0
@@ -294,7 +357,7 @@ def test_phase_b_skips_training_below_threshold(recorder, fake_algorithm, monkey
 
 def test_phase_b_trains_and_creates_challenger_above_threshold(recorder, fake_algorithm, monkeypatch):
     monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
-    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl.sb, "get_latest_challenger", lambda family, league: None)
     monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
     monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact",
                          lambda model, tid: f"model-artifacts/{tid}.json")
@@ -319,7 +382,7 @@ def test_phase_b_model_not_available_skips_challenger_creation(recorder, fake_al
     """D3 (ADR-048): daca get_trained_model() intoarce None desi
     status=='trained', Challenger-ul NU se creeaza deloc."""
     monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
-    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl.sb, "get_latest_challenger", lambda family, league: None)
     monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
     monkeypatch.setattr(fake_algorithm, "get_trained_model", lambda: None)
 
@@ -339,7 +402,7 @@ def test_phase_b_storage_failure_skips_challenger_creation(recorder, fake_algori
     """D3: daca save_model_artifact() intoarce None, Challenger-ul NU se
     creeaza."""
     monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
-    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl.sb, "get_latest_challenger", lambda family, league: None)
     monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
     monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact", lambda model, tid: None)
 
@@ -359,7 +422,7 @@ def test_phase_b_storage_exception_treated_as_failure(recorder, fake_algorithm, 
     """D3: o exceptie neasteptata din save_model_artifact() e tratata identic
     cu None — nu se propaga, Challenger-ul nu se creeaza."""
     monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
-    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl.sb, "get_latest_challenger", lambda family, league: None)
     monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
 
     def _raise(model, tid):
@@ -385,7 +448,7 @@ def test_phase_b_persist_success_but_create_challenger_fails_leaves_no_challenge
     Challenger nu exista, iar fluxul se opreste curat, fara exceptie
     propagata."""
     monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
-    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl.sb, "get_latest_challenger", lambda family, league: None)
     monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
     monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact",
                          lambda model, tid: f"model-artifacts/{tid}.json")
@@ -413,7 +476,7 @@ def test_phase_b_calibration_not_available_skips_challenger_creation(recorder, f
     None dupa persistarea reusita a modelului, Challenger-ul NU se creeaza
     deloc."""
     monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
-    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl.sb, "get_latest_challenger", lambda family, league: None)
     monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
     monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact",
                          lambda model, tid: f"model-artifacts/{tid}.json")
@@ -435,7 +498,7 @@ def test_phase_b_calibration_storage_failure_skips_challenger_creation(recorder,
     """Extensie D3: daca save_calibration_artifact() intoarce None, Challenger-ul
     NU se creeaza."""
     monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
-    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl.sb, "get_latest_challenger", lambda family, league: None)
     monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
     monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact",
                          lambda model, tid: f"model-artifacts/{tid}.json")
@@ -458,7 +521,7 @@ def test_phase_b_calibration_storage_exception_treated_as_failure(recorder, fake
     """Extensie D3: o exceptie neasteptata din save_calibration_artifact()
     e tratata identic cu None — nu se propaga, Challenger-ul nu se creeaza."""
     monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
-    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl.sb, "get_latest_challenger", lambda family, league: None)
     monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 500)
     monkeypatch.setattr(cl.model_artifact_storage, "save_model_artifact",
                          lambda model, tid: f"model-artifacts/{tid}.json")
@@ -545,7 +608,7 @@ def test_phase_a_monitoring_verdict_takes_no_action(recorder, fake_algorithm, mo
 
 def test_phase_c_commits_approved_decision_via_promotion_service(recorder, fake_algorithm, monkeypatch):
     monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
-    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: {"created_at": "x"})
+    monkeypatch.setattr(cl.sb, "get_latest_challenger", lambda family, league: {"created_at": "x"})
     monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 0)  # sub prag -> skip B
 
     target_key = "fake_algo|Premier League"
@@ -571,7 +634,7 @@ def test_phase_c_commits_approved_decision_via_promotion_service(recorder, fake_
 
 def test_phase_c_marks_commit_failed_when_promotion_rejected(recorder, fake_algorithm, monkeypatch):
     monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
-    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: {"created_at": "x"})
+    monkeypatch.setattr(cl.sb, "get_latest_challenger", lambda family, league: {"created_at": "x"})
     monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 0)
 
     target_key = "fake_algo|Premier League"
@@ -626,7 +689,7 @@ def test_generic_over_multiple_registry_entries(recorder, monkeypatch):
     model_registry.register(_FakeAlgorithm(name="algo_a", league_scope="Premier League"))
     model_registry.register(_FakeAlgorithm(name="algo_b", league_scope="La Liga"))
     monkeypatch.setattr(cl.sb, "count_active_challengers", lambda family, league: 0)
-    monkeypatch.setattr(cl.sb, "get_latest_training_run", lambda family, league: None)
+    monkeypatch.setattr(cl.sb, "get_latest_challenger", lambda family, league: None)
     monkeypatch.setattr(cl, "_count_finished_matches", lambda league, since=None: 0)
 
     result = cl.run_cycle()
