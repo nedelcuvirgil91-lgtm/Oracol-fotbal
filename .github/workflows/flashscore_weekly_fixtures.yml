@@ -39,13 +39,18 @@ name: Football Oracle — Flashscore Weekly Fixtures Discovery
 # scorul NULL permanent.
 #
 # Cadenta: SAPTAMANAL (nu nocturn/zilnic - corectat 2026-08-05, clarificare
-# proprietar produs), luni 00:00 UTC (03:00 Romania, EEST) - acopera
-# saptamana intreaga (luni-duminica) dintr-o singura rulare. Inainte de
-# night_sync.yml (03:00 UTC) SI de live_sync.yml (prima rulare a zilei,
-# 02:00 UTC), gap de minim 30 min garantat de timeout-minutes: 90 (aceeasi
-# disciplina de "fara suprapunere prin programare, nu prin lock" ca restul
-# workflow-urilor Flashscore - vezi live_sync.yml). O sesiune Playwright
-# Flashscore per fereastra orara, niciodata doua simultan.
+# proprietar produs), joi 00:00 UTC (03:00 Romania, EEST) - acopera
+# saptamana intreaga dintr-o singura rulare. [ZIUA SCHIMBATA 2026-08-05,
+# cerere explicita proprietar produs — "sa nu mai stam pana luni"] Initial
+# luni, mutat pe prima zi disponibila din saptamana curenta (joi) ca prima
+# rulare sa prinda meciurile viitoare cat mai curand, nu abia saptamana
+# urmatoare — ora ramane neschimbata (00:00 UTC, deja verificata fara
+# suprapuneri). Inainte de night_sync.yml (03:00 UTC) SI de live_sync.yml
+# (09:00/13:00/17:00 UTC), gap de minim ~7h30 garantat de timeout-minutes:
+# 90 (aceeasi disciplina de "fara suprapunere prin programare, nu prin
+# lock" ca restul workflow-urilor Flashscore - vezi live_sync.yml). O
+# sesiune Playwright Flashscore per fereastra orara, niciodata doua
+# simultan.
 #
 # limit-per-league: 25 - dimensiunea reala a hub-ului /fixtures/ (16-28
 # meciuri unice, verificat live, fara paginare dincolo de randarea
@@ -59,11 +64,11 @@ name: Football Oracle — Flashscore Weekly Fixtures Discovery
 # rularile urmatoare). Acelasi tipar deja documentat si observat real la
 # live_sync.yml (rularile #15/#16, backlog absorbit in cateva nopti
 # succesive, nu dintr-o rulare). Nu marim timeout-ul peste 90 min ca sa
-# pastram marja fata de live_sync.yml (02:00 UTC).
+# pastram marja fata de live_sync.yml (prima rulare a zilei, 09:00 UTC).
 
 on:
   schedule:
-    - cron: "0 0 * * 1"
+    - cron: "0 0 * * 4"
   workflow_dispatch:
     inputs:
       leagues:
