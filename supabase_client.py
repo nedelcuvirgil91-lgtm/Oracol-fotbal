@@ -588,6 +588,29 @@ def get_latest_training_run(algorithm_name: str, league_scope: str) -> dict | No
         return None
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# VALIDATION FRAMEWORK — engine_comparison_snapshots (ADR-052)
+# ════════════════════════════════════════════════════════════════════════════
+# Instantaneu per meci al ieșirilor disponibile Oracle/ML/Blend, pentru
+# analize periodice ulterioare. Upsert pe fixture_id (migrare 006) — o
+# reanalizare a aceluiași meci actualizează rândul, nu creează duplicate.
+# Rezultatul real NU se scrie aici — rămâne exclusiv în
+# match_history.actual_result (Canonical Feature Ownership, ADR-036/D3.5).
+
+def save_engine_comparison_snapshot(row: dict) -> bool:
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("engine_comparison_snapshots").upsert(
+            row, on_conflict="fixture_id",
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.error("[Supabase] save_engine_comparison_snapshot failed: %s", exc)
+        return False
+
+
 def get_active_champion(algorithm_family: str, league_scope: str) -> dict | None:
     """Campionul activ curent pentru (algorithm_family, league_scope) —
     rândul cu superseded_at IS NULL, per invariantul din migrare (cel mult

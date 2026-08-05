@@ -192,6 +192,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # servită; acesta niciodată). Populează doar pred.ml_engine_prediction.
     # Implicit OPRIT.
     "ml_engine_display_enabled": False,
+    # Validation Framework (ADR-052) — colectare automată, per meci, a
+    # ieșirilor Oracle/ML/Blend în engine_comparison_snapshots, pentru
+    # analize periodice ulterioare. Flag dedicat, neînrudit cu flag-urile
+    # de afișare de mai sus. Nu ia decizii, nu optimizează, nu promovează.
+    # Implicit OPRIT.
+    "validation_framework_enabled": False,
 }
 
 DEFAULT_WEIGHTS: dict[str, Any] = {
@@ -428,14 +434,17 @@ class MatchPrediction:
     # aproximează).
     home_flashscore_dna:      dict | None = None
     away_flashscore_dna:      dict | None = None
-    # ── Blend Engine (ADR-051/ADR-052, Vision Shift) ──────────────────────
+    # ── Blend Engine (ADR-051/ADR-052) ──────────────────────────────────────
     # Câmp SEPARAT, dedicat, izolat de `raw_predictions` (ADR-031) în mod
     # deliberat — consensus_validation.compute_metrics() presupune azi
     # exact 2 motoare în raw_predictions (`a, b = engines[0], engines[1]`);
     # o a treia intrare acolo ar rupe acel cod. Populat de BlendEngine
-    # (blend_engine.py, motor independent, zero coupling cu Champion/
-    # Shadow/Promotion/ADR-031/ADR-033). None dacă flag-ul de afișare e
-    # oprit — nu se aproximează.
+    # (blend_engine.py, motor independent, algoritm neschimbat, zero
+    # coupling cu Champion/Shadow/Promotion/ADR-031/ADR-033). De la
+    # ADR-052: combină Oracle + ML (dacă ml_engine_prediction e disponibil
+    # la momentul calculului — vezi _get_blend_engine_prediction()),
+    # altfel doar Oracle, exact comportamentul dinainte de ADR-052. None
+    # dacă flag-ul de afișare e oprit — nu se aproximează.
     blend_engine_prediction:  dict | None = None
     # ── ML Engine (ADR-051, Phase 1) ───────────────────────────────────────
     # Câmp SEPARAT, izolat, mirror exact al blend_engine_prediction de mai
@@ -1775,26 +1784,34 @@ class FootballOracleEngine:
         # metode e ignorat de apelant.
         self._log_consensus_capture(pred)
 
-        # [ADAUGAT — ADR-051/ADR-052, Vision Shift] BlendEngine — motor
-        # independent (blend_engine.py), afișat simultan cu Oracle, fără
-        # niciun selector/fallback. Flag dedicat
-        # (blend_engine_display_enabled). Singura mutație:
-        # pred.blend_engine_prediction (câmp izolat, fără alt cititor) —
-        # nu atinge raw_predictions/prob_home_win/shadow_predictions.
-        # Astăzi doar Oracle e furnizor (BlendEngine.predict() cu un
-        # singur EngineOutput == acel output); un viitor ML Engine se
-        # adaugă aici, aditiv, ca al doilea EngineOutput — zero schimbare
-        # în blend_engine.py.
-        pred.blend_engine_prediction = self._get_blend_engine_prediction(pred)
-
         # [ADAUGAT — ADR-051, Phase 1] ML Engine — a treia voce independentă,
         # afișare read-only, gatată de flag propriu (ml_engine_display_enabled).
-        # Simetric cu blocul Blend de mai sus: niciun selector/fallback, ambele
-        # rămân vizibile independent. Singura mutație: pred.ml_engine_prediction
-        # (câmp izolat) — nu atinge raw_predictions/prob_home_win/shadow_predictions.
+        # Calculat ÎNAINTE de Blend (mai jos) — de la ADR-052, Blend citește
+        # pred.ml_engine_prediction ca să decidă dacă include ML în combinare.
+        # Singura mutație: pred.ml_engine_prediction (câmp izolat) — nu atinge
+        # raw_predictions/prob_home_win/shadow_predictions.
         pred.ml_engine_prediction = self._get_ml_engine_prediction(
             pred, home_p, away_p, h2h, home_xg, away_xg, ph, pd, pa, mc, w_pen,
         )
+
+        # [ADAUGAT — ADR-051/ADR-052] BlendEngine — motor independent
+        # (blend_engine.py, algoritm neschimbat), afișat simultan cu
+        # Oracle/ML, fără niciun selector/fallback. Flag dedicat
+        # (blend_engine_display_enabled). Singura mutație:
+        # pred.blend_engine_prediction (câmp izolat, fără alt cititor) —
+        # nu atinge raw_predictions/prob_home_win/shadow_predictions.
+        # De la ADR-052: consumă și pred.ml_engine_prediction (deja calculat
+        # mai sus), dacă disponibil — vezi _get_blend_engine_prediction().
+        pred.blend_engine_prediction = self._get_blend_engine_prediction(pred)
+
+        # [ADAUGAT — ADR-052] Validation Framework — colectare automată,
+        # per meci, a ieșirilor disponibile Oracle/ML/Blend, pentru analize
+        # periodice ulterioare. Flag DEDICAT (validation_framework_enabled,
+        # implicit OPRIT), separat de toate celelalte. Rulează DUPĂ ce toate
+        # cele trei predicții sunt deja calculate — nu modifică pred, nu
+        # influențează nimic din ce se servește. Rezultatul acestei metode e
+        # ignorat de apelant (exact tiparul shadow logging de mai sus).
+        self._log_validation_snapshot(pred)
 
         return pred
 
@@ -1989,15 +2006,20 @@ class FootballOracleEngine:
             return False
 
     def _get_blend_engine_prediction(self, pred: MatchPrediction) -> dict | None:
-        """[ADAUGAT — ADR-051/ADR-052, Vision Shift] Predicția BlendEngine
-        (blend_engine.py, motor independent) pentru AFIȘARE în UI —
-        read-only, nu scrie NIMIC în shadow_predictions/raw_predictions.
-        Flag propriu (blend_engine_display_enabled). Flag oprit sau
-        self.blend indisponibil = zero cost, None. Azi construiește un
-        singur EngineOutput (Oracle, din pred deja servit) — un viitor ML
-        Engine se adaugă aici ca al doilea EngineOutput, aditiv, fără
-        nicio schimbare în blend_engine.py. Orice eșec e prins aici,
-        niciodată propagat mai departe."""
+        """[ADAUGAT — ADR-051/ADR-052] Predicția BlendEngine (blend_engine.py,
+        motor independent, ALGORITM NESCHIMBAT — WeightedAverageStrategy)
+        pentru AFIȘARE în UI — read-only, nu scrie NIMIC în
+        shadow_predictions/raw_predictions. Flag propriu
+        (blend_engine_display_enabled). Flag oprit sau self.blend
+        indisponibil = zero cost, None.
+
+        [ADR-052] Construiește al doilea EngineOutput (ML) DOAR dacă
+        pred.ml_engine_prediction e deja disponibil (calculat mai devreme
+        în evaluate_match(), înainte de acest apel — vezi ordinea acolo) —
+        altfel rămâne exact comportamentul dinainte de ADR-052, un singur
+        EngineOutput (Oracle). Zero schimbare în blend_engine.py — era deja
+        generic pe listă, nu pe număr fix de motoare. Orice eșec e prins
+        aici, niciodată propagat mai departe."""
         if not self.config.get("blend_engine_display_enabled", False):
             return None
         if self.blend is None:
@@ -2007,10 +2029,34 @@ class FootballOracleEngine:
                 engine="oracle",
                 prob_home=pred.prob_home_win, prob_draw=pred.prob_draw, prob_away=pred.prob_away_win,
             )]
+            mp = pred.ml_engine_prediction
+            if mp and mp.get("available"):
+                outputs.append(EngineOutput(
+                    engine="ml",
+                    prob_home=mp["prob_home"], prob_draw=mp["prob_draw"], prob_away=mp["prob_away"],
+                ))
             return self.blend.predict(outputs)
         except Exception as exc:
             logger.debug("[BlendEngine] _get_blend_engine_prediction failed: %s", exc)
             return None
+
+    def _log_validation_snapshot(self, pred: MatchPrediction) -> bool:
+        """[ADAUGAT — ADR-052] Validation Framework — colectare automată,
+        per meci, a ieșirilor disponibile Oracle/ML/Blend, pentru analize
+        periodice (zilnice/săptămânale/lunare) ulterioare. Flag DEDICAT
+        (validation_framework_enabled, implicit OPRIT), separat de toate
+        celelalte. NU ia decizii, NU optimizează, NU promovează — pur
+        observațional (ADR-052 §2.3). Nu modifică pred. Orice eșec (modul
+        indisponibil, Supabase indisponibil, eroare neprevăzută) e prins
+        aici, niciodată propagat către evaluate_match()."""
+        if not self.config.get("validation_framework_enabled", False):
+            return False
+        try:
+            import validation_framework
+            return validation_framework.save_snapshot(pred)
+        except Exception as exc:
+            logger.debug("[ValidationFramework] _log_validation_snapshot failed: %s", exc)
+            return False
 
     def _get_ml_engine_prediction(
         self, pred: MatchPrediction, home_p: TeamProfile, away_p: TeamProfile, h2h: H2HRecord,
