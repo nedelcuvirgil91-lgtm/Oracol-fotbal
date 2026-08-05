@@ -13,11 +13,6 @@ on:
         required: false
         default: "false"
         type: boolean
-      skip_ml:
-        description: "Sări reantrenarea ML"
-        required: false
-        default: "false"
-        type: boolean
       dry_run:
         description: "Dry run (fără scriere în Supabase)"
         required: false
@@ -66,7 +61,6 @@ jobs:
         run: |
           ARGS=""
           if [ "${{ github.event.inputs.skip_features }}" = "true" ]; then ARGS="$ARGS --no-features"; fi
-          if [ "${{ github.event.inputs.skip_ml }}" = "true" ]; then ARGS="$ARGS --no-ml"; fi
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
           python sync/run_daily.py $ARGS
 

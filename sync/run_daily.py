@@ -25,13 +25,16 @@ Flux de execuție:
      architecture/ADR-004-continuous-learning.md pt ordinea completă)
   5. Persistă cote de piață (odds_history) — vezi
      docs/03_ENGINE/ODDS_PERSISTENCE_DESIGN.md (Frozen, ADR-005, ADR-006)
-  6. Verifică dacă trebuie reantrenat modelul ML
-  7. Afișează raport de sincronizare
+  6. Afișează raport de sincronizare
+
+  [ELIMINAT ADR-054] "Verifică dacă trebuie reantrenat modelul ML" — pas
+  legacy, fără scop practic (antrena și arunca modelul, fără artefact/
+  Challenger). Antrenarea ML reală rulează exclusiv prin Learning Core
+  (continuous_learning.py, ADR-030), etapa 8 din night_sync.yml.
 
 Folosire:
   python sync/run_daily.py                # rulare completă
   python sync/run_daily.py --no-features  # fără actualizare feature-uri derivate
-  python sync/run_daily.py --no-ml        # fără reantrenare ML
   python sync/run_daily.py --dry-run      # simulare fără scriere în Supabase
 ================================================================================
 """
@@ -132,7 +135,12 @@ PIPELINE_STEPS: tuple[PipelineStep, ...] = (
     PipelineStep("feature_update", depends_on=("history_sync",)),
     PipelineStep("shadow_evaluation", depends_on=("feature_update",)),
     PipelineStep("odds_persistence"),
-    PipelineStep("ml_retrain", depends_on=("feature_update",)),
+    # [ELIMINAT ADR-054] "ml_retrain" — antrena MLPredictorEngine direct,
+    # in fiecare noapte, fara sa salveze artefact/sa creeze Challenger,
+    # doar loga accuracy si arunca modelul. Antrenarea ML reala ruleaza
+    # exclusiv prin Learning Core (continuous_learning.py, ADR-030),
+    # etapa 8 din night_sync.yml — vezi ADR-054 pentru investigatia
+    # completa (contamina pragul de volum al Challenger-ului).
     # [ADAUGAT ADR-041 Faza 2, Sprint 1.1 #2] intretinere provider_call_log
     # (retentie 9 zile) — fara dependinte, poate rula oricand in pipeline;
     # plasat ultimul deliberat, housekeeping, nu afecteaza restul fluxului.
@@ -200,23 +208,6 @@ def _print_sync_report(reports: list) -> None:
     print(f"  Competiții      : {len(all_leagues)}")
 
 
-def _print_ml_report(status: dict) -> None:
-    print("\n🤖  ML MODEL")
-    _print_separator()
-    if status.get("status") == "trained":
-        acc = status.get("accuracy")
-        acc_str = f"{acc*100:.1f}%" if acc else "N/A"
-        print(f"  ✅ Model reantrenat")
-        print(f"     Samples : {status.get('samples_used', 0)}")
-        print(f"     Accuracy: {acc_str}")
-    elif status.get("status") == "insufficient_data":
-        print(f"  ℹ️  Insuficiente date ({status.get('samples_used', 0)} / 30 necesare)")
-    elif status.get("status") == "skipped":
-        print(f"  ℹ️  Sărit — mai puțin de 20 meciuri noi față de ultimul training")
-    else:
-        print(f"  ⚠️  {status.get('message', 'Status necunoscut')}")
-
-
 def _print_match_statistics_report(results: list) -> None:
     """`results`: listă de `SyncTaskResult` (sync_orchestrator.py) —
     Soccer Football Info (owner nou, Sprint 1 v6/ADR-041 Faza 1), fallback
@@ -248,7 +239,6 @@ def _print_features_report(result: dict) -> None:
 
 def run(
     skip_features: bool = False,
-    skip_ml:       bool = False,
     dry_run:       bool = False,
 ) -> None:
     start_total = time.time()
@@ -583,40 +573,8 @@ def run(
             except Exception:
                 pass
 
-    # ── Pasul 6 (PIPELINE_STEPS: "ml_retrain", depends_on="feature_update") ──
-    print("\n▶  Pasul 6/6 — Verificare / reantrenare ML...")
-
-    if skip_ml:
-        ml_status = {"status": "skipped", "message": "--no-ml flag"}
-    elif dry_run:
-        ml_status = {"status": "skipped", "message": "dry run"}
-    else:
-        try:
-            from database.queries import should_retrain_ml, get_ml_sample_count
-            sample_count = get_ml_sample_count()
-
-            if should_retrain_ml(min_new_matches=20):
-                # Antrenăm direct din ml_predictor — fără să încărcăm tot engine-ul
-                from ml_predictor import MLPredictorEngine
-                ml_engine = MLPredictorEngine()
-                result    = ml_engine.train()
-                ml_status = {
-                    "status":       result.status,
-                    "samples_used": result.samples_used,
-                    "accuracy":     result.accuracy,
-                    "message":      result.message,
-                }
-            else:
-                ml_status = {
-                    "status":       "skipped",
-                    "samples_used": sample_count,
-                    "message":      "Mai puțin de 20 meciuri noi față de ultimul training",
-                }
-        except Exception as exc:
-            logger.error("[DailySync] ML retraining failed: %s", exc)
-            ml_status = {"status": "error", "message": str(exc)}
-
-    _print_ml_report(ml_status)
+    # [ELIMINAT ADR-054] Pasul "ml_retrain" — vezi comentariul din
+    # PIPELINE_STEPS de mai sus și ADR-054 pentru motiv complet.
 
     # ── Intretinere (PIPELINE_STEPS: "provider_call_log_cleanup") ──────────
     # [ADAUGAT ADR-041 Faza 2, Sprint 1.1 #2] Singura intretinere necesara
@@ -655,10 +613,6 @@ def main() -> None:
         help="Sări actualizarea feature-urilor derivate (formă, H2H, cornere, cartonașe, faulturi)"
     )
     parser.add_argument(
-        "--no-ml", action="store_true",
-        help="Sări reantrenarea ML"
-    )
-    parser.add_argument(
         "--dry-run", action="store_true",
         help="Simulare fără scriere în Supabase"
     )
@@ -666,7 +620,6 @@ def main() -> None:
 
     run(
         skip_features = args.no_features,
-        skip_ml       = args.no_ml,
         dry_run       = args.dry_run,
     )
 
