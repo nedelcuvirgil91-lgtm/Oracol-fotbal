@@ -44,6 +44,7 @@ def test_tracked_competitions_only_contains_verified_slugs():
         "Eredivisie": ("netherlands", "eredivisie"),
         "Super Lig": ("turkey", "super-lig"),
         "HNL": ("croatia", "hnl"),
+        "Conference League": ("europe", "conference-league"),
     }
 
 

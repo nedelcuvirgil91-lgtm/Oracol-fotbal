@@ -43,8 +43,8 @@ explicit mai jos, niciodată amestecate:
   (`.event__match`, `a.eventRowLink`) confirmată direct pe pagină.
 - **Nivel B (Premier League, La Liga, Serie A, Bundesliga, Ligue 1,
   Europa League, MLS — adăugate Faza 2, extindere Discovery; Primeira
-  Liga, Eredivisie, Super Lig, HNL — adăugate 2026-08-04, cerere explicită
-  proprietar produs)** —
+  Liga, Eredivisie, Super Lig, HNL — adăugate 2026-08-04; Conference
+  League — adăugată 2026-08-05, cerere explicită proprietar produs)** —
   verificare prin căutare web (titlul REAL, generat de Flashscore, indexat
   de motorul de căutare, confirmă că URL-ul exact există și corespunde
   ligii — nu un slug ghicit din convenție), NU prin navigare Playwright
@@ -178,6 +178,14 @@ FLASHSCORE_TRACKED_COMPETITIONS: dict[str, tuple[str, str]] = {
     "Eredivisie": ("netherlands", "eredivisie"),
     "Super Lig": ("turkey", "super-lig"),
     "HNL": ("croatia", "hnl"),
+    # [ADAUGAT 2026-08-05] Nivel B — verificare prin căutare web (WebSearch,
+    # rezultate multiple independente, titlu Flashscore real: "Conference
+    # League 2026/2027 live scores, results, Football Europe", "Conference
+    # League Fixtures - Football/Europe" — URL exact confirmat, nu ghicit
+    # din convenție). Cerere explicită proprietar produs — Conference League
+    # lipsea complet din discovery Flashscore, deși e deja tracked în
+    # mappings.LEAGUE_PROVIDERS (espn/tsdb/soccerfootballinfo).
+    "Conference League": ("europe", "conference-league"),
 }
 
 
