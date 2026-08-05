@@ -6,8 +6,11 @@ Module: learning_core/challenger_runner.py
 
 Rulează orice algoritm din Model Registry ("challenger") și campionul curent
 ("production_champion", implicit) pe același input, producând un rezultat
-comparabil, side-by-side. Nu evaluează statistic (asta rămâne Evaluation
-Engine, neimplementat încă), nu decide nimic, nu scrie în
+comparabil, side-by-side. Nu evaluează statistic — evaluarea statistică
+reală (Brier/Log-loss/Accuracy, simultan) există azi în shadow_testing.
+evaluate_experiment() + Challenger FSM (ADR-016), fluxuri separate, complet
+neatinse de acest modul — Challenger Runner rămâne exclusiv un instrument
+punctual de comparație manuală, nu decide nimic, nu scrie în
 shadow_predictions/experiment_registry — doar rulează și compară.
 
 NU atinge Prediction Engine / calea de servire live (app.py) — funcționează

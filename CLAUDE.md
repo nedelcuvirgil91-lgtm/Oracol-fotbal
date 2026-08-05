@@ -57,6 +57,8 @@ Guvernanța (ADR-uri, documente Frozen, promovare manuală) e tratată ca avanta
 
 Orice propunere viitoare de a simplifica proiectul prin eliminarea ML sau Blend trebuie evaluată explicit împotriva acestei viziuni, niciodată decisă tacit. Un document existent care presupune Oracle ca motor unic/implicit primar nu se editează tacit — se actualizează printr-un ADR dedicat (vezi lista de goluri identificate în ADR-051 §6).
 
+Ciclul de validare și îmbunătățire continuă (integrarea completă Oracle-ML-Blend, colectarea automată per meci, analizele periodice zilnice/săptămânale care compară cele trei motoare) e formalizat de ADR-052 (Validation & Continuous Evaluation Framework, derivat din ADR-051, `docs/00_GOVERNANCE/ADR-052-validation-continuous-evaluation-framework.md`) — document separat, nu o modificare a viziunii de mai sus.
+
 ## Knowledge Map — rolul fiecărui modul
 
 | Modul | Rol (o propoziție) | Depinde de | Consumat de |

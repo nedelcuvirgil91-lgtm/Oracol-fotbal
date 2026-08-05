@@ -501,12 +501,12 @@ class FootballOracleEngine:
 
         self._initialize_ml()
 
-        # [ADAUGAT — ADR-051/ADR-052, Vision Shift] BlendEngine — motor
-        # independent (blend_engine.py), instanțiat o dată, reutilizat per
-        # predicție, exact tiparul lui self.ml de mai sus. Zero coupling:
-        # blend_engine.py nu importă acest fișier. Config public, tipizat
-        # (BlendConfig), citit din model_config (self.config) — modulul
-        # însuși rămâne fără I/O.
+        # [ADAUGAT — ADR-051] BlendEngine — motor independent
+        # (blend_engine.py), instanțiat o dată, reutilizat per predicție,
+        # exact tiparul lui self.ml de mai sus. Zero coupling: blend_engine.py
+        # nu importă acest fișier. Config public, tipizat (BlendConfig),
+        # citit din model_config (self.config) — modulul însuși rămâne fără
+        # I/O.
         self.blend = (
             BlendEngine(BlendConfig.from_dict(self.config.get("blend_engine_config")))
             if BLEND_ENGINE_MODULE_AVAILABLE else None

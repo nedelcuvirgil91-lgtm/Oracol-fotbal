@@ -1,21 +1,27 @@
 """
 ================================================================================
-FOOTBALL ORACLE — Blend Engine (ADR-051, Vision Shift / ADR-052)
+FOOTBALL ORACLE — Blend Engine (ADR-051)
 ================================================================================
 Module: blend_engine.py
 
 Motor independent — al treilea motor al platformei, alături de Oracle
-(`oracle_engine.py`) și ML (viitor). Nu este un Challenger, nu este un
-model ML separat, nu este un element de UI: rolul lui e să consume
-predicțiile deja produse de unul sau mai multe motoare și să genereze
-propria predicție.
+(`oracle_engine.py`) și ML (`ml_predictor.py`, servit prin
+`oracle_engine._get_ml_engine_prediction()`, ADR-051 Phase 1). Nu este un
+Challenger, nu este un model ML separat, nu este un element de UI: rolul lui
+e să consume predicțiile deja produse de unul sau mai multe motoare și să
+genereze propria predicție.
 
 Zero coupling, verificabil static: acest modul NU importă
 `oracle_engine`/`ml_predictor`/`feature_engine`/`learning_core.*`. Nu
 cunoaște cum au fost calculate `EngineOutput`-urile primite — doar
-contractul lor. Oracle nu importă acest modul; un viitor ML Engine nu-l va
-importa nici el — singurul care cunoaște `BlendEngine` e orchestratorul
-(`oracle_engine.py`).
+contractul lor. Nici Oracle, nici ML Engine nu importă acest modul —
+singurul care cunoaște `BlendEngine` e orchestratorul (`oracle_engine.py`).
+
+Wiring-ul complet Oracle→ML→Blend (al doilea `EngineOutput`, ML, adăugat în
+`oracle_engine._get_blend_engine_prediction()`) e formalizat de ADR-052
+(Validation & Continuous Evaluation Framework, derivat din ADR-051) —
+document diferit de acesta, nu o extensie a arhitecturii Blend Engine
+însăși, care rămâne definită integral aici, neschimbată.
 
 Separare de responsabilitate față de Machine Learning Engine (fixată
 explicit, cerință a proprietarului produsului): `BlendEngine` NU își

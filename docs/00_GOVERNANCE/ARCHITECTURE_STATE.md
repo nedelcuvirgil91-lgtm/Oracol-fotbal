@@ -92,17 +92,14 @@ Scope-ul complet a fost împărțit deliberat în două sub-pași, cu granițe d
 
 ADR-049 e acum **complet implementat**, de la antrenare până la servire live. Fișiere confirmate neatinse pe tot parcursul 10a+10b (`git diff --stat`, gol): `promotion_service.py`, `training_runner.py`, `challenger_manager.py`, `model_artifact_storage.py`, `RUNTIME_CONTRACT.md`.
 
-### 3.2 Blend Engine (`blend_engine.py`) — stare tehnică curentă, coexistență cu mecanismele legacy
+### 3.2 Blend Engine (`blend_engine.py`) — stare tehnică curentă (ACTUALIZAT — „dualitatea Blend" închisă)
 
-Descriere strict factuală a codului existent azi — nu o decizie arhitecturală nouă, nu modifică ADR-051 (rămâne documentul de referință al viziunii).
+**[ACTUALIZAT]** ADR-051 §6 identifica, la momentul acceptării, o „dualitate Blend" ca întrebare deschisă. Proprietarul produsului a închis explicit acea întrebare (decizie arhitecturală finală, nu mai e subiect de ADR viitor — vezi istoricul deciziei): rămân azi **două** mecanisme, cu roluri distincte, fără suprapunere:
 
-Coexistă azi în cod **trei mecanisme distincte** care ating cuvântul „blend", fără nicio relație de dependență între ele:
+1. **`blend_v1` Challenger** (ADR-050, Pasul 13/14, `learning_core/blend_challenger_shadow.py`) — shadow-only, parte din Learning Core, cu propriul ciclu de antrenare/evaluare/promovare prin Challenger Framework. Aparține ciclului de antrenare/evaluare, nu trebuie confundat cu motorul Blend servit în producție.
+2. **`blend_engine.py`** (ADR-051 §2.3) — **singurul Blend din runtime, motorul Blend oficial**. Modul pur, fără I/O, fără antrenare (`BlendEngine`/`BlendConfig`/`EngineOutput`), instanțiat în `oracle_engine.py` (`self.blend`), afișare UI gatată de `blend_engine_display_enabled` (implicit `False`), populează `MatchPrediction.blend_engine_prediction`, izolat de `raw_predictions`/ADR-031 și de `shadow_predictions`/ADR-033. **De la ADR-052**: consumă Oracle ȘI ML (al doilea `EngineOutput`, adăugat în `_get_blend_engine_prediction()` dacă `pred.ml_engine_prediction` e disponibil) — nu mai e o medie cu un singur termen. Zero coupling verificat static (`tests/test_blend_engine.py`) cu `learning_core.*`/`oracle_engine`-ul intern/mecanismul de mai sus.
 
-1. **Blend legacy inline** (`oracle_engine.py:1589`, gatat de `ml_blending_enabled`, implicit `False`) — ar influența predicția LIVE dacă activat; neatins de implementarea de mai jos.
-2. **`blend_v1` Challenger** (ADR-050, Pasul 13/14, `learning_core/blend_challenger_shadow.py`) — shadow-only, cu propriul ciclu de antrenare/evaluare/promovare prin Challenger Framework; neatins de implementarea de mai jos.
-3. **`blend_engine.py`** (nou, ADR-051 §2.3) — modul pur, fără I/O, fără antrenare (`BlendEngine`/`BlendConfig`/`EngineOutput`), instanțiat în `oracle_engine.py` (`self.blend`) exclusiv pentru **afișare UI** (`blend_engine_display_enabled`, implicit `False`), populează `MatchPrediction.blend_engine_prediction`, izolat complet de `raw_predictions`/ADR-031 și de `shadow_predictions`/ADR-033. Azi primește un singur `EngineOutput` (Oracle) — o medie cu un singur termen. Zero coupling verificat static (`tests/test_blend_engine.py`) cu `learning_core.*`/`oracle_engine`-ul intern/celelalte două mecanisme de mai sus.
-
-ADR-051 §6 identifica, la momentul acceptării, o „dualitate Blend" (mecanismele 1 și 2) ca întrebare deschisă, nerezolvată deliberat. Adăugarea mecanismului 3 nu rezolvă acea întrebare — extinde starea tehnică de la două la trei mecanisme coexistente. Relația definitivă dintre ele (dacă vreunul înlocuiește altul, sau rămân distincte) rămâne, ca și înainte, subiectul unui ADR viitor dedicat — nedecisă aici.
+**Blend legacy inline** (fostul mecanism #1, gatat de `ml_blending_enabled`) a fost **eliminat complet** — nu mai există în cod (`oracle_engine.py`), nu mai există în `model_config` live (`ml_blending_enabled`/`ml_blend_weight`, șterse). `blend_predictions()` (funcția partajată, `ml_predictor.py`) rămâne — folosită azi exclusiv de `blend_v1` Challenger de mai sus; call site-ul ei din `explainability.py` (treapta „Model ML" a cascadei de explicații) a fost eliminat la același pas — cascada explică azi exclusiv Oracle, care rămâne mereu pur (nu mai există blend legacy in-place care să-i dilueze probabilitatea).
 
 ## 4. Ce rulează efectiv în producție azi (verificat live)
 
@@ -112,6 +109,7 @@ ADR-051 §6 identifica, la momentul acceptării, o „dualitate Blend" (mecanism
 | `continuous_learning.yml` | **`workflow_dispatch` only** (corectat 2026-08-03, EPIC ML Activation Pasul 5 — secțiunea anterioară afirma `0 6 * * *`, depășită; cron-ul propriu a fost eliminat, consolidat în `night_sync.yml`, vezi rândul de mai jos) | `continuous_learning.run_cycle()` — 4 faze (A/B/D/C), Faza D gatată separat | `learning_core_enabled` (A/B/C), `champion_guardian_enabled` (D) |
 | `night_sync.yml` | zilnic 03:00 UTC | Etapa 8 („ML Refresh") apelează `continuous_learning.run_cycle()` — cadența reală de producție pentru Learning Core | Aceleași flag-uri ca rândul de mai sus |
 | `consensus_validation.yml` | `0 9 * * *` | `run_consensus_validation.py` | `consensus_validation_enabled` |
+| `validation_analysis.yml` (ADR-052 §2.4) | zilnic `0 10 * * *` + săptămânal (luni) `15 10 * * 1` | `run_validation_analysis.py --cadence daily\|weekly` | `validation_analysis_enabled` (implicit `False`) |
 
 **Stare canonică relevantă** (verificat live, 2026-07-28): `model_champions` — 4 rânduri, toate `gate_validation_test` (fixturi R1.8, niciun campion real `production_champion`/`xgboost_v1`); `challengers` — 5 rânduri, toate `gate_validation_test`, toate în stare terminală/test, zero challenger real activ; `decision_feed` = 0; `champion_health_evaluations` = 0; `shadow_predictions` = 0 (infrastructură activată azi, în așteptare de trafic real + un challenger real activ — vezi §3); `recalibration_log` = 0 (`auto_recalibration_enabled=False`, deliberat, neatins azi).
 

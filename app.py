@@ -308,9 +308,9 @@ def _render_match_card(match: dict, engine) -> None:
         + "</div>", unsafe_allow_html=True
     )
 
-    # [ADAUGAT — ADR-051/ADR-052, Vision Shift] Blend Engine — motor
-    # independent (blend_engine.py), afișat simultan cu Oracle de mai sus
-    # (niciun motor ascuns). Populat de
+    # [ADAUGAT — ADR-051/ADR-052] Blend Engine — motor independent
+    # (blend_engine.py), afișat simultan cu Oracle de mai sus (niciun motor
+    # ascuns). Populat de
     # oracle_engine._get_blend_engine_prediction() DOAR dacă
     # blend_engine_display_enabled=True ȘI self.blend e disponibil —
     # altfel None, secțiunea nu apare deloc (nu se aproximează). Nu există

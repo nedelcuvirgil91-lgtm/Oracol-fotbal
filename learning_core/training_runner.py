@@ -10,7 +10,11 @@ LEARNING_CORE_ARCHITECTURE.md §3.2, §6.
 La v0.1: apelabil DOAR manual (CLI, learning_core/train.py) — NU e integrat
 în sync/run_daily.py. Nu antrenează automat, nu evaluează, nu promovează, nu
 decide nimic — doar rulează fit() pe un algoritm dat și persistă rezultatul.
-Evaluation Engine, Promotion Engine, Champion Manager rămân neimplementate.
+Antrenarea automată/evaluarea/promovarea există azi ca fluxuri SEPARATE
+(Continuous Learning / Daily Scheduler, ADR-030; shadow_testing.
+evaluate_experiment(); promotion_service.py; Champion Manager,
+model_champions) — acest modul rămâne, deliberat, doar calea manuală,
+punctuală, nesuprapusă cu ele.
 ================================================================================
 """
 from __future__ import annotations

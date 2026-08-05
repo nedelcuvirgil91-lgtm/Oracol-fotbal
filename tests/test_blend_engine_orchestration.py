@@ -1,6 +1,6 @@
 """
-Teste pentru frontiera oracle_engine.py <-> blend_engine.py (ADR-051, Vision
-Shift / ADR-052) — orchestrarea `_get_blend_engine_prediction()` +
+Teste pentru frontiera oracle_engine.py <-> blend_engine.py (ADR-051/
+ADR-052) — orchestrarea `_get_blend_engine_prediction()` +
 instanțierea `self.blend`. Comportamentul intern al `BlendEngine` (strategii,
 combinare, config) e testat separat, izolat, în tests/test_blend_engine.py.
 
