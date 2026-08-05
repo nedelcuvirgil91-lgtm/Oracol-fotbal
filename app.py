@@ -327,6 +327,33 @@ def _render_match_card(match: dict, engine) -> None:
             + "</div>", unsafe_allow_html=True
         )
 
+    # [ADAUGAT — ADR-051, Phase 5] ML Engine — a treia voce independentă,
+    # afișată simultan cu Oracle/Blend de mai sus (niciun motor ascuns).
+    # Populat de oracle_engine._get_ml_engine_prediction() DOAR dacă
+    # ml_engine_display_enabled=True — altfel None, secțiunea nu apare deloc
+    # (nu se aproximează). Nu există niciun selector/fallback. Trei stări
+    # posibile (vezi oracle_engine.py), nu doar prezent/absent: succes (bare
+    # probabilități), indisponibil cu motiv explicit (nu se aproximează o
+    # predicție lipsă), sau absent complet (flag oprit/eroare neprevăzută).
+    if pred.ml_engine_prediction:
+        mp = pred.ml_engine_prediction
+        st.markdown('<span class="sub-label">🤖 ML</span>', unsafe_allow_html=True)
+        if mp.get("available"):
+            st.markdown(
+                '<div style="padding:0 1.5rem;">'
+                + _prob_bar(f"🏠 {home[:14]}", mp["prob_home"], "#4a9eff")
+                + _prob_bar("Egal",            mp["prob_draw"], "#ffb300")
+                + _prob_bar(f"✈️ {away[:14]}", mp["prob_away"], "#ff3d57")
+                + "</div>", unsafe_allow_html=True
+            )
+        else:
+            _ML_REASON_LABEL = {
+                "model_indisponibil": "model insuficient antrenat pentru acest context",
+                "predictie_esuata": "predicție eșuată pentru acest meci",
+            }
+            reason = _ML_REASON_LABEL.get(mp.get("reason"), mp.get("reason", "motiv necunoscut"))
+            st.caption(f"ℹ️ ML indisponibil — {reason}")
+
     # [ADAUGAT — ADR-031] N-way Serving: ieșirile brute, separate, per motor
     # — aditiv, view-ul compus de mai sus rămâne implicit, neschimbat.
     # Nu interpretează acordul/dezacordul dintre motoare (asta rămâne
