@@ -50,25 +50,39 @@ name: Football Oracle — Flashscore Weekly Fixtures Discovery
 # proprietar produs — "sa nu mai stam pana luni"] Ramane si azi, alaturi
 # de luni (ziua originala) — ora ramane neschimbata (00:00 UTC, deja
 # verificata fara suprapuneri). Inainte de night_sync.yml (03:00 UTC) SI
-# de live_sync.yml (09:00/13:00/17:00 UTC), gap de minim ~7h30 garantat de
-# timeout-minutes: 90 (aceeasi disciplina de "fara suprapunere prin
+# de live_sync.yml (09:00/13:00/17:00 UTC), gap garantat de
+# timeout-minutes (aceeasi disciplina de "fara suprapunere prin
 # programare, nu prin lock" ca restul workflow-urilor Flashscore - vezi
-# live_sync.yml). O sesiune Playwright Flashscore per fereastra orara,
-# niciodata doua simultan.
+# live_sync.yml). [ACTUALIZAT 2026-08-06, timeout marit 90->120 min,
+# vezi comentariul de la timeout-minutes mai jos] gap minim ~1h fata de
+# night_sync.yml, ~7h fata de live_sync.yml, in cel mai rau caz (rulare
+# care consuma tot plafonul). O sesiune Playwright Flashscore per
+# fereastra orara, niciodata doua simultan.
 #
 # limit-per-league: 25 - dimensiunea reala a hub-ului /fixtures/ (16-28
 # meciuri unice, verificat live, fara paginare dincolo de randarea
 # initiala - vezi discovery.py) acopera confortabil o saptamana intreaga
 # per competitie fara sa ceara mai mult decat hub-ul poate intoarce.
 #
-# timeout-minutes: 90 — prima rulare (backlog initial, fara Delta Sync
-# in spate) poate atinge acest plafon si opri inainte sa termine toate
-# cele 14 ligi — sigur, nu distructiv (fiecare meci se persista atomic,
-# secvential; o oprire la mijloc nu corupe nimic, doar lasa restul pt.
-# rularile urmatoare). Acelasi tipar deja documentat si observat real la
-# live_sync.yml (rularile #15/#16, backlog absorbit in cateva nopti
-# succesive, nu dintr-o rulare). Nu marim timeout-ul peste 90 min ca sa
-# pastram marja fata de live_sync.yml (prima rulare a zilei, 09:00 UTC).
+# timeout-minutes: 120 — [MARIT de la 90, 2026-08-06, cerere explicita
+# proprietar produs] confirmat live: prima rulare reala (run #1,
+# workflow_dispatch, 22:09-23:39 UTC) a atins plafonul de 90 min si a
+# fost oprita de GitHub Actions (conclusion=cancelled, nu esec) inainte
+# sa termine toate cele 14 ligi — a acoperit 8 (Romania SuperLiga,
+# Champions League, Premier League, La Liga, Serie A, Bundesliga,
+# Ligue 1, Europa League, MLS, Primeira Liga - ultima intrerupta la
+# mijloc), a ramas fara Eredivisie/Super Lig/HNL/Conference League
+# (ultimele 4 din FLASHSCORE_TRACKED_COMPETITIONS, niciodata atinse).
+# Ritm real observat: ~8 ligi / 89 min => ~11 min/liga; 120 min
+# acopera confortabil restul de gol ramas (Delta Sync sare deja ce s-a
+# scris azi), desi tot nu garanteaza o rulare COMPLETA din zero pentru
+# toate cele 14 (ar cere ~140+ min) — acceptat, acelasi tipar sigur,
+# nu distructiv (fiecare meci se persista atomic, secvential; o oprire
+# la mijloc nu corupe nimic, doar lasa restul pt. rularile urmatoare,
+# exact ca la live_sync.yml, rularile #15/#16). Marja fata de
+# live_sync.yml (prima rulare a zilei, 09:00 UTC) ramane ampla: acest
+# workflow porneste la 00:00 UTC, deci chiar folosind toate cele 120
+# min s-ar termina cel tarziu 02:00 UTC, la 7 ore inainte.
 
 on:
   schedule:
@@ -93,7 +107,7 @@ on:
 jobs:
   flashscore-weekly-fixtures:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
       - name: Checkout repository
