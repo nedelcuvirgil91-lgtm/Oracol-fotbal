@@ -350,6 +350,20 @@ TEAM_ALIASES: dict[str, list[str]] = {
     # adaugate explicit ca sa nu se reintroduca fragmentarea dupa consolidarea Faza 3.
     "Colon Santa Fe": ["Colon Santa FE"],
     "Fenerbahce": ["FENERBAHCE"],
+    # [ADAUGAT 2026-08-06, cerere explicita proprietar produs — Team DNA
+    # Voluntari gol fals] Flashscore extrage numele oficial de pe pagina
+    # ("FC Voluntari"), TheSportsDB foloseste forma scurta ("Voluntari") -
+    # fara acest alias, normalize_team_name() le trata ca 2 echipe diferite
+    # (niciuna nu era in ALIAS_TO_CANONICAL, deci ramaneau neschimbate),
+    # ascunzand cele 3 meciuri deja jucate din Romania SuperLiga 2026/2027
+    # (colectate de Flashscore sub "FC Voluntari") de la orice interogare
+    # facuta cu "Voluntari" (Team DNA, statistici avansate). Canonic ales
+    # "FC Voluntari" (nu "Voluntari") pe baza distributiei reale din
+    # match_history, verificata live: 171 randuri "FC Voluntari" (Kaggle
+    # istoric + Flashscore) vs. 1 singur rand "Voluntari" (TheSportsDB,
+    # fixture-ul viitor 08.08) - forma majoritara, si cea oficiala a
+    # clubului.
+    "FC Voluntari": ["Voluntari"],
 }
 
 ALIAS_TO_CANONICAL: dict[str, str] = {}
