@@ -206,7 +206,7 @@ class _FakePage:
 
 
 def test_discover_for_hub_tries_fixtures_when_results_empty_and_future_allowed(monkeypatch):
-    monkeypatch.setattr("providers.flashscore.discovery.FLASHSCORE_MIN_DELAY_SECONDS", 0)
+    monkeypatch.setattr("providers.flashscore.discovery.polite_delay", lambda: None)
     page = _FakePage({"results": _EMPTY_HTML, "fixtures": _MATCH_HTML})
     matches = _discover_for_hub(page, "https://www.flashscore.com/football/x/y", "Premier League",
                                  limit=None, include_future_fixtures=True)
@@ -220,7 +220,7 @@ def test_discover_for_hub_skips_fixtures_when_future_fixtures_disabled(monkeypat
     fixture-uri viitoare (audit 2026-08-03): cu include_future_fixtures=
     False, /fixtures/ nu mai e incercat NICIODATA — liga cu /results/ gol
     (in pauza competitionala) e sarita curat, 0 meciuri, nu 100+."""
-    monkeypatch.setattr("providers.flashscore.discovery.FLASHSCORE_MIN_DELAY_SECONDS", 0)
+    monkeypatch.setattr("providers.flashscore.discovery.polite_delay", lambda: None)
     page = _FakePage({"results": _EMPTY_HTML, "fixtures": _MATCH_HTML})
     matches = _discover_for_hub(page, "https://www.flashscore.com/football/x/y", "Premier League",
                                  limit=None, include_future_fixtures=False)
@@ -232,7 +232,7 @@ def test_discover_for_hub_skips_fixtures_when_future_fixtures_disabled(monkeypat
 def test_discover_for_hub_still_returns_results_when_future_fixtures_disabled(monkeypatch):
     """Excluderea /fixtures/ nu atinge deloc /results/ — meciurile deja
     terminate raman complet neafectate."""
-    monkeypatch.setattr("providers.flashscore.discovery.FLASHSCORE_MIN_DELAY_SECONDS", 0)
+    monkeypatch.setattr("providers.flashscore.discovery.polite_delay", lambda: None)
     page = _FakePage({"results": _MATCH_HTML, "fixtures": _EMPTY_HTML})
     matches = _discover_for_hub(page, "https://www.flashscore.com/football/x/y", "Champions League",
                                  limit=None, include_future_fixtures=False)

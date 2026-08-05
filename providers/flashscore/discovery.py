@@ -72,6 +72,7 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -84,9 +85,26 @@ POST_LOAD_WAIT_MS = 3500
 # Vezi adapter.py - acelasi mecanism opțional de executable_path explicit.
 _CHROMIUM_EXECUTABLE_PATH = os.environ.get("FLASHSCORE_CHROMIUM_EXECUTABLE") or None
 
-# Unica disciplina de politete/rata implementata azi - delay minim intre
-# doua navigari succesive (hub->hub, sau meci->meci in orchestrare).
+# Disciplina de politete/rata intre doua navigari succesive (hub->hub, sau
+# meci->meci in orchestrare). [EXTINS 2026-08-05, cerere explicita
+# proprietar produs — "sa nu il blocheze"] Un delay FIX (2.0s constant) e
+# exact tiparul pe care detectia anti-bot il cauta — research (BrowserStack
+# "Web Scraping with Playwright", ScrapingAnt "Avoid Getting Blocked", 2026):
+# 1-3s cu jitter (randomizare) e considerat trafic uman, un interval identic
+# repetat de fiecare data nu e. FLASHSCORE_MIN/MAX_DELAY_SECONDS definesc
+# plaja, polite_delay() alege uniform in ea de fiecare data — nu schimba
+# comportamentul la protectie detectata (FlashscoreProtectionDetected tot
+# opreste imediat, niciun retry-prin-blocaj, niciodata bypass/proxy/stealth).
 FLASHSCORE_MIN_DELAY_SECONDS = 2.0
+FLASHSCORE_MAX_DELAY_SECONDS = 4.0
+
+
+def polite_delay() -> None:
+    """Delay cu jitter intre doua navigari succesive — vezi comentariul
+    de la FLASHSCORE_MIN/MAX_DELAY_SECONDS pentru motiv. Sursa unica,
+    reutilizata si de pre_match_odds.py."""
+    time.sleep(random.uniform(FLASHSCORE_MIN_DELAY_SECONDS, FLASHSCORE_MAX_DELAY_SECONDS))
+
 
 _PROTECTION_MARKERS = (
     "checking your browser", "cf-browser-verification", "attention required",
@@ -298,7 +316,7 @@ def _discover_for_hub(
                 DiscoveredMatch(league=league, match_base_url=base, mid=mid, source=source)
                 for base, mid in pairs
             ]
-        time.sleep(FLASHSCORE_MIN_DELAY_SECONDS)
+        polite_delay()
     return []
 
 
@@ -334,7 +352,7 @@ def discover_matches(
                 country, competition = FLASHSCORE_TRACKED_COMPETITIONS[league]
                 hub_url = f"https://www.flashscore.com/football/{country}/{competition}"
                 if i > 0:
-                    time.sleep(FLASHSCORE_MIN_DELAY_SECONDS)
+                    polite_delay()
                 results.extend(_discover_for_hub(page, hub_url, league, limit_per_league, include_future_fixtures))
         finally:
             browser.close()
@@ -369,7 +387,7 @@ def run_foundation_data_layer_for_discovered_matches(
     reports: list[dict[str, Any]] = []
     for i, match in enumerate(matches):
         if i > 0:
-            time.sleep(FLASHSCORE_MIN_DELAY_SECONDS)
+            polite_delay()
         # [Delta Sync — Faza 2] `mid` e cunoscut ÎNAINTE de fetch (Discovery
         # îl extrage din URL-ul hub-ului) — dacă acest meci a fost deja
         # persistat canonic (fixture_id="flashscore_{mid}" pe match_history),

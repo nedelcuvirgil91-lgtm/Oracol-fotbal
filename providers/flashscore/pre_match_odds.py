@@ -44,19 +44,18 @@ doar populează tabela.
 from __future__ import annotations
 
 import logging
-import time
 from datetime import datetime, timedelta
 from typing import Any
 
 from mappings import match_key
 
 from .discovery import (
-    FLASHSCORE_MIN_DELAY_SECONDS,
     FLASHSCORE_TRACKED_COMPETITIONS,
     _CHROMIUM_EXECUTABLE_PATH,
     _check_protection,
     _dismiss_gdpr_if_present,
     parse_match_links,
+    polite_delay,
 )
 from .normalizer import normalize_odds, normalize_upcoming_match
 
@@ -157,7 +156,7 @@ def _discover_league_fixtures_with_odds(
 
     records: list[dict[str, Any]] = []
     for base_url, mid in pairs:
-        time.sleep(FLASHSCORE_MIN_DELAY_SECONDS)
+        polite_delay()
         pages = _fetch_summary_and_odds(page, base_url, mid)
         identity = normalize_upcoming_match(pages)
         kickoff = identity.get("kickoff_date")
@@ -207,7 +206,7 @@ def discover_week_fixtures_with_odds(
         try:
             for i, league in enumerate(targets):
                 if i > 0:
-                    time.sleep(FLASHSCORE_MIN_DELAY_SECONDS)
+                    polite_delay()
                 try:
                     records.extend(_discover_league_fixtures_with_odds(page, league, days_ahead, limit_per_league))
                 except Exception as exc:

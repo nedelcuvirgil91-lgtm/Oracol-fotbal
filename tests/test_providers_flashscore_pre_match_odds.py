@@ -250,7 +250,7 @@ def test_discover_week_fixtures_isolates_one_failing_league(monkeypatch):
         "providers.flashscore.pre_match_odds._discover_league_fixtures_with_odds", _fake_discover_league,
     )
     monkeypatch.setattr("playwright.sync_api.sync_playwright", lambda: _FakePlaywright(fake_browser))
-    monkeypatch.setattr("providers.flashscore.pre_match_odds.time.sleep", lambda s: None)
+    monkeypatch.setattr("providers.flashscore.pre_match_odds.polite_delay", lambda: None)
 
     records = discover_week_fixtures_with_odds(
         leagues=["Europa League", "Champions League", "Premier League"], days_ahead=7,
@@ -284,7 +284,7 @@ def _patch_discovery_internals(monkeypatch, pairs, identities, odds_by_mid=None)
     monkeypatch.setattr("providers.flashscore.pre_match_odds.parse_match_links", lambda html: pairs)
     monkeypatch.setattr("providers.flashscore.pre_match_odds._dismiss_gdpr_if_present", lambda page: None)
     monkeypatch.setattr("providers.flashscore.pre_match_odds._check_protection", lambda *a, **kw: None)
-    monkeypatch.setattr("providers.flashscore.pre_match_odds.time.sleep", lambda s: None)
+    monkeypatch.setattr("providers.flashscore.pre_match_odds.polite_delay", lambda: None)
     return fetched_mids
 
 
