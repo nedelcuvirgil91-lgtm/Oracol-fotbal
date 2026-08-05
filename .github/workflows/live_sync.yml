@@ -15,18 +15,29 @@ name: Football Oracle — Live Sync
 # OPRESTE jobul la exact 120 min, deci ora cea mai tarzie posibila de
 # finalizare e 05:00 UTC, nu o estimare) - fara niciun mecanism de
 # concurrency intre workflow-uri diferite (prefera programare simpla, nu
-# blocare). Slotul 02:00 se termina cu mult inainte de 03:00 (timeout
-# live_sync: 20 min); slotul 06:00 incepe la o ora dupa cea mai tarzie
-# finalizare posibila a night_sync.yml - marja absorbe si intarzierile
-# tipice de programare cron ale GitHub Actions (documentate, cateva
-# minute in perioade de incarcare). Flashscore are Delta Sync real
-# (is_flashscore_match_already_collected) - o cadenta mai deasa e ieftina
-# prin design, spre deosebire de providerii API, care nu au acest
-# mecanism si raman la o singura rulare/zi (night_sync.yml).
+# blocare). Slotul 02:00 trebuie sa se termine cu mult inainte de 03:00
+# (marja absoarbe si intarzierile tipice de programare cron ale GitHub
+# Actions, documentate, cateva minute in perioade de incarcare). Flashscore
+# are Delta Sync real (is_flashscore_match_already_collected) - o cadenta
+# mai deasa e ieftina prin design, spre deosebire de providerii API, care
+# nu au acest mecanism si raman la o singura rulare/zi (night_sync.yml).
 # `concurrency` de mai jos previne doar suprapunerea unei rulari live_sync
 # cu EA INSASI (o rulare care depaseste 4h nu porneste una noua peste ea)
 # - nu are legatura cu garantia fata de night_sync.yml, asigurata integral
 # prin programare.
+#
+# [FIX 2026-08-05 — timeout 20min -> 50min] Rularile #15 si #16 au fost
+# ambele CANCELLED de GitHub Actions la exact 20 min (log verificat, nu
+# presupus: 18 meciuri procesate complet in ~17 min utile, ~57s/meci in
+# medie, dominat de scraping Playwright per meci — nu un hang, treaba utila
+# intrerupta la mijloc). Discovery a gasit 82 de meciuri neprocesate intr-o
+# singura rulare, fata de un buget de ~20 meciuri/20min. Cauza directa:
+# extinderea la 13 competitii urmarite (Primeira Liga/Eredivisie/Super
+# Lig/HNL adaugate 2026-08-04) a marit backlog-ul de Delta Sync fara ca
+# timeout-ul, calibrat cand erau mai putine competitii, sa fie recalibrat
+# odata cu el. 50 min lasa un buget de ~50 meciuri/rulare (suficient sa
+# consume backlog-ul in 2 rulari, nu nelimitat) si respecta in continuare
+# marja fata de night_sync.yml (02:00+50min=02:50, inainte de 03:00).
 
 on:
   schedule:
@@ -40,7 +51,7 @@ concurrency:
 jobs:
   live-sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 50
 
     steps:
       - name: Checkout repository
