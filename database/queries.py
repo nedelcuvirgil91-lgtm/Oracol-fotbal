@@ -2616,9 +2616,18 @@ def is_flashscore_match_already_collected(mid: str) -> bool:
         except ValueError:
             return True
         now = datetime.now(kickoff.tzinfo) if kickoff.tzinfo else datetime.now()
-        # kickoff inca in viitor (cu marja de siguranta de fus orar) -> normal sa nu aiba
-        # inca rezultat, sarim (True). Kickoff trecut, tot fara rezultat -> reincercam (False).
-        if kickoff + timedelta(hours=6) > now:
+        # [FIX — gasit la re-verificare, 2026-08-05] Varianta initiala aduna
+        # marja la kickoff (kickoff + 6h > now), ceea ce trata drept "sarim,
+        # e normal" orice moment pana la 6h DUPA kickoff - reproducea exact
+        # bug-ul original (skip permanent), doar cu o fereastra mai ingusta.
+        # Corect: skip (True) DOAR daca suntem increzatori ca meciul tot nu
+        # a inceput, adica varianta cea mai timpurie posibila de kickoff
+        # (kickoff - marja, in caz ca fusul orar real e mai devreme decat
+        # cel afisat) e tot dupa "acum". Altfel (kickoff trecut cu certitudine,
+        # sau in fereastra de ambiguitate) -> reincercam (False) - a reincerca
+        # putin prea devreme e ieftin (un fetch in plus), a nu reincerca
+        # niciodata e bug-ul pe care il reparam.
+        if kickoff - timedelta(hours=6) > now:
             return True
         return False
     except Exception as exc:

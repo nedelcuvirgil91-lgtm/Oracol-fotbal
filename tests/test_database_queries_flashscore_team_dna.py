@@ -235,6 +235,21 @@ def test_is_flashscore_match_already_collected_false_when_kickoff_past_no_result
     assert q.is_flashscore_match_already_collected("abc123") is False
 
 
+def test_is_flashscore_match_already_collected_false_when_kickoff_few_hours_ago(monkeypatch):
+    """[REGRESIE — ar fi prins bug-ul de semn gasit la re-verificare: prima
+    varianta a fix-ului aduna marja la kickoff (kickoff + 6h > now), care
+    trata orice moment pana la 6h DUPA kickoff drept "sarim" - un meci
+    inceput acum 3 ore (aproape sigur terminat) tot ar fi fost sarit
+    definitiv. Kickoff cu doar cateva ore in urma (nu zile, ca la testul
+    de mai sus) - trebuie sa reincercam (False), nu doar kickoff din trecut
+    indepartat."""
+    past = (datetime.now() - timedelta(hours=3)).isoformat()
+    row = {"id": 1, "kickoff_date": past, "actual_result": None}
+    fake = _FakeClient({"match_history": [row]})
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    assert q.is_flashscore_match_already_collected("abc123") is False
+
+
 def test_is_flashscore_match_already_collected_true_when_kickoff_unparsable(monkeypatch):
     """Data neparsabila - nu se ghiceste, comportament neschimbat (True, siguranta)."""
     row = {"id": 1, "kickoff_date": "not-a-date", "actual_result": None}
