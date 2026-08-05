@@ -60,6 +60,76 @@ def _normalize_team_fields(row: dict) -> dict:
     return out
 
 
+def get_matches_for_week_from_history(
+    leagues: list[str], d_from: str, d_to: str,
+) -> tuple[list[dict], set[str]]:
+    """[ADAUGAT ADR-053] Sursa Database-First pentru oracle_api.
+    get_matches_for_week() — interoghează `match_history` direct, fără
+    niciun apel live. Returnează `(meciuri, ligi_acoperite)` — o ligă din
+    `leagues` care NU apare în `ligi_acoperite` e tratată de apelant ca
+    gaură reală (fallback pe cascada live, restrâns strict la acea ligă).
+
+    `kickoff_date` în `match_history` nu e mereu același format (uneori
+    doar dată, "YYYY-MM-DD", uneori timestamp complet,
+    "YYYY-MM-DDTHH:MM:SS") — filtrul SQL de mai jos e deliberat larg
+    (`d_to` + "T23:59:59" ca prag superior), iar verificarea exactă a
+    ferestrei se face în Python, pe primele 10 caractere — identic
+    convenției deja folosite de `oracle_api._fetch_matches_fd()` la
+    construirea dicționarului de meci (`"kickoff_date": ko[:10]`).
+
+    Forma dicționarului returnat e identică celei produse de fetch-erele
+    live (`fixture_id`/`home_team`/`away_team`/`kickoff_utc`/
+    `kickoff_date`/`league`/`season`/`status`/câmpuri de cotă goale) —
+    niciun cod din app.py/oracle_engine.py/value_dashboard.py nu are
+    nevoie de nicio schimbare. `home_team_id`/`away_team_id` rămân goale
+    ("") — Level DB din `oracle_engine._build_profile()`, sursa PRIMARĂ de
+    profil echipă, folosește deja numele echipei, nu `team_id`."""
+    client = get_client()
+    if client is None:
+        return [], set()
+    try:
+        res = (
+            client.table("match_history")
+            .select("fixture_id,home_team,away_team,league,kickoff_date,season,actual_result")
+            .in_("league", leagues)
+            .gte("kickoff_date", d_from)
+            .lte("kickoff_date", f"{d_to}T23:59:59")
+            .execute()
+        )
+    except Exception as exc:
+        logger.warning("[Queries] get_matches_for_week_from_history failed: %s", exc)
+        return [], set()
+
+    matches: list[dict] = []
+    covered: set[str] = set()
+    for row in (res.data or []):
+        kickoff_raw = row.get("kickoff_date") or ""
+        kickoff_date_only = kickoff_raw[:10]
+        if kickoff_date_only < d_from or kickoff_date_only > d_to:
+            continue  # filtru exact — netul SQL de mai sus e deliberat larg
+        league = row.get("league") or ""
+        home = row.get("home_team") or ""
+        away = row.get("away_team") or ""
+        if not home or not away or not league:
+            continue
+        covered.add(league)
+        matches.append({
+            "fixture_id":     row.get("fixture_id"),
+            "home_team":      home, "away_team": away,
+            "home_team_id":   "", "away_team_id": "",
+            "kickoff_utc":    kickoff_raw,
+            "kickoff_date":   kickoff_date_only,
+            "league":         league,
+            "season":         row.get("season"),
+            "venue_city":     "",
+            "status":         "finished" if row.get("actual_result") else "scheduled",
+            "coverage_level": "",
+            "home_odds": None, "draw_odds": None, "away_odds": None,
+            "odds_source": None, "source": "match_history",
+        })
+    return matches, covered
+
+
 def _rpc_write_ok(res, payload: dict, ctx: str) -> bool:
     """Interpreteaza rezultatul unui RPC canonic (upsert_match_canonical).
     True daca s-a scris (insert/update); False + warning la HARD CONFLICT

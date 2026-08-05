@@ -38,19 +38,23 @@ name: Football Oracle — Flashscore Weekly Fixtures Discovery
 # dupa ce s-a jucat) l-ar fi sarit definitiv prin Delta Sync, lasand
 # scorul NULL permanent.
 #
-# Cadenta: SAPTAMANAL (nu nocturn/zilnic - corectat 2026-08-05, clarificare
-# proprietar produs), joi 00:00 UTC (03:00 Romania, EEST) - acopera
-# saptamana intreaga dintr-o singura rulare. [ZIUA SCHIMBATA 2026-08-05,
-# cerere explicita proprietar produs — "sa nu mai stam pana luni"] Initial
-# luni, mutat pe prima zi disponibila din saptamana curenta (joi) ca prima
-# rulare sa prinda meciurile viitoare cat mai curand, nu abia saptamana
-# urmatoare — ora ramane neschimbata (00:00 UTC, deja verificata fara
-# suprapuneri). Inainte de night_sync.yml (03:00 UTC) SI de live_sync.yml
-# (09:00/13:00/17:00 UTC), gap de minim ~7h30 garantat de timeout-minutes:
-# 90 (aceeasi disciplina de "fara suprapunere prin programare, nu prin
-# lock" ca restul workflow-urilor Flashscore - vezi live_sync.yml). O
-# sesiune Playwright Flashscore per fereastra orara, niciodata doua
-# simultan.
+# Cadenta: [EXTINS 2026-08-06, cerere explicita proprietar produs — motiv:
+# get_matches_for_week() a devenit Database-First (ADR-053), deci o gaura
+# de prospetime in match_history nu mai e mascata de un fallback live
+# automat pt. fiecare utilizator - conteaza mult mai mult acum sa fie
+# mica] DE 2 ORI/saptamana - luni SI joi, 00:00 UTC (03:00 Romania, EEST) -
+# fereastra maxima de invechire scade de la 7 zile la ~3-4 zile. Fiecare
+# rulare acopera saptamana intreaga dintr-o singura trecere (Delta Sync
+# face reluarile ieftine, doar meciurile noi de la ultima rulare sunt
+# fetch-uite complet). [ZIUA JOI ADAUGATA 2026-08-05, cerere explicita
+# proprietar produs — "sa nu mai stam pana luni"] Ramane si azi, alaturi
+# de luni (ziua originala) — ora ramane neschimbata (00:00 UTC, deja
+# verificata fara suprapuneri). Inainte de night_sync.yml (03:00 UTC) SI
+# de live_sync.yml (09:00/13:00/17:00 UTC), gap de minim ~7h30 garantat de
+# timeout-minutes: 90 (aceeasi disciplina de "fara suprapunere prin
+# programare, nu prin lock" ca restul workflow-urilor Flashscore - vezi
+# live_sync.yml). O sesiune Playwright Flashscore per fereastra orara,
+# niciodata doua simultan.
 #
 # limit-per-league: 25 - dimensiunea reala a hub-ului /fixtures/ (16-28
 # meciuri unice, verificat live, fara paginare dincolo de randarea
@@ -68,6 +72,7 @@ name: Football Oracle — Flashscore Weekly Fixtures Discovery
 
 on:
   schedule:
+    - cron: "0 0 * * 1"
     - cron: "0 0 * * 4"
   workflow_dispatch:
     inputs:

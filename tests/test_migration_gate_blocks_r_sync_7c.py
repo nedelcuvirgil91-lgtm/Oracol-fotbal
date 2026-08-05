@@ -25,14 +25,20 @@ _REQUIRED_DISCOVERY_CALLS = {
 
 def _r_sync_7c_has_started() -> bool:
     """Detecție structurală: dacă oricare din cele 6 apeluri de discovery
-    (pașii 1-6 din get_matches_for_week(), ADR-039) lipsește, R-Sync-7c a
-    început să înlocuiască calea veche."""
-    src = textwrap.dedent(inspect.getsource(oracle_api.FootballOracleAPI.get_matches_for_week))
-    tree = ast.parse(src)
-    called = {
-        node.attr for node in ast.walk(tree)
-        if isinstance(node, ast.Attribute) and node.attr in _REQUIRED_DISCOVERY_CALLS
-    }
+    (pașii 1-6, ADR-039) lipsește, R-Sync-7c a început să înlocuiască calea
+    veche. [ACTUALIZAT ADR-053] Cele 6 apeluri au fost extrase din
+    get_matches_for_week() în _fetch_live_week_matches() (cascada live
+    NESCHIMBATĂ logic, devenită fallback per-ligă sub Database-First) —
+    garda inspectează acum sursa combinată a ambelor metode, nu doar a
+    fostei metode unice."""
+    called: set[str] = set()
+    for src in (
+        textwrap.dedent(inspect.getsource(oracle_api.FootballOracleAPI.get_matches_for_week)),
+        textwrap.dedent(inspect.getsource(oracle_api.FootballOracleAPI._fetch_live_week_matches)),
+    ):
+        for node in ast.walk(ast.parse(src)):
+            if isinstance(node, ast.Attribute) and node.attr in _REQUIRED_DISCOVERY_CALLS:
+                called.add(node.attr)
     return bool(_REQUIRED_DISCOVERY_CALLS - called)
 
 

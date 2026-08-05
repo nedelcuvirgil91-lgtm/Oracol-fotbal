@@ -1559,12 +1559,66 @@ class FootballOracleAPI:
     # ── Orchestrator principal ────────────────────────────────────────────
     def get_matches_for_week(self, days_ahead: int = 7,
                              competitions: list[str] | None = None) -> list[dict]:
+        """[REFACTORIZAT ADR-053] Front-door Database-First — interogheaza
+        intai match_history (database.queries.get_matches_for_week_from_
+        history()), fara niciun apel live. Cascada live veche
+        (_fetch_live_week_matches(), neschimbata) ruleaza DOAR pentru
+        ligile fara niciun rand in fereastra ceruta (gaura reala), nu
+        pentru toate ligile la fiecare sesiune."""
         today    = date.today()
         end_date = today + timedelta(days=days_ahead)
         d_from   = today.isoformat(); d_to = end_date.isoformat()
         cache_key = f"week_{d_from}_{days_ahead}_{','.join(sorted(competitions or []))}"
         cached = self._cget(cache_key)
         if cached is not None: return cached
+
+        comps = competitions or list(ODDS_SPORT_KEYS.keys())
+
+        from database.queries import get_matches_for_week_from_history
+        matches, covered = get_matches_for_week_from_history(comps, d_from, d_to)
+        seen_keys = {
+            match_key(m.get("home_team", "") or "", m.get("away_team", "") or "", m.get("kickoff_date", "") or "")
+            for m in matches
+        }
+
+        def _add(new_matches: list[dict]) -> None:
+            for m in new_matches:
+                mk = match_key(
+                    m.get("home_team", "") or "",
+                    m.get("away_team", "") or "",
+                    m.get("kickoff_date", "") or "",
+                )
+                if mk not in seen_keys:
+                    seen_keys.add(mk); matches.append(m)
+
+        gap_leagues = [c for c in comps if c not in covered]
+        if gap_leagues:
+            logger.info("[WeekLoop] Database-First: %d/%d ligi acoperite, fallback live pentru: %s",
+                        len(comps) - len(gap_leagues), len(comps), ", ".join(gap_leagues))
+            _add(self._fetch_live_week_matches(days_ahead, gap_leagues))
+
+        # 7. Demo mode când nu există date (total combinat DB + live fallback)
+        if len(matches) < 3:
+            _add(self._generate_demo_matches(comps))
+
+        matches = [m for m in matches
+                   if d_from <= (m.get("kickoff_date") or "9999") <= d_to]
+        matches = self._attach_odds(matches)
+        matches = self._attach_flashscore_odds_fallback(matches)
+        matches.sort(key=lambda m: m.get("kickoff_utc", ""))
+        self._shadow_evaluate_selection_engine(comps, matches)
+        self._shadow_evaluate_scheduled_fixtures(matches, d_from, d_to)
+        self._cset(cache_key, matches); return matches
+
+    def _fetch_live_week_matches(self, days_ahead: int, competitions: list[str]) -> list[dict]:
+        """[EXTRAS din get_matches_for_week(), ADR-053] Cascada live
+        originala (Odds API -> FreeLF -> football-data.org -> ESPN ->
+        TheSportsDB -> API-Football), NESCHIMBATA logic - apelata acum
+        DOAR pentru ligile fara acoperire in match_history (fallback
+        ingust), nu pentru toate ligile la fiecare sesiune de utilizator."""
+        today    = date.today()
+        end_date = today + timedelta(days=days_ahead)
+        d_from   = today.isoformat(); d_to = end_date.isoformat()
 
         matches: list[dict] = []; seen_keys: set[str] = set()
 
@@ -1578,7 +1632,7 @@ class FootballOracleAPI:
                 if mk not in seen_keys:
                     seen_keys.add(mk); matches.append(m)
 
-        comps    = competitions or list(ODDS_SPORT_KEYS.keys())
+        comps    = competitions
         priority = ["World Cup 2026"] + [c for c in comps if c != "World Cup 2026"]
 
         # 1. Odds API events (cote + meciuri)
@@ -1677,18 +1731,7 @@ class FootballOracleAPI:
             _add(self._fetch_matches_api_football(league, d_from, d_to))
             logger.info("[WeekLoop] API-Football fallback done: %s", league)
 
-        # 7. Demo mode când nu există date
-        if len(matches) < 3:
-            _add(self._generate_demo_matches(comps))
-
-        matches = [m for m in matches
-                   if d_from <= (m.get("kickoff_date") or "9999") <= d_to]
-        matches = self._attach_odds(matches)
-        matches = self._attach_flashscore_odds_fallback(matches)
-        matches.sort(key=lambda m: m.get("kickoff_utc", ""))
-        self._shadow_evaluate_selection_engine(comps, matches)
-        self._shadow_evaluate_scheduled_fixtures(matches, d_from, d_to)
-        self._cset(cache_key, matches); return matches
+        return matches
 
     def _shadow_evaluate_selection_engine(self, comps: list[str], matches: list[dict]) -> None:
         """[ADAUGAT] ADR-034 PR5 — efect secundar, STRICT observațional.
