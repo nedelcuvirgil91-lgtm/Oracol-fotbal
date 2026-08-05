@@ -1,0 +1,64 @@
+name: Football Oracle — Validation Analysis (ADR-052)
+
+# Complet decuplat de daily.yml, continuous_learning.yml (ADR-030) ȘI de
+# consensus_validation.yml (ADR-033) — cadență proprie, concurrency proprie,
+# flag propriu (validation_analysis_enabled, model_config), implicit False.
+# Un eșec aici nu poate bloca sau influența niciun alt ciclu, și invers.
+#
+# Două cron-uri distincte în același workflow — pasul citește
+# github.event.schedule ca să știe care cadență să ruleze:
+#   - zilnic, 10:00 UTC (oră distinctă de daily.yml 03:00, continuous_learning
+#     06:00, consensus_validation 09:00) -> --cadence daily
+#   - săptămânal, luni 10:15 UTC -> --cadence weekly
+
+on:
+  schedule:
+    - cron: "0 10 * * *"
+    - cron: "15 10 * * 1"
+  workflow_dispatch:
+    inputs:
+      cadence:
+        description: "Cadență de rulat manual"
+        required: true
+        default: "daily"
+        type: choice
+        options: ["daily", "weekly"]
+
+concurrency:
+  group: validation-analysis
+  cancel-in-progress: false
+
+jobs:
+  validation-analysis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Determine cadence
+        id: cadence
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "value=${{ github.event.inputs.cadence }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.schedule }}" = "15 10 * * 1" ]; then
+            echo "value=weekly" >> "$GITHUB_OUTPUT"
+          else
+            echo "value=daily" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run validation analysis cycle
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python run_validation_analysis.py --cadence ${{ steps.cadence.outputs.value }}

@@ -611,6 +611,27 @@ def save_engine_comparison_snapshot(row: dict) -> bool:
         return False
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# VALIDATION ANALYSIS — validation_analysis_reports (ADR-052 §2.4)
+# ════════════════════════════════════════════════════════════════════════════
+# Rapoarte periodice (zilnice/săptămânale) descriptive Oracle/ML/Blend, per
+# fereastră de timp. Upsert pe (cadence, period_end) (migrare 008) — o
+# rerulare a aceleiași ferestre actualizează raportul, nu creează duplicate.
+
+def save_validation_analysis_report(row: dict) -> bool:
+    client = get_client()
+    if client is None:
+        return False
+    try:
+        client.table("validation_analysis_reports").upsert(
+            row, on_conflict="cadence,period_end",
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.error("[Supabase] save_validation_analysis_report failed: %s", exc)
+        return False
+
+
 def get_active_champion(algorithm_family: str, league_scope: str) -> dict | None:
     """Campionul activ curent pentru (algorithm_family, league_scope) —
     rândul cu superseded_at IS NULL, per invariantul din migrare (cel mult
