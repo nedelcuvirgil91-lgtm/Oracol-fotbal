@@ -981,8 +981,9 @@ elif nav == "settings":
         if "ml_train_result" in st.session_state:
             res = st.session_state.pop("ml_train_result")
             if res.get("status") == "trained":
-                st.success(f"✅ Model antrenat — {res.get('samples_used')} meciuri, "
-                           f"accuracy={res.get('accuracy')}, log_loss={res.get('log_loss')}.")
+                st.success(f"✅ Diagnostic — {res.get('samples_used')} meciuri, "
+                           f"accuracy={res.get('accuracy')}, log_loss={res.get('log_loss')} "
+                           f"(nu afectează modelul care servește predicții live).")
             elif res.get("status") == "insufficient_data":
                 st.warning(f"ℹ️ {res.get('message', 'Date insuficiente pentru antrenare.')}")
             else:
@@ -1016,14 +1017,23 @@ elif nav == "settings":
             samples_used = ml_status.get("samples_used", 0)
             if samples_used == 0:
                 target = min_required
-                progress_label = f"Progres până la prima antrenare: {current_samples}/{target}"
+                progress_label = f"Progres până la prima antrenare automată: {current_samples}/{target}"
             else:
                 target = samples_used + 20
-                progress_label = f"Progres până la următoarea reantrenare: {current_samples}/{target}"
+                progress_label = f"Progres până la următoarea reantrenare automată: {current_samples}/{target}"
             st.progress(min(current_samples / target, 1.0) if target else 0.0, text=progress_label)
+            # [ADAUGAT ADR-030] Reantrenarea reală, care poate deveni campion,
+            # rulează exclusiv automat (Learning Core, nocturn) — bara de mai
+            # sus arată progresul acelui prag, informativ, nu declanșat de
+            # niciun buton de-aici.
 
-            if st.button("🎓 Antrenează ML acum", use_container_width=True):
-                with st.spinner("Antrenare ML în curs..."):
+            # [MODIFICAT — ADR-055] Strict diagnostic — vezi
+            # oracle_engine.retrain_ml_model(). Nu antrenează/schimbă
+            # modelul care servește predicții live (self.ml, partajat între
+            # toți utilizatorii aplicației) — doar arată ce accuracy/log-loss
+            # ar produce o antrenare acum, pe o instanță separată, aruncată.
+            if st.button("🔍 Rulează diagnostic antrenare (nu afectează predicțiile live)", use_container_width=True):
+                with st.spinner("Antrenare diagnostic în curs..."):
                     result = engine.retrain_ml_model()
                 st.session_state["ml_train_result"] = result
                 st.rerun()

@@ -2244,10 +2244,21 @@ class FootballOracleEngine:
 
     # ── ML training trigger (v3.0) ────────────────────────────────────────
     def retrain_ml_model(self):
-        """Reantrenează modelul ML pe toate datele disponibile în Supabase."""
-        if not self.ml:
+        """[MODIFICAT — ADR-055] Strict diagnostic — antrenează o instanță
+        NOUĂ, aruncată, de MLPredictorEngine, niciodată self.ml (obiectul
+        folosit de _get_ml_engine_prediction() pentru servire live, deja
+        populat prin _resolve_champion()/seed_from_champion() cu Campionul
+        real, promovat). engine e @st.cache_resource — partajat între toți
+        utilizatorii aplicației — deci antrenarea directă pe self.ml ar
+        suprascrie, live, modelul care servește predicții tuturor, ocolind
+        complet Challenger Framework/Promotion Engine/ADR-002. Rezultatul
+        (accuracy/log-loss/samples) rămâne util ca răspuns la "dacă aș
+        antrena acum, ce aș obține?", fără niciun efect asupra modelului
+        activ. Antrenarea reală, guvernată, rămâne exclusiv Learning Core
+        (continuous_learning.py, ADR-030)."""
+        if not ML_MODULE_AVAILABLE:
             return {"status": "unavailable", "message": "Modulul ml_predictor.py lipsește."}
-        result = self.ml.train()
+        result = MLPredictorEngine().train()
         return {
             "status": result.status, "samples_used": result.samples_used,
             "accuracy": result.accuracy, "log_loss": result.log_loss,
