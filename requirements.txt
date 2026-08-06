@@ -20,3 +20,10 @@ supabase>=2.4.0
 xgboost>=2.0.0
 scikit-learn>=1.4.0
 kagglehub==1.0.2
+# [ADAUGAT — 2026-08-06] Lipsea din requirements.txt de la crearea
+# predictor_regression_suite.yml (commit 9192526, 2026-08-03) — gate-ul
+# "obligatoriu la merge" rula `pip install -r requirements.txt` apoi
+# `pytest`, dar pytest nu era niciodată instalat: "No module named pytest".
+# Confirmat: toate cele 6 push-uri pe main din acest interval au eșuat
+# silențios acest gate (fără branch protection care să blocheze push direct).
+pytest>=8.0.0
