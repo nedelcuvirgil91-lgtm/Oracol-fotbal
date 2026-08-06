@@ -11,13 +11,19 @@ Orchestrator de noapte, decuplat de `daily.yml`/`sync/run_daily.py`
     Database → Team DNA → Oracle Data Layer → Diagnostics → Cleanup →
     Backup → Final Report
 
-Plus o etapă SUPLIMENTARĂ, în afara acestor 11 nume — Continuous Learning
-(Learning Core, ADR-030), PRE-EXISTENTĂ, complet independentă de
-Flashscore/Team DNA/Faza 2/Faza 3 (Champion/Challenger, nu recalibrare
-Predictor) — păstrată aici doar ca să nu se piardă automatizarea ei după
-consolidarea schedulerului (vezi `.github/workflows/continuous_learning.yml`,
-cron dezactivat acolo). Gatată intern de `learning_core_enabled`, implicit
-OPRIT — no-op sigur azi.
+Plus DOUĂ etape SUPLIMENTARE, în afara acestor 11 nume:
+  - Challenger Shadow Batch (ADR-056) — loghează predicții shadow pentru
+    Challenger-ul activ pe toate meciurile descoperite, indiferent de
+    vizionare, ca să accelereze acumularea celor 200 de meciuri necesare
+    evaluării (pragul NU se schimbă, doar viteza).
+  - Continuous Learning (Learning Core, ADR-030), PRE-EXISTENTĂ, complet
+    independentă de Flashscore/Team DNA/Faza 2/Faza 3 (Champion/Challenger,
+    nu recalibrare Predictor) — păstrată aici doar ca să nu se piardă
+    automatizarea ei după consolidarea schedulerului (vezi
+    `.github/workflows/continuous_learning.yml`, cron dezactivat acolo).
+    Gatată intern de `learning_core_enabled`, implicit OPRIT — no-op sigur
+    azi. Rulează DUPĂ Challenger Shadow Batch, ca predicțiile proaspete să
+    existe deja la evaluare.
 
 Fiecare etapă rulează IZOLAT (o excepție într-o etapă nu oprește restul
 pipeline-ului — la fel ca `sync/run_daily.py`, care deja tratează fiecare
@@ -134,6 +140,21 @@ def _stage_oracle_data_layer() -> str:
     return "context disponibil live în Oracle Engine (home/away_flashscore_dna) — fără recalibrare, fără pas batch"
 
 
+def _stage_challenger_shadow_batch() -> dict:
+    """[ADAUGAT — ADR-056] Loghează predicții shadow pentru Challenger-ul
+    activ pe TOATE meciurile descoperite (nu doar cele vizionate în
+    aplicație) — accelerează acumularea celor 200 de meciuri necesare
+    evaluării (MIN_MATCHES_FOR_EVALUATION, neschimbat), fără nicio
+    relaxare a rigorii statistice de promovare. Rulează ÎNAINTE de etapa
+    Continuous Learning de mai jos, ca predicțiile proaspete să existe
+    deja când _phase_a_monitor_existing() evaluează Challenger-ul, în
+    aceeași rulare nocturnă. Vezi oracle_engine.log_challenger_shadow_
+    for_week() pentru detaliu complet (idempotent, Database-First)."""
+    from oracle_engine import FootballOracleEngine
+    engine = FootballOracleEngine()
+    return engine.log_challenger_shadow_for_week()
+
+
 def _stage_ml_refresh_pre_existing() -> str:
     """Etapă SUPLIMENTARĂ, în afara celor 11 numite explicit — Continuous
     Learning (Learning Core, ADR-030) PRE-EXISTENTĂ, independentă de
@@ -190,6 +211,7 @@ def run() -> list[dict[str, Any]]:
     print("  Discovery → API Providers → Flashscore → Validation →")
     print("  Canonical Database → Team DNA → Oracle Data Layer → Diagnostics →")
     print("  Cleanup → Backup → Final Report")
+    print("  (+ Challenger Shadow Batch, ADR-056)")
     print("  (+ Continuous Learning, ADR-030, pre-existentă, gatată OFF implicit)")
     print("═" * 78)
 
@@ -200,6 +222,8 @@ def run() -> list[dict[str, Any]]:
     _run_stage("5. Flashscore (Discovery + fetch/persist, Delta Sync)", _stage_flashscore, report)
     _run_stage("6. Team DNA", _stage_team_dna, report)
     _run_stage("7. Oracle Data Layer", _stage_oracle_data_layer, report)
+    _run_stage("[extra, ADR-056] Challenger Shadow Batch (logare predicții pe toate meciurile)",
+               _stage_challenger_shadow_batch, report)
     _run_stage("[extra, pre-existentă] Continuous Learning (ADR-030)", _stage_ml_refresh_pre_existing, report)
     _run_stage("8. Diagnostics", _stage_diagnostics, report)
     _run_stage("9. Cleanup (Season Cleanup — dry run)", _stage_cleanup, report)

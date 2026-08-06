@@ -1,11 +1,12 @@
 """Teste pentru sync/run_night.py — orchestrare Night Sync (Faza 2 finalizare).
 
-Verifică: cele 8 etape rulează, în ordinea corectă (Discovery+API+
+Verifică: cele 9 etape rulează, în ordinea corectă (Discovery+API+
 Validation+Canonical -> Flashscore -> Team DNA -> Oracle Data Layer ->
-Continuous Learning [extra, pre-existentă] -> Diagnostics -> Cleanup ->
-Backup); o etapă eșuată NU oprește restul pipeline-ului (izolare per
-etapă); raportul final conține un rând per etapă cu ok/detail sau
-ok=False/error. Fără rețea — fiecare dependență externă e monkeypatch-uită."""
+Challenger Shadow Batch [extra, ADR-056] -> Continuous Learning [extra,
+pre-existentă] -> Diagnostics -> Cleanup -> Backup); o etapă eșuată NU
+oprește restul pipeline-ului (izolare per etapă); raportul final conține
+un rând per etapă cu ok/detail sau ok=False/error. Fără rețea — fiecare
+dependență externă e monkeypatch-uită."""
 from __future__ import annotations
 
 import sync.run_night as night
@@ -16,6 +17,8 @@ def _patch_all_stages_ok(monkeypatch, calls):
     monkeypatch.setattr(night, "_stage_flashscore", lambda: calls.append("flashscore") or "ok")
     monkeypatch.setattr(night, "_stage_team_dna", lambda: calls.append("team_dna") or "ok")
     monkeypatch.setattr(night, "_stage_oracle_data_layer", lambda: calls.append("oracle_data_layer") or "ok")
+    monkeypatch.setattr(night, "_stage_challenger_shadow_batch",
+                         lambda: calls.append("challenger_shadow_batch") or {"matches_checked": 0, "evaluated": 0})
     monkeypatch.setattr(night, "_stage_ml_refresh_pre_existing", lambda: calls.append("ml_refresh") or "ok")
     monkeypatch.setattr(night, "_stage_diagnostics", lambda: calls.append("diagnostics") or {"matches_checked": 0})
     monkeypatch.setattr(night, "_stage_cleanup", lambda: calls.append("cleanup") or {"delete_executed": False})
@@ -30,9 +33,9 @@ def test_run_executes_all_stages_in_order(monkeypatch):
 
     assert calls == [
         "api_providers", "flashscore", "team_dna", "oracle_data_layer",
-        "ml_refresh", "diagnostics", "cleanup", "backup",
+        "challenger_shadow_batch", "ml_refresh", "diagnostics", "cleanup", "backup",
     ]
-    assert len(report) == 8
+    assert len(report) == 9
     assert all(r["ok"] for r in report)
 
 
@@ -50,13 +53,13 @@ def test_run_isolates_a_failing_stage_and_continues(monkeypatch):
 
     assert calls == [
         "api_providers", "flashscore", "team_dna", "oracle_data_layer",
-        "ml_refresh", "diagnostics", "cleanup", "backup",
+        "challenger_shadow_batch", "ml_refresh", "diagnostics", "cleanup", "backup",
     ]  # toate etapele au rulat, in ciuda esecului celei de-a 2-a
     flashscore_report = next(r for r in report if "Flashscore" in r["stage"])
     assert flashscore_report["ok"] is False
     assert "simulated failure" in flashscore_report["error"]
     # Restul etapelor raman OK, neafectate.
-    assert sum(1 for r in report if r["ok"]) == 7
+    assert sum(1 for r in report if r["ok"]) == 8
 
 
 def test_run_returns_report_with_duration_for_every_stage(monkeypatch):
@@ -132,6 +135,27 @@ def test_cleanup_stage_never_deletes(monkeypatch):
     detail = night._stage_cleanup()
     assert detail["delete_executed"] is False
     assert detail["cleanup_candidates"] == ["2019-2020"]
+
+
+def test_challenger_shadow_batch_stage_instantiates_engine_and_delegates(monkeypatch):
+    """[ADAUGAT ADR-056] _stage_challenger_shadow_batch instantiaza
+    FootballOracleEngine si delega direct la log_challenger_shadow_for_week()
+    — nu reimplementeaza nicio logica proprie aici."""
+    calls = []
+
+    class _FakeEngine:
+        def __init__(self):
+            calls.append("init")
+
+        def log_challenger_shadow_for_week(self):
+            calls.append("log_challenger_shadow_for_week")
+            return {"matches_checked": 5, "evaluated": 5}
+
+    monkeypatch.setattr("oracle_engine.FootballOracleEngine", _FakeEngine)
+    detail = night._stage_challenger_shadow_batch()
+
+    assert calls == ["init", "log_challenger_shadow_for_week"]
+    assert detail == {"matches_checked": 5, "evaluated": 5}
 
 
 def test_ml_refresh_stage_is_gated_and_pre_existing(monkeypatch):

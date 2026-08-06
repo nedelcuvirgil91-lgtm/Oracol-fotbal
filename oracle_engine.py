@@ -2265,6 +2265,34 @@ class FootballOracleEngine:
             "message": result.message,
         }
 
+    def log_challenger_shadow_for_week(self, days_ahead: int = 7) -> dict:
+        """[ADAUGAT — ADR-056] Evaluează TOATE meciurile descoperite pentru
+        fereastra curentă (self.api.get_matches_for_week(), Database-First,
+        ADR-053), indiferent dacă userul le vizionează în aplicație —
+        accelerează acumularea de predicții shadow pentru Challenger-ul
+        activ (MIN_MATCHES_FOR_EVALUATION, tot 200 — pragul NU se schimbă,
+        doar viteza de acumulare). evaluate_match() rămâne complet
+        neschimbat — shadow logging-ul rulează pe același traseu ca la o
+        vizionare manuală (_log_challenger_shadow(), gatat de
+        challenger_shadow_logging_enabled). Idempotent — vezi
+        shadow_testing.log_shadow_prediction() (upsert pe fixture_id/
+        experiment_name/experiment_version/experiment_group/
+        processing_stage) — sigur de rulat zilnic pentru aceleași meciuri
+        încă nejucate, doar reîmprospătează predicția. Orice eșec per meci
+        e izolat, nu oprește restul batch-ului (Regula #8)."""
+        matches = self.api.get_matches_for_week(days_ahead=days_ahead)
+        evaluated = 0
+        for m in matches:
+            try:
+                if self.evaluate_match(m) is not None:
+                    evaluated += 1
+            except Exception as exc:
+                logger.warning(
+                    "[ChallengerShadowBatch] evaluate_match a eșuat pentru %s vs %s: %s",
+                    m.get("home_team"), m.get("away_team"), exc,
+                )
+        return {"matches_checked": len(matches), "evaluated": evaluated}
+
     def get_ml_status(self) -> dict:
         if not self.ml:
             return {"available": False}
