@@ -33,7 +33,7 @@ on:
       limit_per_league:
         description: "Limită meciuri descoperite per competiție"
         required: false
-        default: "8"
+        default: "10"
       dry_run:
         description: "Doar Discovery — fără fetch/persist"
         required: false
@@ -43,7 +43,7 @@ on:
 jobs:
   flashscore-foundation-data-layer:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - name: Checkout repository
