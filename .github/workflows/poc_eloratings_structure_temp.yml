@@ -25,8 +25,11 @@ jobs:
           python-version: "3.11"
           cache: "pip"
 
-      - name: Install minimal dependencies (requests + beautifulsoup4 only)
-        run: pip install requests beautifulsoup4
+      - name: Install Playwright
+        run: pip install playwright
+
+      - name: Install Playwright Chromium
+        run: playwright install --with-deps chromium
 
       - name: Run structure POC
         run: python scripts/_poc_eloratings_structure_temp.py
