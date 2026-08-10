@@ -8,27 +8,19 @@ name: Football Oracle — Live Sync
 # ar fi exact tipul de "interogare inutila catre provideri live" interzis
 # explicit de filosofia proiectului (cota API critica).
 #
-# Cadenta: [REDUS 2026-08-05, cerere explicita proprietar produs — 6
-# rulari/zi insemnau 6 sesiuni Playwright separate catre Flashscore/zi,
-# expunere inutila cand prospetimea de cateva ore nu e critica] 3x/zi -
-# 09:00/13:00/17:00 UTC (12:00/16:00/20:00 ora Romaniei, EEST, UTC+3 -
-# orele cerute explicit de proprietarul produsului). Program ales exclusiv
-# prin cron, ca sa garanteze absenta suprapunerii cu night_sync.yml (03:00
-# UTC, timeout-minutes: 120 -> GitHub Actions OPRESTE jobul la exact 120
-# min, deci ora cea mai tarzie posibila de finalizare e 05:00 UTC, nu o
-# estimare) SI cu sync_pre_match_odds.yml (08:00/20:00 UTC, timeout 45 min
-# -> 08:45/20:45 cel mai tarziu) - fara niciun mecanism de concurrency
-# intre workflow-uri diferite (prefera programare simpla, nu blocare).
-# Slotul 09:00 are 15 min marja dupa 08:45 (sync_pre_match_odds); slotul
-# 17:00 are peste 2h marja inainte de 20:00 (sync_pre_match_odds).
-# Flashscore are Delta Sync real (is_flashscore_match_already_collected) -
-# o cadenta mai deasa e ieftina prin design, spre deosebire de providerii
-# API, care nu au acest mecanism si raman la o singura rulare/zi
-# (night_sync.yml). `concurrency` de mai jos previne doar suprapunerea
-# unei rulari live_sync cu EA INSASI (o rulare care depaseste 4h nu
-# porneste una noua peste ea) - nu are legatura cu garantia fata de
-# night_sync.yml/sync_pre_match_odds.yml, asigurata integral prin
-# programare.
+# Cadenta: [REDUS din nou — 2026-08-10, cerere explicita proprietar produs,
+# buget GitHub Actions 90% consumat (1800/2000 min) dupa doar 10 zile din
+# ciclul de facturare — night_sync (~70min/zi) + live_sync 3x/zi (~19min
+# fiecare, ~57min/zi) + lineup_sync */30min (~20min/zi) erau principalii
+# consumatori] 1x/zi, 17:00 UTC (20:00 ora Romaniei, EEST, UTC+3 — acelasi
+# slot cu lineup_sync.yml, cerut explicit). Functional SIGUR de redus la
+# 1x/zi (spre deosebire de lineup_sync) - Delta Sync-ul e complet
+# (is_flashscore_match_already_collected scaneaza TOATE meciurile, nu doar
+# o fereastra din jurul orei de rulare) - prospetimea scade la ~24h in loc
+# de ~4-8h, dar niciun meci nu ramane definitiv neacoperit. Backlog-ul intre
+# rulari creste ~3x (24h in loc de ~8h) - timeout-minutes crescut la 90 mai
+# jos (de la 50), ca o rulare cu backlog mai mare sa nu fie intrerupta la
+# mijloc (vezi precedentul #15/#16, comentariul de mai jos).
 #
 # [FIX 2026-08-05 — timeout 20min -> 50min] Rularile #15 si #16 au fost
 # ambele CANCELLED de GitHub Actions la exact 20 min (log verificat, nu
@@ -39,15 +31,13 @@ name: Football Oracle — Live Sync
 # extinderea la 13 competitii urmarite (Primeira Liga/Eredivisie/Super
 # Lig/HNL adaugate 2026-08-04) a marit backlog-ul de Delta Sync fara ca
 # timeout-ul, calibrat cand erau mai putine competitii, sa fie recalibrat
-# odata cu el. 50 min lasa un buget de ~50 meciuri/rulare (suficient sa
-# consume backlog-ul in 2 rulari, nu nelimitat) si respecta in continuare
-# marja fata de night_sync.yml/sync_pre_match_odds.yml — vezi comentariul
-# despre cadenta, mai sus, pentru marjele exacte pe noile sloturi
-# 09:00/13:00/17:00 UTC.
+# odata cu el (istoric — de atunci, cadenta a scazut la 1x/zi, 17:00 UTC,
+# vezi comentariul despre cadenta, mai sus; timeout-ul a crescut la 90 min
+# pentru acelasi motiv, backlog mai mare per rulare).
 
 on:
   schedule:
-    - cron: "0 9,13,17 * * *"
+    - cron: "0 17 * * *"
   workflow_dispatch: {}
 
 concurrency:
@@ -57,7 +47,7 @@ concurrency:
 jobs:
   live-sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 90
 
     steps:
       - name: Checkout repository

@@ -15,10 +15,23 @@ name: Football Oracle — Lineup Sync (Free Live Football)
 # apeluri FreeLF/meci în fereastra de 4h. La */30 min, un meci în fereastra
 # de 4h primește ~8 poll-uri (până la 16 apeluri), înjumătățind consumul,
 # păstrând acoperire rezonabilă aproape de kickoff.
+#
+# [REDUS din nou — 2026-08-10, cerere explicită proprietar produs, buget
+# GitHub Actions 90% consumat (1800/2000 min) după doar 10 zile din ciclul
+# de facturare] 1x/zi, 17:00 UTC (20:00 ora României, EEST, UTC+3).
+# **GOL DE ACOPERIRE ACCEPTAT EXPLICIT** (întrebare pusă, răspuns explicit
+# al proprietarului produsului: "1x/zi oricum, accept golul") — fereastra
+# rămâne relativă la MOMENTUL rulării (T-15min..T+240min, neschimbată în
+# sync/sync_lineup_freelf.py), deci la o singură rulare/zi acoperă STRICT
+# meciurile cu kickoff în 19:45–00:00 ora României. Orice meci din afara
+# acestui interval NU mai primește aliniamente deloc (nu doar mai rar) —
+# spre deosebire de live_sync.yml (Delta Sync complet, sigur de redus la
+# 1x/zi fără gol de acoperire), acesta e un compromis funcțional real,
+# asumat conștient pentru bugetul de minute, nu doar o optimizare de cost.
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "0 17 * * *"
   workflow_dispatch:
     inputs:
       window_minutes:
