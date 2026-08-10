@@ -169,12 +169,15 @@ def test_elo_read_only_called_from_build_profile():
 
 
 def test_get_elo_rating_never_called_from_oracle_engine():
-    """[ADĂUGAT — ADR-039 R-Sync-4] Regresie directă: get_elo_rating()
-    (apel live la eloratings.net) nu mai are voie să fie apelat din
-    oracle_engine.py, sub nicio formă — singurul apelant de producție
-    rămâne Sync Layer (elo_ratings_adapter.py, care de la corectarea
-    2026-08-10 randază pagina direct prin Playwright, nu mai trece prin
-    oracle_api.get_national_elo_ratings_raw())."""
+    """[ADĂUGAT — ADR-039 R-Sync-4; ACTUALIZAT — 2026-08-10] Regresie
+    directă: `get_elo_rating()` nu mai are voie să fie apelat din
+    oracle_engine.py, sub nicio formă. Funcția în sine (împreună cu
+    `_fetch_elo_ratings()`/`get_national_elo_ratings_raw()`) a fost ȘTEARSĂ
+    complet din oracle_api.py la 2026-08-10 — grep + verificare AST au
+    confirmat zero apelanți de producție rămași (Sync Layer randază azi
+    direct prin Playwright, elo_ratings_adapter.py). Testul rămâne, deliberat,
+    ca gardă de regresie ieftină — insurance contra reintroducerii unui apel
+    cu același nume din oracle_engine.py, nu contra existenței funcției."""
     path = ROOT / "oracle_engine.py"
     tree = ast.parse(path.read_text(encoding="utf-8"), filename="oracle_engine.py")
     lines = _calls_matching(tree, {"get_elo_rating"})

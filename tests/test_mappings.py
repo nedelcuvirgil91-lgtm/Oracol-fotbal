@@ -3,7 +3,7 @@ from mappings import (
     ODDS_SPORT_KEYS, FREE_LF_LEAGUE_IDS, SPORT_KEY_TO_LEAGUE,
     API_FOOTBALL_LEAGUE_IDS,
     verify_league_coverage, normalize_league_name, normalize_team_name,
-    LEAGUE_BASELINES, ELO_RATINGS_FALLBACK,
+    LEAGUE_BASELINES,
 )
 
 BOOTSTRAP_LEAGUES = [
@@ -120,10 +120,9 @@ def test_normalize_team_name_previously_colliding_teams():
     assert normalize_team_name("Leicester City FC") == "Leicester City"
 
 
-def test_league_baselines_and_elo_fallback_untouched():
+def test_league_baselines_untouched():
     """Astea NU trebuiau atinse de refactorizare - verificare ca nu s-a stricat nimic."""
     assert len(LEAGUE_BASELINES) >= 10
-    assert len(ELO_RATINGS_FALLBACK) >= 60
     assert LEAGUE_BASELINES.get("Premier League") == 1.35
 
 

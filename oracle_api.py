@@ -31,16 +31,10 @@ except ImportError:
 from key_manager import get_key_manager
 from request_manager import get_request_manager  # [ADAUGAT R-Sync-6, ADR-039]
 
-try:
-    from bs4 import BeautifulSoup
-    BS4_AVAILABLE = True
-except ImportError:
-    BS4_AVAILABLE = False
-
 from mappings import (
     ODDS_SPORT_KEYS, SPORT_KEY_TO_LEAGUE, FD_COMPETITIONS,
     ESPN_LEAGUE_SLUGS, TSDB_LEAGUE_IDS, TSDB_TEAM_IDS, API_FOOTBALL_LEAGUE_IDS,
-    ELO_RATINGS_FALLBACK, FREE_LF_LEAGUE_IDS,
+    FREE_LF_LEAGUE_IDS,
     normalize_team_name, match_key,
 )
 
@@ -60,7 +54,6 @@ ODDS_API_URL       = "https://api.the-odds-api.com/v4"
 THESPORTSDB_URL    = "https://www.thesportsdb.com/api/v1/json/3"
 ESPN_API_URL       = "https://site.api.espn.com/apis/site/v2/sports/soccer"
 WEATHER_URL        = "http://api.weatherapi.com/v1"
-ELO_URL            = "https://www.eloratings.net"
 FREE_LF_URL        = "https://free-api-live-football-data.p.rapidapi.com"
 FREE_LF_HOST       = "free-api-live-football-data.p.rapidapi.com"
 
@@ -78,13 +71,6 @@ DEFAULT_SEASON = 2026
 # (stare la nivel de modul, elapsed fata de ultimul apel real, indiferent de
 # cate instante FootballOracleAPI exista in acelasi proces).
 #
-# eloratings.net NU e in aceasta lista desi trimite tot zero header-e reale
-# (confirmat live, acelasi POC) — protejat deja structural, mai puternic
-# decat orice interval static: scrape unic (toate ratingurile nationale
-# intr-un singur raspuns, fara paginare per echipa), cache CacheManager 24h
-# (`_cget("elo_ratings")`), deci cel mult un apel real la 24h indiferent de
-# cate procese partajeaza acelasi cache disc/Supabase — vezi
-# `_fetch_elo_ratings()`.
 _STATIC_THROTTLE_INTERVAL_SECONDS: dict[str, float] = {
     "thesportsdb": 1.0,
 }
@@ -260,7 +246,6 @@ class FootballOracleAPI:
         (THESPORTSDB_URL, "thesportsdb"),
         (ESPN_API_URL, "espn"),
         (WEATHER_URL, "weatherapi"),
-        (ELO_URL, "eloratings"),
     )
 
     def _detect_provider_endpoint(self, url: str) -> tuple[str, str]:
@@ -1231,88 +1216,19 @@ class FootballOracleAPI:
                 })
         return results
 
-    # ── ELO ratings ───────────────────────────────────────────────────────
-    def _fetch_elo_ratings(self) -> dict[str, int]:
-        # [REPARAT] Elimin stratul redundant (_disc_fresh + self._elo_cache) -
-        # CacheManager (prin _cget, categoria "elo", TTL 24h) acoperea deja
-        # exact acelasi caz, dublat inutil. O singura sursa de adevar acum.
-        #
-        # [THROTTLING STATIC DOCUMENTAT — Phase 4 Functional Completion,
-        # punctul 1] Bypass istoric al `_get()` (HTML, nu JSON) — nu poate
-        # trece prin gating-ul universal de mai sus. Confirmat live (POC
-        # 2026-08-03): eloratings.net nu trimite niciun header de
-        # rate-limit. Protectia reala e mai sus in acest exact bloc: cache-ul
-        # de 24h (`_cget`/`_cset("elo_ratings", ...)`, cateva linii mai jos)
-        # face ca acest `self._s.get()` sa se execute cel mult o data la 24h
-        # per proces, indiferent de cate ori e apelat `get_elo_rating()` -
-        # un raspuns unic acopera TOATE echipele nationale (fara paginare
-        # per echipa), deci nu exista risc de burst pe care un interval
-        # static l-ar mai reduce.
-        cached = self._cget("elo_ratings")
-        if cached is not None: return cached
-        if not BS4_AVAILABLE:
-            fallback = dict(ELO_RATINGS_FALLBACK)
-            self._cset("elo_ratings", fallback); return fallback
-        try:
-            r = self._s.get(ELO_URL,
-                            headers={"User-Agent": _ua(), "Accept-Language": "en-US,en;q=0.9"},
-                            timeout=15)
-            if not r.ok: raise Exception(f"HTTP {r.status_code}")
-            soup = BeautifulSoup(r.text, "html.parser"); ratings: dict[str, int] = {}
-            table = soup.find("table")
-            if table:
-                for row in table.find_all("tr"):
-                    cells = row.find_all(["td", "th"])
-                    if len(cells) < 3: continue
-                    try:
-                        raw_name = cells[1].get_text(strip=True)
-                        raw_elo  = cells[2].get_text(strip=True).replace(",", "")
-                        elo_val  = int(raw_elo)
-                        canonical = normalize_team_name(raw_name)
-                        if canonical and elo_val > 0: ratings[canonical] = elo_val
-                    except (ValueError, IndexError): continue
-            if not ratings: ratings = dict(ELO_RATINGS_FALLBACK)
-            self._cset("elo_ratings", ratings)
-            return ratings
-        except Exception as exc:
-            logger.error("[ELO] Scrape failed: %s", exc)
-            fallback = dict(ELO_RATINGS_FALLBACK)
-            self._cset("elo_ratings", fallback); return fallback
-
-    def get_elo_rating(self, team_name: str) -> int | None:
-        canonical = normalize_team_name(team_name)
-        ratings   = self._fetch_elo_ratings()
-        result    = ratings.get(canonical)
-        if result is None:
-            result = ELO_RATINGS_FALLBACK.get(canonical)
-            if result: logger.info("[ELO] %s in hardcoded fallback: %d", canonical, result)
-        return result
-
-    def get_national_elo_ratings_raw(self) -> dict[str, int]:
-        """[Sync Layer only — ADR-039, R-Sync-4] Toate ratingurile ELO
-        naționale cunoscute, brute, dintr-un singur scrape — expune
-        public `_fetch_elo_ratings()` (deja funcțională, deja normalizează
-        numele la scrape) ca punct de intrare Sync Layer, fără s-o
-        rescrie (ADR-039 Principiul 4).
-
-        Reproduce EXPLICIT semantica pe două niveluri deja folosită de
-        `get_elo_rating()` (live scrape are prioritate, `ELO_RATINGS_FALLBACK`
-        completează echipele lipsă) — nu doar fallback-ul „scrape eșuat
-        total" deja intern lui `_fetch_elo_ratings()`. Necesar aici fiindcă,
-        după migrare, Oracle Engine nu mai citește live deloc — dacă
-        snapshot-ul persistat n-ar include și completarea per-echipă din
-        `ELO_RATINGS_FALLBACK`, orice echipă prezentă azi doar în fallback
-        (nu în tabelul scrape-uit) ar deveni silențios „necunoscută" după
-        migrare — o regresie reală, nu doar o schimbare de sursă.
-
-        [ADR-039, R-Sync-4 — TEMPORAR, nu permanent] `ELO_RATINGS_FALLBACK`
-        e o soluție de tranziție, nu o decizie arhitecturală definitivă —
-        vezi comentariul de la definiția ei (`mappings.py`). Se elimină (sau
-        se reduce strict) odată ce sincronizarea live confirmă acoperire
-        completă pentru toate echipele din ea, nu se păstrează din inerție."""
-        merged = dict(ELO_RATINGS_FALLBACK)
-        merged.update(self._fetch_elo_ratings())
-        return merged
+    # [ELIMINAT — 2026-08-10, cod mort confirmat] `_fetch_elo_ratings()` /
+    # `get_elo_rating()` / `get_national_elo_ratings_raw()` — scrape live
+    # eloratings.net prin `requests`+BeautifulSoup pe HTML brut, care nu a
+    # funcționat NICIODATĂ (pagina randază tabelul 100% client-side prin
+    # SlickGrid, confirmat live prin POC izolat Playwright, 2026-08-10 —
+    # vezi elo_ratings_adapter.py). Fiecare apel cădea tăcut pe
+    # ELO_RATINGS_FALLBACK (mappings.py, eliminat odată cu acestea). Grep +
+    # verificare AST (tests/test_oracle_engine_single_profile_construction_
+    # point.py::test_get_elo_rating_never_called_from_oracle_engine) au
+    # confirmat zero apelanți de producție rămași — Sync Layer citește azi
+    # direct de la eloratings.net prin EloRatingsAdapter (Playwright real),
+    # servirea live citește exclusiv Supabase (database.queries.
+    # get_national_team_elo()). Vezi ADR-039, addendum 2026-08-10.
 
     # ── Odds ──────────────────────────────────────────────────────────────
     def _fetch_market(self, sport_key: str, markets: str) -> list | None:

@@ -789,39 +789,18 @@ def verify_league_coverage(bootstrap_leagues: list[str] | None = None) -> dict[s
     return {"errors": errors, "warnings": warnings}
 
 
-#
-# [ADR-039, R-Sync-4 — soluție TEMPORARĂ de compatibilitate, nu decizie
-# permanentă] Folosit din 2026-07-27 și de EloRatingsAdapter
-# (elo_ratings_adapter.py, via oracle_api.get_national_elo_ratings_raw()),
-# fuzionat cu scrape-ul live eloratings.net în snapshot-ul persistat
-# (national_team_elo_snapshot) — evită o regresie: fără fuziune, orice
-# echipă prezentă azi doar aici (nu în tabelul scrape-uit) ar deveni
-# silențios „necunoscută" după migrare. TREBUIE eliminat (sau redus strict
-# la echipe fără nicio acoperire live confirmată) în momentul în care
-# sincronizarea live oferă acoperire completă pentru toate echipele de
-# mai jos — nu se lasă permanent din inerție. Verificare de acoperire:
-# comparat cu conținutul real al `national_team_elo_snapshot` după câteva
-# rulări ale sync/sync_national_team_elo.py.
-ELO_RATINGS_FALLBACK: dict[str, int] = {
-    "Argentina": 2141, "France": 2085, "England": 2065, "Brazil": 2062,
-    "Spain": 2052, "Belgium": 2040, "Portugal": 2038, "Netherlands": 2034,
-    "Germany": 2024, "Croatia": 2006, "Italy": 1998, "Uruguay": 1985,
-    "Colombia": 1978, "United States": 1975, "Mexico": 1972, "Denmark": 1968,
-    "Switzerland": 1964, "Morocco": 1952, "Japan": 1948, "Senegal": 1942,
-    "South Korea": 1936, "Australia": 1928, "Ecuador": 1920, "Canada": 1918,
-    "Poland": 1915, "Serbia": 1912, "Tunisia": 1905, "Iran": 1898,
-    "Saudi Arabia": 1890, "Ghana": 1885, "Cameroon": 1882, "Costa Rica": 1875,
-    "Peru": 1870, "Nigeria": 1868, "Qatar": 1850, "Panama": 1830,
-    "Honduras": 1815, "Bolivia": 1808, "Paraguay": 1812, "Jamaica": 1780,
-    "Curaçao": 1745, "Cape Verde": 1820, "New Zealand": 1738, "Bahrain": 1720,
-    "Iraq": 1715, "Venezuela": 1800, "Chile": 1835, "Ivory Coast": 1870,
-    "Manchester City": 1950, "Real Madrid": 1945, "Bayern Munich": 1940,
-    "Liverpool": 1932, "FC Barcelona": 1928, "Paris Saint-Germain": 1920,
-    "Arsenal": 1915, "Chelsea": 1908, "Manchester United": 1900,
-    "Juventus": 1895, "Inter Milan": 1898, "AC Milan": 1885,
-    "Atletico Madrid": 1890, "Borussia Dortmund": 1885, "Napoli": 1880,
-    "Tottenham Hotspur": 1875,
-}
+# [ELIMINAT — 2026-08-10, cod mort confirmat] `ELO_RATINGS_FALLBACK` era
+# fallback-ul static "temporar" din ADR-039 R-Sync-4, folosit de
+# oracle_api._fetch_elo_ratings()/get_elo_rating()/get_national_elo_
+# ratings_raw() — toate șterse azi (grep + verificare AST au confirmat că
+# n-au niciun apelant de producție rămas: Sync Layer citește de la
+# eloratings.net direct prin EloRatingsAdapter/Playwright de la fix-ul
+# R-Sync-4 din 2026-08-10, servirea live citește exclusiv Supabase). Dict-ul
+# conținea și 16 nume de club (Real Madrid, Bayern Munich etc.) amestecate
+# greșit într-un tabel gândit pentru echipe naționale — inconsecvență de
+# date preexistentă, descoperită la verificarea live a paginii, rezolvată
+# prin eliminarea completă a mecanismului, nu prin curățarea datelor
+# (codul care le citea era deja mort). Vezi ADR-039, addendum 2026-08-10.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # NATIONAL TEAM STATS — date reale din calificari + turnee recente
