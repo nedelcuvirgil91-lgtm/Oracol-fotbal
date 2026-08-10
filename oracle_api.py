@@ -1438,15 +1438,51 @@ class FootballOracleAPI:
                 if odds.get("btts_no", 0.0) > 1.0:  m["btts_no_odds"]  = odds["btts_no"]
         return matches
 
+    # [ADAUGAT — corectare ADR-043 §Decizie pct. 3, 2026-08-10] `odds_history`
+    # (Frozen) are prioritate necondiționată per ADR-043, dar nicio cale de
+    # servire nu-i citea vreodată VALOAREA — doar `_attach_odds()` de mai
+    # sus (fetch LIVE, provider extern) putea popula `home_odds`. Rezultat
+    # confirmat live: meciuri cu un rând deja persistat în `odds_history`
+    # (de la un job de sincronizare separat) rămâneau fără nicio cotă
+    # afișată ori de câte ori fetch-ul live curent nu găsea nimic — exact
+    # scenariul pe care ADR-043 §5 îl presupunea "rezolvat automat".
+    # Necondiționat de niciun flag — `odds_history` e sursa primară/Frozen,
+    # nu un experiment (spre deosebire de fallback-ul Flashscore de mai
+    # jos). Rulează ÎNAINTE de fallback-ul Flashscore, ca fixture-urile cu
+    # date primare persistate să nu mai ajungă la el deloc.
+    def _attach_primary_odds_from_history(self, matches: list[dict]) -> list[dict]:
+        missing_ids = [m["fixture_id"] for m in matches if not m.get("home_odds") and m.get("fixture_id")]
+        if not missing_ids:
+            return matches
+        try:
+            from database.queries import get_primary_odds_from_history
+            primary = get_primary_odds_from_history(missing_ids)
+        except Exception as exc:
+            logger.warning("[PrimaryOddsHistory] citire eșuată: %s", exc)
+            return matches
+        if not primary:
+            return matches
+        for m in matches:
+            row = primary.get(m.get("fixture_id"))
+            if not row:
+                continue
+            m["home_odds"]   = row["home"]
+            m["draw_odds"]   = row["draw"]
+            m["away_odds"]   = row["away"]
+            m["bookmaker"]   = row.get("bookmaker", "")
+            m["odds_source"] = f"The Odds API — arhivă ({row.get('bookmaker', '')})"
+        return matches
+
     # [ADAUGAT — ADR-043 §Decizie pct. 3] Fallback TEMPORAR de cote —
     # funcție NOUĂ, separată, NU modifică `_attach_odds()` de mai sus.
     # Implicit OPRIT (`flashscore_odds_fallback_config.is_enabled()`,
     # North Star #3) — dacă dezactivat, return imediat, zero cost dincolo
     # de un singur boolean check. Populează DOAR meciurile fără cote deja
-    # atașate de sursa primară (`m.get("home_odds")` fals) — regula reală
-    # de citire (odds_history vs. odds_fallback_flashscore) e aplicată o
-    # singură dată, la sursă, în
-    # `database.queries.get_odds_fallback_for_missing_fixtures()`.
+    # atașate de sursa primară (`m.get("home_odds")` fals, verificat ȘI
+    # după `_attach_odds()`, ȘI după `_attach_primary_odds_from_history()`
+    # de mai sus) — `get_odds_fallback_for_missing_fixtures()` de mai jos
+    # nu mai verifică ea însăși `odds_history`, are încredere în lista
+    # primită de la apelant.
     def _attach_flashscore_odds_fallback(self, matches: list[dict]) -> list[dict]:
         import flashscore_odds_fallback_config
         if not flashscore_odds_fallback_config.is_enabled():
@@ -1604,6 +1640,7 @@ class FootballOracleAPI:
         matches = [m for m in matches
                    if d_from <= (m.get("kickoff_date") or "9999") <= d_to]
         matches = self._attach_odds(matches)
+        matches = self._attach_primary_odds_from_history(matches)
         matches = self._attach_flashscore_odds_fallback(matches)
         matches.sort(key=lambda m: m.get("kickoff_utc", ""))
         self._shadow_evaluate_selection_engine(comps, matches)

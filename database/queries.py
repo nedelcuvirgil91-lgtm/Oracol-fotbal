@@ -1866,45 +1866,79 @@ def upsert_odds_fallback_flashscore(
         return False
 
 
-def get_odds_fallback_for_missing_fixtures(fixture_ids: list[str]) -> dict[str, dict]:
-    """Regula de citire ADR-043 §Decizie pct. 3, implementata intr-un
-    singur punct: intai `odds_history` (Frozen, sursa oficiala) - orice
-    `fixture_id` cu macar un rand acolo NU primeste fallback, chiar daca
-    fetch-ul live curent (`oracle_api._attach_odds()`) tocmai a esuat pe
-    acel meci (un rand mai vechi in `odds_history` tot inseamna "sursa
-    primara are date pentru acest meci", per ADR-043 §5 - reversibilitate
-    automata, fara cod nou, cand providerul oficial revine). DOAR
-    fixture-urile complet absente din `odds_history` (niciun rand,
-    niciodata) sunt cautate in `odds_fallback_flashscore`. Cand exista mai
-    multe case de pariuri pentru acelasi fixture, se alege cea mai recenta
-    captura (`captured_at`) - o singura pereche coerenta de cote per meci,
-    niciodata amestecate intre case de pariuri diferite. Returneaza DOAR
-    fixture-urile gasite in fallback - niciun rand pentru un fixture
-    inseamna "nicio cota disponibila", niciodata aproximat (North Star
-    #8)."""
+def get_primary_odds_from_history(fixture_ids: list[str]) -> dict[str, dict]:
+    """[ADAUGAT — corectare ADR-043 §Decizie pct. 3, 2026-08-10] `odds_history`
+    (Frozen) are "prioritate necondiționată" per ADR-ul original — dar
+    până acum doar EXISTENȚA unui rând era verificată (ca să blocheze
+    fallback-ul Flashscore, vezi `get_odds_fallback_for_missing_fixtures()`
+    mai jos), niciun cod nu-i citea vreodată VALOAREA. Rezultat confirmat
+    live (audit infrastructură, 2026-08-10): meciuri cu rând în
+    `odds_history` + date Flashscore disponibile nu primeau NICIO cotă
+    afișată — nici cea persistată, nici fallback-ul. Această funcție
+    completează regula: citește `closing_*` (cu fallback la `opening_*`
+    dacă piața nu s-a închis încă) pentru fixture-urile cerute. Când
+    există mai multe case de pariuri pentru același fixture, se alege cea
+    mai recentă captură (`closing_fetched_at`, apoi `opening_fetched_at`).
+    Returnează DOAR fixture-urile cu o pereche completă de cote (home,
+    draw, away toate prezente) — nicio aproximare (North Star #8)."""
     if not fixture_ids:
         return {}
     client = get_client()
     if client is None:
         return {}
     try:
-        primary_res = (
-            client.table("odds_history").select("fixture_id").in_("fixture_id", fixture_ids).execute()
+        res = (
+            client.table("odds_history")
+            .select("fixture_id,bookmaker,closing_home,closing_draw,closing_away,"
+                     "opening_home,opening_draw,opening_away,closing_fetched_at,opening_fetched_at")
+            .in_("fixture_id", fixture_ids)
+            .execute()
         )
-        covered = {row["fixture_id"] for row in (primary_res.data or [])}
+        rows = res.data or []
     except Exception as exc:
-        logger.warning("[Queries] get_odds_fallback_for_missing_fixtures: citire odds_history esuata: %s", exc)
+        logger.warning("[Queries] get_primary_odds_from_history failed: %s", exc)
         return {}
 
-    missing = [fid for fid in fixture_ids if fid not in covered]
-    if not missing:
-        return {}
+    best: dict[str, dict] = {}
+    best_ts: dict[str, str] = {}
+    for row in rows:
+        home = row.get("closing_home") or row.get("opening_home")
+        draw = row.get("closing_draw") or row.get("opening_draw")
+        away = row.get("closing_away") or row.get("opening_away")
+        if not (home and draw and away):
+            continue
+        fid = row["fixture_id"]
+        ts = row.get("closing_fetched_at") or row.get("opening_fetched_at") or ""
+        if fid not in best or ts > best_ts[fid]:
+            best[fid] = {"home": home, "draw": draw, "away": away, "bookmaker": row.get("bookmaker", "")}
+            best_ts[fid] = ts
+    return best
 
+
+def get_odds_fallback_for_missing_fixtures(fixture_ids: list[str]) -> dict[str, dict]:
+    """Partea Flashscore a regulii de citire ADR-043 §Decizie pct. 3 —
+    apelată DOAR pentru fixture-urile care rămân fără cote după
+    `oracle_api._attach_odds()` (live) ȘI `get_primary_odds_from_history()`
+    de mai sus (persistat). Nu mai verifică ea însăși `odds_history` —
+    apelantul (`oracle_api._attach_flashscore_odds_fallback()`) primește
+    doar fixture-urile încă fără `home_odds` după ambii pași anteriori,
+    deci orice fixture cu date primare (live sau persistate) nu ajunge
+    niciodată aici. Cand exista mai multe case de pariuri pentru acelasi
+    fixture, se alege cea mai recenta captura (`captured_at`) - o singura
+    pereche coerenta de cote per meci, niciodata amestecate intre case de
+    pariuri diferite. Returneaza DOAR fixture-urile gasite in fallback -
+    niciun rand pentru un fixture inseamna "nicio cota disponibila",
+    niciodata aproximat (North Star #8)."""
+    if not fixture_ids:
+        return {}
+    client = get_client()
+    if client is None:
+        return {}
     try:
         fallback_res = (
             client.table("odds_fallback_flashscore")
             .select("fixture_id,bookmaker,home,draw,away,captured_at")
-            .in_("fixture_id", missing)
+            .in_("fixture_id", fixture_ids)
             .execute()
         )
     except Exception as exc:

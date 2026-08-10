@@ -5,7 +5,14 @@ Verifică: (1) implicit OPRIT — zero apel DB cu flag dezactivat (North Star
 #3); (2) populează DOAR meciurile fără cote deja atașate de sursa primară;
 (3) nu suprascrie niciodată cote deja existente; (4) degradare grațioasă
 la orice eroare — `matches` returnat neschimbat; (5) wiring real în
-`get_matches_for_week()`, imediat după `_attach_odds()`."""
+`get_matches_for_week()`, imediat după `_attach_odds()` și
+`_attach_primary_odds_from_history()`.
+
+[ADAUGAT — corectare ADR-043, 2026-08-10] Teste separate pentru
+`_attach_primary_odds_from_history()` — pasul nou, necondiționat de
+niciun flag, care citește valoarea persistată din `odds_history` (nu
+doar existența ei) înainte ca fallback-ul Flashscore să vadă lista de
+fixture-uri lipsă."""
 from __future__ import annotations
 
 from datetime import date
@@ -115,6 +122,74 @@ def test_flag_enabled_db_exception_degrades_gracefully(monkeypatch):
     assert result == matches
 
 
+# ── _attach_primary_odds_from_history — direct, izolat ──────────────────────
+
+def test_primary_history_fills_odds_only_for_matches_missing_them(monkeypatch):
+    import database.queries as q
+    calls = []
+
+    def _fake_get(fixture_ids):
+        calls.append(fixture_ids)
+        return {"fx2": {"bookmaker": "bet365", "home": 1.9, "draw": 3.3, "away": 4.2}}
+    monkeypatch.setattr(q, "get_primary_odds_from_history", _fake_get)
+
+    matches = [
+        {"fixture_id": "fx1", "home_odds": 1.8, "draw_odds": 3.2, "away_odds": 4.5, "bookmaker": "Unibet"},
+        {"fixture_id": "fx2"},
+    ]
+    result = _api()._attach_primary_odds_from_history(matches)
+
+    assert calls == [["fx2"]]
+    assert result[0] == {"fixture_id": "fx1", "home_odds": 1.8, "draw_odds": 3.2, "away_odds": 4.5, "bookmaker": "Unibet"}
+    assert result[1]["home_odds"] == 1.9
+    assert result[1]["odds_source"] == "The Odds API — arhivă (bet365)"
+
+
+def test_primary_history_no_fixture_id_skips_db_call(monkeypatch):
+    import database.queries as q
+
+    def _spy(*a, **kw):
+        raise AssertionError("nu trebuie apelat fara fixture_id")
+    monkeypatch.setattr(q, "get_primary_odds_from_history", _spy)
+
+    matches = [{"home_team": "A", "away_team": "B"}]
+    result = _api()._attach_primary_odds_from_history(matches)
+    assert result == matches
+
+
+def test_primary_history_all_matches_already_have_odds_skips_db_call(monkeypatch):
+    import database.queries as q
+
+    def _spy(*a, **kw):
+        raise AssertionError("nu trebuie apelat daca toate meciurile au deja cote")
+    monkeypatch.setattr(q, "get_primary_odds_from_history", _spy)
+
+    matches = [{"fixture_id": "fx1", "home_odds": 1.8}]
+    result = _api()._attach_primary_odds_from_history(matches)
+    assert result == matches
+
+
+def test_primary_history_fixture_not_found_stays_without_odds(monkeypatch):
+    import database.queries as q
+    monkeypatch.setattr(q, "get_primary_odds_from_history", lambda fixture_ids: {})
+
+    matches = [{"fixture_id": "fx1"}]
+    result = _api()._attach_primary_odds_from_history(matches)
+    assert "home_odds" not in result[0]
+
+
+def test_primary_history_db_exception_degrades_gracefully(monkeypatch):
+    import database.queries as q
+
+    def _boom(fixture_ids):
+        raise RuntimeError("boom")
+    monkeypatch.setattr(q, "get_primary_odds_from_history", _boom)
+
+    matches = [{"fixture_id": "fx1"}]
+    result = _api()._attach_primary_odds_from_history(matches)
+    assert result == matches
+
+
 # ── wiring real în get_matches_for_week() ───────────────────────────────────
 
 def _api_no_network() -> oracle_api.FootballOracleAPI:
@@ -173,6 +248,32 @@ def test_get_matches_for_week_wires_fallback_after_attach_odds(monkeypatch):
     assert len(matches) == 1
     assert matches[0]["home_odds"] == 1.5
     assert matches[0]["odds_source"] == "Flashscore fallback (bet365)"
+
+
+def test_get_matches_for_week_primary_history_takes_priority_over_flashscore(monkeypatch):
+    """[ADAUGAT — corectare ADR-043, 2026-08-10] Dacă `odds_history` are
+    valoarea persistată pentru un fixture, fallback-ul Flashscore nu mai
+    e apelat deloc pentru el — exact ordinea nouă din get_matches_for_week()."""
+    _disable_other_shadows(monkeypatch)
+
+    import flashscore_odds_fallback_config as cfg
+    monkeypatch.setattr(cfg, "is_enabled", lambda: True)
+    import database.queries as q
+    monkeypatch.setattr(
+        q, "get_primary_odds_from_history",
+        lambda fixture_ids: {fixture_ids[0]: {"bookmaker": "bet365", "home": 1.7, "draw": 3.6, "away": 5.0}},
+    )
+
+    def _flashscore_spy(*a, **kw):
+        raise AssertionError("nu trebuie apelat cand odds_history are deja valoarea")
+    monkeypatch.setattr(q, "get_odds_fallback_for_missing_fixtures", _flashscore_spy)
+
+    api = _api_no_network()
+    matches = api.get_matches_for_week(days_ahead=7, competitions=["Romania SuperLiga"])
+
+    assert len(matches) == 1
+    assert matches[0]["home_odds"] == 1.7
+    assert matches[0]["odds_source"] == "The Odds API — arhivă (bet365)"
 
 
 def test_get_matches_for_week_flag_off_leaves_matches_without_odds(monkeypatch):
