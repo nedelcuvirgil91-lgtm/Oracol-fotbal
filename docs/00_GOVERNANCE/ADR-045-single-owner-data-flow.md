@@ -1,6 +1,6 @@
 # ADR-045 — Single Owner per categorie de date (Data Ownership Model)
 
-**Status**: **PROPUS** — în așteptarea aprobării explicite a proprietarului produsului. Acest ADR **nu autorizează nicio implementare** prin el însuși — e declarația formală a arhitecturii țintă. Odată aprobat, execuția urmează secvența cerută explicit de proprietarul produsului: (1) stabilizare workflow-uri (P0, deja propusă separat), apoi (2) modificările de Sync Layer descrise la Secțiunea „Ce autorizează acest ADR să se implementeze imediat". **Nicio schimbare de Sync Layer nu pornește înainte ca acest ADR să fie aprobat explicit** — matricea Owner/Fallback de mai jos rămâne înghețată până atunci.
+**Status**: **APROBAT** (2026-08-03, confirmat prin commit-ul de merge `2345f84` — „Aprobat explicit de proprietarul produsului pentru scriere directa pe main"). Secțiunea „Ce autorizează acest ADR să se implementeze imediat" (cele 4 puncte de Sync Layer — Statistics/Fixtures/H2H/Standings) a fost implementată integral în Pasul 1 al Master Repair Plan (commit `2363158`, merge-uit pe `main` la 2026-08-03). Secțiunea „Ce NU autorizează acest ADR" (repointarea consumatorului din Oracle Engine pentru Standings/H2H) rămâne, deliberat, neimplementată — cere propriul task separat, cu aprobare și testare de non-regresie proprii, verificat 2026-08-10: niciun asemenea task nu a fost încă deschis.
 
 **Autor**: Claude, la cererea proprietarului produsului.
 
@@ -73,7 +73,9 @@ Predictorul, ML-ul și Streamlit-ul rămân complet neatinse de acest ADR.
 ## Aprobare
 
 ```
-[ ] Aprobat de proprietarul produsului — data: __________
+[x] Aprobat de proprietarul produsului — data: 2026-08-03
 ```
 
-Până la bifarea de mai sus, matricea Owner/Fallback rămâne PROPUSĂ, nu implementată.
+Confirmat prin commit-ul de merge `2345f84` pe `main` (2026-08-03): „Aprobat explicit de proprietarul produsului pentru scriere directa pe main". Checkbox-ul a rămas nebifat în acest document până la 2026-08-10 — gol de sincronizare a documentației, nu de aprobare reală; corectat acum, retroactiv, la cererea proprietarului produsului.
+
+Matricea Owner/Fallback e azi APROBATĂ integral. Implementarea rămâne parțială, deliberat: cele 4 modificări de Sync Layer autorizate direct (Statistics/Fixtures/H2H/Standings) sunt live pe `main`; repointarea consumatorului Oracle Engine pentru Standings/H2H (explicit NEautorizată de acest ADR, vezi secțiunea de mai sus) rămâne un task separat, neînceput.
