@@ -130,6 +130,75 @@ def get_matches_for_week_from_history(
     return matches, covered
 
 
+def get_matches_for_week_from_scheduled_fixtures(
+    leagues: list[str], d_from: str, d_to: str,
+) -> tuple[list[dict], set[str]]:
+    """[ADĂUGAT — 2026-08-10, incident live confirmat] Fallback de ULTIMĂ
+    INSTANȚĂ pentru `oracle_api.get_matches_for_week()`, folosit STRICT
+    pentru ligile rămase fără niciun meci după Level DB (`match_history`)
+    ȘI cascada live (`_fetch_live_week_matches`) — apelantul restrânge
+    `leagues` la exact acel subset, niciodată la toate ligile cerute.
+
+    Motivul acestei restricții deliberate: gate-ul de echivalență live
+    (`equivalence_evaluations`, R-Sync-7b/ADR-040) NU a certificat încă
+    `scheduled_fixtures` ca sursă echivalentă cascadei live (stare
+    predominant "red"/"insufficient_data" — verificat live, 2026-08-10) —
+    Regula North Star #1 ("shadow rămâne shadow până e dovedit") interzice
+    folosirea lui ca înlocuitor general. Aici nu se pretinde echivalență —
+    doar că un meci real, deja descoperit de Sync Layer, e mai bun decât
+    zero meciuri (cazul confirmat live azi: cascada veche a întors 14
+    meciuri pe 15 competiții cerute, deși `scheduled_fixtures` avea deja
+    76 pentru aceeași fereastră — 62 pierdute complet, fără acest nivel).
+
+    Identitate: `scheduled_fixtures` nu are `fixture_id` canonic unic —
+    se sintetizează `f"scheduled_{id}"` din cheia primară a rândului,
+    stabil per rând, suficient pentru deduplicarea prin `match_key()`
+    (deja bazată pe nume echipe + dată, nu pe fixture_id) făcută de
+    apelant."""
+    client = get_client()
+    if client is None:
+        return [], set()
+    try:
+        res = (
+            client.table("scheduled_fixtures")
+            .select("id,home_team_canonical,away_team_canonical,league,"
+                    "kickoff_date,kickoff_utc,venue_city,status")
+            .in_("league", leagues)
+            .gte("kickoff_date", d_from)
+            .lte("kickoff_date", d_to)
+            .execute()
+        )
+    except Exception as exc:
+        logger.warning("[Queries] get_matches_for_week_from_scheduled_fixtures failed: %s", exc)
+        return [], set()
+
+    matches: list[dict] = []
+    covered: set[str] = set()
+    for row in (res.data or []):
+        league = row.get("league") or ""
+        home = row.get("home_team_canonical") or ""
+        away = row.get("away_team_canonical") or ""
+        if not home or not away or not league:
+            continue
+        covered.add(league)
+        kickoff_date = row.get("kickoff_date") or ""
+        matches.append({
+            "fixture_id":     f"scheduled_{row.get('id')}",
+            "home_team":      home, "away_team": away,
+            "home_team_id":   "", "away_team_id": "",
+            "kickoff_utc":    row.get("kickoff_utc") or kickoff_date,
+            "kickoff_date":   kickoff_date,
+            "league":         league,
+            "season":         None,
+            "venue_city":     row.get("venue_city") or "",
+            "status":         row.get("status") or "scheduled",
+            "coverage_level": "",
+            "home_odds": None, "draw_odds": None, "away_odds": None,
+            "odds_source": None, "source": "scheduled_fixtures",
+        })
+    return matches, covered
+
+
 def _rpc_write_ok(res, payload: dict, ctx: str) -> bool:
     """Interpreteaza rezultatul unui RPC canonic (upsert_match_canonical).
     True daca s-a scris (insert/update); False + warning la HARD CONFLICT

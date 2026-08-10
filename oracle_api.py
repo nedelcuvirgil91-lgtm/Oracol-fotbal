@@ -1547,7 +1547,31 @@ class FootballOracleAPI:
         if gap_leagues:
             logger.info("[WeekLoop] Database-First: %d/%d ligi acoperite, fallback live pentru: %s",
                         len(comps) - len(gap_leagues), len(comps), ", ".join(gap_leagues))
-            _add(self._fetch_live_week_matches(days_ahead, gap_leagues))
+            live_matches = self._fetch_live_week_matches(days_ahead, gap_leagues)
+            _add(live_matches)
+
+            # [ADĂUGAT — 2026-08-10, incident live confirmat: ESPN a întors
+            # zero rezultate pe toate cele 98 de interogări ale cascadei
+            # live, deși scheduled_fixtures avea deja 76 de meciuri pentru
+            # aceeași fereastră — 62 pierdute complet.] Fallback de ULTIMĂ
+            # instanță, restrâns STRICT la ligile rămase fără niciun meci
+            # și după Level DB ȘI cascada live — niciodată o înlocuire a
+            # vreunei surse care a funcționat deja. Gate-ul de echivalență
+            # (R-Sync-7b/ADR-040) nu certifică încă scheduled_fixtures ca
+            # sursă generală (stare predominant "red"/"insufficient_data") —
+            # nu se pretinde echivalență aici, doar "un meci real e mai bun
+            # decât zero".
+            live_covered = {m.get("league") for m in live_matches}
+            still_gap = [c for c in gap_leagues if c not in live_covered]
+            if still_gap:
+                logger.warning(
+                    "[WeekLoop] Cascada live tot n-a acoperit: %s — fallback pe "
+                    "scheduled_fixtures (ultimă instanță, non-echivalent, doar completare gol total)",
+                    ", ".join(still_gap),
+                )
+                from database.queries import get_matches_for_week_from_scheduled_fixtures
+                sched_matches, _ = get_matches_for_week_from_scheduled_fixtures(still_gap, d_from, d_to)
+                _add(sched_matches)
 
         # 7. Demo mode când nu există date (total combinat DB + live fallback)
         if len(matches) < 3:
