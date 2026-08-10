@@ -61,34 +61,28 @@ def main() -> int:
                 print(f"[POC] Primele 1500 caractere din body_text:\n{body_text[:1500]}")
                 return 1
 
-            for needle in ["FC Argeș", "Rapid București", "FORMĂ", "FORM"]:
+            for needle in ["FC Arges", "FORM", "last 5 matches"]:
                 idx = body_text.find(needle)
                 print(f"[POC] '{needle}' găsit la offset {idx}" if idx >= 0
                       else f"[POC] '{needle}' NU apare în textul randat")
 
-            # Rândurile de clasament — clasa reală necunoscută încă, căutăm
-            # generic orice element care conține numele unei echipe cunoscute
-            # din captura de ecran, ca să găsim containerul rândului.
-            row_el = page.query_selector("text=FC Argeș")
+            # Rândurile de clasament — echipa reala pe site-ul .com (englez,
+            # fara diacritice): "FC Arges", nu "FC Argeș" (.ro).
+            row_el = page.query_selector("text=FC Arges")
             if row_el is None:
-                print("[POC] Niciun element nu conține 'FC Argeș' — pagina nu s-a randat cum era așteptat.")
+                print("[POC] Niciun element nu conține 'FC Arges' — pagina nu s-a randat cum era așteptat.")
                 print(f"[POC] Primele 3000 caractere din body_text:\n{body_text[:3000]}")
                 return 0
 
-            print(f"[POC] Element găsit pentru 'FC Argeș': "
+            print(f"[POC] Element găsit pentru 'FC Arges': "
                   f"tag={row_el.evaluate('e => e.tagName')} class={row_el.evaluate('e => e.className')}")
 
-            # Urcăm până găsim un părinte plauzibil de "rând întreg" (conține
-            # și cifre de MJ/V/E/Î/G/DG/P) — încercăm câțiva pași în sus.
-            row_container = row_el.evaluate_handle(
-                "e => { let n = e; for (let i = 0; i < 6 && n; i++) { n = n.parentElement; } return n; }"
-            )
-            row_html = row_container.evaluate("e => e ? e.outerHTML : null")
-            print(f"[POC] outerHTML container (6 nivele sus, primele 4000 caractere):\n{(row_html or '')[:4000]}")
-
-            # Căutare generică: orice element ale cărui text e EXACT "V", "E"
-            # sau "Î"/"I" (badge-uri de formă) — raportăm clasă + title/aria.
-            for letter in ["V", "E", "Î", "I"]:
+            # Căutare generică: orice element ale cărui text e EXACT "W", "D",
+            # "L" sau "?" (badge-uri de formă, site .com englez) — raportăm
+            # clasă + title/aria + outerHTML complet (primele 6 găsite per
+            # literă), ca să confirmăm ordinea reală (index DOM = ordine
+            # cronologică?) și eventuale atribute cu data meciului.
+            for letter in ["W", "D", "L", "?"]:
                 els = page.query_selector_all(f"xpath=//*[text()='{letter}']")
                 print(f"[POC] Elemente cu text exact '{letter}': {len(els)}")
                 for el in els[:6]:
@@ -96,7 +90,17 @@ def main() -> int:
                     title = el.evaluate("e => e.getAttribute('title')")
                     aria = el.evaluate("e => e.getAttribute('aria-label')")
                     tag = el.evaluate("e => e.tagName")
-                    print(f"[POC]   tag={tag} class={cls!r} title={title!r} aria-label={aria!r}")
+                    outer = el.evaluate("e => e.outerHTML")
+                    print(f"[POC]   tag={tag} class={cls!r} title={title!r} aria-label={aria!r} outerHTML={outer!r}")
+
+            # Container complet al rândului FC Arges — pentru context de
+            # structură (câte niveluri până la celula FORM, ce clasă are
+            # celula-container a formei).
+            row_container = row_el.evaluate_handle(
+                "e => { let n = e; for (let i = 0; i < 6 && n; i++) { n = n.parentElement; } return n; }"
+            )
+            row_html = row_container.evaluate("e => e ? e.outerHTML : null")
+            print(f"[POC] outerHTML container FC Arges (6 nivele sus, primele 5000 caractere):\n{(row_html or '')[:5000]}")
 
         finally:
             browser.close()
