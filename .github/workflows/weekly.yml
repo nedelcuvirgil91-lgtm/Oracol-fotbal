@@ -1,4 +1,4 @@
-name: Football Oracle — Weekly ML Retrain
+name: Football Oracle — Weekly National Team ELO Sync
 
 on:
   schedule:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  weekly-retrain:
+  weekly-elo-sync:
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -33,32 +33,16 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: python -m sync.sync_national_team_elo
 
-      - name: Retrain ML model
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
-        run: |
-          python -c "
-          import sys
-          sys.path.insert(0, '.')
-          from ml_predictor import MLPredictorEngine
-          from database.queries import get_ml_sample_count
-
-          sample_count = get_ml_sample_count()
-          print(f'Samples disponibile: {sample_count}')
-
-          engine = MLPredictorEngine()
-          result = engine.train()
-
-          print('=' * 50)
-          print(f'Status   : {result.status}')
-          print(f'Samples  : {result.samples_used}')
-          print(f'Accuracy : {result.accuracy}')
-          print(f'Log Loss : {result.log_loss}')
-          print(f'Message  : {result.message}')
-          print('=' * 50)
-
-          if result.accuracy and result.accuracy < 0.42:
-              print('WARNING: Accuracy sub 42% — verifică datele de antrenare!')
-              sys.exit(1)
-          "
+      # [ELIMINAT — 2026-08-06, audit infrastructură] Pasul "Retrain ML
+      # model" apela MLPredictorEngine().train() direct — a treia copie a
+      # aceluiași tipar deja eliminat prin ADR-054 (pipeline legacy din
+      # sync/run_daily.py) și ADR-055 (butonul manual din app.py): antrena
+      # un model complet, îl arunca imediat (niciun artefact persistat,
+      # niciodată Challenger), dar suprascria `ml_model_status` (citită de
+      # should_retrain_ml() pentru progress bar-ul din UI) și insera un rând
+      # fals în `training_runs`. Nu mai putea contamina Challenger-ul real
+      # (continuous_learning.py ancorează azi exclusiv pe get_latest_
+      # challenger(), imun) — dar rămânea muncă CI irosită + cifre UI
+      # înșelătoare. Antrenarea reală rămâne exclusiv responsabilitatea
+      # learning_core/continuous_learning.py (Faza B, ADR-030), rulată
+      # nocturn din night_sync.yml.

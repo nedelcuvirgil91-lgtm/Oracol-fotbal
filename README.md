@@ -139,7 +139,7 @@ Proiectul folosește mai multe chei API externe. Recomandat: variabile de mediu 
 | Workflow | Declanșare | Scop |
 |---|---|---|
 | `daily.yml` | cron zilnic (03:00 UTC) + manual | Sincronizare meciuri/rezultate, recalculare ELO, evaluare experimente shadow, persistare cote, verificare/reantrenare ML |
-| `weekly.yml` | cron săptămânal | Recalibrare periodică |
+| `weekly.yml` | cron săptămânal (Duminică 04:00 UTC) + manual | Sincronizare ELO echipe naționale (eloratings.net) |
 | `backfill.yml` | manual | Recalculare istorică de feature-uri |
 | `import_kaggle.yml` | manual | Import istoric inițial (Kaggle) |
 | `bootstrap_league_learning.yml` | manual | Inițializare ponderi per ligă |
