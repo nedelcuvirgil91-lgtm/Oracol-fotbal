@@ -2604,7 +2604,17 @@ def get_team_recent_advanced_stats(team: str, league: str, last_n: int = 5) -> l
     Team DNA Flashscore. `id` inclus — ancoră pentru join-ul Python cu
     match_statistics_extended/player_match_stats de mai jos (PostgREST nu
     suportă join direct, aceeași limitare documentată la
-    get_recent_flashscore_matches)."""
+    get_recent_flashscore_matches).
+
+    [FIX 2026-08-10] Istoricul echipei e căutat GLOBAL, peste toate
+    competițiile — `league` rămas doar pentru logging, NU mai filtrează
+    interogarea. Comportamentul vechi (`.eq("league", league)`) izola
+    artificial istoricul unei echipe pe numele exact al competiției curente
+    — o echipă cu meciuri atât în campionat cât și în cupă europeană nu-și
+    combina istoricul, deși ambele au aceleași coloane Flashscore reale.
+    Aliniat acum la disciplina deja folosită de `sync/backfill_features.py`
+    (ELOTracker/FormTracker/CornerCardTracker etc. — istoric per echipă,
+    fără filtru de ligă)."""
     client = get_client()
     if client is None:
         return []
@@ -2616,7 +2626,6 @@ def get_team_recent_advanced_stats(team: str, league: str, last_n: int = 5) -> l
                     "home_goalkeeper_saves,away_goalkeeper_saves,"
                     "home_red_cards,away_red_cards,"
                     "actual_home_goals,actual_away_goals,kickoff_date")
-            .eq("league", league)
             .or_(f"home_team.eq.{team},away_team.eq.{team}")
             .not_.is_("actual_result", "null")
             .order("kickoff_date", desc=True)
@@ -2633,11 +2642,14 @@ def _recent_match_side_map(client, team: str, league: str, last_n: int) -> dict[
     """Ultimele `last_n` meciuri terminate ale echipei -> {match_id: 'home'|'away'}.
     Helper comun pentru join-ul Python cu tabelele EAV (fără coloană de
     echipă nativă), reutilizat de get_team_recent_statistics_extended și
-    get_team_recent_player_ratings."""
+    get_team_recent_player_ratings.
+
+    [FIX 2026-08-10] Istoric GLOBAL per echipă, fără filtru de ligă — vezi
+    motivul identic documentat la get_team_recent_advanced_stats(), mai sus.
+    `league` rămas doar pentru logging la apelanți."""
     matches = (
         client.table("match_history")
         .select("id,home_team,away_team,kickoff_date")
-        .eq("league", league)
         .or_(f"home_team.eq.{team},away_team.eq.{team}")
         .not_.is_("actual_result", "null")
         .order("kickoff_date", desc=True)
