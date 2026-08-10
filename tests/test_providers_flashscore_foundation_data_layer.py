@@ -20,6 +20,7 @@ from providers.flashscore.normalizer import (
     normalize_player_match_stats_table,
     normalize_standings,
     _extract_standings_form,
+    _strip_advancing_note,
 )
 
 FIXTURE_DIR = Path(__file__).parent.parent / "docs" / "06_UDAL" / "poc_evidence" / "flashscore_full_tabs_poc"
@@ -222,6 +223,10 @@ def test_normalize_match_context_real_values(full_tabs_pages):
     assert most_recent_home_form["away_score"] == 1
     assert most_recent_home_form["source"] == "flashscore"
     assert most_recent_home_form["context_match_id"] == 999
+    assert most_recent_home_form["subject_team"] == "Dinamo Bucuresti"
+
+    h2h_row = next(r for r in rows if r["category"] == "h2h_overall")
+    assert h2h_row["subject_team"] is None
 
 
 def test_normalize_match_context_populates_competition_code(full_tabs_pages):
@@ -238,6 +243,20 @@ def test_normalize_match_context_populates_competition_code(full_tabs_pages):
 
 def test_normalize_match_context_no_h2h_tab_returns_empty():
     assert normalize_match_context({}, match_id=999, home_team="A", away_team="B") == []
+
+
+def test_strip_advancing_note_removes_concatenated_tooltip():
+    """[GĂSIT LA AUDIT, 2026-08-10] Confirmat live pe flashscore_match_
+    context (context_match_id=131057): Flashscore concatenează în același
+    element numele echipei cu un tooltip de promovare din fază
+    eliminatorie — trebuie tăiat, nu păstrat ca parte din numele echipei."""
+    assert _strip_advancing_note("Levski SofiaAdvancing to next round: Levski Sofia") == "Levski Sofia"
+    assert _strip_advancing_note("Univ. CraiovaAdvancing to next round: Univ. Craiova") == "Univ. Craiova"
+
+
+def test_strip_advancing_note_no_op_on_normal_names():
+    assert _strip_advancing_note("Univ. Craiova") == "Univ. Craiova"
+    assert _strip_advancing_note("KuPS") == "KuPS"
 
 
 def test_normalize_standings_row_count_and_order(full_tabs_pages):

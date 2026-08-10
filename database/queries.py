@@ -2729,6 +2729,87 @@ def get_team_standings_row(team: str, competition: str) -> dict | None:
     return None
 
 
+def get_team_recent_form_context(team: str, n: int = 5) -> list[dict]:
+    """[ADĂUGAT — 2026-08-10] Ultimele `n` meciuri REALE ale unei echipe,
+    din cea mai recentă secțiune "Last matches: <echipă>" capturată deja
+    de `normalize_match_context()` (`flashscore_match_context`, migrația
+    035 + `subject_team`, migrația 046) — sursă existentă, populată
+    automat pentru FIECARE meci procesat (H2H e unul din cele 7 tab-uri
+    fetch-uite standard, `persistence.py`), doar necitită până acum de
+    cascada de profil.
+
+    Spre deosebire de Level FS (`get_team_standings_row`, clasament per
+    ligă domestică) — funcționează pentru ORICE echipă, din ORICE țară,
+    în ORICE competiție, inclusiv fazele eliminatorii ale cupelor
+    europene (care nu au niciodată clasament) și echipele străine din
+    ligi neurmărite (ex. KuPS, Finlanda — confirmat live, 2026-08-10,
+    Univ. Craiova vs KuPS, Europa League calificări).
+
+    Selecție prin `subject_team` (NU prin poziția home/away a rândului —
+    verificat live, o echipă apare pe ambele părți în rânduri diferite
+    ale propriei secțiuni, reflectând corect meciurile ei reale). Rânduri
+    cu `subject_team` NULL (persistate înainte de migrația 046) nu sunt
+    vizibile aici — se completează natural la următoarea resincronizare
+    a acelei echipe, niciun backfill forțat.
+
+    W/D/L derivat per rând, comparând scorul cu partea REALĂ jucată
+    (`home_team`/`away_team` ale acelui rând, nu presupusă din categorie).
+
+    Returnează în ordine CRONOLOGICĂ (cel mai vechi primul, cel mai
+    recent ULTIMUL) — contractul cerut de `compute_form_score()`."""
+    client = get_client()
+    if client is None:
+        return []
+    cols = "context_match_id,meeting_order,meeting_date,home_team,away_team,home_score,away_score"
+    try:
+        res = (
+            client.table("flashscore_match_context")
+            .select(cols)
+            .eq("subject_team", team)
+            .in_("category", ["recent_form_home", "recent_form_away"])
+            .order("context_match_id", desc=True)
+            .limit(50)
+            .execute()
+        )
+    except Exception as exc:
+        logger.warning("[Queries] get_team_recent_form_context failed pentru %s: %s", team, exc)
+        return []
+
+    candidates = res.data or []
+    if not candidates:
+        return []
+    latest_ctx = max(r["context_match_id"] for r in candidates)
+    rows = sorted(
+        (r for r in candidates if r["context_match_id"] == latest_ctx),
+        key=lambda r: r.get("meeting_order", 0),
+    )
+
+    results: list[dict] = []
+    for r in rows[:n]:
+        home_score, away_score = r.get("home_score"), r.get("away_score")
+        if home_score is None or away_score is None:
+            continue
+        home_team, away_team = r.get("home_team") or "", r.get("away_team") or ""
+        is_home = home_team.startswith(team)
+        is_away = away_team.startswith(team)
+        if not is_home and not is_away:
+            continue  # defensiv — nu ar trebui atins, dat fiind filtrul subject_team de mai sus
+        if home_score == away_score:
+            result = "D"
+        elif (is_home and home_score > away_score) or (is_away and away_score > home_score):
+            result = "W"
+        else:
+            result = "L"
+        results.append({
+            "result": result, "date": r.get("meeting_date"),
+            "goals_for": home_score if is_home else away_score,
+            "goals_against": away_score if is_home else home_score,
+        })
+
+    results.reverse()  # meeting_order 0 = cel mai recent -> inversăm pentru ordine cronologică
+    return results
+
+
 def is_flashscore_match_already_collected(mid: str) -> bool:
     """Delta Sync (Faza 2, §7 din task) — verifică ÎNAINTE de fetch dacă
     acest meci (identificat prin `mid`-ul Flashscore, cunoscut deja la

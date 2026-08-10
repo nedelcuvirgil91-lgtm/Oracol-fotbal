@@ -91,6 +91,7 @@ try:
         get_team_stats_tsdb, get_freelf_h2h_snapshot, get_freelf_lineup_snapshot,
         get_team_recent_advanced_stats, get_team_recent_statistics_extended,
         get_team_recent_player_ratings, get_team_standings_row,
+        get_team_recent_form_context,
     )
     DB_QUERIES_MODULE_AVAILABLE = True
 except ModuleNotFoundError:
@@ -951,6 +952,7 @@ class FootballOracleEngine:
            DB. Supabase match_history (get_team_recent_results)      ← PRIMAR, ADR-035/D1
           -1. Date naționale hardcodate (World Cup + naționale)      — fallback, doar dacă Level DB nu are date
            FS. Flashscore standings+formă reală (Supabase) (get_team_standings_row) — fallback, ADR-045 (Owner Standings, 14 ligi FLASHSCORE_TRACKED_COMPETITIONS)
+           FS2. Flashscore recent match-context form (Supabase) (get_team_recent_form_context) — fallback, adăugat 2026-08-10 (orice echipă/țară/competiție — acoperă cupele europene fără clasament + echipele străine, ex. KuPS)
            0+1. FreeLF standings+formă (Supabase) (get_team_form_freelf_snapshot) — fallback, ADR-039 R-Sync-6
            2. Odds API meciuri recente (Supabase) (get_team_recent_form_oddsapi) — fallback, ADR-039 R-Sync-6
            3. fd.org standings (Supabase)  (get_team_form_footballdata) — fallback, ADR-039 R-Sync-3
@@ -1110,6 +1112,45 @@ class FootballOracleEngine:
                     data_source  = "flashscore-standings"
                     logger.info("[Profile] %s — flashscore-standings (%d rezultate reale)",
                                 canonical, len(stats))
+
+        # ── Level FS2: Flashscore recent match-context form (adăugat
+        # 2026-08-10, caz real confirmat: Univ. Craiova vs KuPS, Europa
+        # League calificări) ────────────────────────────────────────────
+        # Sync Layer only — citire STRICT din Supabase
+        # (flashscore_match_context, populată de normalize_match_context()
+        # — H2H e unul din cele 7 tab-uri fetch-uite standard pentru
+        # FIECARE meci procesat, deja existent, doar necitit până acum de
+        # cascada de profil), niciodată apel live.
+        #
+        # Level FS (mai sus) acoperă doar clasamentele ligilor domestice
+        # urmărite — fazele eliminatorii ale cupelor europene (Champions/
+        # Europa/Conference League) NU au niciodată clasament (verificat
+        # live: `flashscore_standings_snapshot`, zero rânduri pentru
+        # aceste 3 competiții), iar echipele străine din ligi neurmărite
+        # (ex. KuPS, Finlanda) nu apar în niciun clasament domestic urmărit
+        # de aici. Level FS2 completează exact acest gol — funcționează
+        # pentru orice echipă, orice țară, orice competiție, folosind
+        # ultimele meciuri REALE ale echipei (nu clasament), cu scor exact
+        # per meci (mai precis decât media de sezon folosită la Level FS).
+        if not stats and DB_QUERIES_MODULE_AVAILABLE:
+            try:
+                context_form = get_team_recent_form_context(canonical, n=last_n)
+            except Exception as exc:
+                context_form = []
+                logger.warning("[Profile] Flashscore match-context form read failed for %s: %s", canonical, exc)
+            if context_form:
+                sot = real_sot if real_sot is not None else (
+                    sum(r["goals_for"] for r in context_form) / len(context_form) * 0.45
+                )
+                pos = 50.0
+                stats = [
+                    {"result": r["result"], "goals_for": r["goals_for"], "goals_against": r["goals_against"],
+                     "shots_on_goal": sot, "possession": pos}
+                    for r in context_form
+                ]
+                data_source = "flashscore-match-context"
+                logger.info("[Profile] %s — flashscore-match-context (%d rezultate reale)",
+                            canonical, len(stats))
 
         # ── Level 0+1: Free Live Football standings + formă (ADR-039, R-Sync-6) ─
         # Sync Layer only — citire STRICT din Supabase

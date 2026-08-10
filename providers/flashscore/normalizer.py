@@ -647,7 +647,16 @@ def normalize_match_context(
     (recent_form_home), "Last matches: <echipa oaspete>" (recent_form_away).
     NU amestecate intr-un flux nediferentiat - fiecare rand real cu data
     (DD.MM.YY -> ISO), competitie, echipe, scor, dintr-un singur <a
-    class="h2h__row"> auto-continut per meci istoric."""
+    class="h2h__row"> auto-continut per meci istoric.
+
+    `subject_team` (migrația 046, 2026-08-10) - numele echipei căreia îi
+    aparține secțiunea (extras direct din header-ul "Last matches: X"),
+    NULL pentru `h2h_overall` (nu are un subiect unic). Necesar pentru
+    identificare fiabilă: rândurile INTERNE ale unei secțiuni pot avea
+    echipa pe orice parte (acasă sau oaspete) - reflectă corect meciurile
+    ei reale, nu presupune mereu aceeași poziție (confirmat live: Univ.
+    Craiova apare pe ambele părți în rânduri diferite ale propriei
+    secțiuni "recent_form_away")."""
     html = pages.get("h2h")
     if not html:
         return []
@@ -656,14 +665,17 @@ def normalize_match_context(
     for header in soup.select("[data-testid='wcl-headerSection-text']"):
         header_text = header.get_text(strip=True)
         category: str | None = None
+        subject_team: str | None = None
         if header_text.startswith("Head-to-head"):
             category = "h2h_overall"
         elif header_text.startswith("Last matches:"):
             team_name = header_text.split(":", 1)[1].strip()
             if home_team and team_name == home_team:
                 category = "recent_form_home"
+                subject_team = team_name
             elif away_team and team_name == away_team:
                 category = "recent_form_away"
+                subject_team = team_name
         if category is None:
             continue
         section = header.find_parent(class_="h2h__section")
@@ -679,16 +691,27 @@ def normalize_match_context(
             rows_out.append({
                 "context_match_id": match_id,
                 "category": category,
+                "subject_team": subject_team,
                 "meeting_order": order,
                 "meeting_date": _parse_h2h_date(date_el.get_text(strip=True) if date_el else None),
                 "competition_code": event_el.get_text(strip=True) if event_el else None,
-                "home_team": participants[0].get_text(strip=True),
-                "away_team": participants[1].get_text(strip=True),
+                "home_team": _strip_advancing_note(participants[0].get_text(strip=True)),
+                "away_team": _strip_advancing_note(participants[1].get_text(strip=True)),
                 "home_score": _parse_int_loose(scores[0].get_text(strip=True)),
                 "away_score": _parse_int_loose(scores[1].get_text(strip=True)),
                 "source": "flashscore",
             })
     return rows_out
+
+
+def _strip_advancing_note(raw: str) -> str:
+    """[GĂSIT LA AUDIT, 2026-08-10] Pe rândurile "Last matches" ale unei
+    echipe care a promovat dintr-o fază eliminatorie, Flashscore
+    concatenează în același element numele echipei cu un tooltip
+    ("Univ. CraiovaAdvancing to next round: Univ. Craiova") — confirmat
+    live, `flashscore_match_context`, context_match_id=131057. Taie orice
+    de la "Advancing to next round" încolo, păstrează doar numele real."""
+    return raw.split("Advancing to next round")[0].strip()
 
 
 def _parse_h2h_date(raw: str | None) -> str | None:
