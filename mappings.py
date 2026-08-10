@@ -659,6 +659,63 @@ LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
                     "odds": False, "freelf": "necunoscut", "api_football": "necunoscut",
                     "soccerfootballinfo": "necunoscut"},
     ),
+    # [ADAUGAT 2026-08-10] Extinderea etapizată Belgia/Polonia/Scoția
+    # (vezi providers/flashscore/discovery.py, FLASHSCORE_TRACKED_
+    # COMPETITIONS) — verificare live, sync/poc_new_leagues_provider_
+    # lookup.py, run 31418847416. football_data=False pentru toate 3 —
+    # CONFIRMAT live, /v4/competitions (planul gratuit, 13 competiții
+    # returnate) nu include Belgia/Polonia/Scoția. api_football rămâne
+    # "necunoscut" pentru toate 3 — verificarea live a EȘUAT, contul
+    # API-Football e SUSPENDAT ("Your account is suspended", HTTP 200 cu
+    # eroare în body, confirmat pentru toate 3 țări) — problemă a
+    # contului, nelegată de aceste ligi, semnalată separat proprietarului
+    # produsului. espn/freelf/soccerfootballinfo rămân "necunoscut" —
+    # neverificate azi, în afara scopului cerut (tracking cote pre-meci).
+    "Jupiler Pro League": LeagueDefinition(
+        name="Jupiler Pro League",
+        # odds="soccer_belgium_first_div" — CONFIRMAT live, /v4/sports
+        # (all=true), title="Belgium First Div", active=True. tsdb="4338"
+        # ("Belgian Pro League") — CONFIRMAT live, search_all_leagues.php?
+        # c=Belgium&s=Soccer.
+        provider_ids={"football_data": None, "espn": None, "tsdb": "4338",
+                       "odds": "soccer_belgium_first_div", "freelf": None, "api_football": None,
+                       "soccerfootballinfo": None},
+        supported={"football_data": False, "espn": "necunoscut", "tsdb": True,
+                    "odds": True, "freelf": "necunoscut", "api_football": "necunoscut",
+                    "soccerfootballinfo": "necunoscut"},
+    ),
+    "Ekstraklasa": LeagueDefinition(
+        name="Ekstraklasa",
+        # odds="soccer_poland_ekstraklasa" — CONFIRMAT live, /v4/sports
+        # (all=true), title="Ekstraklasa - Poland", active=True.
+        # tsdb="4422" ("Polish Ekstraklasa") — CONFIRMAT live,
+        # search_all_leagues.php?c=Poland&s=Soccer.
+        provider_ids={"football_data": None, "espn": None, "tsdb": "4422",
+                       "odds": "soccer_poland_ekstraklasa", "freelf": None, "api_football": None,
+                       "soccerfootballinfo": None},
+        supported={"football_data": False, "espn": "necunoscut", "tsdb": True,
+                    "odds": True, "freelf": "necunoscut", "api_football": "necunoscut",
+                    "soccerfootballinfo": "necunoscut"},
+    ),
+    "Scottish Premiership": LeagueDefinition(
+        name="Scottish Premiership",
+        # odds="soccer_spl" — CONFIRMAT live, /v4/sports (all=true),
+        # title="Premiership - Scotland" — EXISTĂ în catalog, dar
+        # active=False la momentul verificării (piață temporar
+        # nepublicată, nu ligă neacoperită — același mecanism dinamic de
+        # "dead keys" deja gestionat runtime de oracle_api._validate_api_
+        # keys(), nu o valoare statică de reverificat manual). tsdb=None —
+        # CONFIRMAT live, search_all_leagues.php?c=Scotland&s=Soccer NU a
+        # întors "Scottish Premiership" (doar Championship id=4395 și ligi
+        # inferioare) — id-ul real al ligii de elită rămâne neconfirmat,
+        # NU ghicit.
+        provider_ids={"football_data": None, "espn": None, "tsdb": None,
+                       "odds": "soccer_spl", "freelf": None, "api_football": None,
+                       "soccerfootballinfo": None},
+        supported={"football_data": False, "espn": "necunoscut", "tsdb": "necunoscut",
+                    "odds": True, "freelf": "necunoscut", "api_football": "necunoscut",
+                    "soccerfootballinfo": "necunoscut"},
+    ),
 }
 
 # ── Dictionare derivate — generate, NU scrise manual (elimina desincronizarea) ──
