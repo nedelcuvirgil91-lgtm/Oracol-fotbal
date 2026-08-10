@@ -16,22 +16,20 @@ name: Football Oracle — Lineup Sync (Free Live Football)
 # de 4h primește ~8 poll-uri (până la 16 apeluri), înjumătățind consumul,
 # păstrând acoperire rezonabilă aproape de kickoff.
 #
-# [REDUS din nou — 2026-08-10, cerere explicită proprietar produs, buget
-# GitHub Actions 90% consumat (1800/2000 min) după doar 10 zile din ciclul
-# de facturare] 1x/zi, 17:00 UTC (20:00 ora României, EEST, UTC+3).
-# **GOL DE ACOPERIRE ACCEPTAT EXPLICIT** (întrebare pusă, răspuns explicit
-# al proprietarului produsului: "1x/zi oricum, accept golul") — fereastra
-# rămâne relativă la MOMENTUL rulării (T-15min..T+240min, neschimbată în
-# sync/sync_lineup_freelf.py), deci la o singură rulare/zi acoperă STRICT
-# meciurile cu kickoff în 19:45–00:00 ora României. Orice meci din afara
-# acestui interval NU mai primește aliniamente deloc (nu doar mai rar) —
-# spre deosebire de live_sync.yml (Delta Sync complet, sigur de redus la
-# 1x/zi fără gol de acoperire), acesta e un compromis funcțional real,
-# asumat conștient pentru bugetul de minute, nu doar o optimizare de cost.
+# [REDUS temporar 2026-08-10 -> REVENIT la fel de 2026-08-10] Redus scurt
+# la 1x/zi (buget GitHub Actions aproape epuizat, 1800/2000 min în 10
+# zile) — ar fi lăsat un gol real de acoperire (fereastra e relativă la
+# MOMENTUL rulării, T-15min..T+240min, neschimbată în sync/sync_lineup_
+# freelf.py, deci 1x/zi ar fi acoperit STRICT meciurile dintr-un interval
+# de ~4h15, restul zilei rămânând fără aliniamente deloc — acceptat
+# explicit la momentul respectiv, dar redundant acum). Motivul reducerii
+# a dispărut: repo-ul a devenit public (2026-08-10) — pe repo public,
+# GitHub Actions e gratuit, fără plafon de minute. Revenit la */30 min,
+# acoperire completă pe toată ziua restaurată.
 
 on:
   schedule:
-    - cron: "0 17 * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
       window_minutes:

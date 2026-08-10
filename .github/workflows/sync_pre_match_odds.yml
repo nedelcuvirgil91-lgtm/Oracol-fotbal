@@ -8,19 +8,18 @@ name: Football Oracle — Sync Pre-Match Odds (Flashscore)
 # (Frozen). Vezi docstring modul `providers/flashscore/pre_match_odds.py`
 # pentru justificarea completă a separării.
 #
-# Cadență: [REDUS — 2026-08-10, cerere explicită proprietar produs, buget
-# GitHub Actions 90% consumat (1800/2000 min) după doar 10 zile din ciclul
-# de facturare] de la 2x/zi la 1x/3 zile (08:00 UTC, zi din 3). Spre
-# deosebire de live_sync.yml, acest job NU are Delta Sync — rescanează
-# integral fereastra de 7 zile la fiecare rulare, deci costul e strict
-# proporțional cu frecvența (~50min/zi -> ~8.3min/zi, ~1500->~250 min/lună,
-# cea mai mare economie dintre toate reducerile de cadență de azi). Impact
-# pe calitatea predicțiilor: ZERO — cotele nu sunt feature ML (verificat,
-# FEATURE_COLUMNS din ml_predictor.py), intră doar în value betting/de-vig.
-# Impact real, limitat: `odds_fallback_flashscore` servește DOAR meciurile
-# fără nicio cotă de la Odds API (verificat live, 498 rânduri, 04-09 aug)
-# — pentru acelea, cota poate fi cu până la 3 zile mai veche decât piața
-# reală, risc de flag de value bet depășit, mai ales aproape de kickoff.
+# Cadență: [REDUS temporar 2026-08-10 -> REVENIT la fel de 2026-08-10]
+# Redus scurt la 1x/3 zile (buget GitHub Actions aproape epuizat, 1800/2000
+# min în 10 zile) — impact real acceptat la momentul respectiv (cote cu
+# până la 3 zile vechime pentru meciurile fără Odds API, doar pe value
+# betting, zero pe predicțiile de bază — cotele nu sunt feature ML).
+# Motivul reducerii a dispărut: repo-ul a devenit public (2026-08-10) —
+# pe repo public, GitHub Actions e gratuit, fără plafon de minute. Revenit
+# la 2x/zi (08:00 și 20:00 UTC) — cotele se mișcă în timp și beneficiază
+# de reîmprospătare mai deasă decât o rulare unică/zi; programul evită
+# deliberat orele night_sync.yml (03:00 UTC) și live_sync.yml
+# (09:00/13:00/17:00 UTC), ca să nu suprapună trafic Flashscore simultan
+# din workflow-uri diferite.
 #
 # Declanșare programată (schedule) vs. manuală (workflow_dispatch) diferă
 # în domeniul de acoperire, intenționat: rularea programată acoperă
@@ -34,7 +33,8 @@ name: Football Oracle — Sync Pre-Match Odds (Flashscore)
 
 on:
   schedule:
-    - cron: "0 8 */3 * *"
+    - cron: "0 8 * * *"
+    - cron: "0 20 * * *"
   workflow_dispatch:
     inputs:
       leagues:
