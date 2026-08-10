@@ -1,0 +1,35 @@
+name: Football Oracle — Probă Provider Lookup (Belgia/Polonia/Scoția)
+
+# Discovery temporar — verifică live ID-urile reale (Odds API/football-data.org/
+# TheSportsDB/API-Football) pentru extinderea LEAGUE_PROVIDERS cu Jupiler Pro
+# League/Ekstraklasa/Scottish Premiership. Nicio scriere, nicio integrare —
+# vezi sync/poc_new_leagues_provider_lookup.py.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  lookup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run provider lookup (discovery, nu integrare)
+        env:
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+          API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+        run: |
+          python sync/poc_new_leagues_provider_lookup.py
