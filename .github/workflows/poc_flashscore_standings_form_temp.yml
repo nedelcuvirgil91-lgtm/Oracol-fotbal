@@ -1,0 +1,35 @@
+name: POC izolat — structură FORMĂ clasament Flashscore (temporar)
+
+# [ADAUGAT — 2026-08-10] Investighează structura reală a coloanei FORMĂ din
+# pagina de clasament Flashscore (romania/superliga/standings/) — vezi
+# scripts/_poc_flashscore_standings_form_temp.py pentru contextul complet
+# (ADR-045, Owner Standings). Nu importă key_manager.py/oracle_api.py/
+# discovery.py, nu scrie nicăieri, nu atinge niciun workflow existent. Se
+# șterge după închiderea investigației.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  poc-flashscore-standings-form:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Playwright
+        run: pip install playwright
+
+      - name: Install Playwright Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Run structure POC
+        run: python scripts/_poc_flashscore_standings_form_temp.py
