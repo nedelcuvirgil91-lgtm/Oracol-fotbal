@@ -23,7 +23,7 @@ st.set_page_config(
     page_title="Football Oracle",
     page_icon="⚽",
     layout="wide",
-    initial_sidebar_state="collapsed",
+    initial_sidebar_state="expanded",
 )
 
 st.markdown("""
@@ -37,9 +37,16 @@ st.markdown("""
 }
 *,*::before,*::after{box-sizing:border-box;}
 html,body,[class*="css"]{background:var(--bg)!important;color:var(--t1)!important;font-family:var(--inter)!important;}
-#MainMenu,footer,header,[data-testid="stToolbar"],[data-testid="collapsedControl"]{visibility:hidden!important;}
+#MainMenu,footer,header,[data-testid="stToolbar"]{visibility:hidden!important;}
+[data-testid="stExpandSidebarButton"]{visibility:visible!important;color:var(--accent)!important;}
 .block-container{padding:0!important;max-width:100%!important;}
-section[data-testid="stSidebar"]{display:none!important;}
+section[data-testid="stSidebar"]{background:var(--surface)!important;border-right:1px solid var(--border)!important;}
+section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p{color:var(--t1)!important;}
+.league-sidebar-title{font-family:var(--oswald);font-size:.85rem;font-weight:600;color:var(--t1);letter-spacing:.06em;text-transform:uppercase;padding:.6rem 0 .3rem;}
+section[data-testid="stSidebar"] .stButton>button{font-family:var(--inter)!important;font-size:.78rem!important;font-weight:500!important;letter-spacing:0!important;text-transform:none!important;justify-content:flex-start!important;border-radius:6px!important;}
+section[data-testid="stSidebar"] .stButton>button[kind="primary"]{background:rgba(0,194,255,.22)!important;border-color:var(--accent)!important;color:var(--t1)!important;font-weight:700!important;box-shadow:0 0 0 1px var(--accent)!important;}
+section[data-testid="stSidebar"] .stButton>button[kind="secondary"]{background:transparent!important;border-color:var(--border)!important;color:var(--t2)!important;}
+section[data-testid="stSidebar"] .stButton>button[kind="secondary"]:hover{border-color:var(--accent)!important;color:var(--t1)!important;background:rgba(0,194,255,.08)!important;}
 .topbar{display:flex;align-items:center;justify-content:space-between;background:var(--surface);border-bottom:2px solid var(--accent);padding:.6rem 1.5rem;position:sticky;top:0;z-index:100;}
 .topbar-logo{font-family:var(--oswald);font-size:1.4rem;font-weight:700;color:var(--accent);letter-spacing:.06em;text-transform:uppercase;}
 .topbar-sub{font-family:var(--inter);font-size:.65rem;color:var(--t3);letter-spacing:.12em;text-transform:uppercase;}
@@ -47,11 +54,6 @@ section[data-testid="stSidebar"]{display:none!important;}
 .section-bar{display:flex;align-items:center;gap:.75rem;background:var(--surface);border-bottom:1px solid var(--border);padding:.5rem 1.5rem;}
 .section-bar-title{font-family:var(--oswald);font-size:1rem;font-weight:600;color:var(--t1);letter-spacing:.05em;text-transform:uppercase;}
 .section-bar-pill{background:var(--accent);color:#000;font-size:.6rem;font-weight:700;padding:.15rem .5rem;border-radius:20px;letter-spacing:.06em;}
-.comp-card{background:var(--card);border:1.5px solid var(--border);border-radius:10px;padding:.9rem .6rem;text-align:center;transition:all .18s ease;}
-.comp-card.active{border-color:var(--accent);background:rgba(0,194,255,.08);box-shadow:0 0 0 1px var(--accent),0 4px 16px rgba(0,194,255,.2);}
-.comp-icon{font-size:1.6rem;margin-bottom:.3rem;}
-.comp-name{font-family:var(--oswald);font-size:.72rem;font-weight:500;color:var(--t1);letter-spacing:.04em;text-transform:uppercase;line-height:1.2;}
-.comp-count{font-size:.6rem;color:var(--t2);margin-top:.2rem;}
 [data-testid="stTabs"] [role="tablist"]{background:var(--surface)!important;border-bottom:1px solid var(--border)!important;border-radius:0!important;padding:0 1.5rem!important;gap:0!important;}
 [data-testid="stTabs"] [role="tab"]{font-family:var(--oswald)!important;font-size:.8rem!important;font-weight:500!important;letter-spacing:.05em!important;color:var(--t2)!important;padding:.65rem 1rem!important;border:none!important;border-bottom:3px solid transparent!important;border-radius:0!important;background:transparent!important;}
 [data-testid="stTabs"] [role="tab"][aria-selected="true"]{color:var(--accent)!important;border-bottom-color:var(--accent)!important;background:transparent!important;}
@@ -682,25 +684,18 @@ if nav == "matches":
     if "selected_comp" not in st.session_state:
         st.session_state["selected_comp"] = "World Cup 2026"
 
-    # ── Competition cards ─────────────────────────────────────────────────
-    st.markdown('<div class="section-bar"><div class="section-bar-title">Selectează competiția</div></div>', unsafe_allow_html=True)
-    cols = st.columns(len(COMPETITIONS_META))
-    for i, comp in enumerate(COMPETITIONS_META):
+    # ── Competiții (sidebar, stil Flashscore — listă verticală, fără scroll
+    # orizontal indiferent câte ligi urmărim) ───────────────────────────────
+    st.sidebar.markdown('<div class="league-sidebar-title">⚽ Competiții</div>', unsafe_allow_html=True)
+    for comp in COMPETITIONS_META:
         key = comp["key"]
         cnt = comp_counts.get(key, 0)
         is_active = st.session_state["selected_comp"] == key
-        ac = "active" if is_active else ""
-        border_style = f"border-color:{comp['color']};box-shadow:0 0 0 1px {comp['color']},0 4px 16px {comp['color']}33;" if is_active else ""
-        with cols[i]:
-            st.markdown(f"""
-            <div class="comp-card {ac}" style="{border_style}">
-                <div class="comp-icon">{comp['icon']}</div>
-                <div class="comp-name">{comp['label']}</div>
-                <div class="comp-count">{cnt}</div>
-            </div>""", unsafe_allow_html=True)
-            if st.button("▶", key=f"c_{key}", use_container_width=True, help=comp["label"]):
-                st.session_state["selected_comp"] = key
-                st.rerun()
+        label = f"{comp['icon']}  {comp['label']}  ({cnt})"
+        if st.sidebar.button(label, key=f"c_{key}", use_container_width=True,
+                              type="primary" if is_active else "secondary"):
+            st.session_state["selected_comp"] = key
+            st.rerun()
 
     sel = st.session_state["selected_comp"]
     cm  = next((c for c in COMPETITIONS_META if c["key"] == sel), COMPETITIONS_META[0])
