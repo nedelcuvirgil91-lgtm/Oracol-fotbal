@@ -67,8 +67,8 @@ Predictorul, ML-ul și Streamlit-ul rămân complet neatinse de acest ADR.
 - Stabilește o regulă reutilizabilă pentru orice provider nou introdus în viitor.
 
 **Negative/costuri**:
-- Owner-ul Flashscore pentru Standings/H2H rămâne „pe hârtie" până la task-ul separat de repointare a Oracle Engine — o perioadă în care decizia formală și comportamentul real al sistemului nu coincid complet (documentat explicit aici, nu ascuns).
-- Discovery-ul Flashscore repointat la `scheduled_fixtures` (#1) introduce o dependență nouă: dacă Sync Layer nu găsește un meci, Flashscore nu-l va găsi nici el (pierdere de acoperire posibilă față de discovery-ul independent de azi) — necesită verificare de non-regresie înainte de activare.
+- Owner-ul Flashscore pentru Standings/H2H rămâne „pe hârtie" până la task-ul separat de repointare a Oracle Engine — o perioadă în care decizia formală și comportamentul real al sistemului nu coincid complet (documentat explicit aici, nu ascuns). [REZOLVAT — 2026-08-10, vezi Addendum 3.]
+- ~~Discovery-ul Flashscore repointat la `scheduled_fixtures` (#1) introduce o dependență nouă: dacă Sync Layer nu găsește un meci, Flashscore nu-l va găsi nici el (pierdere de acoperire posibilă față de discovery-ul independent de azi) — necesită verificare de non-regresie înainte de activare.~~ [CORECTAT — 2026-08-10] Riscul descris aici nu s-a materializat: implementarea reală (Pasul 1) NU a repointat discovery-ul la `scheduled_fixtures` (abordare evaluată și respinsă ca fragilă — ar fi cerut o cross-referențiere slug URL → nume canonic). Soluția aleasă efectiv a fost mai simplă și fără acest risc: rulările automate nu mai încearcă deloc hub-ul `/fixtures/` (meciuri viitoare), indiferent dacă Sync Layer a descoperit deja fixture-ul sau nu — vezi comentariul din `providers/flashscore/discovery.py` (liniile de lângă `include_future_fixtures`). Linia de mai sus descria un cost al unei variante de design neadoptate, rămasă din redactarea inițială a ADR-ului.
 
 ## Aprobare
 
