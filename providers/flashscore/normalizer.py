@@ -704,15 +704,57 @@ def _parse_h2h_date(raw: str | None) -> str | None:
         return None
 
 
+_FORM_BADGE_TESTID_TO_LETTER = {
+    "wcl-badgeForm-win": "W",
+    "wcl-badgeForm-draw": "D",
+    "wcl-badgeForm-lose": "L",
+    # "wcl-badgeForm-unknown" — slot de rundă neîncă jucată pentru acea
+    # echipă ("?" pe pagină) — EXCLUS deliberat, nu e un rezultat real.
+}
+
+
+def _extract_standings_form(row) -> list[str]:
+    """Secvența FORM a unui rând de clasament — `.table__cell--form a.
+    tableCellFormIcon`, fiecare cu un `<div data-testid="wcl-badgeForm-
+    {win,draw,lose,unknown}">` (confirmat live, POC izolat 2026-08-10 +
+    fixture existent `flashscore_full_tabs_poc/standings.html`, ambele
+    identice structural — tab-ul de clasament relativ la meci și pagina
+    de clasament directă a ligii randează ACELAȘI component).
+
+    Ordinea din DOM = ordine cronologică REALĂ, cel mai vechi PRIMUL, cel
+    mai recent ULTIMUL (confirmat: badge-ul "unknown"/"?" apare mereu
+    primul, pentru rundele încă nejucate — nu la final) — exact ordinea
+    cerută de `feature_engine.compute_form_score()` (cel mai recent
+    element ULTIM, ponderare exponențială pe recență). Badge-urile
+    "unknown" sunt EXCLUSE din rezultat — nu sunt un rezultat real, nu se
+    aproximează (Regula #8)."""
+    form_el = row.select_one(".table__cell--form")
+    if form_el is None:
+        return []
+    letters: list[str] = []
+    for badge_a in form_el.select("a.tableCellFormIcon"):
+        badge_div = badge_a.select_one("[data-testid^='wcl-badgeForm-']")
+        if badge_div is None:
+            continue
+        testid = badge_div.get("data-testid", "")
+        letter = _FORM_BADGE_TESTID_TO_LETTER.get(testid)
+        if letter:
+            letters.append(letter)
+    return letters
+
+
 def normalize_standings(pages: dict[str, str], competition: str) -> list[dict[str, Any]]:
-    """Randuri `flashscore_standings_snapshot` (migratia 035) - clasament
-    curent. NOTA de robustete (raportata explicit): structura foloseste
-    clase CSS (`.ui-table__row`, `.tableCellParticipant__name`), NU
-    `data-testid` standard ca restul site-ului - mai fragil potential la
-    schimbari viitoare de build decat restul extractorilor. P/W/D/L
-    identificate pozitional (primele 4 `.table__cell--value` din rand,
-    dupa convenția standard confirmată pe fixture) - Scor/GD/Puncte au
-    clase specifice, mai robuste."""
+    """Randuri `flashscore_standings_snapshot` (migratia 035; `form`,
+    migratia 045) - clasament curent. NOTA de robustete (raportata
+    explicit): structura foloseste clase CSS (`.ui-table__row`,
+    `.tableCellParticipant__name`), NU `data-testid` standard ca restul
+    site-ului - mai fragil potential la schimbari viitoare de build decat
+    restul extractorilor. P/W/D/L identificate pozitional (primele 4
+    `.table__cell--value` din rand, dupa convenția standard confirmată pe
+    fixture) - Scor/GD/Puncte au clase specifice, mai robuste.
+
+    `form` (ADR-045, addendum 2026-08-10) — secvență cronologică reală
+    W/D/L, vezi `_extract_standings_form()`."""
     html = pages.get("standings")
     if not html:
         return []
@@ -745,6 +787,7 @@ def normalize_standings(pages: dict[str, str], competition: str) -> list[dict[st
             "goals_against": goals_against,
             "goal_diff": _parse_int_loose(gd_el.get_text(strip=True)) if gd_el else None,
             "points": _parse_int_loose(points_el.get_text(strip=True)) if points_el else None,
+            "form": _extract_standings_form(row),
             "source": "flashscore",
         })
     return rows_out

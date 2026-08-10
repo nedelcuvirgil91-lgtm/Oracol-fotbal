@@ -950,6 +950,7 @@ class FootballOracleEngine:
         Cascade:
            DB. Supabase match_history (get_team_recent_results)      ← PRIMAR, ADR-035/D1
           -1. Date naționale hardcodate (World Cup + naționale)      — fallback, doar dacă Level DB nu are date
+           FS. Flashscore standings+formă reală (Supabase) (get_team_standings_row) — fallback, ADR-045 (Owner Standings, 14 ligi FLASHSCORE_TRACKED_COMPETITIONS)
            0+1. FreeLF standings+formă (Supabase) (get_team_form_freelf_snapshot) — fallback, ADR-039 R-Sync-6
            2. Odds API meciuri recente (Supabase) (get_team_recent_form_oddsapi) — fallback, ADR-039 R-Sync-6
            3. fd.org standings (Supabase)  (get_team_form_footballdata) — fallback, ADR-039 R-Sync-3
@@ -1065,6 +1066,50 @@ class FootballOracleEngine:
             ]
             data_source  = "national-stats-hardcoded"
             logger.info("[Profile] %s — national stats hardcoded (gf=%.2f ga=%.2f)", canonical, gf, ga)
+
+        # ── Level FS: Flashscore standings (ADR-045, Owner Standings —
+        # adăugat 2026-08-10) ──────────────────────────────────────────────
+        # Sync Layer only — citire STRICT din Supabase
+        # (flashscore_standings_snapshot, populată de persist_match_
+        # foundation_data() → upsert_standings_snapshot()), niciodată apel
+        # live. Owner declarat explicit pentru Standings (ADR-045 §Matrice,
+        # rândul 3) — acoperă azi cele 14 competiții din FLASHSCORE_TRACKED_
+        # COMPETITIONS (providers/flashscore/discovery.py). NU înlocuiește
+        # Level 0+1 (FreeLF)/Level 3 (football-data.org) de mai jos — rămân
+        # fallback neatins pentru ligile în afara acoperirii Flashscore
+        # (ex. World Cup, exclus deliberat din FLASHSCORE_TRACKED_
+        # COMPETITIONS — identitate URL ambiguă).
+        #
+        # `form` (migrația 045) — secvență cronologică REALĂ W/D/L, extrasă
+        # din badge-urile paginii de clasament (`data-testid="wcl-badgeForm-
+        # {win,draw,lose}"`, confirmat live, POC izolat 2026-08-10), cel mai
+        # vechi primul, cel mai recent ULTIMUL — exact ordinea cerută de
+        # `compute_form_score()`. Nivelul NU se activează dacă `form` e
+        # goală (echipă fără niciun rezultat real capturat încă) — mai bine
+        # cascada continuă la FreeLF/football-data decât un `results=[]`
+        # care ar produce form_score=0.0 (worst-case, nu neutru — Regula #8).
+        if not stats and DB_QUERIES_MODULE_AVAILABLE:
+            try:
+                fs_row = get_team_standings_row(canonical, league)
+            except Exception as exc:
+                fs_row = None
+                logger.warning("[Profile] Flashscore standings read failed for %s: %s", canonical, exc)
+            if fs_row:
+                form_list = fs_row.get("form") or []
+                if form_list:
+                    played = fs_row.get("played") or 1
+                    gf_avg = (fs_row.get("goals_for", 0) or 0) / played
+                    ga_avg = (fs_row.get("goals_against", 0) or 0) / played
+                    sot    = real_sot if real_sot is not None else gf_avg * 0.45
+                    pos    = 50.0
+                    stats  = [
+                        {"result": r, "goals_for": gf_avg, "goals_against": ga_avg,
+                         "shots_on_goal": sot, "possession": pos}
+                        for r in form_list[-last_n:]
+                    ]
+                    data_source  = "flashscore-standings"
+                    logger.info("[Profile] %s — flashscore-standings (%d rezultate reale)",
+                                canonical, len(stats))
 
         # ── Level 0+1: Free Live Football standings + formă (ADR-039, R-Sync-6) ─
         # Sync Layer only — citire STRICT din Supabase

@@ -19,6 +19,7 @@ from providers.flashscore.normalizer import (
     normalize_odds,
     normalize_player_match_stats_table,
     normalize_standings,
+    _extract_standings_form,
 )
 
 FIXTURE_DIR = Path(__file__).parent.parent / "docs" / "06_UDAL" / "poc_evidence" / "flashscore_full_tabs_poc"
@@ -264,6 +265,91 @@ def test_normalize_standings_real_values(full_tabs_pages):
 
 def test_normalize_standings_no_standings_tab_returns_empty():
     assert normalize_standings({}, competition="SuperLiga") == []
+
+
+# ════════════════════════════════════════════════════════════════════════
+# normalize_standings() — `form` (migrația 045, ADR-045 Owner Standings)
+# ════════════════════════════════════════════════════════════════════════
+
+def test_normalize_standings_form_real_values(full_tabs_pages):
+    """FCSB (rank 1): played=2, won=2, drawn=0, lost=0 — 2 rezultate reale
+    W/W, niciun badge 'unknown' (echipa are deja 2 meciuri jucate din
+    fereastra afișată). Verificat manual contra fixture-ului real."""
+    rows = normalize_standings(full_tabs_pages, competition="SuperLiga")
+    fcsb = rows[0]
+    assert fcsb["form"] == ["W", "W"]
+
+
+def test_normalize_standings_form_mixed_result(full_tabs_pages):
+    """FC Rapid Bucuresti: won=1, drawn=1, lost=0 — ordine cronologică
+    reală (D apoi W, nu alfabetică/aleatorie) — confirmă că ordinea DOM
+    e păstrată, nu resortată."""
+    rows = normalize_standings(full_tabs_pages, competition="SuperLiga")
+    rapid = next(r for r in rows if r["team"] == "FC Rapid Bucuresti")
+    assert rapid["form"] == ["D", "W"]
+
+
+def test_normalize_standings_form_all_rows_present():
+    """Fiecare din cele 16 rânduri are cheia 'form' (listă, posibil goală,
+    niciodată absentă/None) — contract stabil pentru consumatori."""
+    from bs4 import BeautifulSoup
+
+    html = (FIXTURE_DIR / "standings.html").read_text(encoding="utf-8")
+    soup = BeautifulSoup(html, "html.parser")
+    assert len(soup.select(".ui-table__row")) == 16
+
+
+def test_extract_standings_form_excludes_unknown_placeholder():
+    """Badge-ul 'unknown' ('?', rundă neîncă jucată) NU e un rezultat real
+    — exclus explicit, nu aproximat ca 'D' sau altceva (Regula #8)."""
+    from bs4 import BeautifulSoup
+
+    html = """
+    <div class="ui-table__row">
+      <div class="table__cell--form">
+        <a class="tableCellFormIcon tableCellFormIcon--TBD">
+          <div data-testid="wcl-badgeForm-unknown"><span>?</span></div>
+        </a>
+        <a class="tableCellFormIcon">
+          <div data-testid="wcl-badgeForm-win"><span>W</span></div>
+        </a>
+        <a class="tableCellFormIcon">
+          <div data-testid="wcl-badgeForm-draw"><span>D</span></div>
+        </a>
+        <a class="tableCellFormIcon">
+          <div data-testid="wcl-badgeForm-lose"><span>L</span></div>
+        </a>
+      </div>
+    </div>
+    """
+    row = BeautifulSoup(html, "html.parser").select_one(".ui-table__row")
+    assert _extract_standings_form(row) == ["W", "D", "L"]
+
+
+def test_extract_standings_form_preserves_dom_order_chronological():
+    """Ordinea DOM (stânga->dreapta pe pagină) e păstrată identic în lista
+    întoarsă — cel mai vechi primul, cel mai recent ultimul (confirmat
+    live: badge-ul 'unknown' apare mereu primul, niciodată la final)."""
+    from bs4 import BeautifulSoup
+
+    html = """
+    <div class="ui-table__row">
+      <div class="table__cell--form">
+        <a class="tableCellFormIcon"><div data-testid="wcl-badgeForm-lose"><span>L</span></div></a>
+        <a class="tableCellFormIcon"><div data-testid="wcl-badgeForm-win"><span>W</span></div></a>
+        <a class="tableCellFormIcon"><div data-testid="wcl-badgeForm-draw"><span>D</span></div></a>
+      </div>
+    </div>
+    """
+    row = BeautifulSoup(html, "html.parser").select_one(".ui-table__row")
+    assert _extract_standings_form(row) == ["L", "W", "D"]
+
+
+def test_extract_standings_form_no_form_cell_returns_empty():
+    from bs4 import BeautifulSoup
+
+    row = BeautifulSoup("<div class='ui-table__row'></div>", "html.parser").select_one(".ui-table__row")
+    assert _extract_standings_form(row) == []
 
 
 # ════════════════════════════════════════════════════════════════════════

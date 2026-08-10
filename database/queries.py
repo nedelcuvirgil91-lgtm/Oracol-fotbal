@@ -2466,7 +2466,8 @@ def get_match_context(match_id: int) -> list[dict]:
 
 def get_standings_snapshot(competition: str) -> list[dict]:
     """Clasament curent per competitie (snapshot, nu istoric) -
-    `flashscore_standings_snapshot`, migratia 035."""
+    `flashscore_standings_snapshot`, migratia 035. `form` (migratia 045,
+    ADR-045) - secvență cronologică reală W/D/L, cel mai recent ultimul."""
     client = get_client()
     if client is None:
         return []
@@ -2474,7 +2475,7 @@ def get_standings_snapshot(competition: str) -> list[dict]:
         res = (
             client.table("flashscore_standings_snapshot")
             .select("team,rank,played,won,drawn,lost,goals_for,goals_against,"
-                    "goal_diff,points,captured_at")
+                    "goal_diff,points,form,captured_at")
             .eq("competition", competition)
             .order("rank")
             .execute()

@@ -79,3 +79,36 @@ Predictorul, ML-ul și Streamlit-ul rămân complet neatinse de acest ADR.
 Confirmat prin commit-ul de merge `2345f84` pe `main` (2026-08-03): „Aprobat explicit de proprietarul produsului pentru scriere directa pe main". Checkbox-ul a rămas nebifat în acest document până la 2026-08-10 — gol de sincronizare a documentației, nu de aprobare reală; corectat acum, retroactiv, la cererea proprietarului produsului.
 
 Matricea Owner/Fallback e azi APROBATĂ integral. Implementarea rămâne parțială, deliberat: cele 4 modificări de Sync Layer autorizate direct (Statistics/Fixtures/H2H/Standings) sunt live pe `main`; repointarea consumatorului Oracle Engine pentru Standings/H2H (explicit NEautorizată de acest ADR, vezi secțiunea de mai sus) rămâne un task separat, neînceput.
+
+---
+
+## Addendum 3 — repointarea consumatorului Oracle Engine (Standings + H2H), 2026-08-10
+
+**Aprobat explicit de proprietarul produsului** ("mergi și nu te opri până nu termini") — task-ul separat cerut mai sus în document ("Ce NU autorizează acest ADR") a fost deschis, cu testare de non-regresie proprie, exact disciplina cerută.
+
+**Corectare a unei cifre stale**: textul original (2026-08-03) spune „Flashscore acoperă azi doar 9 competiții"/„8 competiții" — verificat live la 2026-08-10, `FLASHSCORE_TRACKED_COMPETITIONS` are azi **14 ligi** (Primeira Liga/Eredivisie/Super Lig/HNL adăugate 2026-08-04, Conference League 2026-08-05, toate ULTERIOARE redactării acestui ADR). Campionatul Mondial rămâne exclus deliberat (identitate URL ambiguă), neschimbat.
+
+### H2H (#7) — NICIO schimbare de cod, confirmat necesară
+
+Investigație înainte de implementare: `flashscore_match_context` (categoria `h2h_overall`) se scrie DOAR pentru meciuri deja JUCATE (enrichment post-meci) — rulările automate au oprit deja explicit scraping-ul pentru meciuri viitoare (Pasul 1, mai sus în acest document). Pentru un meci viitor de prezis, acest tabel nu are niciun rând legat de el — nu poate fi citit direct în `_build_h2h()`.
+
+În schimb, `database.queries.get_h2h_from_history()` (Level DB, citit PRIMUL în `_build_h2h()`) interoghează `match_history` fără niciun filtru de `source`/`fixture_id`/provider — rândurile scrise de Flashscore pentru cele 14 competiții tracked (Faza 2/3, `persist_match_foundation_data()`) sunt deja incluse identic cu orice alt provider. **H2H e deja, de facto, Flashscore-primar pentru acele competiții, prin cascada DB existentă** — cascada rămâne EXACT cum spune rândul #7: DB → FreeLF → Odds API, neschimbată.
+
+Dovadă mecanică, nu doar afirmație: `tests/test_database_queries_h2h_canonical.py` — `test_query_has_no_source_or_fixture_id_filter()` (interogarea nu filtrează după sursă) + `test_flashscore_sourced_rows_returned_identically_to_any_other_provider()` (un rând cu `fixture_id="flashscore_..."` e întors identic cu orice alt provider).
+
+### Standings (#3) — implementat, nivel nou în `_build_profile()`
+
+**Blocaj găsit înainte de implementare**: `flashscore_standings_snapshot` persista doar totaluri de sezon (won/drawn/lost), fără nicio secvență cronologică — `feature_engine.compute_form_score()` cere explicit ordine cronologică (cel mai recent ULTIM). O aproximare (ex. „mereu W", tiparul deja existent la FreeLF) ar fi încălcat Regula #8.
+
+**Rezolvare**: pagina de clasament Flashscore are o coloană FORM cu bagde-uri per echipă (`data-testid="wcl-badgeForm-{win,draw,lose,unknown}"`), confirmată live prin POC izolat (2026-08-10) — ordine DOM = ordine cronologică reală, cel mai vechi primul. Confirmat independent și pe fixture-ul deja existent în proiect (`docs/06_UDAL/poc_evidence/flashscore_full_tabs_poc/standings.html`) — tab-ul de clasament relativ la meci și pagina directă de ligă randează identic structural.
+
+**Implementare**:
+- Migrația 045 (`database/migrations/045_flashscore_standings_form.sql`) — `flashscore_standings_snapshot.form TEXT[]`.
+- `providers/flashscore/normalizer.py::_extract_standings_form()` — extrage secvența W/D/L (badge-urile „unknown"/„?" excluse explicit, nu sunt un rezultat real), cablată în `normalize_standings()`.
+- `database/queries.py::get_standings_snapshot()` — selectează și `form`.
+- `oracle_engine.py::_build_profile()` — nivel nou „Level FS", între Level DB/Level -1 (național) și Level 0+1 (FreeLF): citește `get_team_standings_row()`, folosește `form` reală pentru `results` (nu placeholder sintetic). Nu se activează dacă `form` e goală — cascada continuă la FreeLF/football-data, nu se aproximează cu date insuficiente.
+- Nu s-a atins nimic din fluxul de fetch existent (nicio pagină nouă vizitată) — doar extragere suplimentară din HTML deja fetch-uit.
+
+Teste: `tests/test_providers_flashscore_foundation_data_layer.py` (extracție `form`, contra fixture real + cazuri sintetice de robustețe), `tests/test_oracle_engine_flashscore_standings.py` (7 teste — prioritate față de FreeLF, ordine cronologică păstrată până la `compute_form_score()`, degradare fără excepție, Level DB câștigă și Flashscore nu mai e interogat deloc când DB are deja destule meciuri).
+
+Suită completă după implementare: vezi commit-ul acestei modificări pentru numărul exact de teste trecute.

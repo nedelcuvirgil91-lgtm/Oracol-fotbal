@@ -116,3 +116,45 @@ def test_returns_empty_when_query_raises(monkeypatch):
             raise RuntimeError("Supabase down")
     monkeypatch.setattr(q, "get_client", lambda: _Boom())
     assert q.get_h2h_from_history("TeamA", "TeamB") == []
+
+
+# ════════════════════════════════════════════════════════════════════════
+# ADR-045 — H2H Owner (Flashscore, 14 ligi FLASHSCORE_TRACKED_COMPETITIONS)
+# ════════════════════════════════════════════════════════════════════════
+# get_h2h_from_history() e sursa canonică folosită deja de _build_h2h() —
+# repointarea "de facto" la Flashscore pentru H2H (ADR-045, rândul 7 din
+# matricea Owner/Fallback) nu cere COD nou: match_history include deja,
+# fără nicio schimbare, rezultatele scrise de Flashscore pentru cele 14
+# competiții tracked (Faza 2/3, Foundation Data Layer, `persist_match_
+# foundation_data()`). Testele de mai jos dovedesc mecanic proprietatea
+# care face asta adevărat — get_h2h_from_history() e complet agnostic
+# de sursă/provider, nu filtrează niciodată după `source`/`fixture_id`.
+
+def test_query_has_no_source_or_fixture_id_filter():
+    """Dovadă directă: interogarea nu conține niciun `.eq('source', ...)`
+    sau `.eq('fixture_id', ...)` — rândurile scrise de Flashscore
+    (fixture_id = 'flashscore_<mid>') sunt incluse identic cu orice alt
+    provider, fără nicio cale de cod separată."""
+    import inspect
+    source = inspect.getsource(q.get_h2h_from_history)
+    assert "source" not in source.split('"""')[-1]  # cod, nu docstring
+    assert "fixture_id" not in source.split('"""')[-1]
+
+
+def test_flashscore_sourced_rows_returned_identically_to_any_other_provider(monkeypatch):
+    """Regresie directă pentru ADR-045: un rând `match_history` scris de
+    Flashscore (fixture_id prefixat 'flashscore_', convenție confirmată în
+    `normalize_match_statistics()`) apare în rezultat exact ca un rând de
+    la orice alt provider — niciun filtru/excludere per sursă."""
+    rows = [
+        {"home_team": "TeamA", "away_team": "TeamB", "actual_home_goals": 2,
+         "actual_away_goals": 1, "actual_result": "H", "kickoff_date": "2026-05-01",
+         "league": "Romania SuperLiga", "fixture_id": "flashscore_EeqI7WJc"},
+        {"home_team": "TeamB", "away_team": "TeamA", "actual_home_goals": 0,
+         "actual_away_goals": 0, "actual_result": "D", "kickoff_date": "2025-11-01",
+         "league": "Romania SuperLiga", "fixture_id": "footballdata_9981"},
+    ]
+    _client(rows, monkeypatch)
+    out = q.get_h2h_from_history("TeamA", "TeamB")
+    assert out == rows
+    assert any(r["fixture_id"].startswith("flashscore_") for r in out)
