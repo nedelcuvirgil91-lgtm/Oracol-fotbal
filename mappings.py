@@ -978,7 +978,10 @@ LEAGUE_ALIASES: dict[str, list[str]] = {
     "MLS":               ["USA", "Major League Soccer"],
     "Eredivisie":        ["N1", "Netherlands"],
     "Primeira Liga":     ["P1", "Portugal", "Liga Portugal", "Liga Portugal Betclic"],
-    "Super Lig":         ["Turkey", "Turkish Super Lig", "Süper Lig"],
+    # "T1" = codul football-data.co.uk pentru Turcia (confirmat live in
+    # match_history: Besiktas, Alanyaspor, Antalyaspor etc.) - lipsea, desi
+    # "Turkey" era deja listat; 1.448 randuri istorice ramasesera nenormalizate.
+    "Super Lig":         ["Turkey", "Turkish Super Lig", "Süper Lig", "T1"],
     "HNL":               ["Croatia", "Prva HNL", "Croatian First Football League", "1. HNL"],
 }
 
