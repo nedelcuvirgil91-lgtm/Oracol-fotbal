@@ -24,6 +24,13 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # [ADAUGAT — corectare R-Sync-4, 2026-08-10] eloratings.net randază
+      # tabelul de ratinguri 100% client-side (SlickGrid) — necesită
+      # Chromium real, nu doar pachetul Python `playwright` (deja în
+      # requirements.txt). Vezi elo_ratings_adapter.py pentru context complet.
+      - name: Install Playwright Chromium
+        run: playwright install --with-deps chromium
+
       # [ADAUGAT Sprint 2, Etapa C — Data Quality] Sincronizare ELO echipe
       # naționale (eloratings.net, R-Sync-4) — fără concept de cotă zilnică,
       # frecvență WEEKLY conform planului aprobat (Sprint 2, Pasul 2).

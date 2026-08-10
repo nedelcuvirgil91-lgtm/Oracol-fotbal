@@ -65,4 +65,12 @@ Regula ADR-035 („Niciun provider extern nu poate avea prioritate asupra unei i
 
 ---
 
+## Addendum — corectare mecanism R-Sync-4 (2026-08-10)
+
+**Nu e o schimbare de decizie** — implementarea `EloRatingsAdapter.fetch()` (`elo_ratings_adapter.py`) nu a funcționat niciodată real, de la crearea sincronizării. Confirmat live (audit infrastructură, 2026-08-10, POC izolat în doi pași): eloratings.net randază tabelul de ratinguri 100% client-side prin SlickGrid (`slick.grid.js`) — răspunsul HTTP brut (ce citea `requests`+`BeautifulSoup`) are ~1.8KB, zero `<table>`, zero date. `national_team_elo_snapshot` a persistat de la început, în fiecare rulare săptămânală, EXACT `ELO_RATINGS_FALLBACK` (`mappings.py`) — 47 de valori statice, nemodificate niciodată — fără nicio eroare vizibilă în loguri (fallback-ul mascase tăcut eșecul).
+
+**Corectare**: `fetch()` randază acum pagina real (Playwright, Chromium headless — deja dependință activă a proiectului, folosită pentru Flashscore) și parsează HTML-ul RANDAT, nu răspunsul HTTP brut — vezi `elo_ratings_adapter.parse_elo_ratings_html()`/`_fetch_rendered_html()`. Confirmat live, a doua etapă a POC-ului: 244 echipe naționale reale, cu ratinguri curente (ex. Spain 2259, Argentina 2173 — diferite de aproximările statice vechi).
+
+**Actualizare directă a §Consecințe, „Debt temporar (R-Sync-4)"**: acel paragraf presupunea că fuziunea cu `ELO_RATINGS_FALLBACK` avea să rămână necesară „până la acoperire live completă". În practică, sincronizarea reală (244 echipe, acoperire mult mai largă decât cele 47 din fallback) elimină nevoia fuziunii altfel decât prin dispariția ei naturală: `EloRatingsAdapter.fetch()` nu mai atinge deloc `oracle_api.get_national_elo_ratings_raw()`/`ELO_RATINGS_FALLBACK` — acel cod de fuziune a rămas neatins, dar a devenit orfan (niciun apelant de producție). Curățarea lui explicită (eliminarea codului mort din `oracle_api.py`) rămâne o decizie separată, nu bundle-uită tacit aici — semnalată proprietarului produsului ca descoperire, nu executată automat.
+
 **FREEZE CONFIRMAT.** Nicio linie de cod scrisă sub acest ADR. Arhitectura de mai sus (Universal Sync Layer, `SyncAdapter`, modelul de persistare, politica de migrare provider-cu-provider, identitatea canonică prin nume normalizat) devine contractul normativ pentru orice sincronizare externă a proiectului. Implementarea urmează roadmap-ul din audit companion (§8), incremental, pas cu pas, fiecare cu aprobare explicită separată — fără extindere de scope, fără redesign suplimentar decât la o problemă demonstrată în implementare.
