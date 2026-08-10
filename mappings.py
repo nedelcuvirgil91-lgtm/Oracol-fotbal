@@ -664,24 +664,24 @@ LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
     # COMPETITIONS) — verificare live, sync/poc_new_leagues_provider_
     # lookup.py, run 31418847416. football_data=False pentru toate 3 —
     # CONFIRMAT live, /v4/competitions (planul gratuit, 13 competiții
-    # returnate) nu include Belgia/Polonia/Scoția. api_football rămâne
-    # "necunoscut" pentru toate 3 — verificarea live a EȘUAT, contul
-    # API-Football e SUSPENDAT ("Your account is suspended", HTTP 200 cu
-    # eroare în body, confirmat pentru toate 3 țări) — problemă a
-    # contului, nelegată de aceste ligi, semnalată separat proprietarului
-    # produsului. espn/freelf/soccerfootballinfo rămân "necunoscut" —
-    # neverificate azi, în afara scopului cerut (tracking cote pre-meci).
+    # returnate) nu include Belgia/Polonia/Scoția. api_football —
+    # CONFIRMAT live cu cheia nouă (contul vechi era suspendat, migrare
+    # separată — vezi sync/poc_api_football_new_key_validation.py, run
+    # 31421142891), /leagues?country=<țară>, id-uri reale. espn/freelf/
+    # soccerfootballinfo rămân "necunoscut" — neverificate azi, în afara
+    # scopului cerut (tracking cote pre-meci).
     "Jupiler Pro League": LeagueDefinition(
         name="Jupiler Pro League",
         # odds="soccer_belgium_first_div" — CONFIRMAT live, /v4/sports
         # (all=true), title="Belgium First Div", active=True. tsdb="4338"
         # ("Belgian Pro League") — CONFIRMAT live, search_all_leagues.php?
-        # c=Belgium&s=Soccer.
+        # c=Belgium&s=Soccer. api_football=144 ("Jupiler Pro League") —
+        # CONFIRMAT live, /leagues?country=Belgium.
         provider_ids={"football_data": None, "espn": None, "tsdb": "4338",
-                       "odds": "soccer_belgium_first_div", "freelf": None, "api_football": None,
+                       "odds": "soccer_belgium_first_div", "freelf": None, "api_football": 144,
                        "soccerfootballinfo": None},
         supported={"football_data": False, "espn": "necunoscut", "tsdb": True,
-                    "odds": True, "freelf": "necunoscut", "api_football": "necunoscut",
+                    "odds": True, "freelf": "necunoscut", "api_football": True,
                     "soccerfootballinfo": "necunoscut"},
     ),
     "Ekstraklasa": LeagueDefinition(
@@ -689,12 +689,13 @@ LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
         # odds="soccer_poland_ekstraklasa" — CONFIRMAT live, /v4/sports
         # (all=true), title="Ekstraklasa - Poland", active=True.
         # tsdb="4422" ("Polish Ekstraklasa") — CONFIRMAT live,
-        # search_all_leagues.php?c=Poland&s=Soccer.
+        # search_all_leagues.php?c=Poland&s=Soccer. api_football=106
+        # ("Ekstraklasa") — CONFIRMAT live, /leagues?country=Poland.
         provider_ids={"football_data": None, "espn": None, "tsdb": "4422",
-                       "odds": "soccer_poland_ekstraklasa", "freelf": None, "api_football": None,
+                       "odds": "soccer_poland_ekstraklasa", "freelf": None, "api_football": 106,
                        "soccerfootballinfo": None},
         supported={"football_data": False, "espn": "necunoscut", "tsdb": True,
-                    "odds": True, "freelf": "necunoscut", "api_football": "necunoscut",
+                    "odds": True, "freelf": "necunoscut", "api_football": True,
                     "soccerfootballinfo": "necunoscut"},
     ),
     "Scottish Premiership": LeagueDefinition(
@@ -708,12 +709,14 @@ LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
         # CONFIRMAT live, search_all_leagues.php?c=Scotland&s=Soccer NU a
         # întors "Scottish Premiership" (doar Championship id=4395 și ligi
         # inferioare) — id-ul real al ligii de elită rămâne neconfirmat,
-        # NU ghicit.
+        # NU ghicit. api_football=179 ("Premiership") — CONFIRMAT live,
+        # /leagues?country=Scotland (cheie nouă, sync/poc_api_football_
+        # new_key_validation.py, run 31421142891).
         provider_ids={"football_data": None, "espn": None, "tsdb": None,
-                       "odds": "soccer_spl", "freelf": None, "api_football": None,
+                       "odds": "soccer_spl", "freelf": None, "api_football": 179,
                        "soccerfootballinfo": None},
         supported={"football_data": False, "espn": "necunoscut", "tsdb": "necunoscut",
-                    "odds": True, "freelf": "necunoscut", "api_football": "necunoscut",
+                    "odds": True, "freelf": "necunoscut", "api_football": True,
                     "soccerfootballinfo": "necunoscut"},
     ),
 }
