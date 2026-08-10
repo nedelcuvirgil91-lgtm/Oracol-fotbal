@@ -130,6 +130,9 @@ COMPETITIONS_META = [
     {"key":"Eredivisie",        "icon":"🇳🇱","label":"Eredivisie",      "color":"#f39c12"},
     {"key":"Super Lig",         "icon":"🇹🇷","label":"Süper Lig",       "color":"#d35400"},
     {"key":"HNL",               "icon":"🇭🇷","label":"HNL",             "color":"#2980b9"},
+    {"key":"Jupiler Pro League",   "icon":"🇧🇪","label":"Jupiler Pro League",   "color":"#f1c40f"},
+    {"key":"Ekstraklasa",          "icon":"🇵🇱","label":"Ekstraklasa",          "color":"#e74c3c"},
+    {"key":"Scottish Premiership", "icon":"🏴","label":"Scottish Premiership", "color":"#8e44ad"},
 ]
 
 @st.cache_resource(show_spinner=False)

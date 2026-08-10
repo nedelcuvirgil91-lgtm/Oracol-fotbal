@@ -1,0 +1,75 @@
+name: Football Oracle — Flashscore Extra Leagues (extindere etapizată)
+
+# [ADAUGAT 2026-08-10] Cerere explicită proprietar produs: extindere
+# etapizată a competițiilor urmărite de Flashscore — 3 din 6 propuse, cele
+# cu sezonul deja început (Jupiler Pro League/Belgia, Ekstraklasa/Polonia,
+# Scottish Premiership/Scoția). Verificate Nivel B (WebSearch, URL exact
+# confirmat, nu ghicit) — vezi providers/flashscore/discovery.py,
+# FLASHSCORE_TRACKED_COMPETITIONS.
+#
+# Workflow SEPARAT, nu adăugat la night_sync.yml — cerere explicită: dacă
+# ligile noi ar îngreuna procesul de noapte, să ruleze independent, la altă
+# oră. Mirror exact al etapei Flashscore din sync/run_night.py
+# (_stage_flashscore — leagues=None -> acum listă explicită, ca setul de
+# bază să NU includă implicit ligile noi), dar scopat DOAR la cele 3 ligi
+# noi, la o oră de zi diferită.
+#
+# Cadență: 10:00 UTC (13:00 ora României, EEST) — ales cu marjă explicită,
+# nu "ora 11-12" cerută literal, pentru că acel interval e deja ocupat:
+# sync_pre_match_odds.yml rulează la 08:00 UTC (timeout 45 min -> 08:45 cel
+# mai târziu), live_sync.yml la 09:00 UTC (timeout 50 min -> 09:50 cel mai
+# târziu). 10:00 UTC lasă 10 min marjă după live_sync și e cu mult înainte
+# de următoarea rulare live_sync (13:00 UTC) — fără niciun mecanism de
+# concurrency între workflow-uri diferite (același principiu ca la
+# live_sync.yml: programare simplă, nu blocare).
+#
+# Prima rulare (catch-up istoric pentru cele 3 ligi) poate dura mult mai
+# mult decât rulările ulterioare — Delta Sync (is_flashscore_match_already_
+# collected) face rulările următoare ieftine, sar meciurile deja colectate.
+
+on:
+  schedule:
+    - cron: "0 10 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: flashscore-extra-leagues
+  cancel-in-progress: false
+
+jobs:
+  flashscore-extra-leagues:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: playwright install --with-deps chromium
+
+      - name: Run Flashscore — Extra Leagues (Belgia/Polonia/Scoția)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          python -c "
+          from providers.flashscore.discovery import get_limit_per_league_automated
+          from providers.flashscore.run_foundation_data_layer import run as run_flashscore
+          exit_code = run_flashscore(
+              leagues=['Jupiler Pro League', 'Ekstraklasa', 'Scottish Premiership'],
+              limit_per_league=get_limit_per_league_automated(),
+              dry_run=False,
+              include_future_fixtures=False,
+          )
+          raise SystemExit(exit_code)
+          "

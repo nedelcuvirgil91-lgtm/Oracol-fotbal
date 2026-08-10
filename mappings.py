@@ -983,6 +983,12 @@ LEAGUE_ALIASES: dict[str, list[str]] = {
     # "Turkey" era deja listat; 1.448 randuri istorice ramasesera nenormalizate.
     "Super Lig":         ["Turkey", "Turkish Super Lig", "Süper Lig", "T1"],
     "HNL":               ["Croatia", "Prva HNL", "Croatian First Football League", "1. HNL"],
+    # [ADAUGAT 2026-08-10] Extindere Flashscore etapizată — coduri
+    # football-data.co.uk (Division) confirmate live în match_history
+    # (B1/POL/SC0), acelasi tipar ca USA/N1/P1/T1 de mai sus.
+    "Jupiler Pro League":   ["Belgium", "B1"],
+    "Ekstraklasa":          ["Poland", "POL"],
+    "Scottish Premiership": ["Scotland", "SC0", "Scottish Premier League"],
 }
 
 ALIAS_TO_CANONICAL_LEAGUE: dict[str, str] = {}

@@ -89,7 +89,12 @@ def test_flashscore_stage_uses_configurable_limit_and_excludes_future_fixtures(m
     Plafonul vine din get_limit_per_league_automated() (configurabil prin
     Supabase model_config, nu hardcodat) si include_future_fixtures=False
     — solutia reala pentru cele 240 de fixture-uri viitoare persistate
-    integral (audit 2026-08-03)."""
+    integral (audit 2026-08-03).
+
+    [ACTUALIZAT 2026-08-10] `leagues` nu mai e None ("toate din
+    FLASHSCORE_TRACKED_COMPETITIONS") — listă explicită, ca extinderea
+    etapizată la ligi noi (flashscore_extra_leagues.yml) să nu îngreuneze
+    tacit night_sync-ul existent."""
     monkeypatch.setattr("providers.flashscore.discovery.get_limit_per_league_automated", lambda: 27)
     calls = []
     monkeypatch.setattr(
@@ -98,7 +103,12 @@ def test_flashscore_stage_uses_configurable_limit_and_excludes_future_fixtures(m
             calls.append((leagues, limit_per_league, dry_run, include_future_fixtures)) or 0,
     )
     detail = night._stage_flashscore()
-    assert calls == [(None, 27, False, False)]
+    assert calls[0][0] == [
+        "Romania SuperLiga", "Champions League", "Premier League", "La Liga",
+        "Serie A", "Bundesliga", "Ligue 1", "Europa League", "MLS",
+        "Primeira Liga", "Eredivisie", "Super Lig", "HNL", "Conference League",
+    ]
+    assert calls[0][1:] == (27, False, False)
     assert "exit_code=0" in detail
 
 

@@ -204,6 +204,17 @@ FLASHSCORE_TRACKED_COMPETITIONS: dict[str, tuple[str, str]] = {
     # lipsea complet din discovery Flashscore, deși e deja tracked în
     # mappings.LEAGUE_PROVIDERS (espn/tsdb/soccerfootballinfo).
     "Conference League": ("europe", "conference-league"),
+    # [ADAUGAT 2026-08-10] Nivel B — verificare prin căutare web (WebSearch,
+    # rezultate multiple independente per ligă, titlu Flashscore real, URL
+    # exact confirmat, nu ghicit din convenție). Cerere explicită proprietar
+    # produs — extindere etapizată (3 din 6 propuse, cele cu sezonul deja
+    # început): "Jupiler Pro League 2026/2027 live scores... Football
+    # Belgium", "Ekstraklasa 2026/2027 live scores... Football Poland",
+    # "Scottish Premiership live scores... Football Scotland" (Hearts,
+    # Rangers, Celtic confirmate în conținut).
+    "Jupiler Pro League":   ("belgium", "jupiler-pro-league"),
+    "Ekstraklasa":          ("poland", "ekstraklasa"),
+    "Scottish Premiership": ("scotland", "premiership"),
 }
 
 

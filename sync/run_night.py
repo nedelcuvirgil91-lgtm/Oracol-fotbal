@@ -118,7 +118,20 @@ def _stage_flashscore() -> str:
     raman complet neafectate."""
     from providers.flashscore.discovery import get_limit_per_league_automated
     from providers.flashscore.run_foundation_data_layer import run as run_flashscore
-    exit_code = run_flashscore(leagues=None, limit_per_league=get_limit_per_league_automated(),
+    # [ADAUGAT 2026-08-10] Listă EXPLICITĂ, nu `leagues=None` ("toate din
+    # FLASHSCORE_TRACKED_COMPETITIONS") — cerere explicită proprietar produs:
+    # extinderea etapizată la ligi noi (Jupiler Pro League/Ekstraklasa/
+    # Scottish Premiership) nu trebuie să îngreuneze automat night_sync-ul
+    # existent. Ligile noi rulează separat, la altă oră, prin
+    # flashscore_extra_leagues.yml (vezi workflow-ul dedicat). Dacă se
+    # adaugă o ligă nouă la setul de bază pe viitor, lista de aici trebuie
+    # extinsă manual, deliberat — nu implicit.
+    _NIGHT_SYNC_LEAGUES = [
+        "Romania SuperLiga", "Champions League", "Premier League", "La Liga",
+        "Serie A", "Bundesliga", "Ligue 1", "Europa League", "MLS",
+        "Primeira Liga", "Eredivisie", "Super Lig", "HNL", "Conference League",
+    ]
+    exit_code = run_flashscore(leagues=_NIGHT_SYNC_LEAGUES, limit_per_league=get_limit_per_league_automated(),
                                 dry_run=False, include_future_fixtures=False)
     return f"exit_code={exit_code}"
 

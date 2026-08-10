@@ -45,6 +45,9 @@ def test_tracked_competitions_only_contains_verified_slugs():
         "Super Lig": ("turkey", "super-lig"),
         "HNL": ("croatia", "hnl"),
         "Conference League": ("europe", "conference-league"),
+        "Jupiler Pro League": ("belgium", "jupiler-pro-league"),
+        "Ekstraklasa": ("poland", "ekstraklasa"),
+        "Scottish Premiership": ("scotland", "premiership"),
     }
 
 
