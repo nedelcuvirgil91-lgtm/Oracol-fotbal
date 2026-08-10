@@ -44,6 +44,14 @@ def classify_evaluation(
     Altfel: scor MIN (niciodată medie — ADR-040, principiul 3) peste
     coverage/field_purity/id_purity, apoi RED (<1.0) / YELLOW (==1.0 ȘI
     accepted_exception_count>0) / GREEN (==1.0 ȘI accepted_exception_count==0).
+
+    [REPARAT — 2026-08-10, incident live confirmat: cu mai multe diferențe
+    de câmp/ID decât meciuri potrivite (`matched` mic, diferențe multe pe
+    restul), `field_purity`/`id_purity` ieșeau negative — `score` (min
+    peste toate trei) ieșea sub 0, respins de constraint-ul CHECK
+    `equivalence_evaluations_score_range` la scriere, deci evaluarea
+    respectivă nu se mai salva DELOC. `score` e o proporție — clamp la
+    0.0 minim, ca `coverage` (deja garantat în [0,1] prin construcție).]
     """
     if report.live_count < min_live_for_evaluation:
         return None, "insufficient_data"
@@ -54,8 +62,8 @@ def classify_evaluation(
     denom = max(report.matched, 1)
     coverage = report.matched / max(report.live_count, report.scheduled_count, 1)
     unaccepted_field_diff = max(report.field_difference_count - report.accepted_exception_count, 0)
-    field_purity = 1 - (unaccepted_field_diff / denom)
-    id_purity = 1 - (report.provider_id_difference_count / denom)
+    field_purity = max(1 - (unaccepted_field_diff / denom), 0.0)
+    id_purity = max(1 - (report.provider_id_difference_count / denom), 0.0)
     score = min(coverage, field_purity, id_purity)
 
     if score < 1.0:

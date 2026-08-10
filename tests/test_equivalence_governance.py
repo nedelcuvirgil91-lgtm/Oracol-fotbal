@@ -70,6 +70,26 @@ def test_classify_red_dominates_min_not_average():
     assert state == "red"
 
 
+def test_classify_score_never_negative_when_differences_exceed_matched():
+    """[REPARAT — 2026-08-10] Incident live confirmat: matched mic +
+    diferențe multe pe restul rândurilor producea field_purity/id_purity
+    negativ -> score negativ -> INSERT respins de constraint-ul CHECK
+    equivalence_evaluations_score_range, evaluarea nescrisă deloc. Scorul
+    e o proporție — niciodată sub 0.0, indiferent cât de multe diferențe."""
+    score, state = mod.classify_evaluation(
+        _report(live_count=30, scheduled_count=30, matched=1, field_difference_count=10)
+    )
+    assert score is not None
+    assert score >= 0.0
+    assert state == "red"
+
+    score2, _ = mod.classify_evaluation(
+        _report(live_count=30, scheduled_count=30, matched=1, provider_id_difference_count=10)
+    )
+    assert score2 is not None
+    assert score2 >= 0.0
+
+
 def test_custom_min_live_threshold_respected():
     score, state = mod.classify_evaluation(_report(live_count=10, scheduled_count=10, matched=10), min_live_for_evaluation=5)
     assert state == "green"

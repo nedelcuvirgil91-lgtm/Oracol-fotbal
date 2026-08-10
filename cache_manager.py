@@ -22,7 +22,14 @@ CATEGORY_TTL: dict[str, float] = {
     "lineups": 1.0, "standings": 12.0, "odds": 4.0,
     "elo": 24.0, "events": 0.5,
     "coaches": 72.0,  # [ADAUGAT] schimba rar - TTL lung (3 zile)
-    "matches": 1.0,   # [ADAUGAT] liste de meciuri (FreeLF/ESPN/agregat) - status live, schimba des
+    # [REDUS — 2026-08-10, incident live confirmat: era 1.0, cache-ul
+    # Supabase (L2, comun tuturor instanțelor) a servit o listă stale
+    # (14 meciuri) încă ~1h după ce match_history/scheduled_fixtures
+    # aveau deja date mult mai complete — un reboot al aplicației NU
+    # invalidează L2, doar TTL-ul o face. 0.5h (30 min) înjumătățește
+    # fereastra de staleness fără să crească presiunea pe providerii
+    # live (Level DB rămâne prima sursă, ieftină, la fiecare recitire).
+    "matches": 0.5,   # liste de meciuri (FreeLF/ESPN/agregat) - status live, schimba des
     "stats": 2.0,     # [ADAUGAT] statistici per-meci (xG, posesie) - schimba pana la final
     "teams": 720.0,   # [ADAUGAT] rezolvare nume->ID provider (ex. API-Football) - practic permanent (30 zile)
     "api_football_probe": 24.0,  # [ADAUGAT] sondaj discovery /fixtures/statistics - fixture_id + verdict 403/404, nu productie

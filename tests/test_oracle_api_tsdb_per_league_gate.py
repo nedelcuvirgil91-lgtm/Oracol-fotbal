@@ -8,10 +8,25 @@ gate-ul VECHI (global), TSDB nu era niciodată apelat pentru Romania. Acest
 test pică pe codul vechi (verificat manual înainte de patch) și trece după
 fix — urmează exact tiparul deja existent în
 tests/test_oracle_api_apifootball_fallback.py (FootballOracleAPI.__new__,
-ocolind rețeaua reală)."""
+ocolind rețeaua reală).
+
+[REPARAT — 2026-08-10] Datele erau hardcodate la "2026-07-18" (ziua în
+care testul a fost scris) — get_matches_for_week() filtrează rezultatele
+la fereastra azi..azi+7, deci testele au început să pice silențios odată
+ce "azi" a trecut de acea dată (test rot, nu bug de producție). Rescrise
+cu date relative la date.today(), ca în test_oracle_api_scheduled_
+fixtures_shadow.py. Adăugat și monkeypatch explicit pentru Level DB
+(get_matches_for_week_from_history) și fallback-ul de ultimă instanță
+(get_matches_for_week_from_scheduled_fixtures), ca testele să rămână
+determinist izolate de orice client Supabase real (chiar dacă azi, fără
+credențiale în sandbox, degradează oricum la gol)."""
 from __future__ import annotations
 
+from datetime import date
+
 import oracle_api
+
+_TODAY = date.today().isoformat()
 
 
 def _api_no_network() -> oracle_api.FootballOracleAPI:
@@ -30,16 +45,26 @@ def _api_no_network() -> oracle_api.FootballOracleAPI:
     return api
 
 
+def _no_db_fallback(monkeypatch):
+    """Level DB + fallback-ul de ultimă instanță pe scheduled_fixtures —
+    goale explicit, ca testul să exercite doar cascada live (obiectul
+    acestui fișier)."""
+    import database.queries as queries
+    monkeypatch.setattr(queries, "get_matches_for_week_from_history", lambda comps, d_from, d_to: ([], set()))
+    monkeypatch.setattr(queries, "get_matches_for_week_from_scheduled_fixtures", lambda leagues, d_from, d_to: ([], set()))
+
+
 def test_tsdb_called_for_league_with_zero_matches_even_when_other_leagues_fill_global_threshold(monkeypatch):
     """Reproduce cazul real: World Cup 2026 (>=5 meciuri) + Romania
     SuperLiga (0 meciuri de la Odds API/FreeLF/football-data/ESPN) —
     TSDB TREBUIE apelat pentru Romania SuperLiga, indiferent de cate
     meciuri au adunat deja alte ligi."""
+    _no_db_fallback(monkeypatch)
     api = _api_no_network()
 
     world_cup_matches = [{
         "fixture_id": f"wc_{i}", "home_team": f"WC-Home-{i}", "away_team": f"WC-Away-{i}",
-        "kickoff_date": "2026-07-18", "kickoff_utc": f"2026-07-18T{10+i}:00:00Z",
+        "kickoff_date": _TODAY, "kickoff_utc": f"{_TODAY}T{10+i}:00:00Z",
         "league": "World Cup 2026", "source": "the-odds-api",
     } for i in range(6)]  # 6 meciuri - depaseste pragul vechi (5)
 
@@ -60,7 +85,7 @@ def test_tsdb_called_for_league_with_zero_matches_even_when_other_leagues_fill_g
         if league_name == "Romania SuperLiga":
             return [{
                 "fixture_id": "tsdb_1", "home_team": "Oțelul Galați", "away_team": "CFR Cluj",
-                "kickoff_date": "2026-07-18", "kickoff_utc": "2026-07-18T15:30:00Z",
+                "kickoff_date": _TODAY, "kickoff_utc": f"{_TODAY}T15:30:00Z",
                 "league": "Romania SuperLiga", "source": "thesportsdb",
             }]
         return []
@@ -88,13 +113,14 @@ def test_tsdb_not_called_for_league_that_already_has_matches(monkeypatch):
     """Simetric fata de pasul 6 (API-Football): daca liga deja are meciuri
     de la providerii anteriori, TSDB nu mai e apelat pentru ea - evita
     apeluri irosite, exact tiparul existent la API-Football."""
+    _no_db_fallback(monkeypatch)
     api = _api_no_network()
 
     def _fake_odds_api(sport_key: str, days_ahead: int = 7):
         if sport_key == "soccer_fifa_world_cup":
             return [{
                 "fixture_id": "wc_1", "home_team": "France", "away_team": "England",
-                "kickoff_date": "2026-07-18", "kickoff_utc": "2026-07-18T21:00:00Z",
+                "kickoff_date": _TODAY, "kickoff_utc": f"{_TODAY}T21:00:00Z",
                 "league": "World Cup 2026", "source": "the-odds-api",
             }]
         return []
@@ -124,6 +150,7 @@ def test_tsdb_not_called_for_romania_when_romania_already_has_a_match(monkeypatc
     un meci (de ex. de la ESPN, cand va reveni sa acopere liga), TSDB nu
     trebuie apelat deloc pentru ea - fara apeluri irosite catre un provider
     de rezerva cand nu e nevoie."""
+    _no_db_fallback(monkeypatch)
     api = _api_no_network()
 
     api._fetch_events_odds_api = lambda sport_key, days_ahead=7: []
@@ -131,10 +158,10 @@ def test_tsdb_not_called_for_romania_when_romania_already_has_a_match(monkeypatc
     api._fetch_matches_fd = lambda date_from, date_to, comp_codes=None: []
 
     def _fake_espn(league: str, target_date: str):
-        if league == "Romania SuperLiga" and target_date == "2026-07-18":
+        if league == "Romania SuperLiga" and target_date == _TODAY:
             return [{
                 "fixture_id": "espn_1", "home_team": "Oțelul Galați", "away_team": "CFR Cluj",
-                "kickoff_date": "2026-07-18", "kickoff_utc": "2026-07-18T15:30:00Z",
+                "kickoff_date": _TODAY, "kickoff_utc": f"{_TODAY}T15:30:00Z",
                 "league": "Romania SuperLiga", "source": "espn",
             }]
         return []
@@ -165,6 +192,7 @@ def test_tsdb_gate_is_strictly_per_league_not_shared_across_leagues(monkeypatch)
     comportamentul altor ligi (Premier League, La Liga etc). Trei ligi
     simultan, fiecare cu stare diferita - fiecare trebuie evaluata STRICT
     independent, fara nicio scurgere intre ele."""
+    _no_db_fallback(monkeypatch)
     api = _api_no_network()
 
     def _fake_odds_api(sport_key: str, days_ahead: int = 7):
@@ -172,7 +200,7 @@ def test_tsdb_gate_is_strictly_per_league_not_shared_across_leagues(monkeypatch)
         if sport_key == "soccer_epl":
             return [{
                 "fixture_id": "pl_1", "home_team": "Arsenal", "away_team": "Chelsea",
-                "kickoff_date": "2026-07-18", "kickoff_utc": "2026-07-18T18:00:00Z",
+                "kickoff_date": _TODAY, "kickoff_utc": f"{_TODAY}T18:00:00Z",
                 "league": "Premier League", "source": "the-odds-api",
             }]
         return []  # La Liga si Romania SuperLiga -> 0 de la Odds API
@@ -189,13 +217,13 @@ def test_tsdb_gate_is_strictly_per_league_not_shared_across_leagues(monkeypatch)
         if league_name == "La Liga":
             return [{
                 "fixture_id": "ll_1", "home_team": "Real Madrid", "away_team": "Barcelona",
-                "kickoff_date": "2026-07-18", "kickoff_utc": "2026-07-18T20:00:00Z",
+                "kickoff_date": _TODAY, "kickoff_utc": f"{_TODAY}T20:00:00Z",
                 "league": "La Liga", "source": "thesportsdb",
             }]
         if league_name == "Romania SuperLiga":
             return [{
                 "fixture_id": "ro_1", "home_team": "Oțelul Galați", "away_team": "CFR Cluj",
-                "kickoff_date": "2026-07-18", "kickoff_utc": "2026-07-18T15:30:00Z",
+                "kickoff_date": _TODAY, "kickoff_utc": f"{_TODAY}T15:30:00Z",
                 "league": "Romania SuperLiga", "source": "thesportsdb",
             }]
         return []
