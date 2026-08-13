@@ -1003,27 +1003,45 @@ elif nav == "settings":
             supa_note = "" if ml_status.get("supabase_connected") else "  ·  ⚠️ Supabase indisponibil — status posibil neactualizat"
             st.caption(f"Ultima antrenare: {last_trained or 'niciodată'}{supa_note}")
 
-            # [ADAUGAT] Progres — reutilizează database.queries.get_ml_sample_count(),
-            # deja folosit de sync/run_daily.py pentru decizia de reantrenare automată.
+            # [CORECTAT — bara veche (samples_used + 20) nu reflecta pragul
+            # real de reantrenare: ADR-030 permite cel mult UN Challenger
+            # activ per (algoritm, ligă) — cât timp unul e în evaluare
+            # shadow, Faza B (antrenare nouă) nu rulează deloc, indiferent
+            # de câte meciuri noi se acumulează. Bara arată acum pragul care
+            # chiar blochează progresul: evaluarea shadow a Challenger-ului
+            # activ (learning_core.continuous_learning.MIN_MATCHES_FOR_EVALUATION).
             try:
-                from database.queries import get_ml_sample_count
-                current_samples = get_ml_sample_count()
+                from learning_core.continuous_learning import MIN_MATCHES_FOR_EVALUATION
+                from ml_predictor import _ALGORITHM_FAMILY, _LEAGUE_SCOPE
+                active_challenger = sb.get_active_challenger(_ALGORITHM_FAMILY, _LEAGUE_SCOPE)
             except Exception:
-                current_samples = 0
+                MIN_MATCHES_FOR_EVALUATION = 200
+                active_challenger = None
 
-            min_required = ml_status.get("min_samples_required", 30)
-            samples_used = ml_status.get("samples_used", 0)
-            if samples_used == 0:
-                target = min_required
-                progress_label = f"Progres până la prima antrenare automată: {current_samples}/{target}"
+            if active_challenger:
+                evaluation = sb.get_latest_challenger_evaluation(active_challenger["training_run_id"])
+                n_evaluated = evaluation.get("n_matches_evaluated", 0) if evaluation else 0
+                verdict = evaluation.get("verdict") if evaluation else "insufficient_data"
+                created = (active_challenger.get("created_at") or "")[:10]
+                progress_label = (
+                    f"Challenger activ din {created or '—'} în evaluare shadow: "
+                    f"{n_evaluated}/{MIN_MATCHES_FOR_EVALUATION} meciuri terminate evaluate "
+                    f"— verdict curent: {verdict}"
+                )
+                st.progress(min(n_evaluated / MIN_MATCHES_FOR_EVALUATION, 1.0), text=progress_label)
             else:
-                target = samples_used + 20
-                progress_label = f"Progres până la următoarea reantrenare automată: {current_samples}/{target}"
-            st.progress(min(current_samples / target, 1.0) if target else 0.0, text=progress_label)
-            # [ADAUGAT ADR-030] Reantrenarea reală, care poate deveni campion,
-            # rulează exclusiv automat (Learning Core, nocturn) — bara de mai
-            # sus arată progresul acelui prag, informativ, nu declanșat de
-            # niciun buton de-aici.
+                try:
+                    from database.queries import get_ml_sample_count
+                    current_samples = get_ml_sample_count()
+                except Exception:
+                    current_samples = 0
+                min_required = ml_status.get("min_samples_required", 30)
+                target = min_required
+                progress_label = f"Fără Challenger activ — progres până la prima antrenare: {current_samples}/{target}"
+                st.progress(min(current_samples / target, 1.0) if target else 0.0, text=progress_label)
+            # [ADR-030] Reantrenarea reală, care poate deveni campion, rulează
+            # exclusiv automat (Learning Core, nocturn) — bara de mai sus e
+            # informativă, nu declanșată de niciun buton de-aici.
 
             # [MODIFICAT — ADR-055] Strict diagnostic — vezi
             # oracle_engine.retrain_ml_model(). Nu antrenează/schimbă
