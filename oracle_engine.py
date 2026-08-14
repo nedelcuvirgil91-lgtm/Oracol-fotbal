@@ -2171,7 +2171,9 @@ class FootballOracleEngine:
             import validation_framework
             return validation_framework.save_snapshot(pred, self._resolve_ml_traceability())
         except Exception as exc:
-            logger.debug("[ValidationFramework] _log_validation_snapshot failed: %s", exc)
+            # [CORECTAT — audit "erori silențioase în loguri"] warning, nu
+            # debug — root logger e INFO, la debug eșecul n-ar apărea deloc.
+            logger.warning("[ValidationFramework] _log_validation_snapshot failed: %s", exc)
             return False
 
     def _get_ml_engine_prediction(

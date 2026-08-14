@@ -85,12 +85,16 @@ def save_snapshot(pred: "MatchPrediction", champion_diagnostic: dict | None = No
     try:
         row = _build_snapshot_row(pred, champion_diagnostic)
     except Exception as exc:
-        logger.debug("[ValidationFramework] construire rând eșuată: %s", exc)
+        # [CORECTAT — audit "erori silențioase în loguri"] warning, nu debug:
+        # root logger e configurat la INFO (oracle_engine.py/sync/run_night.py)
+        # — la debug, un eșec aici n-ar apărea NICIODATĂ în logurile GitHub
+        # Actions, la niciun nivel curent de verbozitate.
+        logger.warning("[ValidationFramework] construire rând eșuată: %s", exc)
         return False
 
     try:
         import supabase_client as sb
         return sb.save_engine_comparison_snapshot(row)
     except Exception as exc:
-        logger.debug("[ValidationFramework] save_snapshot failed: %s", exc)
+        logger.warning("[ValidationFramework] save_snapshot failed: %s", exc)
         return False
