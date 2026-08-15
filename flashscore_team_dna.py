@@ -64,6 +64,55 @@ def rolling_advanced_stats(rows: list[dict], canonical: str) -> dict:
     }
 
 
+def rolling_finishing_and_setpieces(rows: list[dict], canonical: str) -> dict:
+    """Eficiență finalizare (goluri/xG real, goluri/șuturi pe poartă) +
+    volum faze fixe (cornere/meci) — pe SUMELE agregate pe perechi
+    aliniate per meci (nu media rapoartelor per meci, care ar exploda la
+    meciuri cu 0 șuturi pe poartă, și nu ar aduna goluri dintr-un meci cu
+    xG dintr-un meci diferit dacă unul din cele două lipsește). Cere
+    aceleași rânduri ca rolling_advanced_stats, extinse cu home/away_
+    shots_on_target și home/away_corners — vezi database.queries.
+    get_team_recent_advanced_stats(). Eficiența la faze fixe (cornere/
+    lovituri libere -> gol) NU e calculabilă azi — match_events.detail
+    (tipul de asistență la gol) nu e populat încă (verificat live,
+    2026-08-15) — doar volumul, niciodată aproximată conversia."""
+    goals_xg_pairs: list[tuple[float, float]] = []
+    goals_sot_pairs: list[tuple[float, float]] = []
+    corners: list[float] = []
+    n_matches = 0
+    for r in rows:
+        is_home = r.get("home_team") == canonical
+        is_away = r.get("away_team") == canonical
+        if not (is_home or is_away):
+            continue
+        n_matches += 1
+        side = "home" if is_home else "away"
+        g = r.get(f"actual_{side}_goals")
+        xg = r.get(f"{side}_xg_actual")
+        sot = r.get(f"{side}_shots_on_target")
+        cor = r.get(f"{side}_corners")
+        if g is not None and xg is not None:
+            goals_xg_pairs.append((float(g), float(xg)))
+        if g is not None and sot is not None:
+            goals_sot_pairs.append((float(g), float(sot)))
+        if cor is not None:
+            corners.append(float(cor))
+
+    def _sum_ratio(pairs: list[tuple[float, float]]) -> float | None:
+        if not pairs:
+            return None
+        denom = sum(p[1] for p in pairs)
+        return sum(p[0] for p in pairs) / denom if denom > 0 else None
+
+    return {
+        "goals_per_xg": _sum_ratio(goals_xg_pairs),
+        "goals_per_shot_on_target": _sum_ratio(goals_sot_pairs),
+        "avg_corners": sum(corners) / len(corners) if corners else None,
+        "matches_sampled": n_matches,
+        "finishing_sample_matches": len(goals_xg_pairs),
+    }
+
+
 def rolling_extended_stats(rows: list[dict]) -> dict[str, float]:
     """Medie per `stat_key`, din rândurile deja rezolvate la partea
     corectă (database.queries.get_team_recent_statistics_extended) —
@@ -100,15 +149,21 @@ def build_team_dna(
     standings_row: dict | None,
     canonical: str,
 ) -> dict:
-    """Combină cele 3 agregări de mai sus + un snapshot de clasament
+    """Combină cele 4 agregări de mai sus + un snapshot de clasament
     (deja per-echipă, database.queries.get_team_standings_row) într-un
     singur dict "Team DNA" Flashscore — folosit atât pentru afișare
     (Streamlit) cât și ca fundație de feature engineering ML viitor.
     Fiecare secțiune degradează independent la valori goale/None dacă
     Flashscore n-a colectat încă date suficiente pentru acea echipă —
-    niciodată aproximat dintr-o altă secțiune."""
+    niciodată aproximat dintr-o altă secțiune.
+
+    `finishing` reutilizează `advanced_rows` (nu un al 5-lea parametru) —
+    rolling_finishing_and_setpieces() cere exact aceleași coloane deja
+    citite de rolling_advanced_stats() (plus șuturi pe poartă/cornere,
+    deja incluse în get_team_recent_advanced_stats())."""
     return {
         "advanced": rolling_advanced_stats(advanced_rows, canonical),
+        "finishing": rolling_finishing_and_setpieces(advanced_rows, canonical),
         "extended_stats": rolling_extended_stats(extended_rows),
         "player_ratings": rolling_player_ratings(player_rows),
         "standings": standings_row,

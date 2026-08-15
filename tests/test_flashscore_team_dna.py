@@ -8,6 +8,7 @@ from flashscore_team_dna import (
     build_team_dna,
     rolling_advanced_stats,
     rolling_extended_stats,
+    rolling_finishing_and_setpieces,
     rolling_player_ratings,
 )
 
@@ -68,6 +69,48 @@ def test_rolling_advanced_stats_none_values_excluded_not_treated_as_zero():
 
 
 # ════════════════════════════════════════════════════════════════════════
+# rolling_finishing_and_setpieces
+# ════════════════════════════════════════════════════════════════════════
+
+def test_rolling_finishing_sums_goals_and_xg_across_matches_not_per_match_average():
+    rows = [
+        {"home_team": "Dinamo", "away_team": "Rapid",
+         "actual_home_goals": 2, "home_xg_actual": 1.0, "home_shots_on_target": 4, "home_corners": 6},
+        {"home_team": "Craiova", "away_team": "Dinamo",
+         "actual_away_goals": 1, "away_xg_actual": 1.0, "away_shots_on_target": 2, "away_corners": 4},
+    ]
+    out = rolling_finishing_and_setpieces(rows, "Dinamo")
+    # 3 goluri / 2.0 xG total (nu media a (2/1 + 1/1)/2 = 1.5)
+    assert out["goals_per_xg"] == 3 / 2.0
+    assert out["goals_per_shot_on_target"] == 3 / 6
+    assert out["avg_corners"] == (6 + 4) / 2
+    assert out["matches_sampled"] == 2
+    assert out["finishing_sample_matches"] == 2
+
+
+def test_rolling_finishing_skips_rows_without_the_team():
+    rows = [{"home_team": "Craiova", "away_team": "Rapid", "actual_home_goals": 1, "home_xg_actual": 1.0}]
+    out = rolling_finishing_and_setpieces(rows, "Dinamo")
+    assert out["goals_per_xg"] is None
+    assert out["matches_sampled"] == 0
+
+
+def test_rolling_finishing_does_not_pair_goals_with_missing_xg():
+    rows = [{"home_team": "Dinamo", "away_team": "Rapid", "actual_home_goals": 2, "home_xg_actual": None}]
+    out = rolling_finishing_and_setpieces(rows, "Dinamo")
+    assert out["goals_per_xg"] is None
+    assert out["finishing_sample_matches"] == 0
+
+
+def test_rolling_finishing_empty_input_returns_none_values():
+    out = rolling_finishing_and_setpieces([], "Dinamo")
+    assert out["goals_per_xg"] is None
+    assert out["goals_per_shot_on_target"] is None
+    assert out["avg_corners"] is None
+    assert out["matches_sampled"] == 0
+
+
+# ════════════════════════════════════════════════════════════════════════
 # rolling_extended_stats
 # ════════════════════════════════════════════════════════════════════════
 
@@ -114,7 +157,8 @@ def test_rolling_player_ratings_empty_input_returns_none():
 # ════════════════════════════════════════════════════════════════════════
 
 def test_build_team_dna_combines_all_sections():
-    advanced_rows = [{"home_team": "Dinamo", "away_team": "Rapid", "home_xg_actual": 1.5}]
+    advanced_rows = [{"home_team": "Dinamo", "away_team": "Rapid", "home_xg_actual": 1.5,
+                       "actual_home_goals": 2, "home_shots_on_target": 3, "home_corners": 5}]
     extended_rows = [{"stat_key": "passes", "value": 400.0}]
     player_rows = [{"rating": 7.0}]
     standings_row = {"team": "Dinamo", "rank": 3, "points": 40}
@@ -122,6 +166,8 @@ def test_build_team_dna_combines_all_sections():
     dna = build_team_dna(advanced_rows, extended_rows, player_rows, standings_row, "Dinamo")
 
     assert dna["advanced"]["avg_xg"] == 1.5
+    assert dna["finishing"]["goals_per_xg"] == 2 / 1.5
+    assert dna["finishing"]["avg_corners"] == 5
     assert dna["extended_stats"]["passes"] == 400.0
     assert dna["player_ratings"]["avg_player_rating"] == 7.0
     assert dna["standings"] == standings_row
@@ -130,6 +176,7 @@ def test_build_team_dna_combines_all_sections():
 def test_build_team_dna_degrades_independently_per_section():
     dna = build_team_dna([], [], [], None, "Dinamo")
     assert dna["advanced"]["avg_xg"] is None
+    assert dna["finishing"]["goals_per_xg"] is None
     assert dna["extended_stats"] == {}
     assert dna["player_ratings"]["avg_player_rating"] is None
     assert dna["standings"] is None

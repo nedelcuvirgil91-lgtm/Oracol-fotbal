@@ -922,13 +922,36 @@ class FootballOracleEngine:
         }
 
     @staticmethod
+    def _current_season_start_date(as_of: date | None = None) -> str:
+        """Data de start a sezonului curent de fotbal european (convenția
+        deja folosită de oracle_api._tsdb_season_string() — sezonul începe
+        în iulie, calculat dinamic din data curentă, niciodată hardcodat).
+        Reimplementată local (nu importată din oracle_api) ca să evite o
+        dependință nouă între module pentru un calcul de o linie — vezi
+        architecture-review."""
+        d = as_of or date.today()
+        start_year = d.year if d.month >= 7 else d.year - 1
+        return date(start_year, 7, 1).isoformat()
+
+    @staticmethod
     def _build_flashscore_dna(canonical: str, league: str, last_n: int = 5) -> dict | None:
         """
         Team DNA Flashscore (Faza 2, ADR-044 §5) — xG real, posesie reală,
-        offside, apărări portar, cartonașe roșii, statistici EAV (pase/
-        dueluri/tackle-uri), rating mediu jucători, clasament curent.
-        Context SUPLIMENTAR, pur informativ — NU intră în TeamProfile, NU
-        atinge compute_team_offdef_rating()/FEATURE_COLUMNS/predicția Oracle servită.
+        offside, apărări portar, cartonașe roșii, eficiență finalizare,
+        volum faze fixe, statistici EAV (pase/dueluri/tackle-uri), rating
+        mediu jucători, clasament curent. Context SUPLIMENTAR, pur
+        informativ — NU intră în TeamProfile, NU atinge
+        compute_team_offdef_rating()/FEATURE_COLUMNS/predicția Oracle servită.
+
+        [ADAUGAT — mărginire la sezonul curent] Toate cele 3 interogări
+        sunt mărginite la kickoff_date >= începutul sezonului curent
+        (convenția iulie). La cerere explicită a proprietarului produsului:
+        loturile se schimbă între sezoane, un profil bazat pe date din
+        sezonul trecut nu descrie corect echipa de azi. Verificat live
+        (2026-08-15): 100% din datele Flashscore existente sunt oricum din
+        sezonul curent (colectarea a pornit 2026-07-14) — mărginirea nu
+        pierde nimic azi, protejează doar viitorul, când istoricul cross-
+        sezon se va acumula.
 
         Returnează None dacă modulele necesare lipsesc (degradare identică
         cu restul cascadei _build_profile) — apelantul afișează "—",
@@ -937,9 +960,10 @@ class FootballOracleEngine:
         if not (DB_QUERIES_MODULE_AVAILABLE and FLASHSCORE_TEAM_DNA_AVAILABLE):
             return None
         try:
-            advanced_rows = get_team_recent_advanced_stats(canonical, league, last_n=last_n)
-            extended_rows = get_team_recent_statistics_extended(canonical, league, last_n=last_n)
-            player_rows = get_team_recent_player_ratings(canonical, league, last_n=last_n)
+            since = FootballOracleEngine._current_season_start_date()
+            advanced_rows = get_team_recent_advanced_stats(canonical, league, last_n=last_n, since_date=since)
+            extended_rows = get_team_recent_statistics_extended(canonical, league, last_n=last_n, since_date=since)
+            player_rows = get_team_recent_player_ratings(canonical, league, last_n=last_n, since_date=since)
             standings_row = get_team_standings_row(canonical, league)
             return build_team_dna(advanced_rows, extended_rows, player_rows, standings_row, canonical)
         except Exception as exc:

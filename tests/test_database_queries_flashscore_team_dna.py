@@ -36,6 +36,9 @@ class _FakeQuery:
     def in_(self, *a, **kw):
         self._calls.append((self._table_name, "in_", a, kw)); return self
 
+    def gte(self, *a, **kw):
+        self._calls.append((self._table_name, "gte", a, kw)); return self
+
     @property
     def not_(self):
         return self
@@ -88,6 +91,21 @@ def test_get_team_recent_advanced_stats_no_client(monkeypatch):
     assert q.get_team_recent_advanced_stats("Dinamo", "Romania SuperLiga") == []
 
 
+def test_get_team_recent_advanced_stats_applies_since_date_when_given(monkeypatch):
+    fake = _FakeClient({"match_history": []})
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    q.get_team_recent_advanced_stats("Dinamo", "Romania SuperLiga", since_date="2026-07-01")
+    gte_calls = [c for c in fake.calls if c[1] == "gte"]
+    assert gte_calls == [("match_history", "gte", ("kickoff_date", "2026-07-01"), {})]
+
+
+def test_get_team_recent_advanced_stats_no_since_date_skips_gte(monkeypatch):
+    fake = _FakeClient({"match_history": []})
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    q.get_team_recent_advanced_stats("Dinamo", "Romania SuperLiga")
+    assert not [c for c in fake.calls if c[1] == "gte"]
+
+
 # ════════════════════════════════════════════════════════════════════════
 # get_team_recent_statistics_extended
 # ════════════════════════════════════════════════════════════════════════
@@ -115,6 +133,14 @@ def test_get_team_recent_statistics_extended_no_matches_returns_empty(monkeypatc
     fake = _FakeClient({"match_history": []})
     monkeypatch.setattr(q, "get_client", lambda: fake)
     assert q.get_team_recent_statistics_extended("Dinamo", "Romania SuperLiga") == []
+
+
+def test_get_team_recent_statistics_extended_forwards_since_date_to_side_map(monkeypatch):
+    fake = _FakeClient({"match_history": []})
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    q.get_team_recent_statistics_extended("Dinamo", "Romania SuperLiga", since_date="2026-07-01")
+    gte_calls = [c for c in fake.calls if c[1] == "gte"]
+    assert gte_calls == [("match_history", "gte", ("kickoff_date", "2026-07-01"), {})]
 
 
 def test_get_team_recent_statistics_extended_degrades_gracefully(monkeypatch):

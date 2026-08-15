@@ -2596,15 +2596,22 @@ def get_match_core_stats(match_id: int) -> dict | None:
 # rating(), deci ai blending-ului) și nu ating FEATURE_COLUMNS.
 # ════════════════════════════════════════════════════════════════════════════
 
-def get_team_recent_advanced_stats(team: str, league: str, last_n: int = 5) -> list[dict]:
-    """xG real/posesie/offside/apărări portar/cartonașe roșii + scor, per
-    ultimele `last_n` meciuri TERMINATE ale echipei — extensie a
-    get_team_recent_match_events() (aceleași coloane core `match_history`,
-    populate de Flashscore prin persist_match_foundation_data), pentru
-    Team DNA Flashscore. `id` inclus — ancoră pentru join-ul Python cu
-    match_statistics_extended/player_match_stats de mai jos (PostgREST nu
-    suportă join direct, aceeași limitare documentată la
-    get_recent_flashscore_matches).
+def get_team_recent_advanced_stats(
+    team: str, league: str, last_n: int = 5, since_date: str | None = None,
+) -> list[dict]:
+    """xG real/posesie/offside/apărări portar/cartonașe roșii + scor +
+    șuturi pe poartă + cornere, per ultimele `last_n` meciuri TERMINATE ale
+    echipei — extensie a get_team_recent_match_events() (aceleași coloane
+    core `match_history`, populate de Flashscore prin
+    persist_match_foundation_data), pentru Team DNA Flashscore. `id`
+    inclus — ancoră pentru join-ul Python cu match_statistics_extended/
+    player_match_stats de mai jos (PostgREST nu suportă join direct,
+    aceeași limitare documentată la get_recent_flashscore_matches).
+
+    `since_date` (opțional, ISO 'YYYY-MM-DD') — mărginește la meciuri cu
+    kickoff_date >= since_date (ex. începutul sezonului curent, calculat de
+    apelant). None (implicit) = comportament neschimbat, fără mărginire —
+    păstrat pentru compatibilitate cu apelanții existenți.
 
     [FIX 2026-08-10] Istoricul echipei e căutat GLOBAL, peste toate
     competițiile — `league` rămas doar pentru logging, NU mai filtrează
@@ -2619,43 +2626,49 @@ def get_team_recent_advanced_stats(team: str, league: str, last_n: int = 5) -> l
     if client is None:
         return []
     try:
-        res = (
+        query = (
             client.table("match_history")
             .select("id,home_team,away_team,home_possession,away_possession,"
                     "home_xg_actual,away_xg_actual,home_offsides,away_offsides,"
                     "home_goalkeeper_saves,away_goalkeeper_saves,"
                     "home_red_cards,away_red_cards,"
+                    "home_shots_on_target,away_shots_on_target,"
+                    "home_corners,away_corners,"
                     "actual_home_goals,actual_away_goals,kickoff_date")
             .or_(f"home_team.eq.{team},away_team.eq.{team}")
             .not_.is_("actual_result", "null")
-            .order("kickoff_date", desc=True)
-            .limit(last_n)
-            .execute()
         )
+        if since_date:
+            query = query.gte("kickoff_date", since_date)
+        res = query.order("kickoff_date", desc=True).limit(last_n).execute()
         return res.data or []
     except Exception as exc:
         logger.warning("[Queries] get_team_recent_advanced_stats failed pentru %s/%s: %s", team, league, exc)
         return []
 
 
-def _recent_match_side_map(client, team: str, league: str, last_n: int) -> dict[int, str]:
+def _recent_match_side_map(
+    client, team: str, league: str, last_n: int, since_date: str | None = None,
+) -> dict[int, str]:
     """Ultimele `last_n` meciuri terminate ale echipei -> {match_id: 'home'|'away'}.
     Helper comun pentru join-ul Python cu tabelele EAV (fără coloană de
     echipă nativă), reutilizat de get_team_recent_statistics_extended și
     get_team_recent_player_ratings.
 
+    `since_date` — vezi get_team_recent_advanced_stats(), aceeași semantică.
+
     [FIX 2026-08-10] Istoric GLOBAL per echipă, fără filtru de ligă — vezi
     motivul identic documentat la get_team_recent_advanced_stats(), mai sus.
     `league` rămas doar pentru logging la apelanți."""
-    matches = (
+    query = (
         client.table("match_history")
         .select("id,home_team,away_team,kickoff_date")
         .or_(f"home_team.eq.{team},away_team.eq.{team}")
         .not_.is_("actual_result", "null")
-        .order("kickoff_date", desc=True)
-        .limit(last_n)
-        .execute()
     )
+    if since_date:
+        query = query.gte("kickoff_date", since_date)
+    matches = query.order("kickoff_date", desc=True).limit(last_n).execute()
     rows = matches.data or []
     return {
         r["id"]: ("home" if r.get("home_team") == team else "away")
@@ -2663,17 +2676,20 @@ def _recent_match_side_map(client, team: str, league: str, last_n: int) -> dict[
     }
 
 
-def get_team_recent_statistics_extended(team: str, league: str, last_n: int = 5) -> list[dict]:
+def get_team_recent_statistics_extended(
+    team: str, league: str, last_n: int = 5, since_date: str | None = None,
+) -> list[dict]:
     """Rânduri EAV (`match_statistics_extended` — passes/duels/tackles/
     big_chances/etc., orice etichetă fără coloană dedicată) pentru
     ultimele `last_n` meciuri terminate ale echipei, rezolvate la partea
     (home/away) corectă în Python — EAV-ul nu are coloană de echipă,
-    doar home_value_numeric/away_value_numeric."""
+    doar home_value_numeric/away_value_numeric. `since_date` — vezi
+    get_team_recent_advanced_stats(), aceeași semantică."""
     client = get_client()
     if client is None:
         return []
     try:
-        side_by_id = _recent_match_side_map(client, team, league, last_n)
+        side_by_id = _recent_match_side_map(client, team, league, last_n, since_date)
         if not side_by_id:
             return []
         stats = (
@@ -2697,16 +2713,19 @@ def get_team_recent_statistics_extended(team: str, league: str, last_n: int = 5)
         return []
 
 
-def get_team_recent_player_ratings(team: str, league: str, last_n: int = 5) -> list[dict]:
+def get_team_recent_player_ratings(
+    team: str, league: str, last_n: int = 5, since_date: str | None = None,
+) -> list[dict]:
     """Rating mediu per jucător (`player_match_stats.rating`) pentru
     ultimele `last_n` meciuri terminate ale echipei — coloana `team` din
     `player_match_stats` e 'home'/'away' (nu numele echipei), rezolvată
-    la fel ca get_team_recent_statistics_extended()."""
+    la fel ca get_team_recent_statistics_extended(). `since_date` — vezi
+    get_team_recent_advanced_stats(), aceeași semantică."""
     client = get_client()
     if client is None:
         return []
     try:
-        side_by_id = _recent_match_side_map(client, team, league, last_n)
+        side_by_id = _recent_match_side_map(client, team, league, last_n, since_date)
         if not side_by_id:
             return []
         players = (

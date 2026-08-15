@@ -619,9 +619,37 @@ def _render_match_card(match: dict, engine) -> None:
             h_players, a_players = hrat.get("players_sampled"), arat.get("players_sampled")
             if h_matches or a_matches or h_players or a_players:
                 st.caption(
-                    f"📊 Eșantion — {home}: {_sample_badge(h_matches)} {h_matches or 0} meciuri / "
+                    f"📊 Eșantion (sezon curent) — {home}: {_sample_badge(h_matches)} {h_matches or 0} meciuri / "
                     f"{h_players or 0} evaluări jucători · {away}: {_sample_badge(a_matches)} "
                     f"{a_matches or 0} meciuri / {a_players or 0} evaluări jucători"
+                )
+
+            # ── Grupul 1b — eficiență finalizare + volum faze fixe ─────────
+            # [ADAUGAT — profil de echipă, brainstorming sesiune 2026-08-15]
+            # Eficiența la faze fixe (cornere/lovituri libere -> gol) NU e
+            # afișată — match_events.detail (tipul de asistență) e gol azi,
+            # nicio conversie reală calculabilă (Regula #8, nu se aproximează).
+            hfin = (hdna or {}).get("finishing") or {}
+            afin = (adna or {}).get("finishing") or {}
+            hext_pre = (hdna or {}).get("extended_stats") or {}
+            aext_pre = (adna or {}).get("extended_stats") or {}
+            finishing_rows = [
+                ("Goluri / xG real (supraperformanță finalizare)",
+                 _v(hfin.get("goals_per_xg"), "{:.2f}"), _v(afin.get("goals_per_xg"), "{:.2f}")),
+                ("Goluri / șuturi pe poartă (conversie)",
+                 _v(hfin.get("goals_per_shot_on_target"), "{:.2f}"), _v(afin.get("goals_per_shot_on_target"), "{:.2f}")),
+                ("Cornere/meci (volum, fără conversie)",
+                 _v(hfin.get("avg_corners")), _v(afin.get("avg_corners"))),
+                ("Lovituri libere/meci (volum)",
+                 _v(hext_pre.get("free_kicks")), _v(aext_pre.get("free_kicks"))),
+                ("Goluri din cap (proxy amenințare aeriană)",
+                 _v(hext_pre.get("headed_goals")), _v(aext_pre.get("headed_goals"))),
+            ]
+            if any(v not in ("—", None) for row in finishing_rows for v in row[1:]):
+                st.caption("⚽ Eficiență finalizare + volum faze fixe (sezon curent)")
+                st.dataframe(
+                    pd.DataFrame(finishing_rows, columns=["Statistică", home, away]),
+                    use_container_width=True, hide_index=True,
                 )
 
             # ── Grupul 3 — clasament complet (context extern, nu formă) ────
@@ -647,10 +675,31 @@ def _render_match_card(match: dict, engine) -> None:
 
             hext = (hdna or {}).get("extended_stats") or {}
             aext = (adna or {}).get("extended_stats") or {}
+
+            # ── Grupul 4 — profil fizic/dueluri, profil de construcție ─────
+            # [ADAUGAT — profil de echipă] Regrupare a acelorași chei EAV
+            # deja agregate mai jos, doar cu etichete tematice — nu
+            # duplicare de calcul, doar de afișare.
+            physical_keys = [("duels_won", "Dueluri câștigate"), ("tackles", "Tackle-uri"),
+                              ("interceptions", "Intercepții"), ("clearances", "Degajări")]
+            buildup_keys = [("passes", "Pase"), ("passes_in_final_third", "Pase în treimea finală"),
+                             ("long_passes", "Pase lungi"), ("accurate_through_passes", "Pase de rupere reușite"),
+                             ("crosses", "Centrări"), ("touches_in_opposition_box", "Atingeri în careul advers")]
+            for title, keys in (("💪 Profil fizic/dueluri (sezon curent)", physical_keys),
+                                 ("🎯 Profil de construcție a jocului (sezon curent)", buildup_keys)):
+                rows = [(label, _v(hext.get(k)), _v(aext.get(k))) for k, label in keys
+                        if hext.get(k) is not None or aext.get(k) is not None]
+                if rows:
+                    st.caption(title)
+                    st.dataframe(
+                        pd.DataFrame(rows, columns=["Statistică", home, away]),
+                        use_container_width=True, hide_index=True,
+                    )
+
             ext_keys = sorted(set(hext.keys()) | set(aext.keys()))
             if ext_keys:
                 ext_rows = [(k, _v(hext.get(k)), _v(aext.get(k))) for k in ext_keys]
-                st.caption("Statistici extinse (EAV — pase/dueluri/tackle-uri/etc.)")
+                st.caption("Statistici extinse (EAV — toate, complet)")
                 st.dataframe(
                     pd.DataFrame(ext_rows, columns=["Statistică", home, away]),
                     use_container_width=True, hide_index=True,
