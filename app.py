@@ -144,19 +144,19 @@ def load_engine():
         return str(exc)
 
 # [ADAUGAT — profil de echipă, sesiune 2026-08-15] Progres agregat, pe
-# toate ligile, spre pragul de validare a formulei de eficiență finalizare
-# (5.253 meciuri, precedentul ADR-012/013/021) — indicator de PROIECT, nu
-# per meci/echipă, deci cache scurt (10 min) în loc de recalculat la
-# fiecare randare a panoului de match detail.
+# TOATE ligile și TOATE sezoanele (NU mărginit la sezonul curent — asta ar
+# face pragul de 5.253 practic inatingibil într-un singur sezon, ~330
+# meciuri/lună), spre pragul de validare a formulei de eficiență
+# finalizare (5.253 meciuri, precedentul ADR-012/013/021) — indicator de
+# PROIECT, nu per meci/echipă, deci cache scurt (10 min) în loc de
+# recalculat la fiecare randare a panoului de match detail.
 @st.cache_data(ttl=600, show_spinner=False)
 def _finishing_data_readiness():
     try:
         from database.queries import get_finishing_data_readiness
-        from oracle_engine import FootballOracleEngine
-        since = FootballOracleEngine._current_season_start_date()
-        return get_finishing_data_readiness(since)
+        return get_finishing_data_readiness()
     except Exception:
-        return {"season_shots_on_target": 0, "season_xg": 0}
+        return {"shots_on_target": 0, "xg": 0}
 
 def _load_json(path):
     if not path.exists(): return {}
@@ -675,10 +675,10 @@ def _render_match_card(match: dict, engine) -> None:
                 # (Regula "nicio schimbare de model fără ablație").
                 readiness = _finishing_data_readiness()
                 st.caption(
-                    "🧪 Progres validare formulă (agregat, toate ligile, necesar înainte de orice "
-                    f"promovare în predicții) — șuturi pe poartă/cornere: "
-                    f"{readiness.get('season_shots_on_target', 0)}/5253 · "
-                    f"xG real: {readiness.get('season_xg', 0)}/5253"
+                    "🧪 Progres validare formulă (agregat, TOT istoricul disponibil, nu doar sezonul "
+                    "curent — necesar înainte de orice promovare în predicții) — șuturi pe poartă/cornere: "
+                    f"{readiness.get('shots_on_target', 0)}/5253 · "
+                    f"xG real: {readiness.get('xg', 0)}/5253"
                 )
 
             # ── Grupul 3 — clasament complet (context extern, nu formă) ────
