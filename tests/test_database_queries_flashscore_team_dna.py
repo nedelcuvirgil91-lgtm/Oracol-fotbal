@@ -294,24 +294,26 @@ def test_is_flashscore_match_already_collected_true_when_kickoff_unparsable(monk
 # get_finishing_data_readiness
 # ════════════════════════════════════════════════════════════════════════
 
-def test_get_finishing_data_readiness_returns_counts_without_date_filter(monkeypatch):
+def test_get_finishing_data_readiness_returns_counts_bound_to_season(monkeypatch):
     rows = [{"id": 1}, {"id": 2}, {"id": 3}]
     fake = _FakeClient({"match_history": rows})
     monkeypatch.setattr(q, "get_client", lambda: fake)
 
-    out = q.get_finishing_data_readiness()
+    out = q.get_finishing_data_readiness("2026-07-01")
 
-    assert out == {"shots_on_target": 3, "xg": 3}
-    # [REGRESIE — bug corectat 2026-08-15] NU trebuie mărginit la sezon —
-    # testul de validitate a formulei rulează pe tot istoricul disponibil.
-    assert not [c for c in fake.calls if c[1] == "gte"]
+    assert out == {"finished_total": 3, "shots_on_target": 3, "xg": 3}
+    # [DECIS — proprietarul produsului, sesiune 2026-08-15] pragul de 400 e
+    # STRICT pe sezonul curent — toate cele 3 interogări trebuie mărginite.
+    gte_calls = [c for c in fake.calls if c[1] == "gte"]
+    assert len(gte_calls) == 3
+    assert all(c == ("match_history", "gte", ("kickoff_date", "2026-07-01"), {}) for c in gte_calls)
 
 
 def test_get_finishing_data_readiness_no_client(monkeypatch):
     monkeypatch.setattr(q, "get_client", lambda: None)
-    assert q.get_finishing_data_readiness() == {"shots_on_target": 0, "xg": 0}
+    assert q.get_finishing_data_readiness("2026-07-01") == {"finished_total": 0, "shots_on_target": 0, "xg": 0}
 
 
 def test_get_finishing_data_readiness_degrades_gracefully(monkeypatch):
     monkeypatch.setattr(q, "get_client", lambda: _BoomClient())
-    assert q.get_finishing_data_readiness() == {"shots_on_target": 0, "xg": 0}
+    assert q.get_finishing_data_readiness("2026-07-01") == {"finished_total": 0, "shots_on_target": 0, "xg": 0}

@@ -143,20 +143,21 @@ def load_engine():
     except Exception as exc:
         return str(exc)
 
-# [ADAUGAT — profil de echipă, sesiune 2026-08-15] Progres agregat, pe
-# TOATE ligile și TOATE sezoanele (NU mărginit la sezonul curent — asta ar
-# face pragul de 5.253 practic inatingibil într-un singur sezon, ~330
-# meciuri/lună), spre pragul de validare a formulei de eficiență
-# finalizare (5.253 meciuri, precedentul ADR-012/013/021) — indicator de
-# PROIECT, nu per meci/echipă, deci cache scurt (10 min) în loc de
-# recalculat la fiecare randare a panoului de match detail.
+# [CORECTAT — decizie proprietar produs, sesiune 2026-08-15] Progres
+# agregat, pe TOATE ligile, STRICT pe sezonul curent — pragul e 400 (nu
+# 5.253, respins deliberat: loturile se schimbă între sezoane, testul de
+# validitate trebuie să folosească aceleași date ca profilul afișat, nu
+# istoric multi-sezon). Indicator de PROIECT, nu per meci/echipă, deci
+# cache scurt (10 min) în loc de recalculat la fiecare randare.
 @st.cache_data(ttl=600, show_spinner=False)
 def _finishing_data_readiness():
     try:
         from database.queries import get_finishing_data_readiness
-        return get_finishing_data_readiness()
+        from oracle_engine import FootballOracleEngine
+        since = FootballOracleEngine._current_season_start_date()
+        return get_finishing_data_readiness(since)
     except Exception:
-        return {"shots_on_target": 0, "xg": 0}
+        return {"finished_total": 0, "shots_on_target": 0, "xg": 0}
 
 def _load_json(path):
     if not path.exists(): return {}
@@ -666,19 +667,28 @@ def _render_match_card(match: dict, engine) -> None:
                     pd.DataFrame(finishing_rows, columns=["Statistică", home, away]),
                     use_container_width=True, hide_index=True,
                 )
-                # [ADAUGAT — profil de echipă] Indicator de PROIECT (agregat
-                # pe toate ligile), nu per echipă — arată cât din pragul de
-                # validare statistică a formulei (5.253 meciuri, precedentul
-                # ADR-012/013/021) s-a strâns până acum. Cifrele de mai sus
-                # rămân informative indiferent de acest progres — formula
-                # NU a fost încă dovedită prin ablație, doar calculată
-                # (Regula "nicio schimbare de model fără ablație").
+                # [CORECTAT — decizie proprietar produs, sesiune 2026-08-15]
+                # Indicator de PROIECT (agregat pe toate ligile), nu per
+                # echipă — bară vizuală, la fel ca bara Challenger-ului ML
+                # (Setări Model — "Challenger activ ... N/200 ... verdict
+                # curent"). Prag 400, STRICT sezonul curent (nu tot
+                # istoricul — decizie explicită: loturile se schimbă între
+                # sezoane, testul trebuie să folosească aceleași date ca
+                # profilul afișat). Cifrele de mai sus rămân informative
+                # indiferent de acest progres — formula NU a fost încă
+                # dovedită prin ablație, doar calculată (Regula "nicio
+                # schimbare de model fără ablație").
+                from database.queries import TEAM_PROFILE_TEST_THRESHOLD
                 readiness = _finishing_data_readiness()
-                st.caption(
-                    "🧪 Progres validare formulă (agregat, TOT istoricul disponibil, nu doar sezonul "
-                    "curent — necesar înainte de orice promovare în predicții) — șuturi pe poartă/cornere: "
-                    f"{readiness.get('shots_on_target', 0)}/5253 · "
-                    f"xG real: {readiness.get('xg', 0)}/5253"
+                n_finished = readiness.get("finished_total", 0)
+                status = "prag atins — test de ablație în așteptare" if n_finished >= TEAM_PROFILE_TEST_THRESHOLD else "insufficient_data"
+                st.progress(
+                    min(n_finished / TEAM_PROFILE_TEST_THRESHOLD, 1.0) if TEAM_PROFILE_TEST_THRESHOLD else 0.0,
+                    text=(
+                        "🧪 Profil de echipă (agregat, toate ligile, sezonul curent) — "
+                        f"{n_finished}/{TEAM_PROFILE_TEST_THRESHOLD} meciuri terminate "
+                        f"— status: {status}"
+                    ),
                 )
 
             # ── Grupul 3 — clasament complet (context extern, nu formă) ────
