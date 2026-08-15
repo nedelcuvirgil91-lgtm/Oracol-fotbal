@@ -143,6 +143,21 @@ def load_engine():
     except Exception as exc:
         return str(exc)
 
+# [ADAUGAT — profil de echipă, sesiune 2026-08-15] Progres agregat, pe
+# toate ligile, spre pragul de validare a formulei de eficiență finalizare
+# (5.253 meciuri, precedentul ADR-012/013/021) — indicator de PROIECT, nu
+# per meci/echipă, deci cache scurt (10 min) în loc de recalculat la
+# fiecare randare a panoului de match detail.
+@st.cache_data(ttl=600, show_spinner=False)
+def _finishing_data_readiness():
+    try:
+        from database.queries import get_finishing_data_readiness
+        from oracle_engine import FootballOracleEngine
+        since = FootballOracleEngine._current_season_start_date()
+        return get_finishing_data_readiness(since)
+    except Exception:
+        return {"season_shots_on_target": 0, "season_xg": 0}
+
 def _load_json(path):
     if not path.exists(): return {}
     try: return json.loads(path.read_text(encoding="utf-8"))
@@ -650,6 +665,20 @@ def _render_match_card(match: dict, engine) -> None:
                 st.dataframe(
                     pd.DataFrame(finishing_rows, columns=["Statistică", home, away]),
                     use_container_width=True, hide_index=True,
+                )
+                # [ADAUGAT — profil de echipă] Indicator de PROIECT (agregat
+                # pe toate ligile), nu per echipă — arată cât din pragul de
+                # validare statistică a formulei (5.253 meciuri, precedentul
+                # ADR-012/013/021) s-a strâns până acum. Cifrele de mai sus
+                # rămân informative indiferent de acest progres — formula
+                # NU a fost încă dovedită prin ablație, doar calculată
+                # (Regula "nicio schimbare de model fără ablație").
+                readiness = _finishing_data_readiness()
+                st.caption(
+                    "🧪 Progres validare formulă (agregat, toate ligile, necesar înainte de orice "
+                    f"promovare în predicții) — șuturi pe poartă/cornere: "
+                    f"{readiness.get('season_shots_on_target', 0)}/5253 · "
+                    f"xG real: {readiness.get('season_xg', 0)}/5253"
                 )
 
             # ── Grupul 3 — clasament complet (context extern, nu formă) ────

@@ -2596,6 +2596,51 @@ def get_match_core_stats(match_id: int) -> dict | None:
 # rating(), deci ai blending-ului) și nu ating FEATURE_COLUMNS.
 # ════════════════════════════════════════════════════════════════════════════
 
+def get_finishing_data_readiness(since_date: str) -> dict:
+    """Progres agregat, pe TOATE ligile (nu per echipă), spre pragul de
+    validare statistică a formulei de eficiență finalizare — 5.253 meciuri,
+    precedentul real deja folosit de ADR-012/013/021 (corner_dominance/
+    foul_diff/shot_dominance). Indicator de proiect (câte date există total
+    ca să merite rulat vreodată testul de ablație pe formulă), NU un test
+    per echipă/meci — deliberat decuplat de `_current_season_start_date()`:
+    testul de validitate al formulei rulează pe TOT istoricul (loturile
+    vechi nu invalidează un mecanism statistic general, doar ar invalida un
+    profil de echipă) — `since_date` aici arată explicit doar cât din
+    eșantionul curent de SEZON s-a acumulat, pentru bara de progres afișată
+    lângă panoul de eficiență finalizare (decizie sesiune 2026-08-15).
+    Rândurile suprascrise (`superseded_by`) sunt excluse, la fel ca la
+    count_matches_with_result()."""
+    client = get_client()
+    if client is None:
+        return {"season_shots_on_target": 0, "season_xg": 0}
+    try:
+        sot_res = (
+            client.table("match_history")
+            .select("id", count="exact")
+            .not_.is_("actual_result", "null")
+            .not_.is_("home_shots_on_target", "null")
+            .is_("superseded_by", "null")
+            .gte("kickoff_date", since_date)
+            .execute()
+        )
+        xg_res = (
+            client.table("match_history")
+            .select("id", count="exact")
+            .not_.is_("actual_result", "null")
+            .not_.is_("home_xg_actual", "null")
+            .is_("superseded_by", "null")
+            .gte("kickoff_date", since_date)
+            .execute()
+        )
+        return {
+            "season_shots_on_target": sot_res.count or 0,
+            "season_xg": xg_res.count or 0,
+        }
+    except Exception as exc:
+        logger.warning("[Queries] get_finishing_data_readiness failed: %s", exc)
+        return {"season_shots_on_target": 0, "season_xg": 0}
+
+
 def get_team_recent_advanced_stats(
     team: str, league: str, last_n: int = 5, since_date: str | None = None,
 ) -> list[dict]:

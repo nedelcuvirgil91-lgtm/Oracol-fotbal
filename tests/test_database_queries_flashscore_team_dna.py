@@ -14,8 +14,9 @@ import database.queries as q
 
 
 class _FakeResult:
-    def __init__(self, data):
+    def __init__(self, data, count=None):
         self.data = data
+        self.count = count
 
 
 class _FakeQuery:
@@ -23,9 +24,13 @@ class _FakeQuery:
         self._rows = rows
         self._calls = calls
         self._table_name = table_name
+        self._count_requested = False
 
     def select(self, *a, **kw):
-        self._calls.append((self._table_name, "select", a, kw)); return self
+        self._calls.append((self._table_name, "select", a, kw))
+        if kw.get("count") == "exact":
+            self._count_requested = True
+        return self
 
     def eq(self, *a, **kw):
         self._calls.append((self._table_name, "eq", a, kw)); return self
@@ -53,7 +58,8 @@ class _FakeQuery:
         self._calls.append((self._table_name, "limit", a, kw)); return self
 
     def execute(self):
-        return _FakeResult(self._rows)
+        count = len(self._rows) if self._count_requested else None
+        return _FakeResult(self._rows, count=count)
 
 
 class _FakeClient:
@@ -282,3 +288,30 @@ def test_is_flashscore_match_already_collected_true_when_kickoff_unparsable(monk
     fake = _FakeClient({"match_history": [row]})
     monkeypatch.setattr(q, "get_client", lambda: fake)
     assert q.is_flashscore_match_already_collected("abc123") is True
+
+
+# ════════════════════════════════════════════════════════════════════════
+# get_finishing_data_readiness
+# ════════════════════════════════════════════════════════════════════════
+
+def test_get_finishing_data_readiness_returns_counts(monkeypatch):
+    rows = [{"id": 1}, {"id": 2}, {"id": 3}]
+    fake = _FakeClient({"match_history": rows})
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+
+    out = q.get_finishing_data_readiness("2026-07-01")
+
+    assert out == {"season_shots_on_target": 3, "season_xg": 3}
+    gte_calls = [c for c in fake.calls if c[1] == "gte"]
+    assert len(gte_calls) == 2
+    assert all(c == ("match_history", "gte", ("kickoff_date", "2026-07-01"), {}) for c in gte_calls)
+
+
+def test_get_finishing_data_readiness_no_client(monkeypatch):
+    monkeypatch.setattr(q, "get_client", lambda: None)
+    assert q.get_finishing_data_readiness("2026-07-01") == {"season_shots_on_target": 0, "season_xg": 0}
+
+
+def test_get_finishing_data_readiness_degrades_gracefully(monkeypatch):
+    monkeypatch.setattr(q, "get_client", lambda: _BoomClient())
+    assert q.get_finishing_data_readiness("2026-07-01") == {"season_shots_on_target": 0, "season_xg": 0}
