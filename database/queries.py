@@ -2233,12 +2233,29 @@ def upsert_standings_snapshot(rows: list[dict]) -> bool:
     """`flashscore_standings_snapshot` (clasament curent) -
     `on_conflict="competition,team"`, cheia UNIQUE existenta
     (migratia 035) - rerun ACTUALIZEAZA snapshot-ul (rand curent), nu
-    acumuleaza istoric."""
+    acumuleaza istoric.
+
+    [FIX — bug real găsit live, 2026-08-15] `team` trece acum prin
+    normalize_team_name() înainte de scriere. `normalize_standings()`
+    (providers/flashscore/normalizer.py) scrie forma BRUTĂ din tabelul
+    de clasament Flashscore (ex. "U. Cluj", "PSG", "Inter") — poate
+    diferi de forma canonică folosită peste tot în match_history (ex.
+    "Universitatea Cluj", "Paris Saint-Germain", "Inter Milan"). Fără
+    normalizare aici, get_team_standings_row() (potrivire exactă de
+    text) nu găsea NICIODATĂ rândul pentru acele echipe — verificat live:
+    45 din 254 echipe urmărite (18%), în aproape toate ligile. Aplicat
+    la scriitor (nu la parser), identic principiului deja stabilit de
+    _normalize_team_fields() pentru match_history (P3.5 Team Identity
+    Audit) — nicio sursă viitoare nu poate reintroduce defectul."""
     if not rows:
         return True
     client = get_client()
     if client is None:
         return False
+    rows = [
+        {**r, "team": normalize_team_name(r["team"])} if r.get("team") else r
+        for r in rows
+    ]
     rows = _dedupe_by_keys(rows, ("competition", "team"), "upsert_standings_snapshot")
     try:
         client.table("flashscore_standings_snapshot").upsert(

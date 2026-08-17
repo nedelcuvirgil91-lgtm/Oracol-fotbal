@@ -342,6 +342,37 @@ def test_upsert_standings_snapshot_deduplicates_before_upsert(monkeypatch):
     assert len(call[2]) == 1
 
 
+def test_upsert_standings_snapshot_normalizes_team_name(monkeypatch):
+    """[REGRESIE — bug real găsit live, 2026-08-15] normalize_standings()
+    scrie forma brută din tabelul Flashscore ("U. Cluj") — fără
+    normalizare aici, get_team_standings_row() nu găsea niciodată rândul
+    (potrivire exactă de text contra "Universitatea Cluj", forma canonică
+    folosită în match_history). 45 din 254 echipe urmărite erau afectate."""
+    fake = _FakeClient()
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    rows = [{"competition": "Romania SuperLiga", "team": "U. Cluj", "rank": 3}]
+    assert q.upsert_standings_snapshot(rows) is True
+    call = next(c for c in fake.calls if c[0] == "flashscore_standings_snapshot")
+    assert call[2][0]["team"] == "Universitatea Cluj"
+
+
+def test_upsert_standings_snapshot_dedupes_after_normalization():
+    """Dacă două rânduri brute diferite normalizează la ACELAȘI nume
+    canonic, dedup-ul (cheie competition+team) trebuie să le prindă —
+    verificat direct pe funcția pură, fără rețea."""
+    rows = [
+        {"competition": "Romania SuperLiga", "team": "U. Cluj", "rank": 3},
+        {"competition": "Romania SuperLiga", "team": "Universitatea Cluj", "rank": 3},
+    ]
+    normalized = [
+        {**r, "team": q.normalize_team_name(r["team"])} if r.get("team") else r
+        for r in rows
+    ]
+    deduped = q._dedupe_by_keys(normalized, ("competition", "team"), "test")
+    assert len(deduped) == 1
+    assert deduped[0]["team"] == "Universitatea Cluj"
+
+
 # ════════════════════════════════════════════════════════════════════════
 # upsert_raw_extraction — stratul RAW al Data Trust Layer (migratia 035)
 # ════════════════════════════════════════════════════════════════════════
