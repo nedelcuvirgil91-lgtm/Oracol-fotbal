@@ -85,7 +85,15 @@ FORM_WINDOW    = 10     # ultimele N meciuri pentru formă (mărit de la 5 la 10
 # SELECT-ul din fetch_all_matches() și pentru gating-ul per-coloană din
 # run_backfill(). Nu conține niciodată actual_result/actual_home_goals/
 # actual_away_goals — scriptul nu rescrie și nu a rescris niciodată rezultate.
-FEATURE_COLUMNS: tuple[str, ...] = (
+# [REDENUMIT — audit ADR-051/052, 2026-08-17] Numit înainte `FEATURE_COLUMNS`
+# — coliziune de nume cu `ml_predictor.FEATURE_COLUMNS`, care e o listă
+# DIFERITĂ (inputurile reale ale modelului ML). Lista de aici include
+# `home_elo_after`/`away_elo_after`, valori POST-meci care codifică direct
+# rezultatul: dacă ar ajunge vreodată în feature set-ul ML ar produce target
+# leakage catastrofal. Redenumită explicit ca să fie imposibil de confundat
+# la o citire rapidă — comportament identic, doar numele s-a schimbat.
+# Garda automată: tests/test_backfill_columns_naming.py.
+BACKFILL_COLUMNS: tuple[str, ...] = (
     "home_elo", "away_elo",
     "home_form_score", "away_form_score",
     "home_offensive_rating", "home_defensive_rating",
@@ -115,9 +123,9 @@ FEATURE_COLUMNS: tuple[str, ...] = (
 
 
 def _missing_feature_columns(match: dict) -> list[str]:
-    """Subsetul din FEATURE_COLUMNS ale căror valori curente sunt NULL
+    """Subsetul din BACKFILL_COLUMNS ale căror valori curente sunt NULL
     pentru acest rând. Listă goală == rând complet, de sărit fără UPDATE."""
-    return [col for col in FEATURE_COLUMNS if match.get(col) is None]
+    return [col for col in BACKFILL_COLUMNS if match.get(col) is None]
 
 
 def get_client():
@@ -146,7 +154,7 @@ def fetch_all_matches(league: str | None = None) -> list[dict]:
                     "home_shots,away_shots,"
                     "home_corners,away_corners,home_yellow_cards,away_yellow_cards,"
                     "home_fouls,away_fouls,"
-                    + ",".join(FEATURE_COLUMNS))
+                    + ",".join(BACKFILL_COLUMNS))
             .not_.is_("actual_result", "null")
             # [ADAUGAT] Exclude rândurile superseded (ADR-025) — fără asta,
             # ELOTracker/FormTracker/H2HTracker procesau același meci real de
@@ -879,7 +887,7 @@ def run_backfill(
     to_process = total - already_done
 
     logger.info("[Backfill] Total meciuri: %d | Deja complete (toate cele %d coloane): %d | De completat: %d",
-                total, len(FEATURE_COLUMNS), already_done, to_process)
+                total, len(BACKFILL_COLUMNS), already_done, to_process)
 
     if to_process == 0:
         logger.info("[Backfill] Toate meciurile sunt deja procesate!")
@@ -954,8 +962,16 @@ def run_backfill(
         # acest meci (Canonical Live ELO Snapshot). Citite DUPĂ
         # elo_tracker.process_match() de mai sus, spre deosebire de
         # home_elo/away_elo (pre-meci, citite înainte de bucla de update-uri
-        # a tracker-elor) — singurele 2 coloane din FEATURE_COLUMNS care
+        # a tracker-elor) — singurele 2 coloane din BACKFILL_COLUMNS care
         # reflectă starea de după meci, nu de dinainte.
+        #
+        # [CLARIFICAT — audit ADR-051/052] Tocmai pentru că reflectă starea
+        # de DUPĂ meci, aceste două coloane codifică direct rezultatul și NU
+        # apar niciodată în `ml_predictor.FEATURE_COLUMNS` (verificat: zero
+        # referințe în ml_predictor.py/ml_feature_pipeline.py). Consumatorul
+        # lor e exclusiv servirea live (ELO curent per echipă). Garda
+        # automată contra unei adăugiri accidentale viitoare:
+        # tests/test_backfill_columns_naming.py.
         home_elo_after = round(elo_tracker.get_elo(home))
         away_elo_after = round(elo_tracker.get_elo(away))
 

@@ -29,14 +29,14 @@ def _fresh_store():
             "league": "Test League", "kickoff_date": "2021-01-01",
             "actual_home_goals": 2, "actual_away_goals": 0, "actual_result": "H",
             "backfill_done": False,
-            **{col: None for col in bf.FEATURE_COLUMNS},
+            **{col: None for col in bf.BACKFILL_COLUMNS},
         },
         2: {
             "id": 2, "fixture_id": "f2", "home_team": "Team X", "away_team": "Team Z",
             "league": "Test League", "kickoff_date": "2021-02-01",
             "actual_home_goals": 1, "actual_away_goals": 1, "actual_result": "D",
             "backfill_done": False,
-            **{col: None for col in bf.FEATURE_COLUMNS},
+            **{col: None for col in bf.BACKFILL_COLUMNS},
             "home_elo": 1600,  # valoare reala preexistenta (ex. Kaggle) — NU trebuie suprascrisa
         },
         3: {
@@ -120,7 +120,7 @@ def test_writes_only_null_columns(monkeypatch):
         "home_foul_avg_recent", "away_foul_avg_recent",
         "home_shot_avg_recent", "away_shot_avg_recent",
     }
-    assert set(calls_by_id[1].keys()) == set(bf.FEATURE_COLUMNS) - cold_start_cols
+    assert set(calls_by_id[1].keys()) == set(bf.BACKFILL_COLUMNS) - cold_start_cols
 
     # id=2 avea deja home_elo populat -> NU trebuie sa apara in payload-ul de update
     assert "home_elo" not in calls_by_id[2], (
@@ -131,7 +131,7 @@ def test_writes_only_null_columns(monkeypatch):
     # CornerCardTracker/FoulsTracker/ShotCountTracker nu acumuleaza
     # niciodata istoric real, deci cold_start_cols raman None si pentru
     # id=2 (Regula #8, nu se scrie None peste NULL).
-    assert set(calls_by_id[2].keys()) == set(bf.FEATURE_COLUMNS) - {"home_elo"} - cold_start_cols
+    assert set(calls_by_id[2].keys()) == set(bf.BACKFILL_COLUMNS) - {"home_elo"} - cold_start_cols
 
     # id=3 era deja complet -> nu trebuie sa aiba niciun apel de update
     assert 3 not in calls_by_id, "randul deja complet nu trebuie atins deloc"

@@ -289,3 +289,144 @@ def test_run_report_cycle_window_excludes_current_day():
 def test_validation_analysis_disabled_by_default(monkeypatch):
     monkeypatch.setattr(va.sb, "load_config", lambda default: dict(default))
     assert va.is_enabled() is False
+
+
+# ════════════════════════════════════════════════════════════════════════
+# INTERSECȚIA COMUNĂ (audit ADR-051/052, 2026-08-17)
+# ════════════════════════════════════════════════════════════════════════
+# Finding închis: metricile per-motor sunt calculate fiecare pe PROPRIUL
+# subset disponibil — corect pentru "cât de bine se descurcă fiecare", dar
+# NU strict comparabile între motoare (dovadă live: oracle_n=25 vs ml_n=24
+# pe raportul săptămânal 2026-08-03..09). Metricile `*_common` răspund la
+# întrebarea complementară: "cum se compară EXACT pe aceleași meciuri?".
+# Ambele coexistă — niciuna nu o înlocuiește pe cealaltă.
+
+def test_is_engine_usable_oracle_never_gated_by_available_flag():
+    row = {"oracle_prob_home": 0.5, "oracle_prob_draw": 0.3, "oracle_prob_away": 0.2}
+    assert va._is_engine_usable(row, "oracle") is True
+
+
+def test_is_engine_usable_ml_requires_available_flag_and_all_probs():
+    complete = {"ml_available": True, "ml_prob_home": 0.4, "ml_prob_draw": 0.3, "ml_prob_away": 0.3}
+    assert va._is_engine_usable(complete, "ml") is True
+
+    assert va._is_engine_usable({**complete, "ml_available": False}, "ml") is False
+    assert va._is_engine_usable({**complete, "ml_prob_draw": None}, "ml") is False
+
+
+def test_common_rows_excludes_match_missing_ml():
+    """Cerința explicită a auditului: un meci fără ML NU intră în common."""
+    with_ml = dict(_snapshot("fx-1", ml_available=True, blend_available=True), actual_result="H")
+    without_ml = dict(_snapshot("fx-2", ml_available=False, blend_available=True), actual_result="D")
+
+    common = va._common_rows([with_ml, without_ml])
+
+    assert [r["fixture_id"] for r in common] == ["fx-1"]
+
+
+def test_common_rows_excludes_match_missing_blend():
+    with_all = dict(_snapshot("fx-1", ml_available=True, blend_available=True), actual_result="H")
+    no_blend = dict(_snapshot("fx-2", ml_available=True, blend_available=False), actual_result="D")
+
+    assert [r["fixture_id"] for r in va._common_rows([with_all, no_blend])] == ["fx-1"]
+
+
+def test_common_metrics_computed_on_identical_sample_for_all_three(monkeypatch):
+    """Invarianta centrală: pe intersecție, cei trei n sunt EGALI — altfel
+    comparația n-ar fi apples-to-apples."""
+    snapshots = [
+        _snapshot("fx-1", ml_available=True, blend_available=True),
+        _snapshot("fx-2", ml_available=True, blend_available=True),
+        _snapshot("fx-3", ml_available=False, blend_available=True),  # fara ML
+    ]
+    match_history = [
+        {"fixture_id": "fx-1", "actual_result": "H"},
+        {"fixture_id": "fx-2", "actual_result": "D"},
+        {"fixture_id": "fx-3", "actual_result": "A"},
+    ]
+    monkeypatch.setattr(va.sb, "get_client", lambda: _FakeClient(snapshots, match_history))
+
+    report = va.compute_period_report("daily", date(2026, 8, 1), date(2026, 8, 1))
+
+    # (A) Subseturile proprii rămân EXACT ce erau înainte — nicio regresie.
+    assert report["n_matches_total"] == 3
+    assert report["oracle"]["n"] == 3
+    assert report["ml"]["n"] == 2
+    assert report["blend"]["n"] == 3
+
+    # (B) Intersecția: doar fx-1 si fx-2, identic pentru toate trei.
+    assert report["n_matches_common"] == 2
+    assert report["common"]["oracle"]["n"] == 2
+    assert report["common"]["ml"]["n"] == 2
+    assert report["common"]["blend"]["n"] == 2
+
+
+def test_common_metrics_differ_from_own_subset_when_availability_differs(monkeypatch):
+    """Dovada că separarea are valoare reală: Oracle pe subsetul propriu
+    (3 meciuri) produce alt Brier decât Oracle pe intersecție (2 meciuri)."""
+    snapshots = [
+        _snapshot("fx-1", ml_available=True, blend_available=True),
+        _snapshot("fx-2", ml_available=True, blend_available=True),
+        _snapshot("fx-3", ml_available=False, blend_available=True),
+    ]
+    match_history = [
+        {"fixture_id": "fx-1", "actual_result": "H"},
+        {"fixture_id": "fx-2", "actual_result": "H"},
+        {"fixture_id": "fx-3", "actual_result": "A"},  # rezultat prost pt Oracle
+    ]
+    monkeypatch.setattr(va.sb, "get_client", lambda: _FakeClient(snapshots, match_history))
+
+    report = va.compute_period_report("daily", date(2026, 8, 1), date(2026, 8, 1))
+
+    assert report["oracle"]["brier"] != report["common"]["oracle"]["brier"]
+
+
+def test_common_metrics_zero_matches_yields_none(monkeypatch):
+    """n=0 pe intersecție => toate metricile None (Regula #8), nu 0.0."""
+    snapshots = [_snapshot("fx-1", ml_available=False, blend_available=False)]
+    match_history = [{"fixture_id": "fx-1", "actual_result": "H"}]
+    monkeypatch.setattr(va.sb, "get_client", lambda: _FakeClient(snapshots, match_history))
+
+    report = va.compute_period_report("daily", date(2026, 8, 1), date(2026, 8, 1))
+
+    assert report["n_matches_common"] == 0
+    for engine in ("oracle", "ml", "blend"):
+        assert report["common"][engine]["brier"] is None
+        assert report["common"][engine]["logloss"] is None
+        assert report["common"][engine]["accuracy"] is None
+
+
+def test_common_rows_never_includes_match_without_result(monkeypatch):
+    """Anti-leakage: intersecția se calculează DUPĂ filtrarea pe rezultat
+    cunoscut — un meci nejucat nu poate intra niciodată în metrici."""
+    snapshots = [
+        _snapshot("fx-1", ml_available=True, blend_available=True),
+        _snapshot("fx-2", ml_available=True, blend_available=True),
+    ]
+    match_history = [{"fixture_id": "fx-1", "actual_result": "H"}]  # fx-2 nejucat
+    monkeypatch.setattr(va.sb, "get_client", lambda: _FakeClient(snapshots, match_history))
+
+    report = va.compute_period_report("daily", date(2026, 8, 1), date(2026, 8, 1))
+
+    assert report["n_matches_common"] == 1
+
+
+def test_flatten_report_includes_common_columns():
+    report = va._empty_report("weekly", date(2026, 8, 1), date(2026, 8, 7))
+    row = va._flatten_report(report)
+
+    assert row["n_matches_common"] == 0
+    for engine in ("oracle", "ml", "blend"):
+        assert f"{engine}_brier_common" in row
+        assert f"{engine}_logloss_common" in row
+        assert f"{engine}_accuracy_common" in row
+
+
+def test_flatten_report_keeps_legacy_columns_untouched():
+    """Backward-compatibility: coloanele vechi rămân, cu aceleași nume."""
+    report = va._empty_report("daily", date(2026, 8, 1), date(2026, 8, 1))
+    row = va._flatten_report(report)
+
+    for engine in ("oracle", "ml", "blend"):
+        for suffix in ("n", "brier", "logloss", "accuracy"):
+            assert f"{engine}_{suffix}" in row

@@ -90,7 +90,7 @@ def test_run_backfill_call_sites_pass_goals(monkeypatch):
             "league": "Test League", "kickoff_date": "2021-01-01",
             "actual_home_goals": 3, "actual_away_goals": 0, "actual_result": "H",
             "backfill_done": False,
-            **{col: None for col in bf.FEATURE_COLUMNS},
+            **{col: None for col in bf.BACKFILL_COLUMNS},
         },
     ]
     updates = []

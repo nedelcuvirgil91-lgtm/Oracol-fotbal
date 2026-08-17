@@ -21,7 +21,7 @@ CHANGES v3.0 (față de v2.3):
 """
 from __future__ import annotations
 
-import csv, json, logging, sys
+import csv, json, logging, sys, time
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -552,17 +552,39 @@ class FootballOracleEngine:
         # exclusiv responsabilitatea learning_core/continuous_learning.py
         # (Faza B, ADR-030), decuplată, în fundal (cron GitHub Actions),
         # NICIODATĂ în calea de servire — vezi local_model_cache.py.
+        #
+        # [ADAUGAT — audit ADR-051/052, instrumentare de startup] Doar
+        # MĂSURARE: `time.perf_counter()` + `logger.info` în jurul celor două
+        # etape care pot domina timpul de pornire (rezolvare Champion,
+        # respectiv încărcare artefact din Local Model Cache — ambele fac
+        # I/O Supabase + Storage). Zero schimbare de comportament: nicio
+        # ramură nouă, nicio decizie schimbată, niciun apel suplimentar de
+        # rețea. Costul e un apel `perf_counter()` per etapă (nanosecunde),
+        # deci sub orice prag de impact asupra servirii. Scop: să putem citi
+        # din logurile Streamlit Cloud unde se duc efectiv secundele, fără
+        # să presupunem.
+        _t_engine_start = time.perf_counter()
         self.ml = MLPredictorEngine() if ML_MODULE_AVAILABLE else None
 
         champion_result = None
+        _t_champion_ms = None
         if self.ml and self.use_supabase:
+            _t0 = time.perf_counter()
             champion_result = self._resolve_champion()
+            _t_champion_ms = (time.perf_counter() - _t0) * 1000
 
         if champion_result is not None:
             self.ml_source = "champion"
             self.champion_diagnostic = self._champion_diagnostic_from_result(champion_result)
+            logger.info(
+                "[Startup] ML=champion (training_run_id=%s) · rezolvare Champion %.0f ms · total %.0f ms",
+                champion_result.training_run_id, _t_champion_ms or 0.0,
+                (time.perf_counter() - _t_engine_start) * 1000,
+            )
         elif self.ml and self.use_supabase:
+            _t1 = time.perf_counter()
             cache_result = self._resolve_local_cache()
+            _t_cache_ms = (time.perf_counter() - _t1) * 1000
             logger.info(
                 "[ML] Inițializare: %s",
                 f"cache încărcat (training_run_id={cache_result.training_run_id})"
@@ -570,10 +592,19 @@ class FootballOracleEngine:
             )
             self.ml_source = "local" if self.ml.is_trained else "none"
             self.champion_diagnostic = self._champion_diagnostic_unavailable("no_valid_champion")
+            logger.info(
+                "[Startup] ML=%s · Champion absent (%.0f ms) · încărcare cache %.0f ms · total %.0f ms",
+                self.ml_source, _t_champion_ms or 0.0, _t_cache_ms,
+                (time.perf_counter() - _t_engine_start) * 1000,
+            )
         else:
             self.ml_source = "none"
             reason = "no_supabase" if not self.use_supabase else "ml_module_unavailable"
             self.champion_diagnostic = self._champion_diagnostic_unavailable(reason)
+            logger.info(
+                "[Startup] ML=none (motiv: %s) · total %.0f ms",
+                reason, (time.perf_counter() - _t_engine_start) * 1000,
+            )
 
     @staticmethod
     def _champion_diagnostic_unavailable(reason: str) -> dict:
