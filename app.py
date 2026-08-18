@@ -668,16 +668,23 @@ def _render_match_card(match: dict, engine) -> None:
                     use_container_width=True, hide_index=True,
                 )
                 # [CORECTAT — decizie proprietar produs, sesiune 2026-08-15]
-                # Indicator de PROIECT (agregat pe toate ligile), nu per
+                # Indicator de PROIECT (agregat pe ligile domestice), nu per
                 # echipă — bară vizuală, la fel ca bara Challenger-ului ML
                 # (Setări Model — "Challenger activ ... N/200 ... verdict
-                # curent"). Prag 400, STRICT sezonul curent (nu tot
-                # istoricul — decizie explicită: loturile se schimbă între
-                # sezoane, testul trebuie să folosească aceleași date ca
-                # profilul afișat). Cifrele de mai sus rămân informative
-                # indiferent de acest progres — formula NU a fost încă
-                # dovedită prin ablație, doar calculată (Regula "nicio
-                # schimbare de model fără ablație").
+                # curent"). Prag STRICT sezonul curent (nu tot istoricul —
+                # decizie explicită: loturile se schimbă între sezoane,
+                # testul trebuie să folosească aceleași date ca profilul
+                # afișat). Cifrele de mai sus rămân informative indiferent
+                # de acest progres — formula NU a fost încă dovedită prin
+                # ablație, doar calculată (Regula "nicio schimbare de model
+                # fără ablație").
+                #
+                # [CORECTAT 2026-08-18] Prag 400→300 ȘI cupele europene
+                # UEFA + World Cup 2026 excluse din numărătoare (vezi
+                # TEAM_PROFILE_EXCLUDED_LEAGUES, database/queries.py) —
+                # acoperire xG real verificată live: 99-100% în ligile
+                # domestice vs. ~30-35% (0% la World Cup) în acele
+                # competiții, structural, nu o chestiune de volum.
                 from database.queries import TEAM_PROFILE_TEST_THRESHOLD
                 readiness = _finishing_data_readiness()
                 n_finished = readiness.get("finished_total", 0)
@@ -685,7 +692,7 @@ def _render_match_card(match: dict, engine) -> None:
                 st.progress(
                     min(n_finished / TEAM_PROFILE_TEST_THRESHOLD, 1.0) if TEAM_PROFILE_TEST_THRESHOLD else 0.0,
                     text=(
-                        "🧪 Profil de echipă (agregat, toate ligile, sezonul curent) — "
+                        "🧪 Profil de echipă (agregat, ligi domestice, sezonul curent) — "
                         f"{n_finished}/{TEAM_PROFILE_TEST_THRESHOLD} meciuri terminate "
                         f"— status: {status}"
                     ),

@@ -2617,20 +2617,33 @@ def get_match_core_stats(match_id: int) -> dict | None:
 # ADR-012/013/021, pe tot istoricul) — decizie explicită, respinsă deliberat:
 # loturile se schimbă între sezoane, un test de validitate pe date multi-sezon
 # ar fi la fel de puțin relevant ca un profil de echipă pe date multi-sezon.
-# Pragul e strict pe sezonul curent, agregat pe toate ligile — 400 meciuri,
-# ales de proprietarul produsului. Simetric cu MIN_MATCHES_FOR_EVALUATION=200
-# de la Challenger-ul ML (learning_core/continuous_learning.py) — un prag
-# agregat, verificat recurent, nu per-ligă/per-etapă.
-TEAM_PROFILE_TEST_THRESHOLD = 400
+# Pragul e strict pe sezonul curent, agregat pe toate ligile — ales de
+# proprietarul produsului. Simetric cu MIN_MATCHES_FOR_EVALUATION=200 de la
+# Challenger-ul ML (learning_core/continuous_learning.py) — un prag agregat,
+# verificat recurent, nu per-ligă/per-etapă.
+#
+# [CORECTAT — proprietarul produsului, sesiune 2026-08-18] Prag redus 400→300
+# ȘI cele 3 cupe europene UEFA + World Cup 2026 excluse din numărătoare —
+# verificat live (nu presupus): acoperirea xG real e 99-100% în orice ligă
+# domestică urmărită, dar doar ~30-35% la Champions/Europa/Conference League
+# (0% la World Cup 2026, n mic) — Flashscore însuși nu publică xG pentru
+# majoritatea turelor de calificare/turneelor cu adversari nepotriviți,
+# indiferent cât timp trece (nu e o problemă de volum). Excluderea se aplică
+# IDENTIC la pragul de mai jos ȘI la sursa reală a formulei de finalizare
+# (get_team_recent_advanced_stats/_recent_match_side_map, mai jos) — altfel
+# am valida pe o populație curată dar am afișa/promova alta, contaminată.
+TEAM_PROFILE_EXCLUDED_LEAGUES = (
+    "Champions League", "Europa League", "Conference League", "World Cup 2026",
+)
+TEAM_PROFILE_TEST_THRESHOLD = 300
 
 
 def get_finishing_data_readiness(since_date: str) -> dict:
-    """Progres agregat, pe TOATE ligile, STRICT pe sezonul curent (kickoff_date
-    >= since_date) — spre TEAM_PROFILE_TEST_THRESHOLD. `finished_total` e
-    cifra afișată în bara de progres (toate meciurile terminate ale
-    sezonului, indiferent de ce coloane au populate); `shots_on_target`/`xg`
-    rămân informative, pentru a ști ce parte din test chiar e susținută de
-    date reale odată atins pragul.
+    """Progres agregat, pe ligile domestice ale sezonului curent (kickoff_date
+    >= since_date, cu excluderea TEAM_PROFILE_EXCLUDED_LEAGUES) — spre
+    TEAM_PROFILE_TEST_THRESHOLD. `finished_total` e cifra afișată în bara de
+    progres; `shots_on_target`/`xg` rămân informative, pentru a ști ce parte
+    din test chiar e susținută de date reale odată atins pragul.
 
     Rândurile suprascrise (`superseded_by`) sunt excluse, la fel ca la
     count_matches_with_result()."""
@@ -2638,12 +2651,14 @@ def get_finishing_data_readiness(since_date: str) -> dict:
     if client is None:
         return {"finished_total": 0, "shots_on_target": 0, "xg": 0}
     try:
+        excluded = list(TEAM_PROFILE_EXCLUDED_LEAGUES)
         finished_res = (
             client.table("match_history")
             .select("id", count="exact")
             .not_.is_("actual_result", "null")
             .is_("superseded_by", "null")
             .gte("kickoff_date", since_date)
+            .not_.in_("league", excluded)
             .execute()
         )
         sot_res = (
@@ -2653,6 +2668,7 @@ def get_finishing_data_readiness(since_date: str) -> dict:
             .not_.is_("home_shots_on_target", "null")
             .is_("superseded_by", "null")
             .gte("kickoff_date", since_date)
+            .not_.in_("league", excluded)
             .execute()
         )
         xg_res = (
@@ -2662,6 +2678,7 @@ def get_finishing_data_readiness(since_date: str) -> dict:
             .not_.is_("home_xg_actual", "null")
             .is_("superseded_by", "null")
             .gte("kickoff_date", since_date)
+            .not_.in_("league", excluded)
             .execute()
         )
         return {
@@ -2699,7 +2716,13 @@ def get_team_recent_advanced_stats(
     combina istoricul, deși ambele au aceleași coloane Flashscore reale.
     Aliniat acum la disciplina deja folosită de `sync/backfill_features.py`
     (ELOTracker/FormTracker/CornerCardTracker etc. — istoric per echipă,
-    fără filtru de ligă)."""
+    fără filtru de ligă).
+
+    [CORECTAT 2026-08-18] `TEAM_PROFILE_EXCLUDED_LEAGUES` rămâne exclusă și
+    aici — vezi nota de lângă TEAM_PROFILE_TEST_THRESHOLD, mai sus. Nu e o
+    reintroducere a filtrului de ligă vechi (rămâne global pe restul
+    competițiilor), doar o excludere țintită a celor cu acoperire xG
+    structural slabă."""
     client = get_client()
     if client is None:
         return []
@@ -2715,6 +2738,7 @@ def get_team_recent_advanced_stats(
                     "actual_home_goals,actual_away_goals,kickoff_date")
             .or_(f"home_team.eq.{team},away_team.eq.{team}")
             .not_.is_("actual_result", "null")
+            .not_.in_("league", list(TEAM_PROFILE_EXCLUDED_LEAGUES))
         )
         if since_date:
             query = query.gte("kickoff_date", since_date)
@@ -2737,12 +2761,18 @@ def _recent_match_side_map(
 
     [FIX 2026-08-10] Istoric GLOBAL per echipă, fără filtru de ligă — vezi
     motivul identic documentat la get_team_recent_advanced_stats(), mai sus.
-    `league` rămas doar pentru logging la apelanți."""
+    `league` rămas doar pentru logging la apelanți.
+
+    [CORECTAT 2026-08-18] TEAM_PROFILE_EXCLUDED_LEAGUES exclusă și aici —
+    vezi nota de lângă TEAM_PROFILE_TEST_THRESHOLD. Propagă automat la
+    get_team_recent_statistics_extended()/get_team_recent_player_ratings()
+    (ambele deleagă la acest helper)."""
     query = (
         client.table("match_history")
         .select("id,home_team,away_team,kickoff_date")
         .or_(f"home_team.eq.{team},away_team.eq.{team}")
         .not_.is_("actual_result", "null")
+        .not_.in_("league", list(TEAM_PROFILE_EXCLUDED_LEAGUES))
     )
     if since_date:
         query = query.gte("kickoff_date", since_date)
