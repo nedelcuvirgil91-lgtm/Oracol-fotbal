@@ -1,8 +1,10 @@
 # F4 — Reconcilierea identității canonice: decizii și stare
 
-**Status**: implementat la nivel de cod, **zero scriere în producție**. Reconcilierea propriu-zisă rămâne neautorizată.
+**Status**: implementat la nivel de cod, **zero scriere în producție**. Execuția reconcilierii rămâne negatată — pilot înainte de rulare completă.
 **Data**: 2026-08-21
-**Relație cu ADR-uri**: consumă ADR-025 (Approved / Architecture Frozen) și ADR-058 (F3). **Nu modifică niciunul.**
+**Relație cu ADR-uri**: consumă ADR-025 (Approved / Architecture Frozen) și ADR-058 (F3); a produs **ADR-059**, care amendează pasul de merge din ID-025-01.
+
+> **Actualizare — ADR-059 (2026-08-21).** Dry-run-ul pe date reale (GitHub Actions run `32536869017`) a arătat că merge-ul ar scrie 66 de valori pe 6 rânduri canonice, în 11 coloane deținute de `_cache_prediction`. Verificat mecanic: **toate** cele 52 de coloane candidate au owner unic (ADR-036), deci nu există subset sigur. ADR-059 a eliminat pasul de merge: **reconcilierea marchează, nu contopește**. Secțiunile de mai jos rămân valide ca dovezi; unde se referă la „merge", contractul curent e cel din ADR-059.
 
 ---
 

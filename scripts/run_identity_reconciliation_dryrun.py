@@ -71,16 +71,23 @@ def main() -> int:
     print(f"  Reconciliabile                      : {report.reconciled_groups}")
     print(f"  Excluse — HARD CONFLICT             : {report.excluded_hard_conflict_count}")
     print(f"  Excluse — sursa necunoscuta         : {report.excluded_unknown_source_count}")
-    print(f"  Randuri canonice cu completari      : {report.canonical_rows_with_any_fill}")
-    print(f"  Total randuri afectate              : {report.total_rows_affected}")
+    print(f"  Randuri de marcat superseded        : {report.rows_to_mark}")
+    print(f"  Randuri canonice cu goluri de date  : {report.canonical_rows_with_data_gap}")
+    print(BAR)
+    print("  [ADR-059] Reconcilierea MARCHEAZA, nu contopeste. Golurile de mai")
+    print("  jos NU se scriu — se raporteaza, ca owner-ul lor sa le regenereze.")
     print(BAR)
 
-    if report.columns_populated:
-        print("  Completari per coloana (NULL -> valoare):")
-        for col, n in sorted(report.columns_populated.items(), key=lambda kv: -kv[1]):
+    if report.columns_with_data_gap:
+        print("  Goluri de date per coloana (lipsa pe canonic, prezenta pe necanonic):")
+        for col, n in sorted(report.columns_with_data_gap.items(), key=lambda kv: -kv[1]):
             print(f"    {col:<32} {n}")
+        print()
+        print("  Cine poate regenera aceste goluri:")
+        for owner, n in sorted(report.gaps_by_owner.items(), key=lambda kv: -kv[1]):
+            print(f"    {owner:<32} {n}")
     else:
-        print("  Nicio completare de coloana propusa.")
+        print("  Niciun gol de date — randurile canonice au tot ce au necanonicele.")
     print(BAR)
 
     # Grupurile excluse sunt cele care cer decizie umana — se listeaza integral,

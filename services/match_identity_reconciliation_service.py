@@ -6,22 +6,36 @@ Implementeaza algoritmul din ID-025-01 (Canonical Row Selection) si motorul
 de descoperire/raportare din ID-025-02 (Historical Reconciliation Engine),
 consumate de strategia de migrare ADR-025.
 
-Scop STRICT in aceasta faza (Faza 2, ADR-025): DRY-RUN. Modul EXECUTE (scriere
-efectiva pe match_history — Faza 3/4 din ADR-025) NU e implementat aici — vezi
-`run()`. Adaugarea lui necesita autorizare separata, explicita, per Phase Gate
-(ADR-025, "Strategie de migrare"). Codul de decizie (discover/clasificare/
-selectie/merge) e comun celor doua moduri prin constructie — DRY-RUN foloseste
-exact acelasi cod, doar nu scrie (ID-025-02, garantie explicita).
+[ADR-059, 2026-08-21] RECONCILIEREA MARCHEAZA, NU CONTOPESTE. Pasul de merge
+non-destructiv (ID-025-01, Pasul 3) a fost ELIMINAT: reconcilierea nu scrie
+nicio coloana de date, pe niciun rand. Singurele coloane pe care le scrie sunt
+`superseded_by`/`superseded_at`/`superseded_reason`, exclusiv pe randul
+NECANONIC — randul canonic nu e atins de niciun octet.
 
-Fluxul (per grup de duplicate, ID-025-01):
+De ce: toate cele 52 de coloane candidate au un owner unic de scriere
+(ADR-036) — verificat mecanic din cod, multimea coloanelor fara owner e vida,
+deci nu exista subset sigur. Si, dincolo de guvernanta: orice valoare de pe un
+rand necanonic a fost calculata sub identitatea FRAGMENTATA, iar RPC-ul si
+`run_backfill` fiind NULL-only, copierea ei ar BLOCA definitiv recalculul
+corect al owner-ului legitim. Diferenta de date se RAPORTEAZA (cu owner-ul care
+o poate regenera), nu se scrie.
+
+Modul EXECUTE e autorizat de ADR-059 si implementat aici (`run(dry_run=False)`).
+Executia in sine ramane gatata per Phase Gate (ADR-025): pilot pe subset
+(`limit_groups`) inainte de rulare completa. Codul de decizie e comun celor
+doua moduri prin constructie — DRY-RUN foloseste exact acelasi cod, doar nu
+scrie (ID-025-02, garantie explicita).
+
+Fluxul (per grup de duplicate, ID-025-01, amendat de ADR-059):
   1. Clasificare HARD CONFLICT (actual_result/actual_home_goals/actual_away_goals)
      — o discrepanta reala exclude tot grupul, fara efect lateral.
   2. Rezolvarea sursei fiecarui rand (`resolve_source`, din prefixul fixture_id)
      — sursa necunoscuta exclude tot grupul (Regula #8 North Star).
   3. Selectia randului canonic — rang minim (SourceTrustProvider), tiebreak id minim.
-  4. Merge non-destructiv camp cu camp (monoton, NULL -> valoare, niciodata invers).
+  4. [ADR-059] Observarea golurilor de date (ce are necanonicul si nu are
+     canonicul) + owner-ul fiecaruia — raportat, niciodata scris.
   5. Marcare trasabila a randurilor necanonice (superseded_by/at/reason) — DOAR
-     in modul EXECUTE, neimplementat inca.
+     in modul EXECUTE.
 ================================================================================
 """
 from __future__ import annotations
@@ -66,11 +80,21 @@ HARD_CONFLICT_COLUMNS: list[str] = [
     "actual_result", "actual_home_goals", "actual_away_goals",
 ]
 
-# Toate coloanele eligibile pentru merge non-destructiv (ID-025-01, Pasul 3) —
-# FEATURE_COLUMNS (ml_predictor.py) + coloanele brute de rezultat/statistici.
-# Exclude: cheia naturala (home_team/away_team/kickoff_date), identitate opaca
-# (id/fixture_id/league), audit (created_at/superseded_*), HARD_CONFLICT_COLUMNS.
-MERGE_COLUMNS: list[str] = [
+# [ADR-059, 2026-08-21] Aceste coloane NU MAI SUNT CONTOPITE. Reconcilierea
+# marcheaza, nu contopeste — vezi `process_group()`. Lista ramane, cu semantica
+# schimbata: coloanele sunt INSPECTATE, ca raportul sa poata arata ce are randul
+# necanonic si nu are cel canonic, si CINE detine fiecare gol.
+#
+# De ce s-a eliminat contopirea: fiecare din cele 52 are un owner unic de
+# scriere (ADR-036) — verificat mecanic din cod, multimea coloanelor fara owner
+# e vida, deci nu exista subset sigur. Si, mai important decat guvernanta:
+# orice valoare de pe un rand necanonic a fost calculata sub identitatea
+# FRAGMENTATA (tracker-ele ELO/forma/H2H sunt cheiate pe numele echipei), iar
+# RPC-ul si `run_backfill` fiind NULL-only, o valoare gresita copiata acolo ar
+# BLOCA definitiv recalculul corect al owner-ului.
+#
+# Alias pastrat mai jos pentru compatibilitate cu apelanti externi.
+OBSERVED_DATA_COLUMNS: list[str] = [
     "home_xg_pred", "away_xg_pred",
     "home_offensive_rating", "home_defensive_rating",
     "away_offensive_rating", "away_defensive_rating",
@@ -99,6 +123,60 @@ MERGE_COLUMNS: list[str] = [
     "home_elo_after", "away_elo_after",
 ]
 
+# Alias de compatibilitate. Numele vechi trimite acum la aceeasi lista, dar
+# semantica e cea din ADR-059: coloane observate, NU contopite.
+MERGE_COLUMNS = OBSERVED_DATA_COLUMNS
+
+# [ADR-059] Coloanele pe care reconcilierea are voie sa le scrie — singurele,
+# si exclusiv pe randul NECANONIC. Randul canonic nu e atins de niciun octet.
+# Reconcilierea e owner unic al acestora (adaugire la modelul ADR-036, nu
+# exceptie de la el).
+RECONCILIATION_OWNED_COLUMNS: tuple[str, ...] = (
+    "superseded_by", "superseded_at", "superseded_reason",
+)
+
+# [ADR-059] Cine poate REGENERA fiecare coloana observata. Raportul transforma
+# astfel "6 randuri au goluri" in "6 randuri asteapta ca _cache_prediction sa
+# ruleze" — reconcilierea observa, owner-ul actioneaza.
+# Derivat mecanic din cod, nu din memorie: `BACKFILL_COLUMNS` +
+# `backfill_done` (sync/backfill_features.py:197) pentru run_backfill;
+# `used_for_training` din scriitorii de import (sync/sources/openfootball.py:193,
+# football_data.py:242); iesirile de predictie per ADR-036 Stage 1.
+# Garda automata: tests/test_adr059_reconciliation_is_identity.py.
+_PREDICTION_OUTPUT_COLUMNS = frozenset({
+    "home_xg_pred", "away_xg_pred",
+    "prob_home_pred", "prob_draw_pred", "prob_away_pred",
+    "mc_prob_home", "mc_prob_draw", "mc_prob_away",
+    "weather_penalty", "home_data_quality", "away_data_quality",
+})
+_BACKFILL_OWNED_COLUMNS = frozenset({
+    "home_offensive_rating", "home_defensive_rating",
+    "away_offensive_rating", "away_defensive_rating",
+    "home_form_score", "away_form_score",
+    "home_elo", "away_elo",
+    "h2h_modifier", "h2h_meetings",
+    "home_corner_avg_recent", "away_corner_avg_recent",
+    "home_card_avg_recent", "away_card_avg_recent",
+    "home_foul_avg_recent", "away_foul_avg_recent",
+    "home_shot_avg_recent", "away_shot_avg_recent",
+    "home_elo_after", "away_elo_after",
+    "backfill_done",
+})
+_IMPORT_OWNED_COLUMNS = frozenset({"used_for_training"})
+
+
+def column_owner(column: str) -> str:
+    """Cine poate regenera aceasta coloana (ADR-036 + ADR-059). Restul
+    coloanelor observate sunt statistici de meci, scrise de sincronizarea de
+    statistici."""
+    if column in _PREDICTION_OUTPUT_COLUMNS:
+        return "_cache_prediction"
+    if column in _BACKFILL_OWNED_COLUMNS:
+        return "run_backfill"
+    if column in _IMPORT_OWNED_COLUMNS:
+        return "import_sources"
+    return "stats_sync"
+
 
 def resolve_source(fixture_id: str | None) -> str | None:
     """Sursa unui rand, derivata din prefixul fixture_id (ID-025-01, Pasul 1).
@@ -119,7 +197,10 @@ class GroupDecision:
     canonical_id: Any = None
     canonical_source: str | None = None
     noncanonical: list[dict] = field(default_factory=list)  # [{"id","source","rank","reason"}]
-    merge_updates: dict[str, Any] = field(default_factory=dict)  # camp -> valoare noua (canonical)
+    # [ADR-059] Ce lipseste de pe randul canonic si exista pe cel necanonic:
+    # {coloana -> owner care o poate regenera}. Se RAPORTEAZA, nu se scrie —
+    # reconcilierea nu atinge randul canonic. Inlocuieste `merge_updates`.
+    data_gaps: dict[str, str] = field(default_factory=dict)
 
 
 def _classify_hard_conflict(rows: list[dict]) -> bool:
@@ -164,20 +245,17 @@ def process_group(rows: list[dict]) -> GroupDecision:
     decision.canonical_id = canonical.get("id")
     decision.canonical_source = canonical_source
 
-    # Pasul 3 — merge non-destructiv, camp cu camp (monoton, NULL -> valoare).
-    for col in MERGE_COLUMNS:
+    # Pasul 3 — [ADR-059] OBSERVARE, nu contopire. Se identifica ce coloane are
+    # randul necanonic si nu are cel canonic, si CINE le detine — dar nu se
+    # scrie nimic pe randul canonic. Vezi ADR-059 pentru rationament: toate cele
+    # 52 de coloane au owner unic (ADR-036), iar valorile de pe randul necanonic
+    # au fost calculate sub identitatea fragmentata, deci copierea lor ar
+    # cimenta date gresite prin semantica NULL-only a RPC-ului si a backfill-ului.
+    for col in OBSERVED_DATA_COLUMNS:
         if canonical.get(col) is not None:
-            continue  # Case 1 — Writer Protection, niciodata atins.
-        candidates = [
-            (row, rank) for row, _, rank in noncanonical_ranked
-            if row.get(col) is not None
-        ]
-        if not candidates:
-            continue  # Case 4 — nimeni nu are valoare, ramane NULL.
-        # Case 2 (un singur candidat) si Case 3 (SOFT CONFLICT — mai multi
-        # candidati, castiga rangul de incredere cel mai mic) — aceeasi regula.
-        winner_row, _ = min(candidates, key=lambda c: c[1])
-        decision.merge_updates[col] = winner_row[col]
+            continue
+        if any(row.get(col) is not None for row, _, _ in noncanonical_ranked):
+            decision.data_gaps[col] = column_owner(col)
 
     # Pasul 4 — marcare trasabila (doar calculata aici; scrisa doar in EXECUTE).
     for row, source, rank in noncanonical_ranked:
@@ -208,9 +286,17 @@ class ReconciliationReport:
     excluded_unknown_source: list[str] = field(default_factory=list)
     reconciled_groups: int = 0
     write_errors: list[str] = field(default_factory=list)  # doar EXECUTE
-    columns_populated: dict[str, int] = field(default_factory=dict)
-    canonical_rows_with_any_fill: int = 0
-    total_rows_affected: int = 0  # canonice completate + necanonice marcate
+    # [ADR-059] Semantica schimbata: nu "ce s-ar scrie", ci "ce lipseste si cine
+    # o poate regenera". Reconcilierea nu scrie niciuna dintre aceste coloane.
+    columns_with_data_gap: dict[str, int] = field(default_factory=dict)
+    gaps_by_owner: dict[str, int] = field(default_factory=dict)
+    canonical_rows_with_data_gap: int = 0
+    # [ADR-059] Randurile atinse sunt EXCLUSIV cele necanonice (marcaj de audit).
+    # `rows_to_mark` se numara in ambele moduri (in DRY-RUN e planul), pe cand
+    # `rows_marked_superseded` numara doar scrierile chiar efectuate. Diferenta
+    # dintre ele, dupa un EXECUTE, e exact numarul de esecuri de scriere.
+    rows_to_mark: int = 0
+    rows_marked_superseded: int = 0
 
     @property
     def excluded_hard_conflict_count(self) -> int:
@@ -282,14 +368,43 @@ class MatchIdentityReconciliationService:
                 rows[row["id"]] = row
         return rows
 
-    def run(self, dry_run: bool = True) -> ReconciliationReport:
-        if not dry_run:
-            raise NotImplementedError(
-                "Modul EXECUTE nu e autorizat/implementat in Faza 2 (ADR-025) — "
-                "necesita aprobare explicita separata pentru Faza 3 (pilot) sau "
-                "Faza 4 (completa), conform Phase Gate din ADR-025."
-            )
+    def _mark_superseded(self, row_id: Any, canonical_id: Any, reason: str) -> None:
+        """[ADR-059] Singura scriere pe care o face reconcilierea. Atinge EXCLUSIV
+        randul necanonic, si doar cele 3 coloane de audit din
+        `RECONCILIATION_OWNED_COLUMNS`. Randul canonic nu e atins niciodata.
 
+        Idempotent prin filtrul `superseded_by is null`: un rand deja marcat nu
+        e re-marcat, deci o reluare dupa esec partial nu suprascrie un marcaj
+        anterior (si nu-i schimba `superseded_at`)."""
+        from datetime import datetime, timezone
+
+        client = self._sb.get_client()
+        (
+            client.table("match_history")
+            .update({
+                "superseded_by": canonical_id,
+                "superseded_at": datetime.now(timezone.utc).isoformat(),
+                "superseded_reason": reason,
+            })
+            .eq("id", row_id)
+            .is_("superseded_by", "null")
+            .execute()
+        )
+
+    def run(self, dry_run: bool = True, limit_groups: int | None = None) -> ReconciliationReport:
+        """DRY-RUN implicit. `dry_run=False` scrie — vezi `_mark_superseded`
+        pentru suprafata exacta (3 coloane de audit, doar pe randul necanonic).
+
+        [ADR-059] Modul EXECUTE e autorizat de ADR-059, care a redus radical
+        riscul: reconcilierea nu mai contopeste date, deci nu mai exista
+        "valoare completata care trebuie reconstituita" la rollback — anularea
+        e stergerea marcajului. Execuția in sine ramane gatata per Phase Gate
+        (ADR-025): pilot pe subset inainte de rulare completa.
+
+        `limit_groups` — plafon de siguranta pentru pilot (ADR-025 Faza 3).
+        Grupurile se proceseaza in ordine sortata a cheii naturale, deci un
+        pilot e reproductibil: aceleasi N grupuri la fiecare rulare.
+        """
         report = ReconciliationReport()
         key_index = self._fetch_key_index()
         duplicate_groups = {k: v for k, v in key_index.items() if len(v) > 1}
@@ -298,7 +413,9 @@ class MatchIdentityReconciliationService:
         all_ids = [row["id"] for rows in duplicate_groups.values() for row in rows]
         full_rows_by_id = self._fetch_full_rows(all_ids)
 
-        for key, stub_rows in duplicate_groups.items():
+        processed = 0
+        for key in sorted(duplicate_groups):
+            stub_rows = duplicate_groups[key]
             full_rows = [full_rows_by_id[r["id"]] for r in stub_rows if r["id"] in full_rows_by_id]
             if len(full_rows) < 2:
                 continue
@@ -311,19 +428,38 @@ class MatchIdentityReconciliationService:
                 report.excluded_unknown_source.append(key)
                 continue
 
-            report.reconciled_groups += 1
-            if decision.merge_updates:
-                report.canonical_rows_with_any_fill += 1
-            for col in decision.merge_updates:
-                report.columns_populated[col] = report.columns_populated.get(col, 0) + 1
+            if limit_groups is not None and processed >= limit_groups:
+                continue
+            processed += 1
 
-        report.total_rows_affected = report.reconciled_groups + report.canonical_rows_with_any_fill
+            report.reconciled_groups += 1
+            if decision.data_gaps:
+                report.canonical_rows_with_data_gap += 1
+            for col, owner in decision.data_gaps.items():
+                report.columns_with_data_gap[col] = report.columns_with_data_gap.get(col, 0) + 1
+                report.gaps_by_owner[owner] = report.gaps_by_owner.get(owner, 0) + 1
+
+            report.rows_to_mark += len(decision.noncanonical)
+
+            if not dry_run:
+                for nc in decision.noncanonical:
+                    try:
+                        self._mark_superseded(nc["id"], decision.canonical_id, nc["reason"])
+                        report.rows_marked_superseded += 1
+                    except Exception as exc:
+                        # Un esec pe un grup nu opreste restul: marcajul e
+                        # idempotent si per-rand, deci reluarea e sigura.
+                        report.write_errors.append(f"id={nc['id']}: {exc}")
+                        logger.error("[MatchIdentityReconciliation] Esec marcaj id=%s: %s", nc["id"], exc)
 
         logger.info(
-            "[MatchIdentityReconciliation] DRY-RUN: %d grupuri, %d reconciliate, "
-            "%d hard_conflict, %d sursa_necunoscuta, %d randuri_canonice_cu_completare",
+            "[MatchIdentityReconciliation] %s: %d grupuri, %d reconciliate, "
+            "%d hard_conflict, %d sursa_necunoscuta, %d randuri_canonice_cu_gol, "
+            "%d randuri_marcate, %d erori_scriere",
+            "DRY-RUN" if dry_run else "EXECUTE",
             report.total_groups, report.reconciled_groups,
             report.excluded_hard_conflict_count, report.excluded_unknown_source_count,
-            report.canonical_rows_with_any_fill,
+            report.canonical_rows_with_data_gap, report.rows_marked_superseded,
+            len(report.write_errors),
         )
         return report

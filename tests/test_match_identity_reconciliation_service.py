@@ -46,7 +46,7 @@ def test_hard_conflict_on_differing_result_excludes_group_no_side_effects():
     decision = process_group(rows)
     assert decision.excluded_reason == "hard_conflict"
     assert decision.canonical_id is None
-    assert decision.merge_updates == {}
+    assert decision.data_gaps == {}
     assert decision.noncanonical == []
 
 
@@ -89,43 +89,72 @@ def test_tiebreak_uses_lowest_id_at_equal_rank():
     assert decision.canonical_id == 10
 
 
-# ── process_group: merge non-destructiv (Pasii 1-4, ID-025-01) ─────────────
+# ── process_group: observarea golurilor (Pasul 3, amendat de ADR-059) ───────
+# Inainte de ADR-059 acest bloc verifica CONTOPIREA (Case 1-4 din ID-025-01).
+# ADR-059 a eliminat contopirea: aceleasi patru situatii exista in continuare,
+# dar rezultatul lor e un RAPORT, nu o scriere.
 
-def test_case1_canonical_value_never_overwritten():
+def test_canonical_value_present_produces_no_gap():
+    """Fost "Case 1 — Writer Protection". Daca randul canonic are deja valoarea,
+    nu exista gol de raportat."""
     rows = [
         _row(1, "fd_1", home_shots=10),
         _row(2, "kaggle_1", home_shots=99),
     ]
     decision = process_group(rows)
-    assert "home_shots" not in decision.merge_updates
+    assert "home_shots" not in decision.data_gaps
 
 
-def test_case2_single_candidate_fills_null_canonical():
+def test_missing_canonical_value_is_reported_as_gap_never_written():
+    """Fost "Case 2". ADR-059: golul e raportat impreuna cu owner-ul care il
+    poate regenera — dar NU se propune nicio valoare de scris. `data_gaps`
+    mapeaza coloana -> owner, niciodata coloana -> valoare."""
     rows = [
         _row(1, "fd_1", home_shots=None),
         _row(2, "kaggle_1", home_shots=7),
     ]
     decision = process_group(rows)
-    assert decision.merge_updates["home_shots"] == 7
+    assert decision.data_gaps["home_shots"] == "stats_sync"
+    # Invarianta centrala ADR-059: nicio valoare de date nu apare in decizie.
+    assert 7 not in decision.data_gaps.values()
+    assert not hasattr(decision, "merge_updates")
 
 
-def test_case3_soft_conflict_resolved_by_lowest_rank_among_candidates():
+def test_gap_reported_once_regardless_of_how_many_rows_have_the_value():
+    """Fost "Case 3 — SOFT CONFLICT". Sub ADR-059 conflictul de valori nu mai
+    exista ca notiune: nu se alege nicio valoare, deci nu e nimic de arbitrat.
+    Golul se raporteaza o singura data, cu owner-ul lui."""
     rows = [
-        _row(1, "espn_1", home_shots=None),   # canonical (rank 2)
-        _row(2, "odds_1", home_shots=11),     # rank 3
-        _row(3, "kaggle_1", home_shots=9),    # rank 4
+        _row(1, "espn_1", home_shots=None),   # canonic
+        _row(2, "odds_1", home_shots=11),
+        _row(3, "kaggle_1", home_shots=9),
     ]
     decision = process_group(rows)
-    assert decision.merge_updates["home_shots"] == 11  # odds_api (rank 3) beats kaggle (rank 4)
+    assert decision.data_gaps == {"home_shots": "stats_sync"}
 
 
-def test_case4_no_row_has_value_stays_absent_from_updates():
+def test_no_gap_when_no_row_has_the_value():
+    """Fost "Case 4"."""
     rows = [
         _row(1, "fd_1", home_shots=None),
         _row(2, "kaggle_1", home_shots=None),
     ]
     decision = process_group(rows)
-    assert "home_shots" not in decision.merge_updates
+    assert "home_shots" not in decision.data_gaps
+
+
+def test_gap_owners_are_derived_per_column_family():
+    """ADR-059 §Decizie 4: raportul spune CINE poate regenera fiecare gol.
+    Cele patru familii de owneri, verificate pe cate un reprezentant."""
+    rows = [
+        _row(1, "fd_1", home_shots=None, home_elo=None, home_xg_pred=None, used_for_training=None),
+        _row(2, "kaggle_1", home_shots=5, home_elo=1500, home_xg_pred=1.2, used_for_training=True),
+    ]
+    decision = process_group(rows)
+    assert decision.data_gaps["home_shots"] == "stats_sync"
+    assert decision.data_gaps["home_elo"] == "run_backfill"
+    assert decision.data_gaps["home_xg_pred"] == "_cache_prediction"
+    assert decision.data_gaps["used_for_training"] == "import_sources"
 
 
 def test_superseded_reason_format():
@@ -156,15 +185,21 @@ def test_idempotent_on_two_row_group_deterministic_regardless_of_input_order():
     a = [_row(1, "fd_1", home_shots=None), _row(2, "kaggle_1", home_shots=5)]
     b = list(reversed(a))
     assert process_group(a).canonical_id == process_group(b).canonical_id
-    assert process_group(a).merge_updates == process_group(b).merge_updates
+    assert process_group(a).data_gaps == process_group(b).data_gaps
 
 
-# ── run(): EXECUTE mode guard ───────────────────────────────────────────────
+# ── run(): mod EXECUTE ──────────────────────────────────────────────────────
+# [ADR-059] EXECUTE nu mai ridica NotImplementedError: e autorizat, fiindca
+# suprafata lui de scriere s-a redus la 3 coloane de audit pe randul necanonic.
+# Testele care conteaza acum nu mai sunt "refuza sa ruleze", ci "scrie EXACT
+# ce are voie si nimic altceva".
 
-def test_execute_mode_not_authorized_raises_before_any_io():
-    service = MatchIdentityReconciliationService(supabase_client=object())
-    with pytest.raises(NotImplementedError):
-        service.run(dry_run=False)
+def test_dry_run_is_the_default():
+    """Un apel fara argumente nu are voie sa scrie. Daca cineva schimba
+    vreodata implicitul, acest test pica inainte sa ajunga in productie."""
+    import inspect
+    sig = inspect.signature(MatchIdentityReconciliationService.run)
+    assert sig.parameters["dry_run"].default is True
 
 
 # ── run(): DRY-RUN orchestration with fake client ───────────────────────────
@@ -237,9 +272,11 @@ def test_run_dry_run_discovers_and_reports_duplicate_groups():
     assert report.reconciled_groups == 1
     assert report.excluded_hard_conflict_count == 0
     assert report.excluded_unknown_source_count == 0
-    assert report.columns_populated.get("home_shots") == 1
-    assert report.canonical_rows_with_any_fill == 1
-    assert report.total_rows_affected == 2  # 1 grup marcat + 1 canonic completat
+    assert report.columns_with_data_gap.get("home_shots") == 1
+    assert report.canonical_rows_with_data_gap == 1
+    assert report.gaps_by_owner.get("stats_sync") == 1
+    # [ADR-059] In DRY-RUN nu se marcheaza nimic.
+    assert report.rows_marked_superseded == 0
 
 
 def test_run_dry_run_never_calls_update_or_rpc():

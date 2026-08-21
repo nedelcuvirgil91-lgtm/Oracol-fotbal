@@ -7,11 +7,20 @@ coloanele așteptate), nu valorile exacte (acelea sunt acoperite de testele
 pure din test_provider_health_score.py/test_provider_cost_estimator.py)."""
 from __future__ import annotations
 
+import pathlib
+
 from streamlit.testing.v1 import AppTest
 
 
+# [REPARAT 2026-08-21] `AppTest.from_file(_APP)` era rezolvat relativ la
+# fisierul de test (`tests/app.py`), nu la radacina repo-ului — FileNotFoundError
+# la fiecare rulare. Calea se calculeaza acum explicit din locatia acestui
+# fisier, deci nu mai depinde nici de directorul de lucru, nici de felul in care
+# Streamlit alege sa rezolve caile relative.
+_APP = str(pathlib.Path(__file__).resolve().parent.parent / "app.py")
+
 def test_provider_health_dashboard_button_renders_report_without_crashing():
-    at = AppTest.from_file("app.py", default_timeout=30)
+    at = AppTest.from_file(_APP, default_timeout=30)
     at.session_state["nav"] = "settings"
     at.run()
     assert not at.exception
@@ -35,7 +44,7 @@ def test_provider_health_dashboard_button_renders_report_without_crashing():
 
 
 def test_provider_health_dashboard_caption_shown_before_button_click():
-    at = AppTest.from_file("app.py", default_timeout=30)
+    at = AppTest.from_file(_APP, default_timeout=30)
     at.session_state["nav"] = "settings"
     at.run()
     assert not at.exception

@@ -11,7 +11,27 @@ mocking din test_oracle_api_scheduled_fixtures_shadow.py
 (FootballOracleAPI.__new__, fără rețea)."""
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 import oracle_api
+
+# [REPARAT 2026-08-21] Datele erau hardcodate ("2026-08-15") si au iesit din
+# fereastra `days_ahead=7` odata cu trecerea calendarului — toate cele 5 teste
+# picau de la o zi la alta, fara nicio schimbare de cod. Un test care se strica
+# singur cu timpul nu mai protejeaza nimic: e zgomot rosu permanent, care face
+# suita necitibila. Datele se calculeaza acum RELATIV la ziua rularii, deci
+# contractul testat (fallback-ul se declanseaza doar pentru ligile ramase fara
+# niciun meci) ramane verificat oricand. Acelasi tipar ca in
+# tests/test_oracle_api_level_db_dedup.py.
+
+
+def _day(offset: int = 2) -> str:
+    """O data din fereastra viitoare de 7 zile, relativa la ziua rularii."""
+    return (date.today() + timedelta(days=offset)).isoformat()
+
+
+def _utc(offset: int = 2) -> str:
+    return f"{_day(offset)}T18:00:00Z"
 
 
 def _api_no_network() -> oracle_api.FootballOracleAPI:
@@ -80,7 +100,7 @@ def _stub_scheduled_fixtures(monkeypatch, matches_by_league: dict[str, list[dict
 def _sched_match(league: str, home="X", away="Y") -> dict:
     return {
         "fixture_id": f"scheduled_{league}", "home_team": home, "away_team": away,
-        "kickoff_date": "2026-08-15", "kickoff_utc": "2026-08-15T18:00:00Z",
+        "kickoff_date": _day(), "kickoff_utc": _utc(),
         "league": league, "source": "scheduled_fixtures",
     }
 
@@ -89,7 +109,7 @@ def test_fallback_not_called_when_db_history_covers_league(monkeypatch):
     _disable_history(monkeypatch, covered_leagues={"Romania SuperLiga"},
                       db_matches=[{
                           "fixture_id": "hist_1", "home_team": "A", "away_team": "B",
-                          "kickoff_date": "2026-08-15", "kickoff_utc": "2026-08-15T18:00:00Z",
+                          "kickoff_date": _day(), "kickoff_utc": _utc(),
                           "league": "Romania SuperLiga", "source": "match_history",
                       }])
     api = _api_no_network()
@@ -108,7 +128,7 @@ def test_fallback_not_called_when_live_cascade_covers_league(monkeypatch):
     api = _api_no_network()
     _stub_live(api, {"Romania SuperLiga": [{
         "fixture_id": "espn_1", "home_team": "A", "away_team": "B",
-        "kickoff_date": "2026-08-15", "kickoff_utc": "2026-08-15T18:00:00Z",
+        "kickoff_date": _day(), "kickoff_utc": _utc(),
         "league": "Romania SuperLiga", "source": "espn",
     }]})
     calls = _stub_scheduled_fixtures(monkeypatch, {"Romania SuperLiga": [_sched_match("Romania SuperLiga")]})
@@ -141,7 +161,7 @@ def test_fallback_restricted_to_still_gap_leagues_only(monkeypatch):
     api = _api_no_network()
     _stub_live(api, {"Romania SuperLiga": [{
         "fixture_id": "espn_1", "home_team": "A", "away_team": "B",
-        "kickoff_date": "2026-08-15", "kickoff_utc": "2026-08-15T18:00:00Z",
+        "kickoff_date": _day(), "kickoff_utc": _utc(),
         "league": "Romania SuperLiga", "source": "espn",
     }]})
     calls = _stub_scheduled_fixtures(monkeypatch, {
@@ -179,7 +199,7 @@ def test_fallback_never_called_when_no_gap_leagues_at_all(monkeypatch):
     _disable_history(monkeypatch, covered_leagues={"Romania SuperLiga"},
                       db_matches=[{
                           "fixture_id": "hist_1", "home_team": "A", "away_team": "B",
-                          "kickoff_date": "2026-08-15", "kickoff_utc": "2026-08-15T18:00:00Z",
+                          "kickoff_date": _day(), "kickoff_utc": _utc(),
                           "league": "Romania SuperLiga", "source": "match_history",
                       }])
     api = _api_no_network()

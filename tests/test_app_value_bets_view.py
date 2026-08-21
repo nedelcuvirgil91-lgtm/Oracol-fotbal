@@ -9,9 +9,18 @@ from __future__ import annotations
 import time
 from datetime import date
 
+import pathlib
+
 from streamlit.testing.v1 import AppTest
 
 from oracle_engine import H2HRecord, MatchPrediction, TeamProfile
+
+# [REPARAT 2026-08-21] `AppTest.from_file(_APP)` era rezolvat relativ la
+# fisierul de test (`tests/app.py`), nu la radacina repo-ului — FileNotFoundError
+# la fiecare rulare. Calea se calculeaza acum explicit din locatia acestui
+# fisier, deci nu mai depinde nici de directorul de lucru, nici de felul in care
+# Streamlit alege sa rezolve caile relative.
+_APP = str(pathlib.Path(__file__).resolve().parent.parent / "app.py")
 
 TODAY = date.today().isoformat()
 
@@ -53,7 +62,7 @@ def test_value_bets_view_reuses_cached_predictions_without_recompute():
     """Cerința centrală a sprintului: dacă meciurile de azi sunt deja
     analizate (cache de sesiune valid), view-ul NU recalculează — 0 apeluri
     evaluate_match(), doar agregare peste ce există deja."""
-    at = AppTest.from_file("app.py", default_timeout=30)
+    at = AppTest.from_file(_APP, default_timeout=30)
 
     at.session_state["nav"] = "value_bets"
     at.session_state["all_matches"] = [
@@ -101,7 +110,7 @@ def test_value_bets_view_reuses_cached_predictions_without_recompute():
 
 
 def test_value_bets_view_shows_empty_state_without_matches_today():
-    at = AppTest.from_file("app.py", default_timeout=30)
+    at = AppTest.from_file(_APP, default_timeout=30)
     at.session_state["nav"] = "value_bets"
     at.session_state["all_matches"] = [
         {"fixture_id": "future1", "home_team": "A", "away_team": "B", "league": "Premier League",
