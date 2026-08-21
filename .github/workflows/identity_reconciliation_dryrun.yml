@@ -1,0 +1,49 @@
+name: Football Oracle — Identity Reconciliation DRY-RUN (ID-025-02)
+
+# [ADAUGAT — F4.4, 2026-08-21] Singura cale de a rula raportul de reconciliere
+# pe datele reale. DRY-RUN exclusiv: scriptul apelat cheama `run(dry_run=True)`
+# cu argument literal si nu expune niciun flag de executie; modul EXECUTE ramane
+# neimplementat in serviciu (`NotImplementedError`), autorizabil doar prin Phase
+# Gate explicit (ADR-025).
+#
+# FARA `schedule:` — DELIBERAT. Doar `workflow_dispatch`, la cerere. Nu e un job
+# de intretinere, e un instrument de audit rulat inaintea unei decizii; o
+# cadenta automata ar produce rapoarte pe care nu le citeste nimeni si ar
+# contrazice regula explicita a proprietarului produsului ("nu vreau joburi
+# automate care executa aceleasi functii in paralel", consolidarea Faza 2).
+#
+# De ce e nevoie de el: raportul Faza 2 din iulie declara intentia de rulare
+# repetabila (CLI/GitHub Actions) dar runner-ul nu exista in repo, deci nu era
+# reproductibil. F3 (ADR-058) a schimbat vocabularul de normalizare, deci si
+# rezultatul descoperirii — raportul trebuie regenerat inainte de orice decizie.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: identity-reconciliation-dryrun
+  cancel-in-progress: false
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run ID-025-02 DRY-RUN (zero writes)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python scripts/run_identity_reconciliation_dryrun.py

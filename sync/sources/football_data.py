@@ -125,10 +125,52 @@ def _parse_match(match: dict, league: str) -> dict | None:
         if not home_team or not away_team:
             return None
 
-        score = match.get("score", {})
-        ft    = score.get("fullTime", {})
-        home_goals = ft.get("home")
-        away_goals = ft.get("away")
+        # [FIX F4.5, 2026-08-21] Departajarea de la 11 metri era numarata ca
+        # goluri. Pentru o tusa decisa la penalty-uri, football-data.org
+        # raporteaza in `score.fullTime` suma (scor dupa prelungiri + suturile
+        # de departajare), semnalata de `score.duration == "PENALTY_SHOOTOUT"`.
+        # Codul citea `fullTime` neconditionat si nu se uita niciodata la
+        # `duration`, deci scria acea suma ca scor al meciului.
+        #
+        # Caz real, descoperit in auditul F4 pe date live: Liverpool - Paris
+        # Saint-Germain, 2025-03-11, Champions League, `fd_524100` ->
+        # `actual_home_goals=1, actual_away_goals=5`. Meciul s-a terminat 0-1,
+        # PSG a castigat 4-1 la penalty-uri: 0+1=1, 1+4=5. Aritmetica se
+        # potriveste exact.
+        #
+        # Impact dincolo de scorul afisat: `actual_result` ramane corect
+        # (castigatorul e acelasi), dar diferenta de goluri intra distorsionat
+        # in multiplicatorul MOV al ELO (`sync/backfill_features._mov_multiplier`)
+        # — goal_diff 4 in loc de 1 — deci coruperea se propaga in starea
+        # derivata, nu ramane cosmetica.
+        #
+        # Ordinea de preferinta e cea a specificatiei providerului: `regularTime`
+        # (90'), apoi `fullTime` cand nu exista departajare. NU se scade
+        # `score.penalties` din `fullTime` — scaderea ar presupune ca `fullTime`
+        # e mereu suma, ipoteza neverificata pe payload-uri reale; cand nu avem
+        # o valoare de 90' explicita si stim ca a existat departajare, meciul e
+        # sarit, iar starea ramane "necunoscut" in loc de aproximata (North Star
+        # #8). Un meci sarit e recuperabil dintr-o alta sursa; unul scris gresit
+        # contamineaza tacit ELO.
+        score      = match.get("score", {})
+        duration   = (score.get("duration") or "").upper()
+        ft         = score.get("fullTime") or {}
+        regular    = score.get("regularTime") or {}
+
+        if duration == "PENALTY_SHOOTOUT":
+            home_goals = regular.get("home")
+            away_goals = regular.get("away")
+            if home_goals is None or away_goals is None:
+                logger.warning(
+                    "[FD] Meci decis la penalty-uri fara `regularTime` explicit "
+                    "(id=%s, %s - %s) — sarit, ca sa nu scriem departajarea ca "
+                    "goluri (F4.5).",
+                    match.get("id", "?"), home_team, away_team,
+                )
+                return None
+        else:
+            home_goals = ft.get("home")
+            away_goals = ft.get("away")
 
         if home_goals is None or away_goals is None:
             return None

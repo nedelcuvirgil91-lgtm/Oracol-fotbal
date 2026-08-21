@@ -7,8 +7,10 @@ import pytest
 
 import services.match_identity_reconciliation_service as svc
 from services.match_identity_reconciliation_service import (
+    FIXTURE_ID_PREFIX_TO_SOURCE,
     MatchIdentityReconciliationService, process_group, resolve_source,
 )
+from source_trust_policy import SourceTrustProvider
 
 
 def _row(id, fixture_id, home="Team A", away="Team B", date="2026-01-01",
@@ -127,11 +129,27 @@ def test_case4_no_row_has_value_stays_absent_from_updates():
 
 
 def test_superseded_reason_format():
+    """Formatul exact al `superseded_reason` — contract de trasabilitate deja
+    scris in productie (3.504 randuri, ADR-025 Faza 4).
+
+    [ACTUALIZAT — F4.3] Rangurile concrete NU mai sunt codificate literal:
+    registrul de incredere e declarat evolutiv prin design
+    (`source_trust_policy.py`, ADR-025 §Consecinte), deci orice sursa noua
+    inserata renumeroteaza legitim. Ce trebuie sa ramana stabil e STRUCTURA
+    mesajului si identitatea randului canonic — acelea sunt verificate aici,
+    cu rangurile citite din registru in loc de constante."""
     rows = [_row(1, "kaggle_04f4107f71d47331"), _row(2, "fd_497780")]
     decision = process_group(rows)
     reason = decision.noncanonical[0]["reason"]
-    assert "canonical=fd_497780 (rank=1)" in reason
-    assert "superseded=kaggle_04f4107f71d47331 (rank=4)" in reason
+
+    fd_rank = SourceTrustProvider.get_rank("football_data")
+    kaggle_rank = SourceTrustProvider.get_rank("kaggle_historical")
+
+    assert reason.startswith("duplicate_cross_provider: ")
+    assert f"canonical=fd_497780 (rank={fd_rank})" in reason
+    assert f"superseded=kaggle_04f4107f71d47331 (rank={kaggle_rank})" in reason
+    # Randul canonic ramane cel de la football_data, indiferent de renumerotare.
+    assert decision.canonical_id == 2
 
 
 def test_idempotent_on_two_row_group_deterministic_regardless_of_input_order():
@@ -251,3 +269,79 @@ def test_run_dry_run_never_calls_update_or_rpc():
     service = MatchIdentityReconciliationService(supabase_client=_NoWriteSb())
     report = service.run(dry_run=True)
     assert report.total_groups == 1
+
+
+# ── [F4.3] Extinderea registrului de surse ──────────────────────────────────
+# Context: F3 (ADR-058) a extins vocabularul `ALIAS_TO_CANONICAL`, iar
+# `match_key()` — folosit de descoperirea ID-025-02 — a inceput sa produca 404
+# grupuri duplicate invizibile in iulie. Toate implicau surse absente din
+# registru, deci regula "sursa necunoscuta exclude tot grupul" le-ar fi exclus
+# pe toate 403 (cel de-al 404-lea e HARD CONFLICT, exclus corect si ramane asa).
+
+def test_new_prefixes_resolve():
+    assert resolve_source("flashscore_jFwdNbHj") == "flashscore"
+    assert resolve_source("tsdb_2573295") == "tsdb"
+    assert resolve_source("openfootball_champions_league_202425_x_vs_y_20250311") == "openfootball"
+
+
+def test_every_live_fixture_prefix_resolves_to_a_ranked_source():
+    """Invariantul care leaga cele doua registre: orice prefix pe care
+    `resolve_source()` stie sa-l rezolve TREBUIE sa aiba si un rang. Un nume de
+    sursa fara rang ar trece de Pasul 1 si ar exploda la sortarea din Pasul 2
+    (`None` nu se compara cu `int`)."""
+    for prefix, source in FIXTURE_ID_PREFIX_TO_SOURCE.items():
+        assert SourceTrustProvider.get_rank(source) is not None, (
+            f"Prefixul {prefix!r} -> sursa {source!r} nu are rang in "
+            f"SOURCE_TRUST_RANK"
+        )
+
+
+def test_no_prefix_shadows_another():
+    """`resolve_source()` itereaza dictionarul si intoarce prima potrivire.
+    Daca un prefix ar fi prefixul altuia (ex. 'fd_' si 'fd_extra_'), rezolvarea
+    ar depinde de ordinea de inserare — fragil si tacit."""
+    prefixes = list(FIXTURE_ID_PREFIX_TO_SOURCE)
+    for a in prefixes:
+        for b in prefixes:
+            if a != b:
+                assert not b.startswith(a), f"Prefixul {b!r} e umbrit de {a!r}"
+
+
+def test_f4_group_compositions_select_expected_canonical():
+    """Cele patru compozitii de surse care apar efectiv in cele 403 grupuri F4
+    (verificate live pe `match_history`, 2026-08-21), fiecare cu randul canonic
+    asteptat sub registrul extins."""
+    cases = [
+        # (fixture_a, fixture_b, id-ul asteptat ca fiind canonic)
+        ("flashscore_abc", "tsdb_123", 1),        # 6 grupuri
+        ("fd_1", "openfootball_x", 1),            # 157 grupuri
+        ("fd_1", "kaggle_x", 1),                  # 78 grupuri
+        ("openfootball_x", "kaggle_y", 1),        # 162 grupuri
+    ]
+    for fx_a, fx_b, expected_canonical_id in cases:
+        rows = [_row(1, fx_a), _row(2, fx_b)]
+        decision = process_group(rows)
+        assert decision.excluded_reason is None, (
+            f"{fx_a} + {fx_b} a fost exclus: {decision.excluded_reason}"
+        )
+        assert decision.canonical_id == expected_canonical_id, (
+            f"{fx_a} + {fx_b} -> canonic {decision.canonical_id}, "
+            f"asteptat {expected_canonical_id}"
+        )
+        # Ordinea de intrare nu conteaza (determinism, Pasul 2).
+        assert process_group(list(reversed(rows))).canonical_id == expected_canonical_id
+
+
+def test_hard_conflict_still_excludes_liverpool_psg_shape():
+    """Grupul cu scoruri contradictorii ramane exclus automat, nerezolvat de
+    alegerea survivorului. Forma reala: openfootball 0-1 vs football_data 1-5
+    (acesta din urma fiind scorul + departajarea, bug de import reparat separat
+    la sursa in F4.5). Politica de merge e NULL-only prin constructie, deci
+    alegerea unui survivor NU poate corecta un scor gresit non-NULL."""
+    rows = [
+        _row(130963, "openfootball_x", result="A", hg=0, ag=1),
+        _row(3809, "fd_524100", result="A", hg=1, ag=5),
+    ]
+    decision = process_group(rows)
+    assert decision.excluded_reason == "hard_conflict"
+    assert decision.canonical_id is None

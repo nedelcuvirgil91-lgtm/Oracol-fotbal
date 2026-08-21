@@ -37,11 +37,27 @@ logger = logging.getLogger("FootballOracle.MatchIdentityReconciliationService")
 
 # Rezolvarea sursei unui rand — componenta separata, inlocuibila (ID-025-01,
 # Pasul 1). NU face parte din Source Trust Policy (source_trust_policy.py).
+#
+# [EXTINS — F4.3, 2026-08-21] Adaugate flashscore/tsdb/openfootball. Fara ele,
+# `resolve_source()` intoarce None pentru orice rand din aceste surse, iar
+# regula "sursa necunoscuta exclude tot grupul" (Regula #8 North Star) ar fi
+# exclus 403/403 grupurile descoperite dupa extinderea de vocabular F3
+# (ADR-058). Rangurile corespunzatoare si justificarea lor empirica sunt in
+# `source_trust_policy.py` — acest dict rezolva DOAR numele sursei din prefix,
+# nu incredere (separatie explicita ID-025-01).
+#
+# Prefixele sunt verificate contra celor scrise efectiv in `match_history`
+# (interogare live pe `fixture_id`, 2026-08-21), nu deduse din numele
+# modulelor. Garda automata: `tests/test_match_identity_reconciliation_service.py
+# ::test_every_live_fixture_prefix_resolves_to_a_ranked_source`.
 FIXTURE_ID_PREFIX_TO_SOURCE: dict[str, str] = {
     "fd_": "football_data",
     "espn_": "espn",
     "odds_": "odds_api",
     "kaggle_": "kaggle_historical",
+    "flashscore_": "flashscore",
+    "tsdb_": "tsdb",
+    "openfootball_": "openfootball",
 }
 
 # Camp care definesc identitatea rezultatului unui meci — discrepanta aici

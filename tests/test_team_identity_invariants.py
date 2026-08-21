@@ -173,6 +173,22 @@ def test_no_alias_chains():
         ("Dundee FC", "Dundee Utd"),
         ("Inter Escaldes", "Inter Milan"),
         ("Paris FC", "Paris Saint-Germain"),  # regresia v1.2, exact cazul citat
+        # [ADAUGAT — F4.6] Perechi gasite de scanarea sistematica "nume =
+        # canonic_cunoscut + cuvinte suplimentare" rulata pe cele 1.254 de nume
+        # live. Scanarea a produs 76 de candidati; toti cei de mai jos sunt
+        # FALSI POZITIVI evidenti — dovada empirica pentru care regula de
+        # potrivire pe prefix de cuvinte NU a fost adoptata, iar F4.6 s-a
+        # limitat la doua alias-uri verificate individual.
+        ("Arsenal Sarandi", "Arsenal"),          # club argentinian
+        ("Arsenal Tula", "Arsenal"),             # club rus
+        ("Inter Miami", "Inter Milan"),
+        ("Inter Turku", "Inter Milan"),
+        ("Juve Stabia", "Juventus"),
+        ("Den Haag", "Denmark"),                 # "Den" != Danemarca
+        ("Oxford City", "Oxford United"),
+        ("U Craiova 1948", "Universitatea Craiova"),  # cluburi rivale distincte
+        ("Villarreal B", "Villarreal"),          # echipa secunda
+        ("Sociedad B", "Real Sociedad"),         # echipa secunda
     ],
 )
 def test_distinct_clubs_never_merge(a, b):
@@ -329,3 +345,35 @@ def test_f3_suffixed_without_known_base_stays_unchanged(suffixed_without_twin):
     fie modificate — regula de strip e cheie de CAUTARE, nu iesire
     (ADR-058 §2.3)."""
     assert normalize_team_name(suffixed_without_twin) == suffixed_without_twin
+
+
+# ── [F4.6] Goluri de vocabular aparute DUPA F3 ──────────────────────────────
+# F3 a inchis vocabularul pe corpusul din 21 august dimineata. Night_sync-ul de
+# seara a adus randuri TSDB cu doua nume noi. ADR-058 §1.3/§6 anticipase exact
+# acest lucru: alte surse pot reintroduce fragmentarea. Aceste teste fixeaza
+# rezolvarea lor si documenteaza ca detectia a fost mecanica, nu ad-hoc.
+
+def test_tsdb_full_club_name_resolves_to_canonical():
+    """"Jagiellonia Bialystok" (numele complet folosit de TheSportsDB) trebuie
+    sa convearga cu "Jagiellonia" si cu forma sufixata "Jagiellonia (POL)"
+    folosita de Flashscore in cupele europene. Fara asta, acelasi club ar avea
+    trei identitati simultan."""
+    canonical = normalize_team_name("Jagiellonia")
+    assert normalize_team_name("Jagiellonia Białystok") == canonical
+    assert normalize_team_name("Jagiellonia (POL)") == canonical
+
+
+def test_country_suffix_rule_resolves_iberia_after_base_was_added():
+    """Regula structurala de sufix (F3) rezolva "X (CCC)" doar daca "X" e o
+    cheie canonica cunoscuta. "Iberia 1999" n-a fost in artefactul F0 fiindca
+    randul fara sufix a aparut abia in night_sync din 21 august — adaugarea
+    cheii goale activeaza regula deja aprobata, fara nicio regula noua."""
+    assert normalize_team_name("Iberia 1999 (GEO)") == normalize_team_name("Iberia 1999")
+
+
+def test_new_f4_6_aliases_are_idempotent():
+    """Normalizarea aplicata de doua ori da acelasi rezultat — invariant deja
+    verificat global, reafirmat punctual pentru intrarile noi."""
+    for name in ("Jagiellonia Białystok", "Iberia 1999 (GEO)"):
+        once = normalize_team_name(name)
+        assert normalize_team_name(once) == once

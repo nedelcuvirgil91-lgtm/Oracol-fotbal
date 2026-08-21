@@ -431,7 +431,19 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "Hibernian":        [],
     "Ilves":            [],
     "Inter Turku":      [],
-    "Jagiellonia":      [],
+    # [F4.6, 2026-08-21] "Jagiellonia Bialystok" (cu diacritica poloneza) —
+    # numele complet folosit de TheSportsDB, aparut prima data in night_sync
+    # din 21 august. Un singur club Jagiellonia in tot corpusul (verificat
+    # live: Ekstraklasa + Europa League, toate randurile sunt clubul polonez),
+    # deci alias-ul nu poate fuziona doua identitati distincte.
+    "Jagiellonia":      ["Jagiellonia Białystok"],
+    # [F4.6, 2026-08-21] Cheie canonica goala, adaugata pentru ca regula
+    # structurala de sufix de tara (`_COUNTRY_SUFFIX_RE`, F3) sa poata rezolva
+    # "Iberia 1999 (GEO)" -> "Iberia 1999". Exact acelasi tipar ca cele 54 de
+    # baze emise mecanic la F3; numele n-a fost in artefactul F0 fiindca randul
+    # TSDB fara sufix a aparut abia in night_sync din 21 august. Re-rularea
+    # detectiei F0 pe datele de azi a gasit aceasta unica pereche noua.
+    "Iberia 1999":      [],
     "KuPS":             [],
     "LASK":             [],
     "Lech Poznan":      [],
