@@ -2209,6 +2209,31 @@ def upsert_player_match_stats_extended(
     return ok
 
 
+def _normalize_context_team_fields(row: dict) -> dict:
+    """[ADAUGAT — ADR-058 F2] Punct unic de normalizare pentru
+    `flashscore_match_context`, simetric cu `_normalize_team_fields()`
+    (match_history) si cu normalizarea din `upsert_standings_snapshot()`.
+
+    De ce era necesar: `providers/flashscore/persistence.py:154-156`
+    transmite numele BRUTE (`base.get("home_team")`), fiindca
+    `_normalize_team_fields()` copiaza randul (`out = dict(row)`, linia 55)
+    si NU muteaza `base` — deci ce ajunge in match_history era normalizat,
+    dar ce ajunge aici NU era. Consumator afectat:
+    `get_team_recent_form_context()`, Level FS2 al cascadei
+    `oracle_engine._build_profile()`.
+
+    ATENTIE (ADR-058 §1.2): normalizarea la writer NU rezolva problema de
+    vocabular. Un nume necunoscut lui `ALIAS_TO_CANONICAL` trece neschimbat,
+    prin design (fuzzy matching interzis, v1.2). Aceasta functie e aparare
+    in adancime — garanteaza ca niciun writer viitor nu poate sari peste
+    normalizare, NU ca vocabularul e complet."""
+    out = dict(row)
+    for key in ("home_team", "away_team", "subject_team"):
+        if out.get(key):
+            out[key] = normalize_team_name(out[key])
+    return out
+
+
 def upsert_match_context(rows: list[dict]) -> bool:
     """`flashscore_match_context` (H2H + forma recenta, segmentate) -
     `on_conflict="context_match_id,category,meeting_order"`, cheia
@@ -2218,6 +2243,10 @@ def upsert_match_context(rows: list[dict]) -> bool:
     client = get_client()
     if client is None:
         return False
+    # [ADR-058 F2] Normalizare INAINTEA dedup-ului — altfel doua variante
+    # brute ale aceleiasi echipe ar trece de `_dedupe_by_keys` ca randuri
+    # distincte, exact defectul pe care normalizarea il elimina.
+    rows = [_normalize_context_team_fields(r) for r in rows]
     rows = _dedupe_by_keys(rows, ("context_match_id", "category", "meeting_order"), "upsert_match_context")
     try:
         client.table("flashscore_match_context").upsert(

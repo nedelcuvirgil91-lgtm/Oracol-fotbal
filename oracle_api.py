@@ -1527,11 +1527,10 @@ class FootballOracleAPI:
         comps = competitions or list(ODDS_SPORT_KEYS.keys())
 
         from database.queries import get_matches_for_week_from_history
-        matches, covered = get_matches_for_week_from_history(comps, d_from, d_to)
-        seen_keys = {
-            match_key(m.get("home_team", "") or "", m.get("away_team", "") or "", m.get("kickoff_date", "") or "")
-            for m in matches
-        }
+        db_matches, covered = get_matches_for_week_from_history(comps, d_from, d_to)
+
+        matches: list[dict] = []
+        seen_keys: set[str] = set()
 
         def _add(new_matches: list[dict]) -> None:
             for m in new_matches:
@@ -1542,6 +1541,35 @@ class FootballOracleAPI:
                 )
                 if mk not in seen_keys:
                     seen_keys.add(mk); matches.append(m)
+
+        # [F2.5 — ADR-058] Lista Level-DB trece si ea prin `_add()`.
+        #
+        # Inainte, `matches` era chiar lista bruta din match_history, iar
+        # `seen_keys` se CONSTRUIA din ea — deci dedup-ul proteja doar
+        # sursele ULTERIOARE (cascada live, scheduled_fixtures), niciodata
+        # Level DB insusi. Era singura sursa din intreaga functie care
+        # ocolea `_add()`: o asimetrie in implementarea ADR-053, nu o
+        # decizie documentata.
+        #
+        # Consecinta reala, masurata (V5, audit ADR-058): doua randuri
+        # match_history pentru acelasi meci (aceeasi pereche de echipe +
+        # data, dar variante de nume diferite) ajungeau AMBELE la
+        # consumatori — de doua ori in UI si, prin
+        # `oracle_engine.log_challenger_shadow_for_week()`, ca doua randuri
+        # `shadow_predictions` pentru acelasi meci real, umfland contorul
+        # Challenger-ului.
+        #
+        # `match_key()` (mappings.py:993) normalizeaza deja prin
+        # `normalize_team_name()`, deci doua variante ale aceleiasi echipe
+        # produc ACEEASI cheie — mecanismul exista, doar nu era aplicat aici.
+        #
+        # No-op in baseline-ul curent: zero chei naturale duplicate in
+        # match_history la data acestei schimbari (verificat live, B3 = 0,
+        # docs/00_GOVERNANCE/identity_audit_F0/baseline_counts.json).
+        # Ordinea e pastrata: Level DB se adauga PRIMUL, deci pastreaza
+        # prioritatea fata de orice sursa ulterioara (first-wins, identic
+        # semanticii deja folosite de `_add()`).
+        _add(db_matches)
 
         gap_leagues = [c for c in comps if c not in covered]
         if gap_leagues:

@@ -107,13 +107,19 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "Manchester City": ["Man City","Manchester City FC","MCFC"],
     "Manchester United": ["Man Utd","Man United","Manchester United FC","MUFC","Manchester Utd"],
     "Newcastle United": ["Newcastle","Newcastle United FC","NUFC"],
-    "Nottingham Forest": ["Nott'm Forest","Nottm Forest","Forest","Nottingham Forest FC"],
+    # [ADR-058 A2] "Nottingham" (Flashscore, Premier League 2026, 0 meciuri
+    # terminate) vs. "Nottingham Forest" (fd.org+historic, PL 2022-2025, 228
+    # terminate) — sezoane DISJUNCTE, aceeasi liga, zero auto-confruntari.
+    "Nottingham Forest": ["Nott'm Forest","Nottm Forest","Forest","Nottingham Forest FC","Nottingham"],
     "Tottenham Hotspur": ["Tottenham","Spurs","Tottenham Hotspur FC","THFC"],
     "West Ham United": ["West Ham","West Ham United FC","WHU"],
     "Wolverhampton Wanderers": ["Wolves","Wolverhampton","Wolverhampton Wanderers FC"],
     "Real Madrid": ["Real Madrid CF","Madrid"],
     "FC Barcelona": ["Barcelona","Barça","Barca","FCB"],
-    "Atletico Madrid": ["Atlético Madrid","Atletico de Madrid","ATM","Ath Madrid","Club Atlético de Madrid"],
+    # [ADR-058 A2] "Atl. Madrid" (Flashscore, La Liga 2026) vs. canonic
+    # (fd.org+historic, La Liga 2021-2025, 266 terminate) — sezoane disjuncte.
+    # NU se unesc: "Atletico GO"/"Atletico-MG" (BRA) — clasa C, teste dedicate.
+    "Atletico Madrid": ["Atlético Madrid","Atletico de Madrid","ATM","Ath Madrid","Club Atlético de Madrid","Atl. Madrid"],
     "Sevilla": ["Sevilla FC"],
     "Real Sociedad": ["Real Sociedad de Fútbol","Sociedad"],
     "Villarreal": ["Villarreal CF","Yellow Submarine"],
@@ -285,7 +291,9 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "Hamburger SV": ["Hamburg"],
     "1. FC Heidenheim": ["Heidenheim","1. FC Heidenheim 1846"],
     "Hoffenheim": ["TSG 1899 Hoffenheim","TSG Hoffenheim"],
-    "Borussia Monchengladbach": ["M'gladbach","MGladbach","Borussia Mönchengladbach","Gladbach"],
+    # [ADR-058 A2] "B. Monchengladbach" (Flashscore, Bundesliga 2026, 0
+    # terminate) vs. canonic (Bundesliga 2021-2025, 248 terminate) — disjuncte.
+    "Borussia Monchengladbach": ["M'gladbach","MGladbach","Borussia Mönchengladbach","Gladbach","B. Monchengladbach"],
     "Mainz 05": ["Mainz","1. FSV Mainz 05"],
     "FC St. Pauli": ["St Pauli","FC St. Pauli 1910"],
     "VfB Stuttgart": ["Stuttgart"],
@@ -364,6 +372,97 @@ TEAM_ALIASES: dict[str, list[str]] = {
     # fixture-ul viitor 08.08) - forma majoritara, si cea oficiala a
     # clubului.
     "FC Voluntari": ["Voluntari"],
+
+    # ════════════════════════════════════════════════════════════════════
+    # [ADR-058 — F3, 2026-08-21] Identitate canonica de echipa, clasa A
+    # ════════════════════════════════════════════════════════════════════
+    # Context complet: docs/00_GOVERNANCE/ADR-058-canonical-team-identity.md
+    # Dovezi mecanice: docs/00_GOVERNANCE/identity_audit_F0/
+    #
+    # A2 — ABREVIERI, fiecare cu dovada individuala (ADR-058 §3-A2):
+    # aceeasi liga + complementaritate de sezon SAU explicatie de sursa +
+    # zero auto-confruntari + niciun al treilea club care revendica numele.
+    # NU sunt derivate dintr-o regula — fiecare a fost verificata separat pe
+    # date live (liga, interval de sezoane, provider).
+    #
+    # Cele 3 chei care EXISTAU deja primesc un alias nou in dreptul lor, mai
+    # sus in acest dictionar (Nottingham Forest / Atletico Madrid /
+    # Borussia Monchengladbach) — aici raman doar cele 6 canonice noi.
+    "Schalke 04":          ["Schalke", "FC Schalke 04"],
+    "Fortuna Sittard":     ["Sittard", "For Sittard"],
+    "SC Heerenveen":       ["Heerenveen", "sc Heerenveen"],
+    "PEC Zwolle":          ["Zwolle"],
+    "Oud-Heverlee Leuven": ["Leuven"],
+    "Telstar 1963":        ["Telstar"],
+
+    # A1 — cele 54 de baze care existau DOAR de facto in match_history,
+    # necunoscute pana acum lui mappings.py. Promovate la forma canonica
+    # (lista de alias-uri goala = numele e deja canonic; auto-maparea din
+    # constructia ALIAS_TO_CANONICAL, linia ~371, e neconditionata).
+    #
+    # Fara ele, regula structurala de sufix (_COUNTRY_SUFFIX_RE, mai jos) nu
+    # are ce cauta: "Gent (BEL)" ar dezbraca la "Gent", nu l-ar gasi in
+    # ALIAS_TO_CANONICAL si ar ramane fragmentat.
+    #
+    # GENERATE MECANIC, NU transcrise (ADR-058 §2.5 — lista manuala a produs
+    # 4 erori de numarare in auditul precedent):
+    #     python scripts/identity_f3_emit_aliases.py
+    # sursa: docs/00_GOVERNANCE/identity_audit_F0/class_a_bases.csv
+    #        (85 perechi = 31 ALREADY_CANONICAL + 54 aici, ALIAS_OF_OTHER = 0)
+    "Aarhus":           [],
+    "Anderlecht":       [],
+    "Apollon":          [],
+    "Ararat-Armenia":   [],
+    "Austria Vienna":   [],
+    "Bohemians":        [],
+    "Brann":            [],
+    "CSKA Sofia":       [],
+    "Celje":            [],
+    "Derry City":       [],
+    "Din. Zagreb":      [],
+    "GKS Katowice":     [],
+    "Gent":             [],
+    "Gornik Zabrze":    [],
+    "Goteborg":         [],
+    "HJK":              [],
+    "Hajduk Split":     [],
+    "Hammarby":         [],
+    "Hearts":           [],
+    "Hibernian":        [],
+    "Ilves":            [],
+    "Inter Turku":      [],
+    "Jagiellonia":      [],
+    "KuPS":             [],
+    "LASK":             [],
+    "Lech Poznan":      [],
+    "Lillestrom":       [],
+    "Lincoln Red Imps": [],
+    "Lugano":           [],
+    "Maccabi Tel Aviv": [],
+    "Mjallby":          [],
+    "Motherwell":       [],
+    "Nijmegen":         [],
+    "Nordsjaelland":    [],
+    "OFI Crete":        [],
+    "PAOK":             [],
+    "Panathinaikos":    [],
+    "Rakow":            [],
+    "Rijeka":           [],
+    "Royale Union SG":  [],
+    "SK Rapid":         [],
+    "Sabah Baku":       [],
+    "Salzburg":         [],
+    "Shamrock Rovers":  [],
+    "Shelbourne":       [],
+    "Sion":             [],
+    "St. Gallen":       [],
+    "St. Truiden":      [],
+    "Thun":             [],
+    "Trabzonspor":      [],
+    "Tromso":           [],
+    "Twente":           [],
+    "Vaduz":            [],
+    "Viking":           [],
 }
 
 ALIAS_TO_CANONICAL: dict[str, str] = {}
@@ -962,6 +1061,26 @@ _STRIP_SUFFIXES = [
 ]
 _STRIP_PREFIXES = ["fc ","cf ","ac ","sc ","fk ","sk ","afc "]
 
+# ── [ADR-058 §2.3 — F3] Sufix de tara ────────────────────────────────────────
+# Flashscore (cupe europene) si openfootball scriu "Ajax (NED)", "AC Milan
+# (ITA)" — acelasi club ca "Ajax"/"AC Milan" din liga domestica.
+#
+# NU e o reintroducere a fuzzy prefix-matching-ului eliminat la v1.2. E o
+# transformare STRUCTURALA determinista (sufix parantezat, 2-4 majuscule),
+# folosita EXCLUSIV ca CHEIE DE CAUTARE — exact tiparul deja existent al lui
+# _STRIP_SUFFIXES/_STRIP_PREFIXES. Daca forma dezbracata nu e cunoscuta,
+# numele original ramane NESCHIMBAT, niciodata ghicit.
+#
+# Dovezi mecanice (docs/00_GOVERNANCE/identity_audit_F0/, 2026-08-21, pe
+# 58.299 randuri match_history / 183 nume cu acest sufix):
+#   - ZERO cazuri in care acelasi nume dezbracat sa fie produs de doua coduri
+#     de tara diferite (altfel s-ar putea uni cluburi omonime din tari
+#     diferite — ex. un ipotetic "Nacional (POR)" + "Nacional (URU)");
+#   - ZERO meciuri in care cele doua variante sa se infrunte (ar fi dovada ca
+#     sunt cluburi distincte);
+#   - 85 perechi cu geamana reala; celelalte 98 raman neatinse, prin design.
+_COUNTRY_SUFFIX_RE = re.compile(r"\s*\([A-Z]{2,4}\)$")
+
 def _unicode_normalize(name: str) -> str:
     return "".join(c for c in unicodedata.normalize("NFD", name) if unicodedata.category(c) != "Mn")
 
@@ -973,6 +1092,12 @@ def normalize_team_name(name: str) -> str:
     uni = _unicode_normalize(cleaned)
     lookup = uni.lower()
     if lookup in ALIAS_TO_CANONICAL: return ALIAS_TO_CANONICAL[lookup]
+    # [ADR-058 §2.3] Sufixul de tara e strict CHEIE DE CAUTARE, niciodata
+    # iesire: daca forma dezbracata nu e cunoscuta, se cade mai jos si numele
+    # original se intoarce neschimbat (linia finala). Vezi _COUNTRY_SUFFIX_RE.
+    if _COUNTRY_SUFFIX_RE.search(uni):
+        base_lookup = _COUNTRY_SUFFIX_RE.sub("", uni).strip().lower()
+        if base_lookup in ALIAS_TO_CANONICAL: return ALIAS_TO_CANONICAL[base_lookup]
     stripped = uni.lower()
     for suffix in _STRIP_SUFFIXES:
         if stripped.endswith(suffix): stripped = stripped[:-len(suffix)].strip(); break

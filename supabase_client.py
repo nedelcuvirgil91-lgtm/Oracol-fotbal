@@ -1093,6 +1093,13 @@ def save_consensus_capture_sample(
     client = get_client()
     if client is None:
         return False
+    # [ADR-058 F2] Normalizare la writer — aparare in adancime, simetrica cu
+    # upsert_match_history() de mai sus. NU rezolva problema de vocabular
+    # (ADR-058 §1.2): cele 44 de randuri cu sufix de tara gasite azi aici
+    # exista fiindca ALIAS_TO_CANONICAL nu cunoaste acele forme, nu fiindca
+    # apelul lipsea.
+    home_team = normalize_team_name(home_team) if home_team else home_team
+    away_team = normalize_team_name(away_team) if away_team else away_team
     try:
         client.table("consensus_capture_samples").upsert({
             "fixture_id": fixture_id, "league": league,

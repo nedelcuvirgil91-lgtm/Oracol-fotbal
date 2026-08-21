@@ -42,6 +42,7 @@ from datetime import date, datetime, timezone
 from typing import Callable, NamedTuple
 
 import supabase_client as sb
+from mappings import normalize_team_name
 
 logger = logging.getLogger("FootballOracle.ShadowTesting")
 
@@ -90,6 +91,15 @@ def log_shadow_prediction(
         max(range(3), key=lambda i: (prob_home, prob_draw, prob_away)[i])
     ]
     confidence = max(prob_home, prob_draw, prob_away)
+    # [ADR-058 F2] Normalizare la writer — apelantul (oracle_engine.py:2068)
+    # transmite `pred.home_team`/`pred.away_team`, adica numele venit din
+    # dictionarul de meci, NU trecut explicit prin normalize_team_name() la
+    # acel punct. Aparare in adancime, nu fix: un nume necunoscut lui
+    # ALIAS_TO_CANONICAL trece neschimbat, prin design (ADR-058 §1.2) —
+    # cele 218 randuri cu sufix de tara gasite azi in shadow_predictions
+    # exista din cauza vocabularului, nu a lipsei acestui apel.
+    home_team = normalize_team_name(home_team) if home_team else home_team
+    away_team = normalize_team_name(away_team) if away_team else away_team
     try:
         client.table("shadow_predictions").upsert({
             "fixture_id": fixture_id,

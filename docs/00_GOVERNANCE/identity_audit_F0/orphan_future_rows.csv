@@ -1,0 +1,51 @@
+id,fixture_id,home_team,away_team,league,kickoff_date,has_xg_pred
+131239,flashscore_UTxAlWfL,Klaksvik (FAI),Lech Poznan (POL),Europa League,2026-08-13T17:30:00,true
+126783,flashscore_pjhHs7d2,Nottingham,Leeds United,Premier League,2026-08-22T14:00:00,true
+131156,flashscore_YFlpKveS,Sittard,AZ Alkmaar,Eredivisie,2026-08-22T14:30:00,true
+131388,flashscore_pGZrQ73b,Gent,Leuven,Jupiler Pro League,2026-08-22T18:45:00,true
+131159,flashscore_l0p9z0u9,Heerenveen,Zwolle,Eredivisie,2026-08-22T19:00:00,true
+131145,flashscore_G0RKkEnd,Sporting CP,Alverca,Primeira Liga,2026-08-22T19:30:00,true
+126911,flashscore_ImSSgC06,Atl. Madrid,Villarreal,La Liga,2026-08-23T15:00:00,true
+131596,flashscore_0KccwcGq,Sabah Baku (AZE),H. Beer Sheva (ISR),Champions League,2026-08-25T16:45:00,false
+131597,flashscore_YwP3q51N,Bodo/Glimt (NOR),Nijmegen (NED),Champions League,2026-08-25T19:00:00,false
+131598,flashscore_OOklm0j3,LASK (AUT),Celtic (SCO),Champions League,2026-08-25T19:00:00,false
+131599,flashscore_63Dqw6Ot,AEK Athens (GRE),Levski Sofia (BUL),Champions League,2026-08-26T19:00:00,false
+131600,flashscore_67VRHb7k,Celje (SLO),Slovan Bratislava (SVK),Champions League,2026-08-26T19:00:00,false
+131601,flashscore_l00Yi0Pa,Lyon (FRA),Fenerbahce (TUR),Champions League,2026-08-26T19:00:00,false
+131602,flashscore_vHqZWB0t,Viking (NOR),Din. Zagreb (CRO),Champions League,2026-08-26T19:00:00,false
+131285,flashscore_YZz3PZW7,Groningen,Sittard,Eredivisie,2026-08-28T18:00:00,false
+126790,flashscore_CYJLO78D,Liverpool,Nottingham,Premier League,2026-08-29T11:30:00,false
+126991,flashscore_WpiYAKo9,RB Leipzig,B. Monchengladbach,Bundesliga,2026-08-29T13:30:00,false
+131278,flashscore_MJqngmgl,Alverca,Santa Clara,Primeira Liga,2026-08-29T14:30:00,false
+131395,flashscore_pt5ATtAj,Leuven,St. Liege,Jupiler Pro League,2026-08-29T18:45:00,false
+131288,flashscore_rTCSueHl,Zwolle,Nijmegen,Eredivisie,2026-08-29T19:00:00,false
+126923,flashscore_KSIgZvKF,Sevilla,Atl. Madrid,La Liga,2026-08-29T19:30:00,false
+131291,flashscore_djJrxDGD,Willem II,Heerenveen,Eredivisie,2026-08-30T12:30:00,false
+131292,flashscore_fqY1s8hg,Telstar,Ajax,Eredivisie,2026-08-30T14:45:00,false
+126995,flashscore_AgoC3xvq,FC Augsburg,Schalke,Bundesliga,2026-08-30T15:30:00,false
+131519,flashscore_zNZHwQiI,Sparta Rotterdam,Zwolle,Eredivisie,2026-09-04T18:00:00,false
+126997,flashscore_x64A3hOh,B. Monchengladbach,Elversberg,Bundesliga,2026-09-05T13:30:00,false
+126805,flashscore_rLM64qM5,Nottingham,Tottenham Hotspur,Premier League,2026-09-05T14:00:00,false
+127002,flashscore_Q99YclhU,Schalke,Bayern Munich,Bundesliga,2026-09-05T16:30:00,false
+131525,flashscore_rm5QUkQp,Heerenveen,AZ Alkmaar,Eredivisie,2026-09-06T12:30:00,false
+131526,flashscore_AgcChgIi,Telstar,Cambuur,Eredivisie,2026-09-06T12:30:00,false
+131527,flashscore_IJ0KjXn4,Den Haag,Sittard,Eredivisie,2026-09-06T14:45:00,false
+126930,flashscore_xS7XRdCk,Athletic Club,Atl. Madrid,La Liga,2026-09-06T15:00:00,false
+131511,flashscore_WU2nVt65,Alverca,Braga,Primeira Liga,2026-09-06T15:00:00,false
+131612,flashscore_jXbSlBHG,Twente,Telstar,Eredivisie,2026-09-09T16:45:00,false
+131082,flashscore_tfPvE0rS,Union Berlin,Schalke,Bundesliga,2026-09-11T18:30:00,false
+131085,flashscore_Y9Vxfuid,Freiburg,B. Monchengladbach,Bundesliga,2026-09-12T13:30:00,false
+126809,flashscore_Mo2opFzi,Aston Villa,Nottingham,Premier League,2026-09-12T14:00:00,false
+126946,flashscore_GG5skrGU,Real Sociedad,Atl. Madrid,La Liga,2026-09-13T15:00:00,false
+126950,flashscore_YZpF3sVN,Atl. Madrid,CA Osasuna,La Liga,2026-09-16T15:00:00,false
+126826,flashscore_YqbwSbyR,Nottingham,Coventry City,Premier League,2026-09-19T16:30:00,false
+126960,flashscore_hGycdKve,Atl. Madrid,Real Madrid,La Liga,2026-09-20T15:00:00,false
+126833,flashscore_ld8jMT45,Crystal Palace,Nottingham,Premier League,2026-10-10T14:00:00,false
+126969,flashscore_6cE9Ndwf,Deportivo Alaves,Atl. Madrid,La Liga,2026-10-11T15:00:00,false
+126847,flashscore_hAOr0qmA,Nottingham,Arsenal,Premier League,2026-10-17T14:00:00,false
+126855,flashscore_lEkBjWFD,Ipswich Town,Nottingham,Premier League,2026-10-24T14:00:00,false
+126861,flashscore_S0CzBLIP,Brentford,Nottingham,Premier League,2026-10-31T15:00:00,false
+126877,flashscore_f977U6FF,Nottingham,Manchester City,Premier League,2026-11-07T15:00:00,false
+126880,flashscore_YH1oNO7k,AFC Bournemouth,Nottingham,Premier League,2026-11-21T15:00:00,false
+126897,flashscore_lnwD2iRb,Nottingham,Chelsea,Premier League,2026-11-28T15:00:00,false
+127063,shadow-probe-d2b0d9e2,Benfica (POR),St. Gallen (SUI),Europa League,2099-01-01,true

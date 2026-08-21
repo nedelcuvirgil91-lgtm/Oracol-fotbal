@@ -1,0 +1,47 @@
+{
+  "_comment": "F0 baseline — stare INGHETATA a match_history INAINTE de orice patch de vocabular (ADR-058). Folosit ca referinta pentru Poarta 2 (verificarea de dupa un ciclu night_sync). Nicio cifra de aici nu se recalculeaza retroactiv.",
+  "captured_at_utc": "2026-08-21",
+  "supabase_project": "gtlpyxzocacaqyompkwe",
+  "source_of_truth": "SELECT-uri read-only, citate integral in README.md din acest director",
+
+  "B1_distinct_team_names_total": 1252,
+  "B2_distinct_suffixed_names": 183,
+  "B2a_suffixed_names_with_existing_base": 85,
+  "B2b_suffixed_names_without_base": 98,
+  "B3_duplicate_natural_keys_today": 0,
+
+  "class_a_scope": {
+    "bases_already_canonical": 31,
+    "bases_new_canonical_needed": 54,
+    "bases_total": 85,
+    "abbreviation_pairs_confirmed": 9,
+    "abbreviation_alias_entries": 12
+  },
+
+  "rows_affected_by_class_a": {
+    "total": 928,
+    "finished": 878,
+    "future_orphans": 50,
+    "future_orphans_with_xg_pred": 8
+  },
+
+  "collisions_if_class_a_applied_to_data": {
+    "_comment": "NU se aplica in F0-F3. Cifra e informativa pentru ADR-059/F4.",
+    "colliding_groups": 208,
+    "surplus_rows": 208
+  },
+
+  "out_of_scope_discoveries": {
+    "D1_hidden_duplicate_matches": 208,
+    "D2_duplication_window_rows": 50,
+    "D3_shadow_probe_test_fixture_ids": ["shadow-probe-d2b0d9e2"]
+  },
+
+  "corrections_to_earlier_manual_audit": {
+    "E1_orphans": {"was": 85, "is": 50},
+    "E1b_finished": {"was": 843, "is": 878},
+    "E2_bases_already_canonical": {"was": 25, "is": 31},
+    "E3_pairs_total": {"was": 84, "is": 85},
+    "_comment": "Toate trei erorile provin din numarare/transcriere manuala. De aceea F3 consuma class_a_bases.csv, nu o lista din text."
+  }
+}
