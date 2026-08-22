@@ -1,0 +1,92 @@
+name: Football Oracle — Identity Drift Check (ADR-059)
+
+# [ADAUGAT — ADR-059, "Gol ramas deschis", 2026-08-22] Detectie RECURENTA a
+# fragmentarii de identitate. `idx_match_history_natural_key_canonical`
+# opereaza pe nume BRUTE — orbeste la orice extindere de vocabular. S-a
+# intamplat de doua ori intr-o zi (F3 dimineata, TSDB noaptea, 2026-08-21),
+# descoperit prin investigatie manuala, nu prin monitorizare. Acest job
+# inchide golul de DETECTIE (nu golul structural — o extindere de vocabular
+# tot poate reintroduce fragmentarea; asta doar garanteaza ca o observam in
+# max 24h, nu peste saptamani).
+#
+# STRICT read-only: ruleaza scripts/check_identity_drift.py, care apeleaza
+# `MatchIdentityReconciliationService.run(dry_run=True)` — acelasi cod
+# verificat pe date reale de doua ori (Actions run 32536869017, 32538543695).
+# Zero scriere in Supabase, zero modificare de mappings.py.
+#
+# Job-ul devine ROSU (exit 1) daca apare un grup/conflict nou fata de
+# `docs/00_GOVERNANCE/identity_drift_baseline.json` — acelasi tipar deja
+# folosit in tot proiectul pentru "cere atentie umana" (ex.
+# flashscore_weekly_fixtures.yml), fara nicio infrastructura noua de
+# notificare (Slack/email) — niciuna nu exista azi in proiect. Bump-ul
+# baseline-ului dupa investigare ramane deliberat NEAUTOMAT — o decizie umana,
+# comisa explicit (vezi antetul scriptului).
+#
+# Cadenta: zilnic, 05:30 UTC. night_sync.yml ruleaza la 03:00 UTC cu timeout
+# 120 min -> cea mai tarzie finalizare posibila e 05:00 UTC; 30 min marja.
+# weekly.yml (doar duminica) ruleaza la 04:00 UTC cu timeout 30 min -> cea mai
+# tarzie finalizare 04:30 UTC. 05:30 UTC e liber de ambele, verificat explicit
+# in `grep -B3 cron: .github/workflows/*.yml` inainte de a alege ora — acelasi
+# principiu de programare-fara-coliziune deja folosit in tot proiectul
+# (programare simpla, nu blocare intre workflow-uri).
+
+on:
+  schedule:
+    - cron: "30 5 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: >-
+          "check" (implicit, folosit de cron) verifica drift fata de baseline.
+          "emit-baseline" regenereaza baseline-ul (mecanic, cerut doar dupa ce
+          un drift raportat a fost investigat si inteles ca legitim) si il
+          incarca drept artifact — NU il comite automat; comisia ramane un pas
+          uman separat, exact ca la identity_audit_F0/baseline_counts.json.
+        required: false
+        default: "check"
+        type: choice
+        options:
+          - check
+          - emit-baseline
+
+concurrency:
+  group: identity-drift-check
+  cancel-in-progress: false
+
+jobs:
+  drift-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run (zero writes — mode selecteaza doar ramura de citire/raportare)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          MODE: ${{ github.event.inputs.mode || 'check' }}
+        run: |
+          if [ "$MODE" = "emit-baseline" ]; then
+            python scripts/check_identity_drift.py --emit-baseline
+          else
+            python scripts/check_identity_drift.py
+          fi
+
+      - name: Upload regenerated baseline (doar la emit-baseline)
+        if: ${{ github.event.inputs.mode == 'emit-baseline' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: identity-drift-baseline-${{ github.run_id }}
+          path: docs/00_GOVERNANCE/identity_drift_baseline.json
+          retention-days: 14

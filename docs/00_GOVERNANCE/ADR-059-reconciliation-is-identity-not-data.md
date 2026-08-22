@@ -71,6 +71,17 @@ Dacă acele predicții sunt vreodată necesare pe rândul canonic, calea corect�
 
 Acest ADR nu rezolvă golul. Îl consemnează ca necesitând un mecanism de detecție recurentă (rularea periodică a descoperirii DRY-RUN, care e read-only și ieftină), propus separat — adăugarea unui job automat e o decizie a proprietarului produsului.
 
+### Addendum — 2026-08-22: detecția recurentă, implementată
+
+Aprobat explicit de proprietarul produsului („adăugarea unui job automat e decizia ta"). **Golul structural rămâne deschis** (indexul e în continuare orb la vocabular) — s-a închis doar golul de *detecție*: latența maximă până la observarea unei recurențe scade de la „nedeterminat, doar prin investigație manuală" la 24h.
+
+Opțiuni verificate, nu presupuse:
+
+- **Index funcțional / trigger care apelează `normalize_team_name()` în SQL** — respinsă. Ar cere reproducerea integrală a vocabularului (~350 aliasuri + regula de sufix de țară) ca funcție `IMMUTABLE` PL/pgSQL — a doua sursă de adevăr pentru identitate, exact contradicția pe care ADR-058 a demonstrat-o costisitoare (v1.2, 141+ fuziuni false). Ar fi soluția structurală corectă *dacă* proiectul decide vreodată să mute rezolvarea identității în stratul de bază de date — decizie arhitecturală separată, proprie, nu o extensie tacită a acestui ADR.
+- **Redescoperire periodică, read-only, diffată pe SET de chei față de un baseline git-committed** — aleasă. Reutilizează 100% motorul deja aprobat și verificat pe date reale de două ori (`MatchIdentityReconciliationService.run(dry_run=True)`); zero schemă nouă, zero risc de scriere; compararea pe SET (nu pe număr) prinde exact cazul unde un grup vechi dispare în aceeași rulare în care unul nou apare, fără ca numărul total să semnaleze nimic.
+
+Implementare: `scripts/check_identity_drift.py` (verificare + `--emit-baseline`), `docs/00_GOVERNANCE/identity_drift_baseline.json` (baseline mecanic, niciodată editat de mână), `.github/workflows/identity_drift_check.yml` (cron zilnic 05:30 UTC + `workflow_dispatch`). Job-ul devine roșu în Actions la orice grup/conflict nou — tiparul deja folosit în tot proiectul, fără infrastructură nouă de notificare. Bump-ul baseline-ului rămâne deliberat neautomat: o decizie umană, comisă explicit după investigare.
+
 ## Referințe
 
 - ADR-025 — Match Identity Implementation Strategy (Approved / Architecture Frozen)

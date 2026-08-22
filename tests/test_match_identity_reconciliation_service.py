@@ -382,3 +382,31 @@ def test_hard_conflict_still_excludes_liverpool_psg_shape():
     decision = process_group(rows)
     assert decision.excluded_reason == "hard_conflict"
     assert decision.canonical_id is None
+
+
+# ── reconciled_group_keys (monitorizare recurenta, 2026-08-22) ─────────────
+
+def test_reconciled_group_keys_matches_reconciled_groups_count():
+    rows = [
+        _row(1, "fd_1", home="Alpha", away="Beta", date="2026-02-01"),
+        _row(2, "kaggle_1", home="Alpha", away="Beta", date="2026-02-01"),
+        _row(3, "fd_2", home="Gamma", away="Delta", date="2026-02-02"),
+        _row(4, "kaggle_2", home="Gamma", away="Delta", date="2026-02-02"),
+    ]
+    sb = _FakeSb(rows)
+    report = MatchIdentityReconciliationService(supabase_client=sb).run(dry_run=True)
+    assert len(report.reconciled_group_keys) == report.reconciled_groups == 2
+    assert "alpha||beta||2026-02-01" in report.reconciled_group_keys
+    assert "gamma||delta||2026-02-02" in report.reconciled_group_keys
+
+
+def test_reconciled_group_keys_excludes_hard_conflict_and_unknown_source():
+    rows = [
+        _row(1, "fd_1", home="A", away="B", date="2026-02-01", result="H"),
+        _row(2, "kaggle_1", home="A", away="B", date="2026-02-01", result="A"),  # hard conflict
+        _row(3, "fd_2", home="C", away="D", date="2026-02-02"),
+        _row(4, "opta_1", home="C", away="D", date="2026-02-02"),  # unknown source
+    ]
+    sb = _FakeSb(rows)
+    report = MatchIdentityReconciliationService(supabase_client=sb).run(dry_run=True)
+    assert report.reconciled_group_keys == []

@@ -285,6 +285,14 @@ class ReconciliationReport:
     excluded_hard_conflict: list[str] = field(default_factory=list)
     excluded_unknown_source: list[str] = field(default_factory=list)
     reconciled_groups: int = 0
+    # [monitorizare recurenta, 2026-08-22] Cheile exacte (match_key()) ale
+    # grupurilor reconciliabile — nu doar numarul lor. Un diff pe NUMAR ar
+    # rata exact clasa de regresie pe care acest camp exista sa o prinda: un
+    # grup vechi dispare (marcat superseded de o executie anterioara) in
+    # aceeasi rulare in care unul NOU apare (o extindere de vocabular
+    # reintroduce fragmentarea) — numarul total poate ramane neschimbat, dar
+    # setul de chei s-a schimbat. Consumat de scripts/check_identity_drift.py.
+    reconciled_group_keys: list[str] = field(default_factory=list)
     write_errors: list[str] = field(default_factory=list)  # doar EXECUTE
     # [ADR-059] Semantica schimbata: nu "ce s-ar scrie", ci "ce lipseste si cine
     # o poate regenera". Reconcilierea nu scrie niciuna dintre aceste coloane.
@@ -433,6 +441,7 @@ class MatchIdentityReconciliationService:
             processed += 1
 
             report.reconciled_groups += 1
+            report.reconciled_group_keys.append(key)
             if decision.data_gaps:
                 report.canonical_rows_with_data_gap += 1
             for col, owner in decision.data_gaps.items():
