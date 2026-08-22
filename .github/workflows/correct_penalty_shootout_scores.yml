@@ -1,0 +1,57 @@
+name: Football Oracle — Corecție scoruri penalty-shootout (ADR-060, Faza 1)
+
+# [ADAUGAT — 2026-08-22] Corectie supervizata cu corpus FIX (6 randuri),
+# aprobata explicit conform ADR-060. Implicit DRY-RUN (zero scriere) — scrie
+# in productie DOAR cu `confirm: EXECUTE-CORRECTION`, aceeasi bariera dubla
+# folosita si la reconcilierea completa (ADR-025 Faza 4).
+#
+# Auditul care a produs corpusul: scripts/audit_penalty_shootout_rows.py,
+# run 32560333453 (7.534 randuri fd_* verificate contra football-data.org,
+# 0 negasite, exact 6 nepotriviri).
+#
+# Suprafata: DOAR actual_home_goals/actual_away_goals/actual_result, pe cele
+# 6 id-uri fixe. Nicio recalibrare declansata. Niciun reset de
+# backfill_done/ELO — vezi docs/00_GOVERNANCE/ADR-060-supervised-data-correction.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Implicit dry-run. Scrie exact "EXECUTE-CORRECTION" ca sa scrie in productie (6 randuri).'
+        required: false
+        type: string
+        default: ''
+
+concurrency:
+  group: correct-penalty-shootout-scores
+  cancel-in-progress: false
+
+jobs:
+  correct:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run correction (dry-run unless confirmed)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" = "EXECUTE-CORRECTION" ]; then
+            python scripts/correct_penalty_shootout_scores.py --execute
+          else
+            echo "Fara confirmare EXECUTE-CORRECTION -> DRY-RUN (zero scriere)."
+            python scripts/correct_penalty_shootout_scores.py
+          fi
