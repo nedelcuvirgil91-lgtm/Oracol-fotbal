@@ -47,7 +47,7 @@ Acest ADR autorizează contractul, nu execuția fiecărui caz — fiecare rămâ
 | Scoruri penalty-shootout | 6 rânduri, id-uri fixe (`3623, 3625, 3634, 3809, 3814, 114439`) | `actual_home_goals`, `actual_away_goals`, `actual_result` | Executat sub acest ADR — vezi jurnalul de execuție de mai jos |
 | Vocabular D3 (extindere vocabular) | 58 perechi → 53 identități, `scripts/detect_identity_alias_candidates.py` | `mappings.py` (`TEAM_ALIASES`) | Executat — vezi Jurnalul de execuție, Faza 2a |
 | Redenumire D2+D3 (rânduri deja scrise) | 2.477 rânduri, 168 nume distincte | `home_team`, `away_team` în `match_history` | Executat — vezi Jurnalul de execuție, Faza 2b |
-| Rebuild ELO | Toate rândurile cu `home_elo`/`away_elo`/`home_elo_after`/`away_elo_after` deja populate | cele 4 coloane ELO | Neexecutat — vocabularul e acum stabil (1.236→1.066 nume distincte), singura excepție rămasă e conflictul HARD CONFLICT deja investigat |
+| Rebuild feature-uri (ELO + 16 alte coloane calculate de `run_backfill()`) | 51.046 rânduri (`superseded_by IS NULL AND actual_result IS NOT NULL`) | cele 20 `BACKFILL_COLUMNS` (nu doar ELO — vezi Jurnalul de execuție, Faza 3, pentru descoperirea amplorii reale) | Reset executat, rebuild în curs — vezi Jurnalul de execuție, Faza 3 |
 
 Ordinea (scoruri → vocabular → ELO) nu e arbitrară: rebuild-ul ELO citește `actual_home_goals`/`actual_away_goals` (deci trebuie să ruleze după corecția scorurilor) și grupează pe `home_team`/`away_team` (deci trebuie să ruleze după unificarea vocabularului, altfel recalculează corect peste lanțuri încă fragmentate — exact observația din măsurătoarea ELO).
 
@@ -130,6 +130,30 @@ Executat 2026-08-22, imediat după Faza 2c.
 **Execuție**: **2.477/2.477 rânduri redenumite, 0 sărite, 0 erori**. Verificat independent, direct în bază: totalul `match_history` neschimbat (58.300 rânduri, 51.565 live, 6.735 superseded — identic înainte/după, cum era de așteptat pentru o operație care nu schimbă numărul de rânduri). Re-rularea analizei D2 confirmă rezultatul: **nume distincte în uz 1.236 → 1.066**, D2 rămas = exact cele 2 nume din singura coliziune cunoscută (`Nijmegen`/`NEC`, `Vitesse`/`SBV Vitesse`), nicio altă fragmentare reziduală.
 
 **Consecință**: vocabularul de identitate e acum stabil — orice extindere viitoare de vocabular trebuie să repete ciclul complet (extinde → reconciliază duplicate → redenumește supraviețuitorii), documentat ca proces obligatoriu în Faza 2c de mai sus.
+
+## Jurnal de execuție — Faza 3 (rebuild feature-uri, singura operație ireversibilă)
+
+Executat 2026-08-22, cu aprobare explicită separată (per condiția 4) pentru pasul de reset — dincolo de delegarea generală de arhitect, cerută explicit de skill-ul `supabase-safety` pentru orice operație distructivă.
+
+**Descoperire care a schimbat scopul, verificată înainte de a acționa**: propunerea inițială discutată cu proprietarul produsului viza „rebuild ELO" (4 coloane). Citind direct codul `sync/backfill_features.py` înainte de a scrie orice SQL, s-a constatat că **toți cei 7 tracker-e din `run_backfill()`** (`ELOTracker`, `FormTracker`, `ShotsTracker`, `FoulsTracker`, `ShotCountTracker`, `CornerCardTracker`, `H2HTracker`) sunt indexate pe **numele echipei ca șir de caractere** (sau perechi de nume, pentru H2H) — exact același defect structural care a fragmentat ELO fragmentează identic toate cele **20 de `BACKFILL_COLUMNS`**. Scopul a fost extins corect, nu ținut la „doar ELO" din inerție.
+
+**Verificare că mecanismul existent e suficient, fără cod nou**: `run_backfill()` recalculează întotdeauna toate cele 20 valori (calcul Python ieftin) dar scrie DOAR coloanele NULL curente (`_missing_feature_columns`). Deci: resetarea celor 20 de coloane la NULL, urmată de o rulare normală, nemodificată, a `sync/backfill_features.py` (deja folosit zilnic în producție, `backfill.yml`) recalculează corect totul, fără nicio linie de cod nouă pentru replay — se reutilizează mecanismul deja testat, nu se scrie unul paralel.
+
+**Verificări de siguranță, înainte de scriere**:
+- `home_elo`/`away_elo` (pre-meci) alimentează `ml_predictor.FEATURE_COLUMNS`, citite live din DB la antrenare — fără snapshot înghețat, deci fără risc de scurgere temporală prin rebuild.
+- `home_elo_after`/`away_elo_after` (post-meci) confirmate, din nou, absente din setul de antrenare ML.
+- `database.queries.get_latest_team_elo()` (servire live) citește direct din DB, cu doar un cache in-memory per-proces, fără persistență — nicio invalidare manuală necesară.
+- Mecanismul de scriere (`update_match_features`) e idempotent și reluabil per-coloană — un timeout la jumătatea rulării nu corupe nimic, doar lasă progres parțial, reluabil identic.
+
+**Corpus** (condiția 2): `WHERE superseded_by IS NULL AND actual_result IS NOT NULL` — **51.046 rânduri**, verificat prin `count(*)` înainte de orice scriere.
+
+**Backup, înainte de orice scriere distructivă**: `CREATE TABLE match_history_backfill_backup_20260822 AS SELECT ...` — snapshot al celor 20 de coloane + `backfill_done` pentru exact cele 51.046 de rânduri din corpus, `ENABLE ROW LEVEL SECURITY` (același tipar ca `odds_history`, ADR-005). Verificat independent, nu presupus: `count(*)` din backup = 51.046 (potrivire exactă cu corpusul), plus comparație directă valoare-cu-valoare pe un eșantion (5 rânduri, `home_elo`/`home_elo_after` identice live vs. backup).
+
+**Reset** (SQL exact arătat, aprobat explicit): `UPDATE match_history SET <20 coloane> = NULL, backfill_done = false WHERE superseded_by IS NULL AND actual_result IS NOT NULL`. Verificat direct în bază, nu presupus corect: 51.046 rânduri din corpus au acum `home_elo IS NULL` (potrivire exactă). Un semnal aparent de alarmă — 504 rânduri suplimentare cu `home_elo IS NULL` în afara corpusului — investigat imediat, nu ignorat: 498 sunt meciuri viitoare (`actual_result IS NULL`, nu au avut niciodată ELO calculat) și 6 sunt rânduri superseded fără rezultat; **zero** rânduri superseded CU rezultat afectate. Confirmat atât logic (WHERE-ul exclude structural aceste categorii) cât și empiric (breakdown pe categorii) — fals pozitiv închis prin verificare, nu prin presupunere.
+
+**Timeout mărit**: `backfill.yml`, `timeout-minutes: 60 → 300` — durata estimată pentru 51.046 scrieri individuale la ~0,19s/rând observat empiric (din log-urile Fazelor 2b/2c) e ~2,7 ore.
+
+**Rebuild**: declanșat `backfill.yml` (`dry_run=false`, `retrain_ml=false` — reantrenarea ML rămâne, deliberat, o decizie separată, niciodată bundle-uită tacit într-un fix de date, per „Filosofia proiectului" din `CLAUDE.md`).
 
 ## Referințe
 

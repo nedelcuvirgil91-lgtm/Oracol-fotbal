@@ -28,7 +28,15 @@ on:
 jobs:
   backfill:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # [MARIT — 2026-08-22, ADR-060 Faza 3] 60 min ajungea doar pentru rulari
+    # incrementale (cateva randuri NULL/zi). Un rebuild complet (ADR-060,
+    # dupa reset la NULL pe toate cele 20 de coloane pentru 51.046 randuri,
+    # ca sa recalculeze corect peste vocabularul unificat D2/D3) inseamna
+    # ~51.000 scrieri individuale la ~0.19s/rand observat — ~2.7h. Mecanismul
+    # e idempotent si reluabil (gating per-coloana pe NULL), deci un timeout
+    # mid-rulare nu corupe nimic — doar reia de unde a ramas la urmatoarea
+    # rulare — dar timeout-ul trebuie sa fie realist pentru cazul obisnuit.
+    timeout-minutes: 300
 
     steps:
       - name: Checkout repository
