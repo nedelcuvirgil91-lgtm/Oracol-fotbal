@@ -1,0 +1,66 @@
+name: Football Oracle — Redenumire la forma canonica (ADR-060, Faza 2b)
+
+# [ADAUGAT — 2026-08-22] Corectie supervizata cu corpus determinist, calculat
+# din starea live la momentul rularii (nu hardcodat, spre deosebire de Faza 1
+# — la aceasta scara, 2.478+ randuri, un corpus hardcodat nu ar fi practic;
+# vezi ADR-060 pentru de ce un corpus "determinist, calculat o singura data,
+# afisat inainte de scriere" satisface totusi conditia 2, "corpus inchis").
+#
+# Implicit DRY-RUN (zero scriere) — scrie in productie DOAR cu
+# confirm: EXECUTE-RENAME.
+#
+# Suprafata: DOAR home_team/away_team, pe randurile ale caror nume
+# normalize_team_name() le-ar schimba (mappings.py). Randurile care ar
+# coliziona pe indexul unic dupa redenumire sunt EXCLUSE automat (ambele
+# parti ale coliziunii raman neatinse) — nu se forteaza nicio redenumire care
+# ar viola idx_match_history_natural_key_canonical.
+#
+# Precondiție indeplinita (Faza 2a + 2c): vocabularul extins cu 53
+# identitati D3, reconcilierea de masa (2.827 randuri) executata si
+# verificata, bug-ul de paginare reparat si verificat live (order=id.asc).
+# Corpus verificat prin dry-run separat (scripts/analyze_d2_vocabulary_drift.py):
+# 168 nume distincte, 2.478 randuri afectate, 2.838 aparitii, EXACT 1
+# coliziune (grupul HARD CONFLICT deja cunoscut, nijmegen||vitesse).
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Implicit dry-run. Scrie exact "EXECUTE-RENAME" ca sa scrie in productie.'
+        required: false
+        type: string
+        default: ''
+
+concurrency:
+  group: rename-teams-to-canonical
+  cancel-in-progress: false
+
+jobs:
+  rename:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run rename (dry-run unless confirmed)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" = "EXECUTE-RENAME" ]; then
+            python scripts/rename_teams_to_canonical.py --execute
+          else
+            echo "Fara confirmare EXECUTE-RENAME -> DRY-RUN (zero scriere)."
+            python scripts/rename_teams_to_canonical.py
+          fi
