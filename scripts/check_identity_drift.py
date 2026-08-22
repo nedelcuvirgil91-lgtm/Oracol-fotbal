@@ -119,6 +119,15 @@ def emit_baseline() -> int:
     print(f"  reconciled_group_keys : {len(baseline['reconciled_group_keys'])}")
     print(f"  hard_conflict_keys    : {len(baseline['hard_conflict_keys'])}")
     print(f"  unknown_source_keys   : {len(baseline['unknown_source_keys'])}")
+
+    # Continutul complet e tiparit si in log (nu doar in artifact) — artifactul
+    # Actions e util pentru descarcare directa, dar unele medii de operare nu
+    # au acces retea la storage-ul de artifacte al GitHub (blocat la nivel de
+    # proxy/politica). Markerii permit extragerea exacta din log, fara nicio
+    # ambiguitate de parsare.
+    print("===BASELINE_JSON_START===")
+    print(json.dumps(baseline, indent=2, ensure_ascii=False))
+    print("===BASELINE_JSON_END===")
     return 0
 
 
