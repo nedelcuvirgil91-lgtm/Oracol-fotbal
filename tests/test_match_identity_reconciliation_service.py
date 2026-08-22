@@ -208,6 +208,7 @@ class _FakeTable:
     def __init__(self, rows):
         self._rows = rows
         self._filters = []
+        self._order_col = None
 
     def select(self, cols):
         return self
@@ -218,6 +219,16 @@ class _FakeTable:
 
     def in_(self, col, values):
         self._filters.append(("in", col, set(values)))
+        return self
+
+    def order(self, col, desc=False):
+        # [ADR-059 Addendum, 2026-08-22] `_fetch_key_index()` cere acum
+        # ordonare explicita inainte de `.range()` (fix pentru golul de
+        # paginare instabila) — clientul fals trebuie sa o poata onora ca
+        # testele existente, care exercita `run()` prin acest client, sa
+        # ramana valide.
+        self._order_col = col
+        self._order_desc = desc
         return self
 
     def range(self, start, end):
@@ -231,6 +242,8 @@ class _FakeTable:
                 rows = [r for r in rows if r.get(f[1]) is None]
             elif f[0] == "in":
                 rows = [r for r in rows if r.get(f[1]) in f[2]]
+        if self._order_col is not None:
+            rows = sorted(rows, key=lambda r: r.get(self._order_col), reverse=self._order_desc)
         if hasattr(self, "_range"):
             start, end = self._range
             rows = rows[start:end + 1]
@@ -459,3 +472,68 @@ def test_target_keys_excludes_hard_conflict_group_even_if_targeted():
     assert report.reconciled_group_keys == []
     assert report.target_keys_not_found == ["a||b||2026-02-01"]
     assert report.excluded_hard_conflict_count == 1
+
+
+# ── Regresie: golul de paginare instabila (descoperit live, 2026-08-22) ─────
+#
+# `_fetch_key_index()` folosea `.range()` FARA `.order()` explicit — sub
+# scriere concurenta pe productie (chiar in timpul unei reconcilieri de masa),
+# PostgREST/Postgres nu garanteaza ordine stabila intre pagini succesive,
+# deci acelasi rand fizic putea fi intors de doua ori, in doua pagini
+# diferite. Efectul, daca ar fi ramas nereparat: un "grup" fals cu acelasi
+# rand de doua ori -> randul devine canonic pentru sine insusi SI necanonic
+# marcat superseded de sine insusi -> `superseded_by = id` (auto-referential)
+# -> randul dispare din setul live fara sa fi existat vreodata un duplicat
+# real. Verificat live pe productie ca NU s-a intamplat (0 randuri
+# auto-referentiale dupa reconcilierea de 2.827 randuri) — dar cauza radacina
+# tot trebuia reparata, plus o aparare in adancime la nivelul `process_group`.
+
+def test_process_group_deduplica_acelasi_rand_fizic_vazut_de_doua_ori():
+    """Simuleaza exact defectul de paginare: acelasi dict de rand apare de
+    doua ori in lista primita de process_group(). Rezultatul NU are voie sa
+    fie un grup "reconciliat" cu randul canonic pentru sine insusi."""
+    row = _row(42, "fd_1", home="Alpha", away="Beta", date="2026-02-01")
+    decision = process_group([row, dict(row)])  # copie separata, acelasi id
+    assert decision.excluded_reason == "not_a_duplicate_after_dedup"
+    assert decision.canonical_id is None
+    assert decision.noncanonical == []
+
+
+def test_process_group_deduplica_dar_pastreaza_duplicatul_real():
+    """[A, A, B] (A vazut de doua ori din bug, B duplicat real) trebuie sa se
+    reduca la [A, B] si sa produca o decizie normala, nu sa fie respins in
+    intregime — bug-ul de paginare nu are voie sa ascunda un duplicat real."""
+    a = _row(1, "fd_1", home="Alpha", away="Beta", date="2026-02-01")
+    b = _row(2, "kaggle_1", home="Alpha", away="Beta", date="2026-02-01")
+    decision = process_group([a, dict(a), b])
+    assert decision.excluded_reason is None
+    assert decision.canonical_id == 1  # football_data (rank mai mic) castiga
+    assert [nc["id"] for nc in decision.noncanonical] == [2]
+
+
+def test_run_nu_marcheaza_niciodata_un_rand_ca_superseded_de_sine_insusi():
+    """Test de integrare prin `run()`: chiar daca `_fetch_key_index` ar
+    intoarce (ipotetic) acelasi rand de doua ori intr-un grup, EXECUTE nu are
+    voie sa produca `superseded_by == id`."""
+    rows = [_row(7, "fd_1", home="Alpha", away="Beta", date="2026-02-01")]
+
+    class _DuplicatingTable(_FakeTable):
+        def execute(self):
+            res = super().execute()
+            if res.data:
+                res.data = res.data + [dict(res.data[0])]  # simuleaza bug-ul
+            return res
+
+    class _DuplicatingClient(_FakeClient):
+        def table(self, name):
+            return _DuplicatingTable(self._rows)
+
+    class _DuplicatingSb:
+        def get_client(self):
+            return _DuplicatingClient(rows)
+
+    service = MatchIdentityReconciliationService(supabase_client=_DuplicatingSb())
+    report = service.run(dry_run=False)
+
+    assert report.reconciled_groups == 0
+    assert report.rows_marked_superseded == 0

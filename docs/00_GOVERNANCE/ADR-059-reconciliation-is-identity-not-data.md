@@ -82,6 +82,22 @@ Opțiuni verificate, nu presupuse:
 
 Implementare: `scripts/check_identity_drift.py` (verificare + `--emit-baseline`), `docs/00_GOVERNANCE/identity_drift_baseline.json` (baseline mecanic, niciodată editat de mână), `.github/workflows/identity_drift_check.yml` (cron zilnic 05:30 UTC + `workflow_dispatch`). Job-ul devine roșu în Actions la orice grup/conflict nou — tiparul deja folosit în tot proiectul, fără infrastructură nouă de notificare. Bump-ul baseline-ului rămâne deliberat neautomat: o decizie umană, comisă explicit după investigare.
 
+### Addendum — 2026-08-22: bug de paginare instabilă găsit și reparat în `_fetch_key_index()`
+
+Descoperit în timpul execuției ADR-060 Faza 2c (reconciliere de masă, 2.827 rânduri, declanșată de extinderea vocabularului). Imediat după o scriere de masă pe producție, un `check_identity_drift.py` a raportat sute de „grupuri noi" în ligi complet neatinse de schimbarea de vocabular (Bundesliga, Champions League) — semn că raportul, nu datele, era suspect.
+
+**Cauza radacină**: `_fetch_key_index()` pagina prin `.range()` **fără `.order()` explicit**. PostgREST/Postgres nu garantează ordine stabilă între cereri succesive fără `ORDER BY` — sub scriere concurentă pe tabelă (exact situația imediat după o reconciliere de masă), același rând fizic putea fi întors de două ori, în două pagini diferite.
+
+**Verificat, nu presupus, cât de gravă era problema**: dacă un rând era văzut de două ori în cadrul aceluiași grup, `process_group()` îl trata drept canonic pentru sine însuși (`ranked[0]`) **și** necanonic marcat superseded de sine însuși (`ranked[1:]`) — `_mark_superseded(id, id, ...)` ar fi scris `superseded_by = id`, făcând rândul să dispară din setul live fără să fi existat vreodată un duplicat real. Verificat direct în bază: reconcilierea de masă deja executată (2.827 rânduri) **nu conținea niciun rând autoreferențial** (`SELECT count(*) WHERE superseded_by = id` → 0) — bug-ul nu apucase să corupă date, dar mecanismul era expus.
+
+**Fix, două straturi**:
+1. **Cauza rădăcină**: `.order("id")` adăugat înainte de `.range()` — `id` e imutabil și monoton, deci ordonarea pe el face paginarea provabil stabilă (același tipar deja folosit corect în `sync/backfill_features.fetch_all_matches()`, care avea deja `.order("kickoff_date").order("id")` — convenția exista în proiect, dar nu fusese urmată în `_fetch_key_index()` și, prin copiere, în patru scripturi noi din Faza 2/audit).
+2. **Apărare în adâncime**: `process_group()` deduplică rândurile după `id` la intrare; dacă grupul se reduce sub 2 rânduri reale, se returnează `excluded_reason="not_a_duplicate_after_dedup"` — niciun scenariu viitor de paginare instabilă (chiar dintr-o cauză neprevăzută azi) nu mai poate produce o scriere autoreferențială.
+
+**Verificare prin mutare (mutation testing)**: eliminând temporar apărarea din `process_group()`, testele noi (`tests/test_match_identity_reconciliation_service.py`) eșuează exact cu dovada corupției — `reason: "canonical=fd_1 (rank=2), superseded=fd_1 (rank=2)"` — confirmând că testele detectează regresia, nu doar că trec accidental.
+
+Fix aplicat și în `scripts/analyze_d2_vocabulary_drift.py`, `scripts/audit_penalty_shootout_rows.py`, `scripts/detect_identity_alias_candidates.py`, `scripts/rename_teams_to_canonical.py` (aceeași paginare fără `.order()`, copiată din `_fetch_key_index()` înainte de fix). **Descoperire în afara scopului, notată, nu extinsă tacit**: `scripts/team_profile_ablation_probe.py` și `scripts/xg_pred_vs_actual_validation.py` (pre-existente, neatinse de această sesiune) au același tipar de paginare fără `.order()` — nereparate aici, semnalate pentru o trecere separată.
+
 ## Referințe
 
 - ADR-025 — Match Identity Implementation Strategy (Approved / Architecture Frozen)

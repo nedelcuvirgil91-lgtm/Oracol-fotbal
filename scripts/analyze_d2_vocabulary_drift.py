@@ -149,14 +149,26 @@ def classify(rows: list[dict], normalize) -> dict:
 
 def _fetch_rows(client, superseded: bool) -> list[dict]:
     """Paginare identica cu `_fetch_key_index()` din serviciul de reconciliere
-    — acelasi contract, aceeasi dimensiune de pagina."""
+    — acelasi contract, aceeasi dimensiune de pagina.
+
+    [FIX — descoperit 2026-08-22] `.range()` FARA `.order()` explicit nu are
+    ordine garantata intre pagini succesive sub scriere concurenta — poate
+    intoarce acelasi rand de doua ori. `id` e imutabil si monoton, deci
+    ordonarea pe el face paginarea provabil stabila (acelasi fix ca in
+    `services/match_identity_reconciliation_service.py`)."""
     rows: list[dict] = []
+    seen_ids: set = set()
     offset, page_size = 0, 1000
     while True:
         q = client.table("match_history").select("id,home_team,away_team,kickoff_date")
         q = q.not_.is_("superseded_by", "null") if superseded else q.is_("superseded_by", "null")
-        batch = (q.range(offset, offset + page_size - 1).execute().data) or []
-        rows.extend(batch)
+        batch = (q.order("id").range(offset, offset + page_size - 1).execute().data) or []
+        for row in batch:
+            rid = row.get("id")
+            if rid in seen_ids:
+                continue  # aparare in adancime, vezi nota de mai sus
+            seen_ids.add(rid)
+            rows.append(row)
         if len(batch) < page_size:
             break
         offset += page_size

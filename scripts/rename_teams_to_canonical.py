@@ -102,17 +102,28 @@ def plan_renames(rows: list[dict], normalize) -> dict:
 
 
 def _fetch_live_rows(client) -> list[dict]:
+    """[FIX — descoperit 2026-08-22] `.range()` fara `.order()` explicit nu
+    are ordine garantata intre pagini sub scriere concurenta — poate intoarce
+    acelasi rand de doua ori. `id` e imutabil si monoton, deci ordonarea pe
+    el face paginarea provabil stabila."""
     rows: list[dict] = []
+    seen_ids: set = set()
     offset, page_size = 0, 1000
     while True:
         batch = (
             client.table("match_history")
             .select("id,home_team,away_team,kickoff_date")
             .is_("superseded_by", "null")
+            .order("id")
             .range(offset, offset + page_size - 1)
             .execute().data
         ) or []
-        rows.extend(batch)
+        for row in batch:
+            rid = row.get("id")
+            if rid in seen_ids:
+                continue
+            seen_ids.add(rid)
+            rows.append(row)
         if len(batch) < page_size:
             break
         offset += page_size

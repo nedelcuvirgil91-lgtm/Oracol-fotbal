@@ -48,8 +48,17 @@ class _CapturingTable:
         self._writes = writes
         self._filters = []
         self._payload = None
+        self._order_col = None
 
     def select(self, cols):
+        return self
+
+    def order(self, col, desc=False):
+        # [ADR-059 Addendum, 2026-08-22] `_fetch_key_index()` cere acum
+        # ordonare explicita inainte de `.range()` (fix pentru golul de
+        # paginare instabila) — clientul fals trebuie sa o onoreze.
+        self._order_col = col
+        self._order_desc = desc
         return self
 
     def update(self, payload):
@@ -97,6 +106,8 @@ class _CapturingTable:
                 rows = [r for r in rows if r.get(f[1]) in f[2]]
             elif f[0] == "eq":
                 rows = [r for r in rows if r.get(f[1]) == f[2]]
+        if self._order_col is not None:
+            rows = sorted(rows, key=lambda r: r.get(self._order_col), reverse=self._order_desc)
         if hasattr(self, "_range"):
             s, e = self._range
             rows = rows[s:e + 1]

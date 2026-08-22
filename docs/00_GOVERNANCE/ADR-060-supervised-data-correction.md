@@ -97,6 +97,22 @@ Executat 2026-08-22, imediat după Faza 1.
 
 **Verificare**: `tests/test_adr060_d3_vocabulary_extension.py` (5 teste) — toate cele 53 de clustere unifică corect, cele 3 perechi vetoate rămân distincte, niciun alias nou nu e deja folosit pentru alt canonic, clusterele de 3 nume sunt complet tranzitive. Suita completă `pytest tests/`: verde.
 
+## Jurnal de execuție — Faza 2c (reconciliere de masă, declanșată de extinderea vocabularului)
+
+Executat 2026-08-22, imediat după Faza 2a. **Nu era planificată** — a fost o descoperire în timpul pregătirii Fazei 2b (redenumire), tratată conform Discovery Rule.
+
+**Ce s-a întâmplat**: rulând planul de redenumire (Faza 2b) pe date reale, `analyze_d2_vocabulary_drift.py` a raportat **peste 2.700 de coliziuni** pe cheia indexului unic — mult peste amploarea D2 originală (616 rânduri). Investigație: extinderea vocabularului din Faza 2a (`AZ`↔`AZ Alkmaar`, `FC Utrecht`↔`Utrecht`, `Almere City`↔`Almere City FC` etc., majoritatea cluburi din Eredivisie/Primeira Liga/Super Lig) a unificat perechi de nume care coexistau deja, nedetectate, ca serii **complet paralele** de-a lungul mai multor sezoane — nu fragmente izolate, ci sezoane întregi înregistrate de două ori sub două nume diferite.
+
+**Verificare, nu presupunere**: rulat `run_identity_reconciliation_dryrun.py` (mecanismul deja aprobat ADR-059, nu o unealtă nouă) — **2.760 grupuri duplicate, 2.759 reconciliabile, 1 HARD CONFLICT nou, 2.827 rânduri de marcat**. Mecanismul de siguranță deja construit în serviciu (`HARD_CONFLICT_COLUMNS`: `actual_result`/`actual_home_goals`/`actual_away_goals` trebuie să coincidă pe tot grupul) a validat singur 2.759 din 2.760 de grupuri — dacă scorurile ar fi diferit, ar fi fost excluse automat, nu forțate.
+
+**HARD CONFLICT investigat, nu ignorat**: `nijmegen||vitesse||2023-10-01` — verificat direct: `id=78154` (kaggle) are 1-3, `id=127878` (fd) are 1-2. Discrepanță reală de scor între surse, fără un bug cunoscut care s-o explice (spre deosebire de Liverpool–PSG). Corect exclus automat, rămâne deschis pentru investigare separată — **nu s-a inventat o corecție** fără dovadă verificată contra unei surse externe (condiția 1, ADR-060).
+
+**Execuție**: `run_identity_reconciliation_full.py` (același script, aceeași suprafață — doar `superseded_by`/`at`/`reason`, doar rândul necanonic) — **2.827/2.827 rânduri marcate, 0 erori de scriere**. Verificat independent, direct în bază: totalul `match_history` neschimbat (58.300), live 54.393→51.565 (-2.827, exact), superseded 3.908→6.735 (+2.827, exact), 0 rânduri canonice greșit marcate, 0 orfani FK.
+
+**Relația cu ADR-059**: acesta e exact scenariul avertizat în secțiunea „Gol rămas deschis" a acelui ADR — „orice extindere viitoare de vocabular reintroduce fragmentarea, tăcut" — dar materializat la o scară mult mai mare decât precedentele (F3/TSDB, câteva meciuri) și cu semn opus: acolo fragmentarea *ascundea* dubluri deja periculoase; aici extinderea vocabularului le-a *dezvăluit*, iar mecanismul deja construit (nu unul nou) le-a rezolvat corect.
+
+**Consecință pentru procesul viitor**: orice extindere de vocabular (Faza 2a, sau orice alias nou adăugat vreodată în `mappings.py`) trebuie urmată OBLIGATORIU de un dry-run de reconciliere înainte de orice redenumire — nu opțional, nu „probabil nu e nevoie". Ordinea corectă, confirmată empiric: **extinde vocabularul → reconciliază duplicate → abia apoi redenumește supraviețuitorii**.
+
 ## Referințe
 
 - ADR-036 / D3.5 — Canonical Feature Ownership

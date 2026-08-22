@@ -193,7 +193,7 @@ def resolve_source(fixture_id: str | None) -> str | None:
 class GroupDecision:
     """Rezultatul determinist al algoritmului (ID-025-01) pentru UN grup."""
     group_key: str
-    excluded_reason: str | None = None  # "hard_conflict" | "unknown_source" | None
+    excluded_reason: str | None = None  # "hard_conflict" | "unknown_source" | "not_a_duplicate_after_dedup" | None
     canonical_id: Any = None
     canonical_source: str | None = None
     noncanonical: list[dict] = field(default_factory=list)  # [{"id","source","rank","reason"}]
@@ -225,6 +225,24 @@ def process_group(rows: list[dict]) -> GroupDecision:
         rows[0].get("kickoff_date", ""),
     )
     decision = GroupDecision(group_key=group_key)
+
+    # [ADR-059 Addendum, 2026-08-22] Aparare in adancime — un grup nu are
+    # voie sa contina acelasi rand fizic de doua ori (id duplicat). Cauza
+    # radacina (paginare fara `.order()` stabil in `_fetch_key_index()`) a
+    # fost reparata separat, dar aceasta garda ramane, fiindca efectul unui
+    # grup auto-duplicat ar fi catastrofal si silentios: randul ar deveni
+    # canonic pentru sine insusi (`ranked[0]`) SI necanonic marcat superseded
+    # de sine insusi (`ranked[1:]`) — `_mark_superseded(id, id, ...)` ar
+    # scrie `superseded_by = id`, facand randul sa dispara din setul live
+    # fara sa fi existat vreodata un duplicat real.
+    dedup: dict[Any, dict] = {}
+    for r in rows:
+        dedup[r.get("id")] = r
+    rows = list(dedup.values())
+
+    if len(rows) < 2:
+        decision.excluded_reason = "not_a_duplicate_after_dedup"
+        return decision
 
     if _classify_hard_conflict(rows):
         decision.excluded_reason = "hard_conflict"
@@ -342,17 +360,35 @@ class MatchIdentityReconciliationService:
         NOT NULL) — un grup deja marcat nu se reevalueaza (ID-025-01)."""
         client = self._sb.get_client()
         index: dict[str, list[dict]] = {}
+        seen_ids: set = set()
         offset, page_size = 0, 1000
         while True:
             res = (
                 client.table("match_history")
                 .select("id,fixture_id,home_team,away_team,kickoff_date")
                 .is_("superseded_by", "null")
+                # [FIX — descoperit 2026-08-22, ADR-059 Addendum] `.range()`
+                # FARA `.order()` explicit nu are ordine garantata intre pagini
+                # succesive (PostgREST/Postgres nu garanteaza ordine stabila
+                # fara ORDER BY) — sub scriere concurenta (exact ce se
+                # intampla in timpul unei reconcilieri de masa), acelasi rand
+                # poate fi intors de doua ori, in doua pagini diferite.
+                # `id` e imutabil (nu se schimba niciodata la UPDATE) si
+                # monoton (randuri noi primesc mereu id mai mare), deci
+                # ordonarea pe el face paginarea provabil stabila.
+                .order("id")
                 .range(offset, offset + page_size - 1)
                 .execute()
             )
             batch = res.data or []
             for row in batch:
+                rid = row.get("id")
+                if rid in seen_ids:
+                    # Aparare in adancime: chiar cu `.order("id")`, un rand
+                    # vazut a doua oara nu are voie sa produca un grup fals
+                    # (auto-referential) — vezi golul gasit live, 2026-08-22.
+                    continue
+                seen_ids.add(rid)
                 key = match_key(row.get("home_team", ""), row.get("away_team", ""), row.get("kickoff_date", ""))
                 index.setdefault(key, []).append(row)
             if len(batch) < page_size:
@@ -456,6 +492,13 @@ class MatchIdentityReconciliationService:
                 continue
             if decision.excluded_reason == "unknown_source":
                 report.excluded_unknown_source.append(key)
+                continue
+            if decision.excluded_reason == "not_a_duplicate_after_dedup":
+                # [ADR-059 Addendum, 2026-08-22] Grup fals, produs de un rand
+                # fizic vazut de doua ori (paginare instabila, cauza reparata
+                # in `_fetch_key_index()`). Fara efect — nu se scrie nimic,
+                # nu se raporteaza ca reconciliat (ar fi inselator: 0 randuri
+                # marcate, `canonical_id` inexistent).
                 continue
 
             if target_keys is not None:

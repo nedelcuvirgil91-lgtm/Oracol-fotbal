@@ -96,19 +96,33 @@ def truth_from_score(score: dict) -> tuple[int | None, int | None, str]:
 
 
 def _fetch_fd_rows(client) -> list[dict]:
+    """[FIX — descoperit 2026-08-22] `.range()` fara `.order()` explicit nu
+    are ordine garantata intre pagini sub scriere concurenta — poate intoarce
+    acelasi rand de doua ori. `id` e imutabil si monoton, deci ordonarea pe
+    el face paginarea provabil stabila."""
     rows: list[dict] = []
+    seen_ids: set = set()
     offset, page_size = 0, 1000
     while True:
-        batch = (
+        raw_batch = (
             client.table("match_history")
             .select("id,fixture_id,home_team,away_team,kickoff_date,league,season,"
                     "actual_home_goals,actual_away_goals,actual_result,superseded_by")
             .like("fixture_id", "fd\\_%")
+            .order("id")
             .range(offset, offset + page_size - 1)
             .execute().data
         ) or []
-        rows.extend(batch)
-        if len(batch) < page_size:
+        for r in raw_batch:
+            rid = r.get("id")
+            if rid in seen_ids:
+                continue
+            seen_ids.add(rid)
+            rows.append(r)
+        # Lungimea PAGINII BRUTE decide oprirea, nu numarul dupa deduplicare —
+        # altfel o pagina plina cu un singur rand duplicat ar opri paginarea
+        # prematur, inainte de a ajunge la ultima pagina reala.
+        if len(raw_batch) < page_size:
             break
         offset += page_size
     return rows
