@@ -143,7 +143,7 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "Freiburg": ["SC Freiburg","Sport-Club Freiburg"],
     "Wolfsburg": ["VfL Wolfsburg"],
     "Paris Saint-Germain": ["PSG","Paris SG","Paris Saint Germain","Paris Saint-Germain FC"],
-    "Marseille": ["Olympique de Marseille","OM"],
+    "Marseille": ["Olympique de Marseille","OM","Olympique Marseille"],
     "Lyon": ["Olympique Lyonnais","OL"],
     "Monaco": ["AS Monaco","ASM","AS Monaco FC"],
     "Lens": ["RC Lens","Racing Club de Lens"],
@@ -337,9 +337,9 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "Slavia Praha": ["SK Slavia Praha"],
     "Slovan Bratislava": ["ŠK Slovan Bratislava"],
     "Sturm Graz": ["SK Sturm Graz"],
-    "Benfica": ["Sport Lisboa e Benfica"],
-    "Braga": ["Sporting Clube de Braga","SC BRAGA"],
-    "Sporting CP": ["Sporting Clube de Portugal"],
+    "Benfica": ["Sport Lisboa e Benfica","SL Benfica"],
+    "Braga": ["Sporting Clube de Braga","SC BRAGA","Sp Braga","Sporting Braga"],
+    "Sporting CP": ["Sporting Clube de Portugal","Sp Lisbon"],
     "Zenit Saint Petersburg": ["Zenit St Petersburg"],
     "Brondby": ["Brøndby IF"],
     "Ferencvaros": ["FERENCVAROSI TC","Ferencvárosi TC"],
@@ -453,7 +453,7 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "Maccabi Tel Aviv": [],
     "Mjallby":          [],
     "Motherwell":       [],
-    "Nijmegen":         [],
+    "Nijmegen":         ["NEC", "NEC Nijmegen"],
     "Nordsjaelland":    [],
     "OFI Crete":        [],
     "PAOK":             [],
@@ -472,9 +472,95 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "Thun":             [],
     "Trabzonspor":      [],
     "Tromso":           [],
-    "Twente":           [],
+    "Twente":           ["FC Twente '65"],
     "Vaduz":            [],
     "Viking":           [],
+
+    # ════════════════════════════════════════════════════════════════════
+    # [ADR-060, Faza 2 — 2026-08-22] Categoria D3: perechi de nume care
+    # desemneaza acelasi club, dar pe care vocabularul de PANA ACUM nu le
+    # unea deloc (spre deosebire de D2, unde varianta fragmentata cel putin
+    # colizioneaza cu match_key() dupa normalizare — aici, inainte de acest
+    # commit, normalize_team_name() lasa ambele forme NESCHIMBATE).
+    #
+    # Descoperite mecanic prin scripts/detect_identity_alias_candidates.py
+    # (GitHub Actions run 32561462931, 2026-08-22), ZERO potrivire fuzzy —
+    # doar dovada factuala: acelasi meci (zi, liga, scor) sub doua nume, cu
+    # cealalta echipa identica la caracter. Mecanismul de VETO absolut
+    # (daca cele doua nume s-au infruntat vreodata, sunt cluburi diferite)
+    # a respins deja, corect, 3 coincidente false gasite de dovada pozitiva
+    # singura: FCSB/Sepsi OSK, CFR Cluj/Chindia Targoviste, Din. Bucuresti/
+    # Farul Constanța — toate 3 cu meciuri directe reale in match_history.
+    #
+    # 58 perechi ramase (dupa veto) grupate prin union-find in 53 identitati
+    # distincte (4 clustere de 3 nume: Braga/Sp Braga/Sporting Braga,
+    # Estoril/GD Estoril/GD Estoril Praia, NEC/NEC Nijmegen/Nijmegen,
+    # Guimaraes/Vitória Guimarães/Vitória SC — nume care apar in mai multe
+    # perechi simultan). 6 dintre cele 53 aterizeaza pe o cheie canonica
+    # deja existenta (Benfica, Braga, Marseille, Nijmegen, Sporting CP,
+    # Twente — alias-urile lor apar mai sus/jos in acest dictionar, NU aici).
+    # Restul de 47, mai jos.
+    #
+    # Canonicul ales per grup = numele cu cele mai multe randuri live in
+    # match_history (verificat live, nu presupus) — cu o exceptie verificata
+    # manual: "Goztepe" (4 randuri, Flashscore, meciuri VIITOARE) e o
+    # varianta fara diacritica a "Göztepe" (36, openfootball) — nu putea
+    # aparea in dovada automata (fara meci trecut de comparat), adaugata
+    # dupa verificare directa: aceeasi liga (Super Lig), acelasi club unic.
+    #
+    # Verificare suplimentara pe cazul cu cel mai mare risc de fuziune falsa
+    # ("Ajaccio" — Corsica are istoric DOUA cluburi, AC Ajaccio si Gazélec
+    # Ajaccio): confirmat live ca toate cele 38 de randuri "AC Ajaccio"
+    # (openfootball, 2022-2023) au un rand-geaman exact pe (zi, liga, scor)
+    # in cele 157 de randuri "Ajaccio" (kaggle, 2000-2025) — acoperire 38/38,
+    # nicio ramasita neexplicata care ar sugera contaminare cu celalalt club.
+    "AZ Alkmaar": ["AZ"],
+    "Ad. Demirspor": ["Adana Demirspor"],
+    "Ajaccio": ["AC Ajaccio"],
+    "Almere City FC": ["Almere City"],
+    "Belenenses": ["Belenenses SAD"],
+    "Bielefeld": ["Arminia Bielefeld"],
+    "Boavista": ["Boavista FC"],
+    "Bodrum FK": ["Bodrumspor"],
+    "Bordeaux": ["Girondins Bordeaux"],
+    "Buyuksehyr": ["İstanbul Başakşehir"],
+    "CD Nacional": ["Nacional"],
+    "CD Santa Clara": ["Santa Clara"],
+    "CD Tondela": ["Tondela"],
+    "CF Estrela da Amadora": ["Estrela"],
+    "Cambuur": ["SC Cambuur"],
+    "Casa Pia AC": ["Casa Pia"],
+    "Estoril": ["GD Estoril", "GD Estoril Praia"],
+    "Eyupspor": ["Eyüpspor"],
+    "FC Arouca": ["Arouca"],
+    "FC Famalicão": ["Famalicao"],
+    "FC Groningen": ["Groningen"],
+    "FC Utrecht": ["Utrecht"],
+    "FC Vizela": ["Vizela"],
+    "FC Volendam": ["Volendam"],
+    "GD Chaves": ["Chaves"],
+    "Gaziantep": ["Gaziantep FK"],
+    "Gil Vicente": ["Gil Vicente FC"],
+    "Goztep": ["Goztepe", "Göztepe"],
+    "Greuther Furth": ["SpVgg Greuther Fürth 1903"],
+    "Guimaraes": ["Vitória Guimarães", "Vitória SC"],
+    "Heracles Almelo": ["Heracles"],
+    "Hertha": ["Hertha BSC"],
+    "Kasimpasa": ["Kasımpaşa SK"],
+    "Maritimo": ["CS Marítimo"],
+    "Moreirense FC": ["Moreirense"],
+    "Pacos Ferreira": ["Paços de Ferreira"],
+    "Portimonense SC": ["Portimonense"],
+    "Rio Ave FC": ["Rio Ave"],
+    "Rizespor": ["Çaykur Rizespor"],
+    "SBV Excelsior": ["Excelsior"],
+    "SC Farense": ["Farense"],
+    "Sampdoria": ["UC Sampdoria"],
+    "Spezia": ["Spezia Calcio"],
+    "Troyes": ["ESTAC Troyes"],
+    "Vitesse": ["SBV Vitesse"],
+    "Waalwijk": ["RKC Waalwijk"],
+    "Willem II": ["Willem II Tilburg"],
 }
 
 ALIAS_TO_CANONICAL: dict[str, str] = {}

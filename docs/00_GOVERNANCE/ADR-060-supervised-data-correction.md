@@ -45,7 +45,8 @@ Acest ADR autorizează contractul, nu execuția fiecărui caz — fiecare rămâ
 | Gol | Corpus | Coloane corectate | Stare |
 |---|---|---|---|
 | Scoruri penalty-shootout | 6 rânduri, id-uri fixe (`3623, 3625, 3634, 3809, 3814, 114439`) | `actual_home_goals`, `actual_away_goals`, `actual_result` | Executat sub acest ADR — vezi jurnalul de execuție de mai jos |
-| Vocabular D2+D3 | 616 rânduri (D2) + candidați D3 aprobați explicit de om, din `scripts/detect_identity_alias_candidates.py` | `home_team`, `away_team` | Neexecutat — următoarea etapă |
+| Vocabular D3 (extindere vocabular) | 58 perechi → 53 identități, `scripts/detect_identity_alias_candidates.py` | `mappings.py` (`TEAM_ALIASES`) | Executat — vezi Jurnalul de execuție, Faza 2a |
+| Redenumire D2+D3 (rânduri deja scrise) | recalculat după extinderea vocabularului — vezi Faza 2b | `home_team`, `away_team` în `match_history` | Neexecutat — următoarea etapă |
 | Rebuild ELO | Toate rândurile cu `home_elo`/`away_elo`/`home_elo_after`/`away_elo_after` deja populate | cele 4 coloane ELO | Neexecutat — după unificarea vocabularului, ca să ruleze o singură dată pe serii curate |
 
 Ordinea (scoruri → vocabular → ELO) nu e arbitrară: rebuild-ul ELO citește `actual_home_goals`/`actual_away_goals` (deci trebuie să ruleze după corecția scorurilor) și grupează pe `home_team`/`away_team` (deci trebuie să ruleze după unificarea vocabularului, altfel recalculează corect peste lanțuri încă fragmentate — exact observația din măsurătoarea ELO).
@@ -79,6 +80,22 @@ Executat 2026-08-22, imediat după aprobarea acestui ADR.
 **Aprobare** (condiția 4): SQL exact arătat proprietarului produsului, aprobat explicit („aprob") separat de aprobarea etapei generale.
 
 **Idempotență** (condiția 5): `scripts/correct_penalty_shootout_scores.py` — fiecare `UPDATE` are `WHERE id = ... AND actual_home_goals = <valoarea_veche> AND actual_away_goals = <valoarea_veche>`. O rulare repetată nu produce efect, fiindcă WHERE-ul nu mai găsește valoarea veche.
+
+**Efect secundar observat, nu presupus**: corectarea rândului `fd_524100` (Liverpool–PSG) a făcut ca acesta să coincidă exact (scor + rezultat) cu rândul geamăn `openfootball_...` — singurul grup HARD CONFLICT rămas nereconciliat după ADR-025 Faza 4. Verificat separat, prin mecanismul deja aprobat (`scripts/run_identity_reconciliation_dryrun.py`): grupul a devenit reconciliabil (1 grup, 1 reconciliat, 0 hard conflict). Executat prin `run_identity_reconciliation_full.py` (mecanism ADR-059, nu o extindere a acestui ADR) — rândul `openfootball` (rank sursă 6) marcat `superseded_by` rândul `fd_` (rank sursă 2), rândul canonic neatins. Confirmat independent în bază.
+
+## Jurnal de execuție — Faza 2a (extindere vocabular D3)
+
+Executat 2026-08-22, imediat după Faza 1.
+
+**Dovadă**: `scripts/detect_identity_alias_candidates.py`, GitHub Actions run `32561462931` — 54.393 rânduri live analizate, 61 perechi cu dovadă pozitivă, 3 respinse de veto (au meciuri directe reale: `FCSB`/`Sepsi OSK`, `CFR Cluj`/`Chindia Targoviste`, `Din. Bucuresti`/`Farul Constanța`), 58 rămase.
+
+**Corpus**: cele 58 de perechi grupate prin union-find (offline, determinist) în **53 identități distincte** — 4 clustere de 3 nume (`Braga`/`Sp Braga`/`Sporting Braga`, `Estoril`/`GD Estoril`/`GD Estoril Praia`, `NEC`/`NEC Nijmegen`/`Nijmegen`, `Guimaraes`/`Vitória Guimarães`/`Vitória SC`), restul perechi simple. 6 din 53 aterizează pe o cheie canonică deja existentă în `mappings.py` (`Benfica`, `Braga`, `Marseille`, `Nijmegen`, `Sporting CP`, `Twente`) — extinse cu aliasuri noi, nu recreate. Restul de 47 sunt chei canonice noi.
+
+**Verificare suplimentară, dincolo de veto** (condiția 1, dovadă verificată): cazul cu cel mai mare risc de fuziune falsă — `Ajaccio`, fiindcă Corsica are istoric două cluburi (AC Ajaccio și Gazélec Ajaccio) — verificat direct în bază: toate cele 38 de rânduri `AC Ajaccio` (openfootball, sezonul 2022-2023) au un rând-geamăn exact pe (zi, ligă, scor) în cele 157 de rânduri `Ajaccio` (kaggle, 2000-2025), acoperire 38/38, nicio rămășiță neexplicată. O singură adăugare manuală, în afara dovezii automate: `Goztepe` (4 rânduri, Flashscore, meciuri **viitoare**, deci fără dovadă pozitivă posibilă — nu există încă un meci trecut de comparat) — verificat direct: aceeași ligă (Super Lig) ca `Goztep`/`Göztepe`, variantă fără diacritică a aceluiași nume.
+
+**Suprafață**: exclusiv `mappings.py` (`TEAM_ALIASES`, 53 de intrări — 6 extinderi + 47 chei noi). **Nu atinge nicio coloană din `match_history`** — vocabularul extins schimbă doar comportamentul viitor al `normalize_team_name()`; rândurile deja scrise cu numele vechi rămân neschimbate până la Faza 2b (redenumire).
+
+**Verificare**: `tests/test_adr060_d3_vocabulary_extension.py` (5 teste) — toate cele 53 de clustere unifică corect, cele 3 perechi vetoate rămân distincte, niciun alias nou nu e deja folosit pentru alt canonic, clusterele de 3 nume sunt complet tranzitive. Suita completă `pytest tests/`: verde.
 
 ## Referințe
 
