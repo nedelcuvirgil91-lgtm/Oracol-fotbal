@@ -1,0 +1,51 @@
+name: Football Oracle — Candidati de vocabular D3 (read-only)
+
+# [ADAUGAT — 2026-08-22] Read-only. Propune aliasuri pentru review uman;
+# NU modifica mappings.py si NU scrie in Supabase.
+#
+# PROBLEMA: reconcilierea (ADR-025) uneste doua randuri doar cand match_key()
+# le da aceeasi cheie. Perechile pe care vocabularul NU le uneste ('Almere
+# City' vs 'Almere City FC') n-au putut fi vazute niciodata. Verificat live
+# 2026-08-22: toate cele 68 de meciuri ale lui Almere City exista de DOUA ori
+# in setul live — meciuri duplicate ramase in antrenarea ML si in replay-ul ELO.
+#
+# DOVADA, fara nicio potrivire fuzzy (v1.2 a eliminat prefix-matching-ul dupa
+# 141 de fuziuni false):
+#   POZITIV — acelasi meci (zi, liga, scor) sub doua nume, cu cealalta echipa
+#             identica la caracter;
+#   VETO    — daca cele doua nume s-au infruntat vreodata, sunt cluburi
+#             diferite. O echipa nu joaca cu ea insasi.
+#
+# FARA `schedule:` deocamdata — se ruleaza cand se pune intrebarea. Poate
+# deveni recurent dupa ce vocabularul se stabilizeaza.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: detect-identity-alias-candidates
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Detect alias candidates (zero writes)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python scripts/detect_identity_alias_candidates.py
