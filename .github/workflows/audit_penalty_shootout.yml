@@ -1,0 +1,53 @@
+name: Football Oracle — Audit scoruri penalty-shootout (read-only)
+
+# [ADAUGAT — 2026-08-22] Audit, ZERO scriere. Verifica FIECARE rand `fd_*` din
+# match_history contra API-ului football-data.org si raporteaza orice scor care
+# nu corespunde adevarului sursei.
+#
+# DE CE: `_parse_match()` citea `score.fullTime` fara sa se uite la
+# `score.duration`. Pentru un meci decis la penalty-uri, `fullTime` include
+# loviturile de departajare — scorul real e in `score.regularTime`. Bugul e
+# reparat la sursa, dar randurile deja scrise raman corupte: un fix la sursa nu
+# rescrie istoria.
+#
+# Caz declansator: fd_524100 (Liverpool - PSG, 2025-03-11) persistat 1-5 in loc
+# de 0-1. E si singura coliziune care blocheaza redenumirea categoriei D2, si
+# singurul HARD CONFLICT ramas dupa ADR-025 Faza 4.
+#
+# Auditul acopera TOATE cele 24 de perechi (liga, sezon), nu doar Champions
+# League — 24 de apeluri API, sub 3 minute de cota. "Verificat, nu presupus":
+# nu se presupune ca o liga interna nu poate avea un scor gresit.
+#
+# FARA `schedule:` — instrument de decizie, rulat cand se pune intrebarea.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: audit-penalty-shootout
+  cancel-in-progress: false
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Audit penalty-shootout rows (zero writes)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
+        run: python scripts/audit_penalty_shootout_rows.py
