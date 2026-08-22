@@ -47,7 +47,7 @@ Acest ADR autorizează contractul, nu execuția fiecărui caz — fiecare rămâ
 | Scoruri penalty-shootout | 6 rânduri, id-uri fixe (`3623, 3625, 3634, 3809, 3814, 114439`) | `actual_home_goals`, `actual_away_goals`, `actual_result` | Executat sub acest ADR — vezi jurnalul de execuție de mai jos |
 | Vocabular D3 (extindere vocabular) | 58 perechi → 53 identități, `scripts/detect_identity_alias_candidates.py` | `mappings.py` (`TEAM_ALIASES`) | Executat — vezi Jurnalul de execuție, Faza 2a |
 | Redenumire D2+D3 (rânduri deja scrise) | 2.477 rânduri, 168 nume distincte | `home_team`, `away_team` în `match_history` | Executat — vezi Jurnalul de execuție, Faza 2b |
-| Rebuild feature-uri (ELO + 16 alte coloane calculate de `run_backfill()`) | 51.046 rânduri (`superseded_by IS NULL AND actual_result IS NOT NULL`) | cele 20 `BACKFILL_COLUMNS` (nu doar ELO — vezi Jurnalul de execuție, Faza 3, pentru descoperirea amplorii reale) | Reset executat, rebuild în curs — vezi Jurnalul de execuție, Faza 3 |
+| Rebuild feature-uri (ELO + 16 alte coloane calculate de `run_backfill()`) | 51.046 rânduri (`superseded_by IS NULL AND actual_result IS NOT NULL`) | cele 20 `BACKFILL_COLUMNS` (nu doar ELO — vezi Jurnalul de execuție, Faza 3, pentru descoperirea amplorii reale) | **Executat, verificat complet — 100,0% divergență-zero pe întregul corpus (vezi Jurnalul de execuție, Faza 3)** |
 
 Ordinea (scoruri → vocabular → ELO) nu e arbitrară: rebuild-ul ELO citește `actual_home_goals`/`actual_away_goals` (deci trebuie să ruleze după corecția scorurilor) și grupează pe `home_team`/`away_team` (deci trebuie să ruleze după unificarea vocabularului, altfel recalculează corect peste lanțuri încă fragmentate — exact observația din măsurătoarea ELO).
 
@@ -155,6 +155,30 @@ Executat 2026-08-22, cu aprobare explicită separată (per condiția 4) pentru p
 
 **Rebuild**: declanșat `backfill.yml` (`dry_run=false`, `retrain_ml=false` — reantrenarea ML rămâne, deliberat, o decizie separată, niciodată bundle-uită tacit într-un fix de date, per „Filosofia proiectului" din `CLAUDE.md`).
 
+**Rezultat rulare 1** (`run 32573933801`, ~2h53min): `conclusion: failure` la nivel de job — investigat imediat, nu tratat ca eșec catastrofal. Log-ul propriu al scriptului arată aproape succes total: „Procesate: 51041, Erori: 5" — `conclusion: failure` reflectă doar `errors > 0` din exit code, nu o oprire prematură. Descărcarea log-ului brut prin `curl` a fost blocată de proxy-ul mediului (403, aceeași clasă de blocaj notată anterior pentru artefacte GitHub) — s-a pivotat pe interogare directă în bază, nu pe presupunere. Interogare directă a găsit **6** rânduri încă `NULL`, nu 5 cât raporta propriul contor al scriptului — discrepanța investigată, nu ignorată: id=126780 (`flashscore_zc0VjBZF`, `kickoff_date=2026-08-22T11:30:00`) are un tipar temporal consistent cu un meci inserat concurent de un alt proces de sincronizare, chiar în fereastra de execuție a rulării — deci niciodată încercat de rebuild (fără eroare logată), spre deosebire de un rând încercat-și-eșuat (cu eroare logată). Explicație plauzibilă, nu confirmată direct — s-a preferat o reluare empirică, idempotentă, în locul unei presupuneri.
+
+**Rezultat rulare 2 — reluare** (`run 32582575394`, 40,4s, `conclusion: success`): mecanismul idempotent (gating NULL-only) a procesat doar rândurile încă incomplete. Log: „Procesate: 6, Erori: 0". Verificat direct în bază, pe toate cele 6 id-uri anterior eșuate: toate cu `home_elo`/`away_elo`/`home_elo_after`/`away_elo_after` complet populate, `backfill_done: true`.
+
+**Verificare finală pe întregul corpus** (nu doar pe cele 6 rânduri spot-verificate): `SELECT count(*) WHERE superseded_by IS NULL AND actual_result IS NOT NULL AND (<oricare din ELO/formă/H2H> IS NULL OR backfill_done IS NOT TRUE)` → **0**. Corpusul a crescut între timp la 51.047 (un meci nou finalizat după crearea backup-ului) — și acel rând suplimentar e de asemenea complet, populat pe altă cale (sincronizarea zilnică live), nu prin rebuild — consistent, nu o anomalie.
+
+**Măsurătoare de închidere a buclei** (`scripts/measure_elo_divergence.py`, strict read-only, aceeași unealtă care a motivat decizia inițială de rebuild): rulat înainte (`run 32558948226`, 2026-08-22 07:12, PRE-rebuild) și după (`run 32582899754`, 2026-08-22 15:51, POST-rebuild), rezultatele comparate direct:
+
+| Metrică | ÎNAINTE de rebuild | DUPĂ rebuild |
+|---|---|---|
+| Meciuri în replay | 53.872 | 51.047 (scădere așteptată — reconcilierea de identitate, Faza 2c, a scos duplicatele din replay) |
+| ELO pre-meci identic (persistat = recalculat) | 66,4% | **100,0%** |
+| ELO pre-meci divergență ≥ 50 puncte | 1,1% (1.225 valori) | **0** |
+| ELO pre-meci, divergență maximă | 641 puncte | **0** |
+| ELO post-meci identic | 66,2% | **100,0%** |
+| Echipe cu ELO servit LIVE corect | 70,9% (856/1.207) | **100,0% (1.045/1.045)** |
+| Divergență maximă servită azi | 115 puncte (Liverpool FC (ENG)) | **0** |
+
+Confirmă, măsurat nu presupus, că rebuild-ul a rezolvat exact problema care l-a motivat: zero divergență reziduală, pe orice metrică urmărită, pe întregul corpus recalculat.
+
+**Suită de teste**: `pytest tests/` — **2.560 passed, 2 skipped**, verde, rulată după rebuild (nicio regresie introdusă de reset+replay).
+
+**Backup**: `match_history_backfill_backup_20260822` păstrat neșters — decizie de retenție (cât timp se păstrează) neluată încă, va fi propusă explicit proprietarului produsului separat de această execuție.
+
 ## Referințe
 
 - ADR-036 / D3.5 — Canonical Feature Ownership
@@ -162,4 +186,4 @@ Executat 2026-08-22, cu aprobare explicită separată (per condiția 4) pentru p
 - `scripts/audit_penalty_shootout_rows.py` — auditul care a produs corpusul Fazei 1
 - `scripts/correct_penalty_shootout_scores.py` — execuția Fazei 1
 - `scripts/analyze_d2_vocabulary_drift.py`, `scripts/detect_identity_alias_candidates.py` — pregătirea Fazei 2 (neexecutată)
-- `scripts/measure_elo_divergence.py` — măsurătoarea care motivează Faza 3 (neexecutată)
+- `scripts/measure_elo_divergence.py` — măsurătoarea care motivează Faza 3, rulată PRE (`run 32558948226`) și POST (`run 32582899754`) rebuild pentru închiderea buclei
