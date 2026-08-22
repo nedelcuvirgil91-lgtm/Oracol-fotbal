@@ -1,0 +1,59 @@
+name: Football Oracle — Identity Reconciliation FULL (ADR-025 Faza 4)
+
+# [ADAUGAT — 2026-08-22] SCRIE IN PRODUCTIE. Reconcilierea completa, dupa ce
+# pilotul (Faza 3) a rulat si a fost verificat independent in baza. Suprafata
+# de scriere e fixata de ADR-059: doar superseded_by/at/reason, doar pe randul
+# necanonic — vezi antetul scripts/run_identity_reconciliation_full.py.
+#
+# NU redenumeste nimic. Categoria "D2" (~537 randuri istorice cu nume
+# fragmentat, fara coliziune) scrie in home_team/away_team — suprafata complet
+# diferita, in afara a ce autorizeaza ADR-059. Design si aprobare proprii.
+#
+# FARA `schedule:` — DELIBERAT, ca si la pilot. Executie unica, manuala, cu
+# confirmare literala (`confirm: EXECUTE-FULL`) ca a doua bariera impotriva
+# declansarii accidentale (North Star #6: confirmare explicita, vizibila).
+# Sirul difera intentionat de cel al pilotului: o confirmare copiata din
+# obisnuinta nu trebuie sa treaca de o operatie cu alt blast radius.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Scrie exact "EXECUTE-FULL" pentru a confirma (scrie in productie, ~397 randuri).'
+        required: true
+        type: string
+
+concurrency:
+  group: identity-reconciliation-full
+  cancel-in-progress: false
+
+jobs:
+  full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Verify confirmation input
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "EXECUTE-FULL" ]; then
+            echo "Confirmare lipsa/incorecta — trebuie 'EXECUTE-FULL', ai dat '${{ github.event.inputs.confirm }}'."
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run full reconciliation
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python scripts/run_identity_reconciliation_full.py
