@@ -305,6 +305,13 @@ class ReconciliationReport:
     # dintre ele, dupa un EXECUTE, e exact numarul de esecuri de scriere.
     rows_to_mark: int = 0
     rows_marked_superseded: int = 0
+    # [pilot, ADR-025 Faza 3] Chei din `target_keys` care NU au fost gasite
+    # printre grupurile reconciliabile — fie nu exista deloc azi (grup deja
+    # rezolvat/disparut), fie sunt HARD CONFLICT/sursa necunoscuta. Populat
+    # DOAR cand `run()` primeste `target_keys`. Un pilot care tinteste 6 chei
+    # si scrie in 4 rânduri, în tacere, ar fi exact genul de esec pe care
+    # aceasta lista il face imposibil de ratat.
+    target_keys_not_found: list[str] = field(default_factory=list)
 
     @property
     def excluded_hard_conflict_count(self) -> int:
@@ -399,7 +406,8 @@ class MatchIdentityReconciliationService:
             .execute()
         )
 
-    def run(self, dry_run: bool = True, limit_groups: int | None = None) -> ReconciliationReport:
+    def run(self, dry_run: bool = True, limit_groups: int | None = None,
+            target_keys: set[str] | None = None) -> ReconciliationReport:
         """DRY-RUN implicit. `dry_run=False` scrie — vezi `_mark_superseded`
         pentru suprafata exacta (3 coloane de audit, doar pe randul necanonic).
 
@@ -409,9 +417,22 @@ class MatchIdentityReconciliationService:
         e stergerea marcajului. Execuția in sine ramane gatata per Phase Gate
         (ADR-025): pilot pe subset inainte de rulare completa.
 
-        `limit_groups` — plafon de siguranta pentru pilot (ADR-025 Faza 3).
+        `limit_groups` — plafon NUMERIC de siguranta (ADR-025 Faza 3).
         Grupurile se proceseaza in ordine sortata a cheii naturale, deci un
-        pilot e reproductibil: aceleasi N grupuri la fiecare rulare.
+        pilot e reproductibil: aceleasi N grupuri la fiecare rulare — dar
+        setul exact de grupuri depinde de ordinea de sortare, nu e ales de
+        apelant.
+
+        `target_keys` — plafon PRECIS: doar grupurile ale caror chei
+        (`match_key()`) sunt in aceasta multime sunt procesate (scrise, in
+        EXECUTE). Pentru un pilot ales deliberat (ex. "exact aceste 6 grupuri
+        flashscore+tsdb, verificate individual") e mai sigur decat
+        `limit_groups` — elimina orice dependenta de ordinea de sortare. Cheile
+        din `target_keys` care nu sunt gasite printre grupurile reconciliabile
+        (disparute, HARD CONFLICT, sursa necunoscuta) ajung in
+        `report.target_keys_not_found`, ca un pilot tintit gresit sa nu treaca
+        neobservat. `limit_groups` si `target_keys` se pot combina; de obicei
+        se foloseste unul singur.
         """
         report = ReconciliationReport()
         key_index = self._fetch_key_index()
@@ -422,6 +443,7 @@ class MatchIdentityReconciliationService:
         full_rows_by_id = self._fetch_full_rows(all_ids)
 
         processed = 0
+        found_targets: set[str] = set()
         for key in sorted(duplicate_groups):
             stub_rows = duplicate_groups[key]
             full_rows = [full_rows_by_id[r["id"]] for r in stub_rows if r["id"] in full_rows_by_id]
@@ -436,6 +458,10 @@ class MatchIdentityReconciliationService:
                 report.excluded_unknown_source.append(key)
                 continue
 
+            if target_keys is not None:
+                if key not in target_keys:
+                    continue
+                found_targets.add(key)
             if limit_groups is not None and processed >= limit_groups:
                 continue
             processed += 1
@@ -460,6 +486,9 @@ class MatchIdentityReconciliationService:
                         # idempotent si per-rand, deci reluarea e sigura.
                         report.write_errors.append(f"id={nc['id']}: {exc}")
                         logger.error("[MatchIdentityReconciliation] Esec marcaj id=%s: %s", nc["id"], exc)
+
+        if target_keys is not None:
+            report.target_keys_not_found = sorted(target_keys - found_targets)
 
         logger.info(
             "[MatchIdentityReconciliation] %s: %d grupuri, %d reconciliate, "

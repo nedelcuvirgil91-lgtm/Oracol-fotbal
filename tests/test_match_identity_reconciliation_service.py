@@ -410,3 +410,52 @@ def test_reconciled_group_keys_excludes_hard_conflict_and_unknown_source():
     sb = _FakeSb(rows)
     report = MatchIdentityReconciliationService(supabase_client=sb).run(dry_run=True)
     assert report.reconciled_group_keys == []
+
+
+# ── target_keys (pilot precis, ADR-025 Faza 3) ──────────────────────────────
+
+def test_target_keys_processes_only_matching_groups():
+    rows = [
+        _row(1, "fd_1", home="Alpha", away="Beta", date="2026-02-01"),
+        _row(2, "kaggle_1", home="Alpha", away="Beta", date="2026-02-01"),
+        _row(3, "fd_2", home="Gamma", away="Delta", date="2026-02-02"),
+        _row(4, "kaggle_2", home="Gamma", away="Delta", date="2026-02-02"),
+    ]
+    sb = _FakeSb(rows)
+    target = {"alpha||beta||2026-02-01"}
+    report = MatchIdentityReconciliationService(supabase_client=sb).run(
+        dry_run=True, target_keys=target,
+    )
+    assert report.reconciled_group_keys == ["alpha||beta||2026-02-01"]
+    assert report.total_groups == 2  # descoperirea vede tot
+    assert report.target_keys_not_found == []
+
+
+def test_target_keys_reports_keys_not_found():
+    rows = [
+        _row(1, "fd_1", home="Alpha", away="Beta", date="2026-02-01"),
+        _row(2, "kaggle_1", home="Alpha", away="Beta", date="2026-02-01"),
+    ]
+    sb = _FakeSb(rows)
+    target = {"alpha||beta||2026-02-01", "nu||exista||2026-01-01"}
+    report = MatchIdentityReconciliationService(supabase_client=sb).run(
+        dry_run=True, target_keys=target,
+    )
+    assert report.target_keys_not_found == ["nu||exista||2026-01-01"]
+
+
+def test_target_keys_excludes_hard_conflict_group_even_if_targeted():
+    """Un pilot nu poate ocoli protectia HARD CONFLICT tintind explicit acel
+    grup — grupul ramane exclus, iar cheia apare in `target_keys_not_found`."""
+    rows = [
+        _row(1, "fd_1", home="A", away="B", date="2026-02-01", result="H"),
+        _row(2, "kaggle_1", home="A", away="B", date="2026-02-01", result="A"),
+    ]
+    sb = _FakeSb(rows)
+    target = {"a||b||2026-02-01"}
+    report = MatchIdentityReconciliationService(supabase_client=sb).run(
+        dry_run=True, target_keys=target,
+    )
+    assert report.reconciled_group_keys == []
+    assert report.target_keys_not_found == ["a||b||2026-02-01"]
+    assert report.excluded_hard_conflict_count == 1

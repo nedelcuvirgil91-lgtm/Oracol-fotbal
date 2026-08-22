@@ -1,0 +1,56 @@
+name: Football Oracle — Identity Reconciliation PILOT (ADR-025 Faza 3)
+
+# [ADAUGAT — 2026-08-22] SCRIE IN PRODUCTIE. Rulare unica, deliberata, a
+# pilotului aprobat explicit de proprietarul produsului — cele 6 grupuri
+# `flashscore + tsdb` (vezi antetul scripts/run_identity_reconciliation_pilot.py
+# pentru justificarea fiecarui grup si suprafata exacta de scriere, fixata de
+# ADR-059: doar superseded_by/at/reason, doar pe randul necanonic).
+#
+# FARA `schedule:` — DELIBERAT. Nu e un job recurent, e o executie unica.
+# `workflow_dispatch` cere o confirmare literala (`confirm: EXECUTE-PILOT`) ca
+# o a doua bariera impotriva declansarii accidentale, dincolo de faptul ca
+# ramane oricum doar manual — acelasi principiu de "confirmare explicita,
+# vizibila" (North Star #6) aplicat si la nivel de trigger, nu doar de cod.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Scrie exact "EXECUTE-PILOT" pentru a confirma rularea (scrie in productie).'
+        required: true
+        type: string
+
+concurrency:
+  group: identity-reconciliation-pilot
+  cancel-in-progress: false
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Verify confirmation input
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "EXECUTE-PILOT" ]; then
+            echo "Confirmare lipsa/incorecta — trebuie 'EXECUTE-PILOT', ai dat '${{ github.event.inputs.confirm }}'."
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run pilot (scrie superseded_by/at/reason pe 6 randuri necanonice)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python scripts/run_identity_reconciliation_pilot.py
