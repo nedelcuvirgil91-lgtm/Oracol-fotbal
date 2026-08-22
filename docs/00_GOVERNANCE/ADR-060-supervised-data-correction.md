@@ -46,8 +46,8 @@ Acest ADR autorizează contractul, nu execuția fiecărui caz — fiecare rămâ
 |---|---|---|---|
 | Scoruri penalty-shootout | 6 rânduri, id-uri fixe (`3623, 3625, 3634, 3809, 3814, 114439`) | `actual_home_goals`, `actual_away_goals`, `actual_result` | Executat sub acest ADR — vezi jurnalul de execuție de mai jos |
 | Vocabular D3 (extindere vocabular) | 58 perechi → 53 identități, `scripts/detect_identity_alias_candidates.py` | `mappings.py` (`TEAM_ALIASES`) | Executat — vezi Jurnalul de execuție, Faza 2a |
-| Redenumire D2+D3 (rânduri deja scrise) | recalculat după extinderea vocabularului — vezi Faza 2b | `home_team`, `away_team` în `match_history` | Neexecutat — următoarea etapă |
-| Rebuild ELO | Toate rândurile cu `home_elo`/`away_elo`/`home_elo_after`/`away_elo_after` deja populate | cele 4 coloane ELO | Neexecutat — după unificarea vocabularului, ca să ruleze o singură dată pe serii curate |
+| Redenumire D2+D3 (rânduri deja scrise) | 2.477 rânduri, 168 nume distincte | `home_team`, `away_team` în `match_history` | Executat — vezi Jurnalul de execuție, Faza 2b |
+| Rebuild ELO | Toate rândurile cu `home_elo`/`away_elo`/`home_elo_after`/`away_elo_after` deja populate | cele 4 coloane ELO | Neexecutat — vocabularul e acum stabil (1.236→1.066 nume distincte), singura excepție rămasă e conflictul HARD CONFLICT deja investigat |
 
 Ordinea (scoruri → vocabular → ELO) nu e arbitrară: rebuild-ul ELO citește `actual_home_goals`/`actual_away_goals` (deci trebuie să ruleze după corecția scorurilor) și grupează pe `home_team`/`away_team` (deci trebuie să ruleze după unificarea vocabularului, altfel recalculează corect peste lanțuri încă fragmentate — exact observația din măsurătoarea ELO).
 
@@ -112,6 +112,24 @@ Executat 2026-08-22, imediat după Faza 2a. **Nu era planificată** — a fost o
 **Relația cu ADR-059**: acesta e exact scenariul avertizat în secțiunea „Gol rămas deschis" a acelui ADR — „orice extindere viitoare de vocabular reintroduce fragmentarea, tăcut" — dar materializat la o scară mult mai mare decât precedentele (F3/TSDB, câteva meciuri) și cu semn opus: acolo fragmentarea *ascundea* dubluri deja periculoase; aici extinderea vocabularului le-a *dezvăluit*, iar mecanismul deja construit (nu unul nou) le-a rezolvat corect.
 
 **Consecință pentru procesul viitor**: orice extindere de vocabular (Faza 2a, sau orice alias nou adăugat vreodată în `mappings.py`) trebuie urmată OBLIGATORIU de un dry-run de reconciliere înainte de orice redenumire — nu opțional, nu „probabil nu e nevoie". Ordinea corectă, confirmată empiric: **extinde vocabularul → reconciliază duplicate → abia apoi redenumește supraviețuitorii**.
+
+## Jurnal de execuție — Faza 2b (redenumire la forma canonică)
+
+Executat 2026-08-22, imediat după Faza 2c.
+
+**Dovadă** (condiția 1): `scripts/rename_teams_to_canonical.py::plan_renames()` reutilizează `classify()` din `scripts/analyze_d2_vocabulary_drift.py` — ACELAȘI cod care a produs numărătorile prezentate înainte de aprobare, nu o reimplementare paralelă. Sursa adevărului pentru „canonic" e exclusiv `mappings.normalize_team_name()`, deja aprobată în Faza 2a.
+
+**Corpus** (condiția 2): calculat determinist din starea live la momentul rulării — 168 nume distincte, 2.479 rânduri candidate, din care 2 excluse automat (coliziunea deja cunoscută `nijmegen||vitesse||2023-10-01`), rămân **2.477 de redenumit**. Verificat de două ori, la interval de câteva minute (dry-run → EXECUTE), cu rezultate identice (168/2.477/2 stabile).
+
+**Suprafață** (condiția 3): exclusiv `home_team`/`away_team`, pe rândul care are nevoie de schimbare. Nicio coloană ELO/feature/predicție atinsă — rebuild-ul rămâne Faza 3, separată.
+
+**Aprobare** (condiția 4): dry-run arătat explicit (exemple + numărători complete) înainte de `--execute`.
+
+**Idempotență** (condiția 5): fiecare `UPDATE` verifică `home_team`/`away_team` VECHI în WHERE — o rulare repetată nu găsește nimic de schimbat pe rândurile deja redenumite.
+
+**Execuție**: **2.477/2.477 rânduri redenumite, 0 sărite, 0 erori**. Verificat independent, direct în bază: totalul `match_history` neschimbat (58.300 rânduri, 51.565 live, 6.735 superseded — identic înainte/după, cum era de așteptat pentru o operație care nu schimbă numărul de rânduri). Re-rularea analizei D2 confirmă rezultatul: **nume distincte în uz 1.236 → 1.066**, D2 rămas = exact cele 2 nume din singura coliziune cunoscută (`Nijmegen`/`NEC`, `Vitesse`/`SBV Vitesse`), nicio altă fragmentare reziduală.
+
+**Consecință**: vocabularul de identitate e acum stabil — orice extindere viitoare de vocabular trebuie să repete ciclul complet (extinde → reconciliază duplicate → redenumește supraviețuitorii), documentat ca proces obligatoriu în Faza 2c de mai sus.
 
 ## Referințe
 
