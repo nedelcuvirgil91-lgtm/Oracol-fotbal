@@ -1,0 +1,48 @@
+name: Football Oracle — Analiza D2 vocabular fragmentat (read-only)
+
+# [ADAUGAT — 2026-08-22] Masuratoare, ZERO scriere. Raspunde la intrebarile pe
+# care un ADR pentru categoria D2 trebuie sa le aiba inainte sa existe:
+# cate randuri poarta un nume pe care normalizarea l-ar schimba, cate lanturi
+# ELO sunt rupte AZI din cauza asta, si daca redenumirea ar incalca indexul
+# unic `idx_match_history_natural_key_canonical`.
+#
+# DE CE ACUM: reconcilierea (ADR-025 Faza 3+4) a rezolvat doar fragmentarea
+# care producea COLIZIUNE de match_key(). Masuratoarea de divergenta ELO
+# (run 32558948226) a aratat ca primele 25 de divergente sunt dominate de nume
+# cu sufix de tara — categoria D2, ramasa neatinsa. Reconstructia ELO nu are
+# sens inainte de a sti cat din eroarea ramasa explica D2.
+#
+# FARA `schedule:` — nu e monitorizare recurenta (aia e identity_drift_check),
+# e un instrument de decizie rulat cand se pune intrebarea. Read-only, deci
+# re-rulabil oricand fara risc.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: analyze-d2-vocabulary-drift
+  cancel-in-progress: false
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Analyze D2 vocabulary drift (zero writes)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python scripts/analyze_d2_vocabulary_drift.py
