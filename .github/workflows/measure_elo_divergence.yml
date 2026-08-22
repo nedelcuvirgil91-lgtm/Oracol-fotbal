@@ -1,0 +1,47 @@
+name: Football Oracle — Measure ELO Divergence (read-only)
+
+# [ADAUGAT — 2026-08-22] Masuratoare, ZERO scriere. Raspunde la o singura
+# intrebare, cu o cifra: cat de gresit e ELO-ul persistat azi, fata de ce ar
+# da un replay corect pe datele reconciliate?
+#
+# De ce conteaza: reconcilierea (ADR-025 Faza 3+4) a scos 403 meciuri duplicate
+# din replay, deci de acum inainte calculul e corect — dar `run_backfill()` e
+# NULL-only prin design si NU recalculeaza coloanele deja populate. Valorile
+# scrise inainte de reconciliere raman calculate pe lanturi fragmentate.
+# Rebuild-ul care le-ar repara e singura operatie ireversibila din tot lantul
+# (cere reset distructiv inainte de replay). Aceasta masuratoare trebuie sa
+# precede acea decizie: fara cifra, rebuild-ul ar fi o intuitie.
+#
+# FARA `schedule:` — nu e monitorizare recurenta, e un instrument de decizie
+# rulat cand se pune intrebarea. Se poate re-rula oricand, e read-only.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: measure-elo-divergence
+  cancel-in-progress: false
+
+jobs:
+  measure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Measure ELO divergence (zero writes)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python scripts/measure_elo_divergence.py
