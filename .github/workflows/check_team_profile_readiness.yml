@@ -1,0 +1,42 @@
+name: Football Oracle — Team Profile Readiness (read-only, ADR-062)
+
+# [ADAUGAT — 2026-08-23] Raportare, ZERO scriere. Arata progresul REAL spre
+# testul de ablatie Team Profile: `evaluable_matches` (meciuri cu ambele
+# echipe avand >=TEAM_PROFILE_WINDOW meciuri anterioare cu xG), nu meciurile
+# jucate in sezon — vezi ADR-062 pentru de ce cele doua difera masiv
+# (298 terminate vs. 15 evaluabile la momentul corectiei).
+#
+# FARA `schedule:` — nu e monitorizare recurenta automata, e un instrument
+# de decizie rulat cand se pune intrebarea "putem rula ablatia?". Estimare
+# la momentul adaugarii: pragul atins spre finalul lui septembrie 2026.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: check-team-profile-readiness
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check Team Profile readiness (zero writes)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python scripts/check_team_profile_readiness.py
