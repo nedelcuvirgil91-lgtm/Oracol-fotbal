@@ -1615,12 +1615,62 @@ class FootballOracleAPI:
         self._shadow_evaluate_scheduled_fixtures(matches, d_from, d_to)
         self._cset(cache_key, matches); return matches
 
+    @staticmethod
+    def _live_cascade_enabled() -> bool:
+        """[ADAUGAT — ADR-063] `discovery_live_cascade_enabled` din
+        model_config. IMPLICIT `True` — valoarea de fallback e comportamentul
+        DE DINAINTE de ADR-063, deci nici merge-ul, nici o indisponibilitate
+        Supabase nu opresc tacit descoperirea (ar fi o degradare tacuta spre
+        MAI PUTINE meciuri, exact ce nu vrem de la o plasa de siguranta).
+
+        Oprirea e deci intotdeauna o decizie explicita, scrisa in config —
+        niciodata un efect secundar al unei erori."""
+        try:
+            from supabase_client import load_config
+            cfg = load_config(default={})
+            value = cfg.get("discovery_live_cascade_enabled")
+            if isinstance(value, bool):
+                return value
+        except Exception as exc:
+            logger.warning("[WeekLoop] Citirea discovery_live_cascade_enabled a esuat, "
+                           "fallback la comportamentul anterior (activ): %s", exc)
+        return True
+
     def _fetch_live_week_matches(self, days_ahead: int, competitions: list[str]) -> list[dict]:
         """[EXTRAS din get_matches_for_week(), ADR-053] Cascada live
         originala (Odds API -> FreeLF -> football-data.org -> ESPN ->
         TheSportsDB -> API-Football), NESCHIMBATA logic - apelata acum
         DOAR pentru ligile fara acoperire in match_history (fallback
-        ingust), nu pentru toate ligile la fiecare sesiune de utilizator."""
+        ingust), nu pentru toate ligile la fiecare sesiune de utilizator.
+
+        [ADAUGAT — ADR-063] Gatata de `discovery_live_cascade_enabled`
+        (model_config), IMPLICIT `True` — deci merge-ul ADR-063 nu schimba
+        nimic la deploy (North Star #3). Oprirea efectiva e o operatie
+        separata, explicita, pe config.
+
+        Motivul gate-ului, masurat (nu presupus): sursele acestei cascade
+        NU descopera meciuri pe care Flashscore nu le vede — 13 din cele 15
+        randuri `tsdb_*` din Romania SuperLiga au `home_xg_actual` populat,
+        desi `_parse_tsdb_event()` nu scrie niciun xG; singurul scriitor al
+        coloanei e providers/flashscore/normalizer.py. Deci Flashscore a
+        vazut aceleasi meciuri si le-a imbogatit pe randurile create de
+        TSDB. Ce adauga in schimb cascada e poluare: 3 duplicate permanente
+        din 22 de randuri (13,6%), cu nume sau data divergente fata de
+        Flashscore, invizibile pentru reconcilierea de identitate.
+
+        Codul NU se sterge deliberat: Flashscore e un scraper, cu o exceptie
+        dedicata (`FlashscoreProtectionDetected`) care confirma ca blocarea
+        e un scenariu real — reactivarea trebuie sa fie un UPDATE de o
+        linie, nu un deploy. Cand cascada e oprita, apelantul cade natural
+        pe fallback-ul deja existent catre `scheduled_fixtures` (tot sursa
+        Flashscore), vezi get_matches_for_week()."""
+        if not self._live_cascade_enabled():
+            logger.info(
+                "[WeekLoop] Cascada live DEZACTIVATA (discovery_live_cascade_enabled=false, "
+                "ADR-063) — descoperirea ramane exclusiv Flashscore. Ligi cerute: %s",
+                ", ".join(competitions) if competitions else "(niciuna)",
+            )
+            return []
         today    = date.today()
         end_date = today + timedelta(days=days_ahead)
         d_from   = today.isoformat(); d_to = end_date.isoformat()
