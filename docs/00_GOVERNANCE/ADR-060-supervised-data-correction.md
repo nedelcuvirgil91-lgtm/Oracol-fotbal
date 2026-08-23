@@ -48,6 +48,7 @@ Acest ADR autorizează contractul, nu execuția fiecărui caz — fiecare rămâ
 | Vocabular D3 (extindere vocabular) | 58 perechi → 53 identități, `scripts/detect_identity_alias_candidates.py` | `mappings.py` (`TEAM_ALIASES`) | Executat — vezi Jurnalul de execuție, Faza 2a |
 | Redenumire D2+D3 (rânduri deja scrise) | 2.477 rânduri, 168 nume distincte | `home_team`, `away_team` în `match_history` | Executat — vezi Jurnalul de execuție, Faza 2b |
 | Rebuild feature-uri (ELO + 16 alte coloane calculate de `run_backfill()`) | 51.046 rânduri (`superseded_by IS NULL AND actual_result IS NOT NULL`) | cele 20 `BACKFILL_COLUMNS` (nu doar ELO — vezi Jurnalul de execuție, Faza 3, pentru descoperirea amplorii reale) | **Executat, verificat complet — 100,0% divergență-zero pe întregul corpus (vezi Jurnalul de execuție, Faza 3)** |
+| Conflict hard rămas (`nijmegen\|\|vitesse\|\|2023-10-01`) | 1 rând (id=127878) | `superseded_by`, `superseded_at`, `superseded_reason` | **Executat, verificat — vezi Jurnalul de execuție, Faza 4** |
 
 Ordinea (scoruri → vocabular → ELO) nu e arbitrară: rebuild-ul ELO citește `actual_home_goals`/`actual_away_goals` (deci trebuie să ruleze după corecția scorurilor) și grupează pe `home_team`/`away_team` (deci trebuie să ruleze după unificarea vocabularului, altfel recalculează corect peste lanțuri încă fragmentate — exact observația din măsurătoarea ELO).
 
@@ -177,7 +178,23 @@ Confirmă, măsurat nu presupus, că rebuild-ul a rezolvat exact problema care l
 
 **Suită de teste**: `pytest tests/` — **2.560 passed, 2 skipped**, verde, rulată după rebuild (nicio regresie introdusă de reset+replay).
 
-**Backup — decizie de retenție (2026-08-23)**: `match_history_backfill_backup_20260822` verificat izolat — 9,77 MB, 51.046 rânduri, niciun cod din repo nu-l referențiază (`grep` exhaustiv, doar acest document îl menționează). Proprietarul produsului a decis explicit: **păstrare 30 de zile de la rebuild, cu revizuire la ~2026-09-21** (nu ștergere imediată, nu păstrare pe termen nelimitat fără termen) — programat un reminder separat pentru acea dată. La revizuire, decizia se ia din nou explicit (ștergere sau prelungire), nu automat.
+**Backup — decizie de retenție (2026-08-23)**: `match_history_backfill_backup_20260822` verificat izolat — 9,77 MB, 51.046 rânduri, niciun cod din repo nu-l referențiază (`grep` exhaustiv, doar acest document îl menționează). Proprietarul produsului a decis explicit: **păstrare 30 de zile de la rebuild, cu revizuire la ~2026-09-21** (nu ștergere imediată, nu păstrare pe termen nelimitat fără termen). Încercarea de a programa automat un reminder (`send_later`) a eșuat repetat (cerea o aprobare inobtenabilă din sesiune) — proprietarul produsului a renunțat explicit la reminder automat; termenul rămâne doar notat aici, de readus în discuție manual.
+
+## Jurnal de execuție — Faza 4 (conflict hard rezolvat: `nijmegen||vitesse||2023-10-01`)
+
+Executat 2026-08-23, cu aprobare explicită separată (condiția 4).
+
+**Descoperire**: la întrebarea proprietarului produsului despre singurul conflict hard rămas, s-a verificat direct în bază — două rânduri distincte pentru aceleași două cluburi, aceeași dată (`2023-10-01`, Eredivisie), scoruri diferite: id=78154 (`kaggle_4a11fa871a3b8eec`, „Nijmegen"–„Vitesse", 1–3) vs. id=127878 (`fd_441541`, „NEC"–„SBV Vitesse", 1–2). Confirmat separat: id=127878 era, la acel moment, **singurul rând din tot corpusul (58.300 rânduri)** care mai purta ortografiile vechi „NEC"/„SBV Vitesse" — izolat complet de lanțul canonic „Nijmegen"/„Vitesse" (`ELOTracker` pornea de la 1500/1500 pentru acest rând, semn clar de lanț nou, fără istoric conectat).
+
+**Verificare externă** (condiția 1 — dovadă, nu presupunere sau rang de încredere): căutare web, surse independente (ESPN — „NEC 1-3 Vitesse"; fcupdate.nl — descriere minut-cu-minut: 6' Vitesse, 26' NEC egalează, apoi 2-1 și 3-1 Vitesse în minutul 94). Scor real confirmat: **NEC 1 – 3 Vitesse**. Rândul 78154 (Kaggle) e corect; rândul 127878 (football-data.org) e greșit — constatare notabilă: `SOURCE_TRUST_RANK` clasează `football_data` (rang 2) peste `kaggle_historical` (rang 7), dar aici sursa „de încredere" a greșit. Rangul de încredere rămâne un prior util pentru alegerea implicită, NICIODATĂ substitut pentru verificare externă reală atunci când există un conflict de fapt.
+
+**Verificare izolare** (fără efecte în cascadă): `shadow_predictions` — 0 referințe la `fd_441541`. Confirmat că „NEC"/„SBV Vitesse" nu apar nicăieri altundeva în corpus — deci scoaterea rândului din setul live nu afectează ELO/H2H/formă ale niciunui alt rând (nu era conectat la niciun alt lanț).
+
+**Execuție** (soft, nu `DELETE` fizic — tiparul stabilit de ADR-059): `UPDATE match_history SET superseded_by=78154, superseded_at=now(), superseded_reason='...' WHERE id=127878 AND superseded_by IS NULL`. Verificat direct: 0 rânduri live rămase cu „NEC"/„SBV Vitesse"; id=78154 rămas canonic.
+
+**Regenerare baseline**: `identity_drift_check.yml` (`mode=emit-baseline`, `run 32624844264`) — rezultat direct din jurnalul rulării: `0 grupuri, 0 reconciliate, 0 hard_conflict, 0 sursa_necunoscuta`. `docs/00_GOVERNANCE/identity_drift_baseline.json` actualizat manual (precedent stabilit — comisia baseline-ului rămâne pas uman separat, nu automatizat) cu conținutul exact emis: `hard_conflict_keys: []`, `reconciled_group_keys: []`, `unknown_source_keys: []`. **Zero conflicte cunoscute rămase în tot corpusul.**
+
+**Consecință**: singurul conflict hard identificat vreodată în acest proiect e închis. Vocabularul de identitate (D2 + D3) e acum complet unificat, fără nicio excepție reziduală.
 
 ## Referințe
 
@@ -187,3 +204,4 @@ Confirmă, măsurat nu presupus, că rebuild-ul a rezolvat exact problema care l
 - `scripts/correct_penalty_shootout_scores.py` — execuția Fazei 1
 - `scripts/analyze_d2_vocabulary_drift.py`, `scripts/detect_identity_alias_candidates.py` — pregătirea Fazei 2 (neexecutată)
 - `scripts/measure_elo_divergence.py` — măsurătoarea care motivează Faza 3, rulată PRE (`run 32558948226`) și POST (`run 32582899754`) rebuild pentru închiderea buclei
+- `scripts/check_identity_drift.py` — verificarea/regenerarea baseline-ului folosită pentru închiderea Fazei 4

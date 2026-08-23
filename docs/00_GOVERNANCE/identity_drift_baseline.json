@@ -1,9 +1,7 @@
 {
   "_comment": "Baseline al fragmentarii de identitate CUNOSCUTE si acceptate — generat mecanic de scripts/check_identity_drift.py --emit-baseline, NICIODATA editat de mana (acelasi principiu ca identity_audit_F0/baseline_counts.json). Orice grup NOU aparut fata de acest fisier e semnalat de check_identity_drift.py ca drift.",
-  "captured_at_utc": "2026-08-22T11:32:12.908185+00:00",
+  "captured_at_utc": "2026-08-23T07:11:09.762750+00:00",
   "reconciled_group_keys": [],
-  "hard_conflict_keys": [
-    "nijmegen||vitesse||2023-10-01"
-  ],
+  "hard_conflict_keys": [],
   "unknown_source_keys": []
 }
