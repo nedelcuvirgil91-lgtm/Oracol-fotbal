@@ -387,7 +387,54 @@ def discover_matches(
                                                   include_future_fixtures, future_fixtures_only))
         finally:
             browser.close()
-    return results
+    return dedupe_by_mid(results)
+
+
+def dedupe_by_mid(matches: list) -> list:
+    """Elimina meciurile descoperite de mai multe ori, dupa `mid` — FUNCTIE
+    PURA, pastreaza ordinea si prima aparitie.
+
+    [R5, 2026-08-23] Rularea din 23 august a descoperit 4 mid-uri de doua ori
+    (4xKntFxe, zkSijgL7, nqbcPVHG, EJFII9Il): hub-urile /fixtures/ si
+    /results/ pot lista acelasi meci, iar un meci in desfasurare apare in
+    ambele. Trei au fost sarite la a doua trecere prin Delta Sync (munca
+    irosita: 7 tab-uri Playwright degeaba), dar al patrulea a picat pe
+    validare de identitate si a facut workflow-ul ROSU — un meci care fusese
+    deja colectat cu succes la prima trecere.
+
+    Explica si observatia nelamurita din CLAUDE.md ("3 intrari MLS cu acelasi
+    mid aparand de doua ori, o data OK apoi ESUAT") — nu era un duplicat in
+    baza de date, ci in lista de descoperire.
+
+    Cazurile eliminate se logheaza: daca acelasi meci ajunge sa fie listat sub
+    DOUA ligi diferite, asta e o informatie despre acoperire, nu zgomot."""
+    vazute: dict = {}
+    pastrate: list = []
+    for m in matches:
+        mid = getattr(m, "mid", None)
+        if mid is None:
+            pastrate.append(m)  # fara mid nu putem deduplica; nu aruncam nimic
+            continue
+        anterior = vazute.get(mid)
+        if anterior is None:
+            vazute[mid] = m
+            pastrate.append(m)
+            continue
+        liga_ant = getattr(anterior, "league", None)
+        liga_now = getattr(m, "league", None)
+        if liga_ant != liga_now:
+            logger.warning(
+                "[Flashscore.Discovery] mid=%s descoperit sub DOUA ligi diferite "
+                "(%r pastrata, %r eliminata) — verifica maparea competitiilor",
+                mid, liga_ant, liga_now,
+            )
+        else:
+            logger.info(
+                "[Flashscore.Discovery] mid=%s descoperit de mai multe ori in %r "
+                "(sursa %r vs %r) — pastrat o singura data",
+                mid, liga_now, getattr(anterior, "source", None), getattr(m, "source", None),
+            )
+    return pastrate
 
 
 _IDENTITY_FIELDS = ("home_team", "away_team", "kickoff_date")

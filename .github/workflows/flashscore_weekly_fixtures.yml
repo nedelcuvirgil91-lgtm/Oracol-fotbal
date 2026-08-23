@@ -64,7 +64,26 @@ name: Football Oracle — Flashscore Weekly Fixtures Discovery
 # initiala - vezi discovery.py) acopera confortabil o saptamana intreaga
 # per competitie fara sa ceara mai mult decat hub-ul poate intoarce.
 #
-# timeout-minutes: 120 — [MARIT de la 90, 2026-08-06, cerere explicita
+# timeout-minutes: 150 — [MARIT de la 120, 2026-08-23, R6] MASURAT, nu
+# estimat: rularea din 23 august (run #10, workflow_dispatch,
+# 15:12:56-16:57:41 UTC) a durat 1h44m45s = 104m45s, adica 87% din
+# plafonul de 120 min. S-a terminat singura, NU a fost anulata — dar
+# marja ramasa era de 15 min.
+#
+# Model de cost derivat din acea rulare: ~7 min descoperire (393 meciuri,
+# 15 competitii) + ~45 s per meci efectiv colectat (129 colectate, 264
+# sarite prin Delta Sync). La 120 min incap ~150 de colectari; la 150 min,
+# ~190. Rularea din 23 august era o recuperare dupa 10 zile de blocaj,
+# deci un varf, nu regula — dar 129 din 150 e prea aproape de plafon.
+#
+# DE CE 150 SI NU 180: cron-ul e 00:00 UTC (luni si joi), iar
+# night_sync.yml porneste la 03:00 UTC. La 180 min rularea s-ar termina
+# EXACT cand porneste night_sync — zero gap, adica exact suprapunerea pe
+# care disciplina "fara suprapunere prin programare, nu prin lock" o
+# interzice. 150 min lasa 30 min marja, aceeasi folosita si la
+# identity_drift_check.yml.
+#
+# [ISTORIC] timeout-minutes: 120 — [MARIT de la 90, 2026-08-06, cerere explicita
 # proprietar produs] confirmat live: prima rulare reala (run #1,
 # workflow_dispatch, 22:09-23:39 UTC) a atins plafonul de 90 min si a
 # fost oprita de GitHub Actions (conclusion=cancelled, nu esec) inainte
@@ -107,7 +126,7 @@ on:
 jobs:
   flashscore-weekly-fixtures:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
 
     steps:
       - name: Checkout repository
