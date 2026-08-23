@@ -45,11 +45,14 @@ Fara retea live — functiile de mai jos primesc HTML deja citit (de
 """
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime
 from typing import Any
 
 from bs4 import BeautifulSoup
+
+logger = logging.getLogger(__name__)
 
 # Eticheta reala (verificata pe fixture-ul din tab-ul "Statistici",
 # /summary/stats/) -> perechea de coloane canonice match_history
@@ -172,10 +175,56 @@ def _slugify(label: str) -> str:
 
 
 def _extract_team_names(soup: BeautifulSoup) -> tuple[str | None, str | None]:
-    """Numele fiecarei echipe apare de 2 ori pe pagina (verificat empiric -
-    header compact + header principal, aceeasi clasa) - dedup pastrand
-    ordinea, NU doar primele 2 valori brute (bug real gasit prin testare
-    directa pe fixture, nu presupus)."""
+    """Gazda si oaspetele din containerele SEMANTICE ale paginii
+    (`duelParticipant__home` / `duelParticipant__away`), NU din ordinea in
+    care numele apar in document.
+
+    [CAUZA RADACINA, 2026-08-23] Varianta anterioara lua `seen[0]` ca gazda
+    si `seen[1]` ca oaspete dintr-o lista construita cu un selector generic
+    (`.participant__participantName.participant__overflow`), deci orientarea
+    depindea exclusiv de ordinea din DOM. Cand Flashscore a randat pagina
+    altfel in ziua meciului, orientarea s-a inversat TACIT: acelasi meci
+    (mid=p2AX2W4D) a fost extras ca `psg__rennes` pe 31 iulie si ca
+    `rennes__psg` pe 23 august. Verificat extern: se juca la Roazhon Park,
+    deci Rennes era gazda si extragerea din iulie era gresita — dar fusese
+    deja scrisa canonic in match_history, cu predictii calculate pe ea.
+
+    O inversare de teren nu e o eroare cosmetica: contamineaza ELO, forma,
+    H2H, atribuirea xG pe parti si avantajul terenului propriu. A iesit la
+    iveala doar din intamplare, printr-o coliziune de fixture_id — o
+    inversare la prima si singura extragere nu declanseaza nimic.
+
+    Containerele semantice exista in markup-ul real (verificat direct pe
+    HTML-ul salvat in docs/06_UDAL/poc_evidence/flashscore_full_tabs_poc/).
+    Ordinea DOM ramane DOAR ca fallback, pentru cazul in care structura
+    paginii se schimba — si atunci se logheaza explicit, ca sa nu redevina
+    tacut sursa de adevar."""
+    def _side(container_class: str) -> tuple[bool, str | None]:
+        """(container_prezent, nume) — cele doua stari sunt DIFERITE.
+
+        Container absent = structura paginii s-a schimbat, deci fallback-ul pe
+        ordinea DOM e justificat. Container prezent dar nume gol = structura e
+        inteleasa, doar datele lipsesc — atunci fallback-ul NU e justificat:
+        ar umple golul cu echipa cealalta. Gasit prin test (2026-08-23):
+        golirea numelui gazdei facea fallback-ul sa intoarca oaspetele DREPT
+        gazda, adica exact inversarea pe care aceasta functie o repara."""
+        container = soup.select_one(f".{container_class}")
+        if container is None:
+            return False, None
+        el = container.select_one(".participant__participantName")
+        text = el.get_text(strip=True) if el is not None else ""
+        return True, (text or None)
+
+    home_present, home = _side("duelParticipant__home")
+    away_present, away = _side("duelParticipant__away")
+    if home_present and away_present:
+        # Structura inteleasa. Un nume lipsa ramane lipsa (regula #8) — va fi
+        # respins de validarea de identitate, nu completat prin ghicire.
+        return home, away
+
+    # Fallback: numele fiecarei echipe apare de 2 ori pe pagina (header
+    # compact + header principal, aceeasi clasa) - dedup pastrand ordinea,
+    # NU doar primele 2 valori brute.
     raw = [
         el.get_text(strip=True)
         for el in soup.select(".participant__participantName.participant__overflow")
@@ -185,9 +234,15 @@ def _extract_team_names(soup: BeautifulSoup) -> tuple[str | None, str | None]:
     for name in raw:
         if not seen or seen[-1] != name:
             seen.append(name)
-    home = seen[0] if len(seen) > 0 else None
-    away = seen[1] if len(seen) > 1 else None
-    return home, away
+    fallback_home = seen[0] if len(seen) > 0 else None
+    fallback_away = seen[1] if len(seen) > 1 else None
+    if fallback_home or fallback_away:
+        logger.warning(
+            "[Flashscore.Normalizer] containere semantice absente "
+            "(duelParticipant__home/away) - orientarea vine din ordinea DOM, "
+            "NEVERIFICATA: home=%r away=%r", fallback_home, fallback_away,
+        )
+    return fallback_home, fallback_away
 
 
 def _extract_kickoff_iso(soup: BeautifulSoup) -> str | None:
