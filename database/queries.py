@@ -201,16 +201,36 @@ def get_matches_for_week_from_scheduled_fixtures(
 
 def _rpc_write_ok(res, payload: dict, ctx: str) -> bool:
     """Interpreteaza rezultatul unui RPC canonic (upsert_match_canonical).
-    True daca s-a scris (insert/update); False + warning la HARD CONFLICT
-    (rand nescris — niciodata pierdut tacit, ID-025-01/03)."""
+    True daca s-a scris (insert/update/reschedule); False + warning la HARD
+    CONFLICT (rand nescris — niciodata pierdut tacit, ID-025-01/03).
+
+    [ADAUGAT — migrarea 048] `reschedule` e o scriere REUSITA: acelasi meci
+    (acelasi fixture_id) a primit o data noua de la provider, iar RPC-ul a
+    actualizat randul existent in loc sa incerce un INSERT care ar fi violat
+    `idx_match_history_fixture` (UNIQUE pe fixture_id). Logat separat de
+    `update` fiindca e un eveniment rar, care merita sa fie vizibil — pana
+    acum se manifesta ca esec al intregului pas de sincronizare
+    (flashscore_weekly_fixtures.yml, blocat 10 zile de un singur meci
+    reprogramat).
+
+    Acceptat AICI inainte ca migrarea sa il poata produce — ordine
+    deliberata: daca migrarea ar fi aplicata prima, orice reprogramare ar fi
+    raportata ca esec de scriere pana la deploy-ul acestui cod."""
     data = getattr(res, "data", None) or {}
     action = data.get("action") if isinstance(data, dict) else None
     if action == "hard_conflict":
         logger.warning(
-            "[Queries] %s HARD CONFLICT (nescris): %s vs %s @ %s",
+            "[Queries] %s HARD CONFLICT (nescris): %s vs %s @ %s%s",
             ctx, payload.get("home_team"), payload.get("away_team"), payload.get("kickoff_date"),
+            f" — motiv: {data.get('reason')}" if data.get("reason") else "",
         )
         return False
+    if action == "reschedule":
+        logger.info(
+            "[Queries] %s REPROGRAMAT (data actualizata pe randul existent): %s vs %s @ %s",
+            ctx, payload.get("home_team"), payload.get("away_team"), payload.get("kickoff_date"),
+        )
+        return True
     return action in ("insert", "update")
 
 
