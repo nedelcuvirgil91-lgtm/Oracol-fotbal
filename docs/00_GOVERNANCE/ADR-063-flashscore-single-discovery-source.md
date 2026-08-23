@@ -88,6 +88,23 @@ Detecția D2/D3 de până acum (ADR-060) cerea ca cele două nume să se fi ÎNT
 
 Notabil: primul test de mutație pe garda anti-împerechere-greșită **a eșuat** — testul trecea din alt motiv decât cel intenționat (`Lok. Zagreb` era sărit ca fiind el însuși abreviere, nu datorită potrivirii pe inițială). Garda era netestată. Corectat cu un caz în care forma concurentă NU e abreviere (`Lokomotiva Zagreb`), reverificat prin mutație.
 
-**Rămas de făcut, deliberat, în această ordine**: unificarea perechilor de abrevieri → abia apoi oprirea efectivă a cascadei (`discovery_live_cascade_enabled` → `false`). Motivul ordinii: monitorizarea trebuie să fie activă și verde ÎNAINTE de a da la o parte plasa de siguranță.
+**Faza 4 — două defecte ale monitorizării, găsite la PRIMA rulare pe date reale** (nu la testarea unitară — motiv pentru care rularea imediată contra producției e parte din proces, nu opțională):
+
+- *Clasa 3 filtra pe sezonul curent* și rata exact fragmentarea pe care trebuia s-o vadă: forma lungă trăiește de obicei DOAR în istoric, cea abreviată doar în sezonul curent. Concret: perechea Zagreb apărea doar fiindcă duplicatul HNL necurățat lăsase un rând `Dinamo Zagreb` în sezon — la curățarea lui, monitorizarea ar fi încetat să raporteze fragmentarea reală. Corectat: scanează tot istoricul (doar cele 2 coloane de nume).
+- *Clasa 1 nu separa competițiile încheiate*: World Cup 2026 producea 19 din 31 de constatări — zgomot permanent sub care semnalul real rămânea ascuns. Corectat: o competiție fără niciun meci viitor programat e raportată ca o linie de context.
+
+**Rezultatul rulării corectate** (`run 32645956334`): clasa 1 separă corect (20 în competiții încheiate vs. semnalul real din ligile active); clasa 2 = **0 duplicate pe cheie naturală**; clasa 3 găsește acum **3 perechi**, nu 1:
+
+| Formă abreviată | Formă lungă |
+|---|---|
+| `Din. Zagreb` (13) | `Dinamo Zagreb` (19) |
+| `St. Mirren` (7) | `St Mirren` (**147**) |
+| `St. Truiden` (6) | `St Truiden` (**149**) |
+
+**Precizare importantă**: această clasă NU e cauzată de cascadă. `St Mirren` (147) vine din importurile istorice, `St. Mirren` (7) e forma Flashscore — fragmentare între Flashscore și date istorice, nu între surse de descoperire. Oprirea cascadei nu o previne; rămâne un gol separat, acum vizibil și monitorizat.
+
+**Faza 5 — oprirea efectivă a cascadei** (2026-08-23 14:43 UTC, confirmare explicită separată, per `supabase-safety`): `UPDATE model_config SET data = jsonb_set(data, '{discovery_live_cascade_enabled}', 'false') WHERE id = 1`. Verificat în același apel că restul configurației rămâne neatinsă (`learning_core_enabled: true`, `blend_v1_champion_display_enabled: true`, `flashscore_limit_per_league_automated: 50`). Reversibil instant prin `'true'`, fără deploy.
+
+Ordinea a fost respectată deliberat: monitorizarea activă și verificată pe date reale ÎNAINTE de a da la o parte plasa de siguranță.
 
 **Rulare completă**: `pytest tests/` — **2.627 passed, 2 skipped**.
