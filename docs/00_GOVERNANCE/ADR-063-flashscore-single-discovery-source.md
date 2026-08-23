@@ -108,3 +108,36 @@ Notabil: primul test de mutație pe garda anti-împerechere-greșită **a eșuat
 Ordinea a fost respectată deliberat: monitorizarea activă și verificată pe date reale ÎNAINTE de a da la o parte plasa de siguranță.
 
 **Rulare completă**: `pytest tests/` — **2.627 passed, 2 skipped**.
+
+---
+
+## AMENDAMENT (2026-08-23, câteva ore după acceptare) — decizia inițială a fost PREA LARGĂ
+
+Proprietarul produsului a ridicat o obiecție arhitecturală corectă, care a schimbat concluzia: **descoperirea meciurilor și colectarea datelor sunt două probleme diferite, iar acest ADR le-a tratat ca pe una singură.**
+
+Verificat în cod, după obiecție:
+
+| Mecanism | Ce face | Poate CREA rânduri? | Poluează? |
+|---|---|---|---|
+| `oracle_api._fetch_live_week_matches()` | descoperă meciuri **viitoare** | **Da** | da — sursa celor 3 duplicate |
+| `sync/sync_results.py` | colectează **rezultate** ale meciurilor jucate | **Nu** — `update_results_in_supabase()` face doar `.update()` pe rânduri existente, potrivite pe cheia naturală; dacă nu găsește → `not_found += 1`, `continue` | nu poate |
+
+**Consecință**: obiectivul „Flashscore se ocupă de colectarea datelor" era **deja satisfăcut de arhitectură** — sursele secundare de rezultate nu pot crea rânduri, deci nu pot polua. Nu era nimic de oprit acolo.
+
+Iar cascada oprită e exact cea unde redundanța e utilă: dacă Flashscore ratează un meci viitor, alt provider îl completează, iar acoperirea rămâne totală. Costul măsurat (3 duplicate în 2 luni) e acum prins de monitorizarea din Faza 3, care raportează 0 duplicate pe cheie naturală.
+
+**Cascada a fost REACTIVATĂ** (2026-08-23 14:58 UTC): `discovery_live_cascade_enabled` → `true`.
+
+**Ce rămâne valabil din acest ADR**: flag-ul, gating-ul, testele, monitorizarea, curățarea duplicatelor și întregul audit al providerilor. Mecanismul de oprire există și e testat — dacă redundanța la descoperire devine vreodată un cost net, se oprește cu o linie de config.
+
+**Ce s-a dovedit greșit**: presupunerea că sursa duplicatelor e „colectarea de date". Am pornit de la simptom (`fixture_id` de la surse secundare) și n-am verificat că descoperirea și colectarea sunt mecanisme distincte — verificarea era la o comandă distanță.
+
+### Riscul concret creat de oprire, descoperit imediat după
+
+La verificarea propriei schimbări (nu la o rulare programată), s-a constatat că `flashscore_weekly_fixtures.yml` — **singurul** workflow care descoperă meciuri VIITOARE — eșuase pe 17 și 20 august; ultima rulare reușită: **13 august**. `night_sync` nu acoperă acest gol: descoperă din `/results/`, iar `/fixtures/` e doar fallback care nu se încearcă niciodată când `/results/` are conținut (comentariu explicit în `discovery.py`).
+
+Dovada că plasa chiar era folosită: singurul meci Europa League din următoarele 7 zile venise din **TSDB** — exact sursa oprită.
+
+Auditul de acoperire („Flashscore acoperă 15/16 ligi") fusese făcut pe date **istorice**; nu verificasem că descoperirea de fixture-uri VIITOARE funcționează în prezent. Informația era disponibilă — `CLAUDE.md` documentează eșecul din 17 august.
+
+**Reparat prin migrarea 048** (vezi `database/migrations/048_upsert_canonical_handle_reschedule.sql`).
