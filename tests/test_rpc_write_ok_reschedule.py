@@ -50,6 +50,16 @@ def test_hard_conflict_cu_motiv_nu_arunca():
     assert q._rpc_write_ok(res, _PAYLOAD, "test") is False
 
 
+def test_identitate_contradictorie_e_esec_de_scriere_nu_exceptie():
+    """Migrarea 049: acelasi fixture_id, alte echipe (inversare de teren).
+
+    Trebuie raportat ca scriere ESUATA — randul chiar nu s-a scris. Dar NU ca
+    exceptie: inainte de 049, cazul asta arunca din INSERT si oprea intregul
+    pas de sincronizare (390 din 393 de meciuri reusite, workflow rosu)."""
+    res = _Res({"action": "hard_conflict", "id": 127011, "reason": "fixture_identity_mismatch"})
+    assert q._rpc_write_ok(res, _PAYLOAD, "test") is False
+
+
 def test_actiune_necunoscuta_e_tratata_ca_esec():
     """O actiune pe care codul nu o cunoaste NU se presupune reusita —
     Regula #8: o stare necunoscuta nu se aproximeaza intr-una favorabila."""
