@@ -93,6 +93,63 @@ def find_abbreviation_pairs(teams: list[str]) -> list[tuple[str, str]]:
     return sorted(set(pairs))
 
 
+def build_home_stadiums(rows: list[dict], min_dovezi: int = 2) -> dict[str, str]:
+    """Stadionul „de acasă" al fiecărei echipe, dedus empiric — FUNCȚIE PURĂ.
+
+    E cel mai frecvent stadion din meciurile în care echipa e gazdă. `min_dovezi`
+    cere cel puțin atâtea meciuri pe acel stadion: o singură apariție ar putea
+    fi chiar rândul inversat pe care încercăm să-l detectăm."""
+    frecventa: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for r in rows:
+        echipa, stadion = r.get("home_team"), r.get("stadium")
+        if echipa and stadion:
+            frecventa[echipa][stadion] += 1
+    rezultat: dict[str, str] = {}
+    for echipa, stadioane in frecventa.items():
+        stadion, n = max(stadioane.items(), key=lambda kv: (kv[1], kv[0]))
+        if n >= min_dovezi:
+            rezultat[echipa] = stadion
+    return rezultat
+
+
+def find_home_away_inversions(rows: list[dict], min_dovezi: int = 2) -> tuple[list[dict], int]:
+    """Rânduri unde stadionul înregistrat aparține, empiric, echipei OASPETE —
+    FUNCȚIE PURĂ. Întoarce (candidați, câte rânduri au putut fi judecate).
+
+    [ADAUGAT 2026-08-23] Clasa a 5-a, după inversarea de teren Rennes-PSG:
+    `normalizer._extract_team_names()` deducea gazda din ordinea DOM, iar o
+    inversare contaminează ELO, formă, H2H și atribuirea xG pe părți. Aceea a
+    ieșit la iveală DIN ÎNTÂMPLARE, printr-o coliziune de `fixture_id`; o
+    inversare la prima și singura extragere nu declanșează nimic.
+
+    Gardă obligatorie contra stadioanelor PARTAJATE (San Siro pentru Milan și
+    Inter, Olimpico pentru Roma și Lazio): se semnalează doar dacă stadionul NU
+    e și al gazdei. Fără ea, fiecare derby ar fi un fals pozitiv.
+
+    Al doilea element din tuplu contează la fel de mult ca primul: „0 găsite"
+    nu înseamnă nimic fără câte rânduri au putut fi verificate efectiv."""
+    acasa = build_home_stadiums(rows, min_dovezi)
+    candidati: list[dict] = []
+    judecabile = 0
+    for r in rows:
+        stadion = r.get("stadium")
+        gazda, oaspete = r.get("home_team"), r.get("away_team")
+        if not stadion or not oaspete or oaspete not in acasa:
+            continue
+        judecabile += 1
+        if acasa[oaspete] != stadion:
+            continue
+        if acasa.get(gazda) == stadion:
+            continue  # stadion partajat — nu e dovada de inversare
+        candidati.append({
+            "id": r.get("id"), "league": r.get("league"),
+            "home_team": gazda, "away_team": oaspete,
+            "stadium": stadion, "kickoff_date": (r.get("kickoff_date") or "")[:10],
+            "stadion_asteptat_gazda": acasa.get(gazda),
+        })
+    return candidati, judecabile
+
+
 def _fetch_all(client, table: str, columns: str, apply_filters) -> list[dict]:
     """Paginare cu `.order("id")` EXPLICIT inainte de `.range()` — fara
     ORDER BY, PostgREST/Postgres nu garanteaza ordine stabila intre cereri
@@ -256,7 +313,30 @@ def main() -> int:
         print("     (normal pentru competiții în pauză sau neîncepute — verifică înainte de a acționa)")
     print(BAR)
 
-    print(f"  Clase cu constatări: {findings}/4")
+    # ── 5. Inversări de teren (gazdă/oaspete) ────────────────────────────
+    #
+    # Stadionul e populat practic doar pe rândurile Flashscore — ceea ce se
+    # potrivește exact: bugul de inversare a fost al extractorului Flashscore,
+    # restul corpusului nu a fost niciodată expus.
+    stadion_rows = _fetch_all(
+        client, "match_history", "id,league,home_team,away_team,stadium,kickoff_date",
+        lambda q: q.is_("superseded_by", "null").not_.is_("stadium", "null"),
+    )
+    inversari, judecabile = find_home_away_inversions(stadion_rows)
+    total_cu_stadion = len(stadion_rows)
+    print(f"  5. INVERSĂRI DE TEREN (stadionul aparține echipei oaspete): {len(inversari)}")
+    print(f"     verificabile: {judecabile} din {total_cu_stadion} rânduri cu stadion "
+          f"({round(100.0 * judecabile / total_cu_stadion, 1) if total_cu_stadion else 0}%)")
+    for c in inversari[:15]:
+        print(f"       {c['kickoff_date']}  [{c['league']}]  {c['home_team']} – {c['away_team']}")
+        print(f"          stadion: {c['stadium']!r}  ·  al gazdei ar fi: {c['stadion_asteptat_gazda']!r}")
+    if inversari:
+        findings += 1
+        print("     (o inversare contaminează ELO, formă, H2H și atribuirea xG — "
+              "verifică extern înainte de orice corecție, regula D3)")
+    print(BAR)
+
+    print(f"  Clase cu constatări: {findings}/5")
     print("  Verificare încheiată. ZERO scriere efectuată.")
     print(BAR)
     return 1 if findings else 0
