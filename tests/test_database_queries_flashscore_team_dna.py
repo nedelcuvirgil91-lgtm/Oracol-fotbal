@@ -67,6 +67,9 @@ class _FakeQuery:
     def limit(self, *a, **kw):
         self._calls.append((self._table_name, "limit", a, kw)); return self
 
+    def range(self, *a, **kw):
+        self._calls.append((self._table_name, "range", a, kw)); return self
+
     def execute(self):
         count = len(self._rows) if self._count_requested else None
         return _FakeResult(self._rows, count=count)
@@ -361,25 +364,53 @@ def test_is_flashscore_match_already_collected_true_when_kickoff_unparsable(monk
 # ════════════════════════════════════════════════════════════════════════
 
 def test_get_finishing_data_readiness_returns_counts_bound_to_season(monkeypatch):
+    """[ACTUALIZAT — ADR-062] `evaluable_matches` e cheia noua care guverneaza
+    poarta; cele 3 vechi raman, ca context informativ."""
     rows = [{"id": 1}, {"id": 2}, {"id": 3}]
     fake = _FakeClient({"match_history": rows})
     monkeypatch.setattr(q, "get_client", lambda: fake)
 
     out = q.get_finishing_data_readiness("2026-07-01")
 
-    assert out == {"finished_total": 3, "shots_on_target": 3, "xg": 3}
-    # [DECIS — proprietarul produsului, sesiune 2026-08-15] pragul de 400 e
-    # STRICT pe sezonul curent — toate cele 3 interogări trebuie mărginite.
+    # cele 3 randuri n-au kickoff_date/echipe -> 0 evaluabile, dar contorii
+    # informativi raman
+    assert out == {"finished_total": 3, "shots_on_target": 3, "xg": 3, "evaluable_matches": 0}
+    # [DECIS — proprietarul produsului, sesiune 2026-08-15] pragul e STRICT pe
+    # sezonul curent — toate interogarile trebuie marginite (3 contori + 1
+    # aducere de randuri pentru evaluable_matches, ADR-062).
     gte_calls = [c for c in fake.calls if c[1] == "gte"]
-    assert len(gte_calls) == 3
+    assert len(gte_calls) == 4
     assert all(c == ("match_history", "gte", ("kickoff_date", "2026-07-01"), {}) for c in gte_calls)
+
+
+def test_get_finishing_data_readiness_paginates_with_explicit_order(monkeypatch):
+    """[ADAUGAT — ADR-062] Aducerea randurilor pentru evaluable_matches
+    pagineaza cu `.order("id")` INAINTE de `.range()`. Fara ORDER BY explicit,
+    PostgREST/Postgres nu garanteaza ordine stabila intre cereri paginate —
+    acelasi rand fizic poate fi adus de doua ori sub scrieri concurente (bug
+    real gasit si reparat in aceeasi sesiune, vezi ADR-059 Addendum)."""
+    fake = _FakeClient({"match_history": [{"id": 1}]})
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+
+    q.get_finishing_data_readiness("2026-07-01")
+
+    order_calls = [c for c in fake.calls if c[1] == "order"]
+    range_calls = [c for c in fake.calls if c[1] == "range"]
+    assert order_calls == [("match_history", "order", ("id",), {})]
+    assert range_calls, "aducerea randurilor trebuie paginata cu .range()"
+    # ordinea relativa: order inaintea range
+    assert fake.calls.index(order_calls[0]) < fake.calls.index(range_calls[0])
 
 
 def test_get_finishing_data_readiness_no_client(monkeypatch):
     monkeypatch.setattr(q, "get_client", lambda: None)
-    assert q.get_finishing_data_readiness("2026-07-01") == {"finished_total": 0, "shots_on_target": 0, "xg": 0}
+    assert q.get_finishing_data_readiness("2026-07-01") == {
+        "finished_total": 0, "shots_on_target": 0, "xg": 0, "evaluable_matches": 0,
+    }
 
 
 def test_get_finishing_data_readiness_degrades_gracefully(monkeypatch):
     monkeypatch.setattr(q, "get_client", lambda: _BoomClient())
-    assert q.get_finishing_data_readiness("2026-07-01") == {"finished_total": 0, "shots_on_target": 0, "xg": 0}
+    assert q.get_finishing_data_readiness("2026-07-01") == {
+        "finished_total": 0, "shots_on_target": 0, "xg": 0, "evaluable_matches": 0,
+    }

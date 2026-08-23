@@ -714,17 +714,37 @@ def _render_match_card(match: dict, engine) -> None:
                 # acoperire xG real verificată live: 99-100% în ligile
                 # domestice vs. ~30-35% (0% la World Cup) în acele
                 # competiții, structural, nu o chestiune de volum.
-                from database.queries import TEAM_PROFILE_TEST_THRESHOLD
+                #
+                # [CORECTAT 2026-08-23, ADR-062] Bara urmărește acum
+                # `evaluable_matches` (meciuri cu AMBELE echipe având
+                # ≥TEAM_PROFILE_WINDOW meciuri anterioare cu xG), nu
+                # `finished_total` (meciuri jucate în sezon). Măsurat live:
+                # la 298 „terminate" existau doar 15 evaluabile (5,0%) —
+                # bara veche s-ar fi umplut la 300 fără ca testul să fie
+                # de fapt posibil. Cifra veche rămâne afișată ca context.
+                from database.queries import (
+                    TEAM_PROFILE_TEST_THRESHOLD, TEAM_PROFILE_WINDOW,
+                )
                 readiness = _finishing_data_readiness()
                 n_finished = readiness.get("finished_total", 0)
-                status = "prag atins — test de ablație în așteptare" if n_finished >= TEAM_PROFILE_TEST_THRESHOLD else "insufficient_data"
+                n_eval = readiness.get("evaluable_matches", 0)
+                status = (
+                    "prag atins — test de ablație în așteptare"
+                    if n_eval >= TEAM_PROFILE_TEST_THRESHOLD else "insufficient_data"
+                )
                 st.progress(
-                    min(n_finished / TEAM_PROFILE_TEST_THRESHOLD, 1.0) if TEAM_PROFILE_TEST_THRESHOLD else 0.0,
+                    min(n_eval / TEAM_PROFILE_TEST_THRESHOLD, 1.0) if TEAM_PROFILE_TEST_THRESHOLD else 0.0,
                     text=(
                         "🧪 Profil de echipă (agregat, ligi domestice, sezonul curent) — "
-                        f"{n_finished}/{TEAM_PROFILE_TEST_THRESHOLD} meciuri terminate "
+                        f"{n_eval}/{TEAM_PROFILE_TEST_THRESHOLD} meciuri evaluabile "
+                        f"(ambele echipe cu ≥{TEAM_PROFILE_WINDOW} meciuri anterioare cu xG) "
                         f"— status: {status}"
                     ),
+                )
+                st.caption(
+                    f"Context: {n_finished} meciuri terminate în sezon. Doar cele evaluabile "
+                    "contează pentru testul de ablație — un meci fără istoric suficient pentru "
+                    "ambele echipe nu poate fi prezis walk-forward cu această formulă."
                 )
 
             # ── Grupul 3 — clasament complet (context extern, nu formă) ────

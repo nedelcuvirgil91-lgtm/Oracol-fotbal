@@ -2666,19 +2666,85 @@ TEAM_PROFILE_EXCLUDED_LEAGUES = (
 )
 TEAM_PROFILE_TEST_THRESHOLD = 300
 
+# [ADAUGAT — ADR-062] Fereastra reală a formulei de finalizare. TREBUIE să
+# rămână identică cu `oracle_engine._build_flashscore_dna(last_n=...)` —
+# altfel poarta de pregătire ar valida o fereastră, iar producția ar afișa
+# alta. Divergența e prinsă de un test dedicat
+# (tests/test_team_profile_readiness_gate.py), nu lăsată pe seama atenției.
+TEAM_PROFILE_WINDOW = 5
+
+
+def count_matches_with_sufficient_history(rows: list[dict], window: int) -> int:
+    """[ADAUGAT — ADR-062] Numără meciurile în care AMBELE echipe au deja cel
+    puțin `window` meciuri ANTERIOARE cu xG real — singura cantitate care
+    contează pentru un test de ablație walk-forward pe eficiența finalizării.
+
+    Funcție PURĂ (fără I/O) — testabilă direct, fără Supabase.
+
+    De ce e nevoie de ea (descoperit prin măsurare, 2026-08-23): numărătoarea
+    anterioară măsura meciurile jucate în sezon, ceea ce e o cantitate
+    DIFERITĂ. La 298 de meciuri „terminate" în sezon, doar 15 aveau ambele
+    echipe cu ≥5 meciuri anterioare cu xG (5,0%) — poarta s-ar fi deschis la
+    300 fără ca datele să fie de fapt utilizabile.
+
+    Semantica „anterior" e STRICT pe zi calendaristică (`kickoff_date <`),
+    identică cu `as_of_date` din get_team_recent_advanced_stats(): meciurile
+    din ACEEAȘI zi nu se numără unele pentru altele. Altfel un meci ar putea
+    intra în propriul său istoric (scurgere directă), iar ordinea în cadrul
+    unei zile — care nu e determinată de `kickoff_date` singur — ar schimba
+    tăcut rezultatul. Implementarea procesează deci zi cu zi: evaluează
+    întâi toate meciurile zilei D contra istoricului strict anterior, abia
+    apoi adaugă contribuțiile zilei D.
+
+    Un meci contribuie la istoricul unei echipe DOAR dacă are xG real pentru
+    partea acelei echipe — un meci fără xG nu ajută formula, deci nu se
+    numără (Regula #8: nu se aproximează o stare lipsă)."""
+    if window <= 0:
+        return len(rows)
+
+    by_day: dict[str, list[dict]] = {}
+    for r in rows:
+        day = (r.get("kickoff_date") or "")[:10]
+        if not day:
+            continue
+        by_day.setdefault(day, []).append(r)
+
+    seen: dict[str, int] = {}
+    evaluable = 0
+    for day in sorted(by_day):
+        todays = by_day[day]
+        for r in todays:
+            home, away = r.get("home_team"), r.get("away_team")
+            if not home or not away:
+                continue
+            if seen.get(home, 0) >= window and seen.get(away, 0) >= window:
+                evaluable += 1
+        for r in todays:
+            home, away = r.get("home_team"), r.get("away_team")
+            if home and r.get("home_xg_actual") is not None:
+                seen[home] = seen.get(home, 0) + 1
+            if away and r.get("away_xg_actual") is not None:
+                seen[away] = seen.get(away, 0) + 1
+    return evaluable
+
 
 def get_finishing_data_readiness(since_date: str) -> dict:
     """Progres agregat, pe ligile domestice ale sezonului curent (kickoff_date
     >= since_date, cu excluderea TEAM_PROFILE_EXCLUDED_LEAGUES) — spre
-    TEAM_PROFILE_TEST_THRESHOLD. `finished_total` e cifra afișată în bara de
-    progres; `shots_on_target`/`xg` rămân informative, pentru a ști ce parte
-    din test chiar e susținută de date reale odată atins pragul.
+    TEAM_PROFILE_TEST_THRESHOLD.
+
+    [CORECTAT — ADR-062] `evaluable_matches` e ACUM cifra care guvernează
+    poarta (meciuri cu ambele echipe având ≥TEAM_PROFILE_WINDOW meciuri
+    anterioare cu xG — vezi count_matches_with_sufficient_history()).
+    `finished_total`/`shots_on_target`/`xg` rămân, dar strict ca context
+    informativ: numărau meciurile jucate în sezon, o cantitate care NU spune
+    dacă un test walk-forward e posibil.
 
     Rândurile suprascrise (`superseded_by`) sunt excluse, la fel ca la
     count_matches_with_result()."""
     client = get_client()
     if client is None:
-        return {"finished_total": 0, "shots_on_target": 0, "xg": 0}
+        return {"finished_total": 0, "shots_on_target": 0, "xg": 0, "evaluable_matches": 0}
     try:
         excluded = list(TEAM_PROFILE_EXCLUDED_LEAGUES)
         finished_res = (
@@ -2710,14 +2776,51 @@ def get_finishing_data_readiness(since_date: str) -> dict:
             .not_.in_("league", excluded)
             .execute()
         )
+        # [ADAUGAT — ADR-062] Cifra reală a porții. Rândurile se aduc
+        # complet (nu doar `count`), fiindcă evaluarea „ambele echipe au
+        # ≥window meciuri anterioare" nu e exprimabilă printr-un singur
+        # count PostgREST (ar cere LATERAL JOIN, indisponibil aici — aceeași
+        # limitare deja documentată la _recent_match_side_map()).
+        #
+        # Paginare cu `.order("id")` EXPLICIT înainte de `.range()`:
+        # PostgREST/Postgres nu garantează ordine stabilă între cereri
+        # paginate fără ORDER BY, deci același rând fizic ar putea fi adus
+        # de două ori (sau deloc) sub scrieri concurente — bug real găsit și
+        # reparat în această sesiune în match_identity_reconciliation_service
+        # (vezi ADR-059, Addendum). `id` e imuabil și monoton, deci stabil.
+        rows: list[dict] = []
+        seen_ids: set = set()
+        page = 0
+        while True:
+            batch = (
+                client.table("match_history")
+                .select("id,home_team,away_team,kickoff_date,home_xg_actual,away_xg_actual")
+                .not_.is_("actual_result", "null")
+                .is_("superseded_by", "null")
+                .gte("kickoff_date", since_date)
+                .not_.in_("league", excluded)
+                .order("id")
+                .range(page * 1000, page * 1000 + 999)
+                .execute()
+            )
+            raw = batch.data or []
+            for r in raw:
+                if r.get("id") not in seen_ids:
+                    seen_ids.add(r.get("id"))
+                    rows.append(r)
+            if len(raw) < 1000:
+                break
+            page += 1
+
         return {
             "finished_total": finished_res.count or 0,
             "shots_on_target": sot_res.count or 0,
             "xg": xg_res.count or 0,
+            "evaluable_matches": count_matches_with_sufficient_history(rows, TEAM_PROFILE_WINDOW),
         }
     except Exception as exc:
         logger.warning("[Queries] get_finishing_data_readiness failed: %s", exc)
-        return {"finished_total": 0, "shots_on_target": 0, "xg": 0}
+        return {"finished_total": 0, "shots_on_target": 0, "xg": 0, "evaluable_matches": 0}
 
 
 def get_team_recent_advanced_stats(

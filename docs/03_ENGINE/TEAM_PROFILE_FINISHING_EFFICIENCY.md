@@ -108,9 +108,52 @@ niciun cod de producție, compară formula cu/fără competițiile excluse
 nu o copie locală — evită divergența). Necesită `SUPABASE_URL`/
 `SUPABASE_SECRET_KEY` în mediu (nu rulează în orice sandbox).
 
+6. **Poarta corectată — ADR-062, 2026-08-23**: pragul 300 rămâne, dar
+   numără acum altceva. Verificat live înainte de a începe ablația:
+   numărătoarea veche ajunsese la 298/300 (deschidere în ore), dar dintre
+   cele 298 de meciuri doar **15 (5,0%)** aveau ambele echipe cu ≥5 meciuri
+   anterioare cu xG — fereastra reală a formulei. Numărătoarea veche
+   măsura meciurile jucate în sezon; ablația walk-forward are nevoie de
+   meciuri cu istoric suficient **per ambele echipe**, o cantitate diferită.
+   Poarta urmărește acum `evaluable_matches` (vezi
+   `database.queries.count_matches_with_sufficient_history`), cu cifra
+   veche păstrată ca context. Detalii complete, inclusiv măsurătorile de
+   stabilitate și analiza 3-vs-5, în
+   `docs/00_GOVERNANCE/ADR-062-team-profile-readiness-gate-correction.md`.
+
+## Ce știm despre zgomotul metricii (măsurat 2026-08-23, nu presupus)
+
+Corelație split-half pe datele curente: `goals_per_xg` ≈ **−0,10** (două
+metode independente, 32 respectiv 61 de echipe). DAR și martorii presupuși
+stabili ies ≈ 0 (xG mediu 0,076, cornere 0,054, șuturi pe poartă −0,056) —
+deci măsurătoarea **nu distinge** „metrica e zgomot" de „eșantion prea mic".
+Istoric mai adânc nu există (xG real începe 2026-05-02, 531 rânduri, maxim
+7 meciuri/echipă), deci nu se poate măsura mai bine azi.
+
+Ce se poate afirma riguros: eroarea relativă a raportului scade cu
+√(xG acumulat) — **±46% la 3 meciuri, ±36% la 5, ±20% abia la ~16**.
+Dispersia observată între echipe (0,413) e integral explicată de zgomotul
+de eșantionare.
+
+Varianta de a reduce fereastra 5→3 (ar fi dat 68 meciuri evaluabile în loc
+de 15, ≈2,7× mai multă putere netă) a fost evaluată explicit și **respinsă
+de proprietarul produsului, 2026-08-23** — se rămâne la 5, planul inițial.
+
 ## Pasul următor (neînceput, în așteptarea pragului + aprobării)
 
 Testul de ablație propriu-zis: măsoară dacă adăugarea acestor semnale ca
 feature-uri ML (sau ca ajustare Oracle) îmbunătățește predicțiile
 măsurabil — nu doar dacă formula „arată bine" pe eșantionul curent. Va
-fi propus separat, cu aprobare separată, când pragul de 300 e atins.
+fi propus separat, cu aprobare separată, când pragul de 300 **meciuri
+evaluabile** e atins (ADR-062). Estimare pe date, la ritmul curent de
+acumulare: **~5-6 săptămâni (finalul lui septembrie)**, nu „azi-mâine"
+cum sugera numărătoarea veche.
+
+### Precondiție deja rezolvată (2026-08-23)
+
+`get_team_recent_advanced_stats()`/`_recent_match_side_map()` au primit
+parametrul opțional `as_of_date` — limită SUPERIOARĂ STRICTĂ
+(`kickoff_date <`), fără de care o ablație walk-forward ar fi dat unui meci
+din septembrie, în propriul istoric „recent", meciuri din decembrie
+(scurgere temporală reală, interzisă de `CLAUDE.md`). Servirea live nu îl
+folosește — acolo „recent" chiar înseamnă „față de acum".
