@@ -54,3 +54,7 @@ Executat 2026-08-23, cu aprobare explicită („aprob ADR nou și implementarea"
 **Teste de mutație, nu doar teste care trec** (cerut explicit): prima versiune a testului de gating pe flag (`test_returns_none_when_flag_disabled`) folosea un mock care ridică `AssertionError` dacă e apelat — verificare directă a arătat că acel `AssertionError` e prins de `except Exception` din interiorul metodei și transformat tot în `None`, deci testul trecea „din întâmplare" chiar și cu garda de flag ȘTEARSĂ din cod (mutație aplicată local, confirmată, apoi revertită). Corectat cu un numărător explicit de apeluri. A doua mutație (eliminarea ramurii „predicție eșuată") a fost prinsă corect de testul existent, fără nicio corecție necesară — verificat separat, nu presupus.
 
 **Rulare completă**: `pytest tests/` — **2.585 passed** (2.560 + 25 noi), **2 skipped** — nicio regresie.
+
+**CI**: „Predictor Regression Suite (obligatoriu la merge)" — verde pe commit-ul `d98b659` (`run 32632743940`), declanșat automat de push-ul pe `main`.
+
+**Activare în producție** (2026-08-23, confirmare separată, per `supabase-safety`): `UPDATE model_config SET data = jsonb_set(data, '{blend_v1_champion_display_enabled}', 'true') WHERE id=1` — operație minimă (`jsonb_set`, nu suprascrie restul configurației). Verificat direct, înainte și după: toate celelalte flag-uri (`learning_core_enabled`, `blend_engine_display_enabled`, `ml_engine_display_enabled`) rămase neatinse (`true`, cum erau). Reversibil oricând (revenire la `'false'`).
