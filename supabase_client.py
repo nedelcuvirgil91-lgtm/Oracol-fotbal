@@ -901,6 +901,10 @@ def record_challenger_evaluation(
     delta_logloss: float | None, logloss_significant: bool | None,
     accuracy_baseline: float | None, accuracy_experiment: float | None,
     delta_accuracy: float | None, accuracy_significant: bool | None,
+    n_matches_informed: int | None = None,
+    delta_brier_informed: float | None = None,
+    delta_logloss_informed: float | None = None,
+    delta_accuracy_informed: float | None = None,
 ) -> bool:
     """Persistă un verdict de Shadow Evaluation ca fapt istoric IMUABIL —
     ADR-018. `INSERT ... ignore_duplicates=True` => ON CONFLICT DO NOTHING
@@ -926,6 +930,12 @@ def record_challenger_evaluation(
             "delta_logloss": delta_logloss, "logloss_significant": logloss_significant,
             "accuracy_baseline": accuracy_baseline, "accuracy_experiment": accuracy_experiment,
             "delta_accuracy": delta_accuracy, "accuracy_significant": accuracy_significant,
+            # [ADR-065] Diagnostic — verdictele istorice raman NULL aici
+            # (necunoscut, nu zero): nu au fost calculate cu aceasta separare.
+            "n_matches_informed": n_matches_informed,
+            "delta_brier_informed": delta_brier_informed,
+            "delta_logloss_informed": delta_logloss_informed,
+            "delta_accuracy_informed": delta_accuracy_informed,
         }, on_conflict="training_run_id,n_matches_evaluated", ignore_duplicates=True).execute()
         return True
     except Exception as exc:

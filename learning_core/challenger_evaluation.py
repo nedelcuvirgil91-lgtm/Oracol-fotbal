@@ -101,4 +101,13 @@ def _persist_immutable_verdict(
         delta_logloss=result.get("delta_logloss"), logloss_significant=result.get("logloss_significant"),
         accuracy_baseline=result.get("accuracy_baseline"), accuracy_experiment=result.get("accuracy_experiment"),
         delta_accuracy=result.get("delta_accuracy"), accuracy_significant=result.get("accuracy_significant"),
+        # [ADR-065] Diagnostic: aceleasi trei delte, doar pe meciurile in care
+        # baseline-ul Oracle a avut date reale. NU schimba verdictul — arata
+        # omului care aproba daca avantajul se pastreaza cand baseline-ul nu
+        # mai e orb. Masurat 2026-08-23: la xgboost_v1, acuratetea isi
+        # inverseaza semnul intre cele doua populatii.
+        n_matches_informed=result.get("n_matches_informed"),
+        delta_brier_informed=result.get("delta_brier_informed"),
+        delta_logloss_informed=result.get("delta_logloss_informed"),
+        delta_accuracy_informed=result.get("delta_accuracy_informed"),
     )

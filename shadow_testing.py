@@ -306,6 +306,22 @@ def _brier(ph: float, pd: float, pa: float, outcome: str) -> float:
     return sum((p[i] - y[i]) ** 2 for i in range(3))
 
 
+def _baseline_is_neutral(match_row: dict) -> bool:
+    """[ADR-065] Baseline-ul Oracle a fost complet ORB pentru acest meci —
+    FUNCȚIE PURĂ, fără I/O.
+
+    „Orb" înseamnă `data_quality == 'neutral'` pe AMBELE părți. Cu toate
+    intrările la valori neutre, `feature_engine.calibrate_xg()` produce
+    aceeași valoare pentru orice meci din acea competiție — verificat live:
+    Champions League 18 rânduri / o singură valoare, Europa League 26 / una.
+
+    Deliberat strict pe „ambele": dacă o singură echipă e neutrală, baseline-ul
+    tot are informație parțială și meciul rămâne în subsetul informat. Un prag
+    mai larg ar exclude mai mult decât justifică dovada."""
+    return (match_row.get("home_data_quality") == "neutral"
+            and match_row.get("away_data_quality") == "neutral")
+
+
 def evaluate_experiment(
     experiment_name: str,
     experiment_version: str,
@@ -340,7 +356,8 @@ def evaluate_experiment(
     try:
         res = (
             client.table("match_history")
-            .select("fixture_id,actual_result,prob_home_pred,prob_draw_pred,prob_away_pred")
+            .select("fixture_id,actual_result,prob_home_pred,prob_draw_pred,prob_away_pred,"
+                    "home_data_quality,away_data_quality")
             .in_("fixture_id", fixture_ids)
             .execute()
         )
@@ -364,6 +381,9 @@ def evaluate_experiment(
     baseline_brier, exp_brier = [], []
     baseline_logloss, exp_logloss = [], []
     baseline_correct, exp_correct = [], []
+    informed_brier_base, informed_brier_exp = [], []
+    informed_ll_base, informed_ll_exp = [], []
+    informed_acc_base, informed_acc_exp = [], []
     dates = []
 
     for shadow, mh in eligible:
@@ -385,6 +405,18 @@ def evaluate_experiment(
 
         if shadow.get("kickoff_date"):
             dates.append(shadow["kickoff_date"])
+
+        # [ADR-065] Subsetul INFORMAT — meciurile în care baseline-ul Oracle a
+        # avut date reale. Pentru un meci complet neutru, Oracle emite aceeași
+        # constantă indiferent de echipe, în timp ce experimentul poate avea
+        # ELO și alte feature-uri reale: comparația nu e „ambii orbi".
+        if not _baseline_is_neutral(mh):
+            informed_brier_base.append(baseline_brier[-1])
+            informed_brier_exp.append(exp_brier[-1])
+            informed_ll_base.append(baseline_logloss[-1])
+            informed_ll_exp.append(exp_logloss[-1])
+            informed_acc_base.append(baseline_correct[-1])
+            informed_acc_exp.append(exp_correct[-1])
 
     test_fn = STATISTICAL_TESTS.get(statistical_method, _paired_bootstrap)
     brier_result = test_fn(baseline_brier, exp_brier, favorable_direction=-1)
@@ -414,7 +446,34 @@ def evaluate_experiment(
         "delta_accuracy": accuracy_result.delta, "accuracy_significant": accuracy_result.significant,
         "statistical_method": statistical_method,
     }
+    # Registry-ul primeste DOAR campurile de verdict, INAINTE de imbogatire:
+    # `experiment_registry` nu are coloanele de diagnostic ADR-065, iar o
+    # scriere cu campuri necunoscute ar esua. Diagnosticul apartine tabelei
+    # `challenger_evaluations`, nu registrului de status.
     _update_registry(experiment_name, experiment_version, league_scope, **result)
+
+    # [ADR-065] Diagnostic, NU un al doilea verdict: aceleași trei delte,
+    # recalculate doar pe meciurile cu baseline informat. Criteriul de
+    # promovare rămâne definit pe populația completă (North Star #2) — asta
+    # doar arată omului care aprobă DE UNDE vine avantajul.
+    #
+    # Se raportează DELTE, nu semnificație: subsetul poate fi prea mic pentru
+    # un test concludent, iar o deltă rămâne citibilă. `n_matches_informed`
+    # merge alături tocmai ca delta să nu fie citită fără context.
+    n_inf = len(informed_brier_base)
+    result["n_matches_informed"] = n_inf
+    if n_inf > 0:
+        result["delta_brier_informed"] = test_fn(
+            informed_brier_base, informed_brier_exp, favorable_direction=-1).delta
+        result["delta_logloss_informed"] = test_fn(
+            informed_ll_base, informed_ll_exp, favorable_direction=-1).delta
+        result["delta_accuracy_informed"] = test_fn(
+            informed_acc_base, informed_acc_exp, favorable_direction=1).delta
+    else:
+        # Niciun meci informat: necunoscut, nu zero (Regula #8).
+        result["delta_brier_informed"] = None
+        result["delta_logloss_informed"] = None
+        result["delta_accuracy_informed"] = None
     return result
 
 
