@@ -1,0 +1,52 @@
+name: Football Oracle — Data Health Check (read-only, ADR-063)
+
+# [ADAUGAT — 2026-08-23] Raportare, ZERO scriere. Patru clase de probleme
+# gasite in aceeasi zi DIN INTAMPLARE, investigand altceva — niciuna nu avea
+# monitorizare, deci cresteau tacut:
+#   1. fixture-uri trecute fara rezultat (duplicate sau amanari cu data veche)
+#   2. duplicate pe cheia naturala (gazda, oaspete, zi)
+#   3. forme abreviate vs forme lungi ("Din. Zagreb" / "Dinamo Zagreb" —
+#      doua lanturi ELO paralele pentru acelasi club)
+#   4. ligi urmarite fara niciun meci descoperit de Flashscore in 7 zile
+#      (alarma care inlocuieste plasa de siguranta data la o parte de ADR-063)
+#
+# Job-ul devine ROSU daca exista constatari — acelasi tipar deja folosit de
+# identity_drift_check.yml, fara infrastructura noua de notificare.
+#
+# Cadenta: zilnic, 07:30 UTC. night_sync.yml ruleaza la 03:00 cu timeout 180
+# min -> finalizare cea mai tarzie 06:00; identity_drift_check.yml la 06:30
+# cu timeout 20 min -> 06:50. 07:30 e liber de ambele, verificat explicit cu
+# `grep -B3 cron: .github/workflows/*.yml` inainte de a alege ora.
+
+on:
+  schedule:
+    - cron: "30 7 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: check-data-health
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check data health (zero writes)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python scripts/check_data_health.py

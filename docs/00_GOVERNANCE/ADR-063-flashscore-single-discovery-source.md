@@ -60,4 +60,34 @@ Verificat că normalizarea NU rezolvă problema: `normalize_team_name("Corvinul 
 
 ## Jurnal de execuție
 
-Se completează pe măsură ce fazele avansează.
+Executat 2026-08-23.
+
+**Faza 1 — flag + gating**: `discovery_live_cascade_enabled` (implicit `True`), `oracle_api._live_cascade_enabled()` + gate în `_fetch_live_week_matches()`. Codul cascadei neatins. 8 teste noi, verificate prin mutație (fallback `True`→`False` prins de 3 teste; scurtcircuitarea gate-ului înaintea providerilor, de alte 2).
+
+**Faza 2 — curățarea duplicatelor**: executate 2 din 3, cu confirmare explicită separată.
+
+| Rând marcat | Superseded de | Dovadă |
+|---|---|---|
+| 126718 `tsdb_2502947` „Corvinul Hunedoara" | 126756 `flashscore_dx4pgX44` (3-0, xG 2,81) | varianta de nume apare EXCLUSIV pe rândul duplicat (1 din 10 apariții) |
+| 127060 `tsdb_2502971` Petrolul–Oțelul 7 aug | 131039 `flashscore_bNX27rsC` 9 aug (1-0, xG 1,39) | aceleași echipe, aceeași partidă tur |
+
+Al treilea (HNL, Rijeka–Zagreb) **oprit deliberat** per Discovery Rule: superseding-ul cerea o decizie de vocabular care nu era în planul aprobat — vezi mai jos.
+
+**Descoperire în afara scopului aprobat (Discovery Rule, prezentată proprietarului produsului)**: o clasă întreagă de fragmentare, invizibilă până acum. Formele abreviate Flashscore coexistă cu forme lungi istorice, pentru același club:
+
+| Formă abreviată | Formă lungă | Efect măsurat |
+|---|---|---|
+| `Din. Zagreb` (7 meciuri, ELO **1607**) | `Dinamo Zagreb` (18 meciuri, ELO **1563**) | două lanțuri ELO paralele; cel nou a pornit de la 1500, ignorând 18 meciuri de istoric — ~63 puncte, peste pragul „material" de 50 din `measure_elo_divergence.py` |
+| `St. Mirren` | `St Mirren` | diferă doar prin punct |
+| `St. Truiden` | `St Truiden` | diferă doar prin punct |
+| `St. Gilloise` | `Union Saint-Gilloise` | de verificat |
+
+Detecția D2/D3 de până acum (ADR-060) cerea ca cele două nume să se fi ÎNTÂLNIT într-un meci; aceste perechi nu s-au întâlnit niciodată, deci erau structural invizibile. Decizie a proprietarului produsului: forma canonică e cea lungă (`Dinamo Zagreb`). Unificarea propriu-zisă rămâne un pas separat, cu verificare per pereche.
+
+**Faza 3 — monitorizare**: `scripts/check_data_health.py` + `check_data_health.yml` (zilnic 07:30 UTC, oră verificată liberă de coliziuni). Patru clase raportate, fiecare găsită azi din întâmplare: fixture-uri stale, duplicate pe cheie naturală, forme abreviate, și ligi urmărite fără descoperire Flashscore (alarma care înlocuiește plasa de siguranță). 11 teste pe funcția pură de detecție.
+
+Notabil: primul test de mutație pe garda anti-împerechere-greșită **a eșuat** — testul trecea din alt motiv decât cel intenționat (`Lok. Zagreb` era sărit ca fiind el însuși abreviere, nu datorită potrivirii pe inițială). Garda era netestată. Corectat cu un caz în care forma concurentă NU e abreviere (`Lokomotiva Zagreb`), reverificat prin mutație.
+
+**Rămas de făcut, deliberat, în această ordine**: unificarea perechilor de abrevieri → abia apoi oprirea efectivă a cascadei (`discovery_live_cascade_enabled` → `false`). Motivul ordinii: monitorizarea trebuie să fie activă și verde ÎNAINTE de a da la o parte plasa de siguranță.
+
+**Rulare completă**: `pytest tests/` — **2.627 passed, 2 skipped**.
