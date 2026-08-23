@@ -22,17 +22,20 @@ name: Football Oracle — Identity Drift Check (ADR-059)
 # baseline-ului dupa investigare ramane deliberat NEAUTOMAT — o decizie umana,
 # comisa explicit (vezi antetul scriptului).
 #
-# Cadenta: zilnic, 05:30 UTC. night_sync.yml ruleaza la 03:00 UTC cu timeout
-# 120 min -> cea mai tarzie finalizare posibila e 05:00 UTC; 30 min marja.
-# weekly.yml (doar duminica) ruleaza la 04:00 UTC cu timeout 30 min -> cea mai
-# tarzie finalizare 04:30 UTC. 05:30 UTC e liber de ambele, verificat explicit
-# in `grep -B3 cron: .github/workflows/*.yml` inainte de a alege ora — acelasi
+# Cadenta: zilnic, 06:30 UTC. night_sync.yml ruleaza la 03:00 UTC cu timeout
+# 180 min ([MODIFICAT — 2026-08-23], anterior 120 min) -> cea mai tarzie
+# finalizare posibila e 06:00 UTC; 30 min marja (pastrata identic fata de
+# forma originala, doar mutata din 05:30 in 06:30 UTC ca sa urmeze bump-ul
+# de timeout din night_sync.yml). weekly.yml (doar duminica) ruleaza la
+# 04:00 UTC cu timeout 30 min -> cea mai tarzie finalizare 04:30 UTC.
+# 06:30 UTC e liber de ambele, verificat explicit in
+# `grep -B3 cron: .github/workflows/*.yml` inainte de a alege ora — acelasi
 # principiu de programare-fara-coliziune deja folosit in tot proiectul
 # (programare simpla, nu blocare intre workflow-uri).
 
 on:
   schedule:
-    - cron: "30 5 * * *"
+    - cron: "30 6 * * *"
   workflow_dispatch:
     inputs:
       mode:

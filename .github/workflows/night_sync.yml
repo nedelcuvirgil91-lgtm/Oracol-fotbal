@@ -28,20 +28,32 @@ name: Football Oracle — Night Sync (Faza 2)
 on:
   schedule:
     # Zilnic, 03:00 UTC - slotul original din Faza 2 (consolidare
-    # scheduler). timeout-minutes: 120 mai jos -> ora cea mai tarzie
-    # posibila de finalizare e 05:00 UTC (GitHub Actions opreste jobul
-    # exact la limita, nu doar estimeaza). `live_sync.yml` ruleaza la 4h,
-    # cu sloturi alese explicit sa evite fereastra [03:00, 05:00]
-    # (02:00/06:00/10:00/...) - garantie prin programare, nu prin
-    # concurrency intre workflow-uri (verificare + decizie explicita,
-    # Pasul 2 Master Repair Plan).
+    # scheduler). timeout-minutes: 180 mai jos -> ora cea mai tarzie
+    # posibila de finalizare e 06:00 UTC (GitHub Actions opreste jobul
+    # exact la limita, nu doar estimeaza). `live_sync.yml` ruleaza la
+    # 09:00/13:00/17:00 UTC (verificat direct in live_sync.yml — comentariul
+    # vechi de aici mentiona gresit sloturi 02:00/06:00/10:00, corectat
+    # 2026-08-23) - oricum in afara ferestrei [03:00, 06:00], fara coliziune.
+    #
+    # [MODIFICAT — 2026-08-23] timeout-minutes 120 -> 180. Verificat direct
+    # (nu presupus): 3 din ultimele 5 rulari (2026-08-20, 2026-08-21,
+    # 2026-08-23) au fost anulate de timeout-ul de 120 min, prinse la
+    # mijlocul etapei de shadow logging pentru Challenger (ADR-056) -- deci
+    # etapa 8 "ML Refresh" (Continuous Learning, ADR-030) nu mai apuca
+    # niciodata sa ruleze, blocand evaluarea Challenger-ului activ
+    # (xgboost_v1/all) la acelasi numar de meciuri de doua nopti la rand.
+    # Cauza exacta a duratei (volum de evaluare shadow vs. alt blocaj) NU
+    # a fost investigata separat -- interventie minima, reversibila, ca sa
+    # lase pipeline-ul sa se termine; investigatia ramane pas ulterior.
+    # `identity_drift_check.yml` mutat 05:30->06:30 UTC ca sa pastreze
+    # aceeasi marja de 30 min fata de noua ora tarzie de finalizare.
     - cron: "0 3 * * *"
   workflow_dispatch: {}
 
 jobs:
   night-sync:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 180
 
     steps:
       - name: Checkout repository
