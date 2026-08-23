@@ -722,30 +722,49 @@ def _render_match_card(match: dict, engine) -> None:
                 # la 298 „terminate" existau doar 15 evaluabile (5,0%) —
                 # bara veche s-ar fi umplut la 300 fără ca testul să fie
                 # de fapt posibil. Cifra veche rămâne afișată ca context.
-                from database.queries import (
-                    TEAM_PROFILE_TEST_THRESHOLD, TEAM_PROFILE_WINDOW,
-                )
-                readiness = _finishing_data_readiness()
-                n_finished = readiness.get("finished_total", 0)
-                n_eval = readiness.get("evaluable_matches", 0)
-                status = (
-                    "prag atins — test de ablație în așteptare"
-                    if n_eval >= TEAM_PROFILE_TEST_THRESHOLD else "insufficient_data"
-                )
-                st.progress(
-                    min(n_eval / TEAM_PROFILE_TEST_THRESHOLD, 1.0) if TEAM_PROFILE_TEST_THRESHOLD else 0.0,
-                    text=(
-                        "🧪 Profil de echipă (agregat, ligi domestice, sezonul curent) — "
-                        f"{n_eval}/{TEAM_PROFILE_TEST_THRESHOLD} meciuri evaluabile "
-                        f"(ambele echipe cu ≥{TEAM_PROFILE_WINDOW} meciuri anterioare cu xG) "
-                        f"— status: {status}"
-                    ),
-                )
-                st.caption(
-                    f"Context: {n_finished} meciuri terminate în sezon. Doar cele evaluabile "
-                    "contează pentru testul de ablație — un meci fără istoric suficient pentru "
-                    "ambele echipe nu poate fi prezis walk-forward cu această formulă."
-                )
+                #
+                # [CORECTAT 2026-08-23, incident live] Blocul e ÎNVELIT în
+                # try/except și citește constantele prin getattr, cu valori
+                # implicite. Motiv real, nu teoretic: după deploy-ul ADR-062,
+                # aplicația live a căzut cu ImportError pe exact acest import.
+                # Cauza — Streamlit re-execută app.py la hot-reload, dar NU
+                # reimportă modulele deja aflate în sys.modules
+                # (`database.queries` intră acolo prin oracle_engine.py la
+                # pornirea procesului). Noul app.py cerea deci un simbol nou
+                # de la versiunea VECHE, cache-uită, a modulului. Se rezolvă
+                # de la sine la un restart complet — dar o bară de progres
+                # pentru un experiment NEPROMOVAT nu are voie, în niciun
+                # scenariu, să dărâme randarea întregului card de meci.
+                # Degradare grațioasă, ca peste tot în proiect (Regula #8):
+                # dacă indicatorul nu se poate calcula, dispare, nu explodează.
+                try:
+                    import database.queries as _dbq
+
+                    threshold = getattr(_dbq, "TEAM_PROFILE_TEST_THRESHOLD", 300)
+                    window = getattr(_dbq, "TEAM_PROFILE_WINDOW", 5)
+                    readiness = _finishing_data_readiness()
+                    n_finished = readiness.get("finished_total", 0)
+                    n_eval = readiness.get("evaluable_matches", 0)
+                    status = (
+                        "prag atins — test de ablație în așteptare"
+                        if n_eval >= threshold else "insufficient_data"
+                    )
+                    st.progress(
+                        min(n_eval / threshold, 1.0) if threshold else 0.0,
+                        text=(
+                            "🧪 Profil de echipă (agregat, ligi domestice, sezonul curent) — "
+                            f"{n_eval}/{threshold} meciuri evaluabile "
+                            f"(ambele echipe cu ≥{window} meciuri anterioare cu xG) "
+                            f"— status: {status}"
+                        ),
+                    )
+                    st.caption(
+                        f"Context: {n_finished} meciuri terminate în sezon. Doar cele evaluabile "
+                        "contează pentru testul de ablație — un meci fără istoric suficient pentru "
+                        "ambele echipe nu poate fi prezis walk-forward cu această formulă."
+                    )
+                except Exception:
+                    logger.warning("[UI] Indicator Team Profile indisponibil", exc_info=True)
 
             # ── Grupul 3 — clasament complet (context extern, nu formă) ────
             standings_fields = [
