@@ -44,6 +44,16 @@ class _FakeQuery:
     def gte(self, *a, **kw):
         self._calls.append((self._table_name, "gte", a, kw)); return self
 
+    def lt(self, *a, **kw):
+        self._calls.append((self._table_name, "lt", a, kw)); return self
+
+    def lte(self, *a, **kw):
+        # Prezenta DELIBERAT, desi codul de productie nu o foloseste: fara ea,
+        # o mutatie lt->lte ar esua din cauza unui AttributeError inghitit de
+        # try/except, nu din cauza gardei de semantica. Cu ea, testul de mai
+        # jos distinge genuin `lt` de `lte` (verificat prin mutatie reala).
+        self._calls.append((self._table_name, "lte", a, kw)); return self
+
     @property
     def not_(self):
         return self
@@ -110,6 +120,62 @@ def test_get_team_recent_advanced_stats_no_since_date_skips_gte(monkeypatch):
     monkeypatch.setattr(q, "get_client", lambda: fake)
     q.get_team_recent_advanced_stats("Dinamo", "Romania SuperLiga")
     assert not [c for c in fake.calls if c[1] == "gte"]
+
+
+# ── as_of_date: limită superioară STRICTĂ (walk-forward, ADR-062) ────────
+
+def test_get_team_recent_advanced_stats_applies_as_of_date_as_strict_lt(monkeypatch):
+    """Garda centrala impotriva scurgerii temporale: `as_of_date` trebuie sa
+    genereze `lt` (STRICT mai mic), NICIODATA `lte`. Cu `lte`, un meci din
+    data D ar primi in propriul istoric "recent" meciurile din aceeasi zi —
+    inclusiv pe el insusi, deci propriul rezultat s-ar scurge in propriul
+    feature."""
+    fake = _FakeClient({"match_history": []})
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    q.get_team_recent_advanced_stats("Dinamo", "Romania SuperLiga", as_of_date="2026-09-15")
+    lt_calls = [c for c in fake.calls if c[1] == "lt"]
+    assert lt_calls == [("match_history", "lt", ("kickoff_date", "2026-09-15"), {})]
+    # si NICIODATA lte, sub nicio forma
+    assert not [c for c in fake.calls if c[1] == "lte"]
+
+
+def test_get_team_recent_advanced_stats_no_as_of_date_skips_lt(monkeypatch):
+    """Comportament neschimbat pentru apelantii existenti (servirea live):
+    fara as_of_date, nicio limita superioara."""
+    fake = _FakeClient({"match_history": []})
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    q.get_team_recent_advanced_stats("Dinamo", "Romania SuperLiga", since_date="2026-07-01")
+    assert not [c for c in fake.calls if c[1] == "lt"]
+
+
+def test_get_team_recent_advanced_stats_combines_since_and_as_of(monkeypatch):
+    """Ambele limite simultan — fereastra inchisa [since_date, as_of_date),
+    exact ce cere un fold walk-forward pe sezonul curent."""
+    fake = _FakeClient({"match_history": []})
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    q.get_team_recent_advanced_stats(
+        "Dinamo", "Romania SuperLiga", since_date="2026-07-01", as_of_date="2026-09-15",
+    )
+    assert [c for c in fake.calls if c[1] == "gte"] == [
+        ("match_history", "gte", ("kickoff_date", "2026-07-01"), {})
+    ]
+    assert [c for c in fake.calls if c[1] == "lt"] == [
+        ("match_history", "lt", ("kickoff_date", "2026-09-15"), {})
+    ]
+
+
+def test_side_map_consumers_forward_as_of_date(monkeypatch):
+    """get_team_recent_statistics_extended si get_team_recent_player_ratings
+    deleaga la _recent_match_side_map — as_of_date trebuie sa ajunga acolo,
+    altfel EAV-ul ar fi filtrat pe o fereastra temporala diferita de
+    statisticile core (inconsistenta silentioasa)."""
+    for fn in (q.get_team_recent_statistics_extended, q.get_team_recent_player_ratings):
+        fake = _FakeClient({"match_history": []})
+        monkeypatch.setattr(q, "get_client", lambda: fake)
+        fn("Dinamo", "Romania SuperLiga", as_of_date="2026-09-15")
+        assert [c for c in fake.calls if c[1] == "lt"] == [
+            ("match_history", "lt", ("kickoff_date", "2026-09-15"), {})
+        ], f"{fn.__name__} nu propaga as_of_date la _recent_match_side_map"
 
 
 # ════════════════════════════════════════════════════════════════════════
