@@ -126,7 +126,17 @@ def log_shadow_prediction(
 def get_shadow_predictions(
     experiment_name: str, experiment_version: str | None = None,
     league_scope: str | None = None, processing_stage: str | None = None,
+    include_invalidated: bool = False,
 ) -> list[dict]:
+    """[ADR-064] Randurile INVALIDATE sunt excluse implicit.
+
+    O predictie facuta sub o identitate gresita (ex. gazda si oaspetele
+    inversate) nu e o predictie despre meciul real — punctata contra
+    rezultatului adevarat, produce semnal fals SISTEMATIC, nu zgomot: un
+    "gazda castiga" ar iesi corect exact cand castiga cealalta echipa.
+
+    `include_invalidated=True` doar pentru audit/inspectie, niciodata pentru
+    evaluare."""
     client = sb.get_client()
     if client is None:
         return []
@@ -138,11 +148,71 @@ def get_shadow_predictions(
             q = q.eq("league", league_scope)
         if processing_stage is not None:
             q = q.eq("processing_stage", processing_stage)
+        if not include_invalidated:
+            q = q.is_("invalidated_at", "null")
         res = q.execute()
         return res.data or []
     except Exception as exc:
         logger.warning("[ShadowTesting] get_shadow_predictions failed: %s", exc)
         return []
+
+
+def invalidate_shadow_predictions(fixture_id: str, reason: str) -> int:
+    """[ADR-064] Scoate din evaluare predicțiile shadow ale unui meci, păstrându-le
+    în tabelă. Întoarce numărul de rânduri invalidate.
+
+    ACȚIUNE SUPRAVEGHEATĂ. Nu se apelează automat dintr-un `hard_conflict`:
+    a decide că o predicție e invalidă înseamnă a decide că identitatea sub
+    care a fost făcută e greșită — exact judecata pe care ADR-002 o ține în
+    mâna omului, și pe care migrarea 049 refuză deliberat să o automatizeze.
+
+    De ce invalidare și nu corecție: probabilitățile NU se permută
+    (`prob_home ↔ prob_away`) — modelul aplică avantajul terenului propriu,
+    deci permutarea ar fabrica o predicție care nu a fost făcută niciodată.
+    Nici recalcularea retroactivă nu e validă: ar folosi feature-uri de azi
+    pentru un moment din trecut (scurgere temporală, North Star #7).
+
+    De ce nu ștergere: sistemul chiar a produs acele predicții, iar faptul
+    rămâne parte din istoric (trasabilitate completă, North Star #9).
+
+    Rândurile deja invalidate nu se re-marchează — motivul original se
+    păstrează, ca prima decizie să rămână cea trasabilă."""
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValueError(
+            "invalidate_shadow_predictions(): `reason` obligatoriu — o "
+            "invalidare fără motiv nu e trasabilă (ADR-064)."
+        )
+    if not fixture_id:
+        raise ValueError("invalidate_shadow_predictions(): `fixture_id` obligatoriu.")
+
+    client = sb.get_client()
+    if client is None:
+        logger.warning("[ShadowTesting] invalidate_shadow_predictions: Supabase indisponibil.")
+        return 0
+    try:
+        res = (
+            client.table("shadow_predictions")
+            .update({
+                "invalidated_at": datetime.now(timezone.utc).isoformat(),
+                "invalidation_reason": reason,
+            })
+            .eq("fixture_id", fixture_id)
+            .is_("invalidated_at", "null")
+            .execute()
+        )
+        n = len(res.data or [])
+        logger.warning(
+            "[ShadowTesting] ADR-064: %d predicții shadow invalidate pentru "
+            "fixture_id=%s — motiv: %s", n, fixture_id, reason,
+        )
+        return n
+    except Exception as exc:
+        logger.error(
+            "[ShadowTesting] invalidate_shadow_predictions eșuat pentru %s: %s",
+            fixture_id, exc,
+        )
+        return 0
 
 
 # ════════════════════════════════════════════════════════════════════════════
