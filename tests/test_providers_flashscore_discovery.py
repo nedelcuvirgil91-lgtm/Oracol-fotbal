@@ -23,7 +23,20 @@ from providers.flashscore.discovery import (
     run_foundation_data_layer_for_discovered_matches,
 )
 
+from udal_validation import ValidationResult
+
 EVIDENCE_DIR = Path(__file__).parent.parent / "docs" / "06_UDAL" / "poc_evidence" / "flashscore_10matches"
+
+
+def _valid_result(records):
+    """[R3, 2026-08-23] Discovery apeleaza acum `validate_detailed()`, care
+    intoarce `ValidationResult` intreg (are nevoie de `rejected` ca sa poata
+    raporta CARE camp din cheia naturala lipsea). `validate()` ramane metoda
+    de contract SyncAdapter, dar nu mai e pe calea de executie a Discovery."""
+    return ValidationResult(valid=[{
+        "home_team": "A", "away_team": "B", "kickoff_date": "2026-08-01T18:00:00",
+        "_pages": records[0],
+    }])
 
 
 def test_tracked_competitions_only_contains_verified_slugs():
@@ -112,11 +125,7 @@ def test_run_foundation_data_layer_passes_league_to_persist(monkeypatch):
     monkeypatch.setattr(FlashscoreAdapter, "fetch", lambda self, params: {"summary": "<html></html>"})
     monkeypatch.setattr(FlashscoreAdapter, "normalize", lambda self, raw: [raw])
     monkeypatch.setattr(
-        FlashscoreAdapter, "validate",
-        lambda self, records: [{
-            "home_team": "A", "away_team": "B", "kickoff_date": "2026-08-01T18:00:00",
-            "_pages": records[0],
-        }],
+        FlashscoreAdapter, "validate_detailed", lambda self, records: _valid_result(records),
     )
     calls = []
     monkeypatch.setattr(
@@ -150,11 +159,7 @@ def test_run_foundation_data_layer_skips_already_collected_match_delta_sync(monk
     new = DiscoveredMatch(league="Romania SuperLiga", match_base_url="https://y", mid="new-mid", source="results")
     monkeypatch.setattr(FlashscoreAdapter, "normalize", lambda self, raw: [raw])
     monkeypatch.setattr(
-        FlashscoreAdapter, "validate",
-        lambda self, records: [{
-            "home_team": "A", "away_team": "B", "kickoff_date": "2026-08-01T18:00:00",
-            "_pages": records[0],
-        }],
+        FlashscoreAdapter, "validate_detailed", lambda self, records: _valid_result(records),
     )
     monkeypatch.setattr(
         "providers.flashscore.persistence.persist_match_with_data_trust_layer",

@@ -212,9 +212,23 @@ class FlashscoreAdapter(ScraperAdapterBase):
         `validate_flat_identity`). Randurile respinse aici nu ajung deloc
         la persist() - dar un rand care trece de acest filtru tot poate
         fi respins ulterior (RAW tot se scrie, per Data Trust Layer)."""
+        return self.validate_detailed(records).valid
+
+    def validate_detailed(self, records: list[dict[str, str]]):
+        """Ca `validate()`, dar intoarce `ValidationResult` INTREG — inclusiv
+        `rejected`, cu motivul fiecarei respingeri.
+
+        [ADAUGAT 2026-08-23] `validate()` arunca `result.rejected`, iar
+        apelantul (Discovery) nu putea raporta decat sirul generic "validare
+        identitate esuata". Din cele 3 esecuri ale rularii din 23 august, 2 au
+        fost de acest tip si au ramas COMPLET nediagnosticabile: la validare
+        esuata nici macar RAW-ul nu se scrie (`persist()` nu se mai apeleaza),
+        deci nu exista nicio urma forensica.
+
+        Metoda de contract `validate()` ramane NESCHIMBATA (`SyncAdapter`) —
+        aceasta e aditiva, ca sa nu atinga contractul."""
         candidates = [{**normalize_match_statistics(pages), "_pages": pages} for pages in records]
-        result = validate_flat_identity(candidates, source_tier="playwright", source_id=self.scraper_id)
-        return result.valid
+        return validate_flat_identity(candidates, source_tier="playwright", source_id=self.scraper_id)
 
     def persist(self, records: list[dict[str, Any]]) -> bool:
         """`records` = rezultatul `validate()` - fiecare rand contine

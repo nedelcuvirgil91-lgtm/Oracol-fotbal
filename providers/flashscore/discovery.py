@@ -390,6 +390,29 @@ def discover_matches(
     return results
 
 
+_IDENTITY_FIELDS = ("home_team", "away_team", "kickoff_date")
+
+
+def _describe_identity_gaps(rejected: list) -> str:
+    """Care campuri din cheia naturala lipseau, pentru fiecare rand respins —
+    FUNCTIE PURA, fara I/O.
+
+    Nu se includ VALORILE campurilor prezente: numele echipelor pot fi lungi
+    si nu ajuta la diagnostic. Conteaza ce LIPSESTE. Daca nu lipseste nimic
+    din cheia naturala, motivul respingerii e altul decat cel asteptat si se
+    raporteaza ca atare — nu se presupune (Regula #8)."""
+    if not rejected:
+        return "niciun rand respins raportat"
+    parti: list[str] = []
+    for r in rejected:
+        record = getattr(r, "record", None) or {}
+        lipsa = [c for c in _IDENTITY_FIELDS if not record.get(c)]
+        motiv = getattr(r, "reason", None) or "motiv necunoscut"
+        parti.append(f"{motiv}: lipsesc {lipsa}" if lipsa
+                     else f"{motiv}: cheia naturala e completa (motiv neasteptat)")
+    return "; ".join(parti)
+
+
 def run_foundation_data_layer_for_discovered_matches(
     matches: list[DiscoveredMatch],
 ) -> list[dict[str, Any]]:
@@ -439,11 +462,25 @@ def run_foundation_data_layer_for_discovered_matches(
             reports.append({"match_id": None, "ok": False, "error": str(exc), "match": match})
             continue
         records = adapter.normalize(pages)
-        valid = adapter.validate(records)
-        if not valid:
-            reports.append({"match_id": None, "ok": False, "error": "validare identitate esuata", "match": match})
+        validation = adapter.validate_detailed(records)
+        if not validation.valid:
+            # [R3, 2026-08-23] Motivul CONCRET, nu sirul generic de dinainte.
+            # `validate_flat_identity` respinge pentru un singur motiv
+            # (`missing_natural_key`), deci ce conteaza e CARE camp lipsea —
+            # altfel esecul e nediagnosticabil: la validare esuata nu se
+            # scrie nici macar RAW, deci nu ramane nicio urma forensica.
+            detalii = _describe_identity_gaps(validation.rejected)
+            logger.error(
+                "[Flashscore.Discovery] validare identitate esuata pentru %s "
+                "(mid=%s, liga=%s): %s", match.match_base_url, match.mid, match.league, detalii,
+            )
+            reports.append({
+                "match_id": None, "ok": False,
+                "error": f"validare identitate esuata ({detalii})",
+                "match": match,
+            })
             continue
-        record = valid[0]
+        record = validation.valid[0]
         match_ref = _build_match_ref(record.get("home_team"), record.get("away_team"), record.get("kickoff_date"))
         # [FIX live] match_history.league e NOT NULL - Discovery deja
         # cunoaste liga (a ales-o explicit ca sa construiasca URL-ul hub-ului,
