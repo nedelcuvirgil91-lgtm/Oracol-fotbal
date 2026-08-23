@@ -375,6 +375,35 @@ def _render_match_card(match: dict, engine) -> None:
             reason = _ML_REASON_LABEL.get(mp.get("reason"), mp.get("reason", "motiv necunoscut"))
             st.caption(f"ℹ️ ML indisponibil — {reason}")
 
+    # [ADAUGAT — ADR-061] Blend v1 Champion — a patra voce independentă,
+    # DISTINCTĂ de „🔀 Blend" de mai sus (acela e motorul static
+    # blend_engine.py, algoritm neschimbat, fără legătură cu Model
+    # Registry). Aceasta e predicția Campionului blend_v1 PROMOVAT prin
+    # ciclul Challenger→evaluare→Decision Feed→aprobare umană (ADR-030/037)
+    # — etichetă separată explicit, ca să nu se confunde cele două „blend"-uri
+    # cu formule diferite sub nume similar. Populat de
+    # oracle_engine._get_blend_v1_champion_prediction() DOAR dacă
+    # blend_v1_champion_display_enabled=True — altfel None, secțiunea nu
+    # apare deloc (nu se aproximează).
+    bvc = getattr(pred, "blend_v1_champion_prediction", None)
+    if bvc:
+        st.markdown('<span class="sub-label">🏆 Blend v1 (Campion promovat)</span>', unsafe_allow_html=True)
+        if bvc.get("available"):
+            st.markdown(
+                '<div style="padding:0 1.5rem;">'
+                + _prob_bar(f"🏠 {home[:14]}", bvc["prob_home"], "#4a9eff")
+                + _prob_bar("Egal",            bvc["prob_draw"], "#ffb300")
+                + _prob_bar(f"✈️ {away[:14]}", bvc["prob_away"], "#ff3d57")
+                + "</div>", unsafe_allow_html=True
+            )
+        else:
+            _BLEND_V1_REASON_LABEL = {
+                "champion_indisponibil": "niciun Campion blend_v1 promovat/utilizabil momentan",
+                "predictie_esuata": "predicție eșuată pentru acest meci",
+            }
+            reason = _BLEND_V1_REASON_LABEL.get(bvc.get("reason"), bvc.get("reason", "motiv necunoscut"))
+            st.caption(f"ℹ️ Blend v1 Champion indisponibil — {reason}")
+
     # [ADAUGAT — ADR-031] N-way Serving: ieșirile brute, separate, per motor
     # — aditiv, view-ul compus de mai sus rămâne implicit, neschimbat.
     # Nu interpretează acordul/dezacordul dintre motoare (asta rămâne

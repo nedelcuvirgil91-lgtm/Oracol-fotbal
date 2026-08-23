@@ -187,6 +187,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # nu mai există blend legacy in-place, eliminat ADR-051/052). Populează
     # doar pred.ml_engine_prediction. Implicit OPRIT.
     "ml_engine_display_enabled": False,
+    # [ADAUGAT — ADR-061] Afișare UI a predicției Campionului blend_v1
+    # PROMOVAT (Model Registry, learning_core/blend_v1_champion_loader.py) —
+    # flag DEDICAT, distinct de blend_engine_display_enabled de mai sus
+    # (acela e motorul static blend_engine.py, algoritm neschimbat, zero
+    # legătură cu Model Registry). Populează doar
+    # pred.blend_v1_champion_prediction. Implicit OPRIT (North Star #3).
+    "blend_v1_champion_display_enabled": False,
     # Validation Framework (ADR-052) — colectare automată, per meci, a
     # ieșirilor Oracle/ML/Blend în engine_comparison_snapshots, pentru
     # analize periodice ulterioare. Flag dedicat, neînrudit cu flag-urile
@@ -442,6 +449,22 @@ class MatchPrediction:
     # sau predicție eșuată pentru acest meci), {"available": True,
     # "prob_home"/"prob_draw"/"prob_away": ...} (succes).
     ml_engine_prediction:     dict | None = None
+    # ── Blend v1 Champion (ADR-061) ────────────────────────────────────────
+    # Câmp SEPARAT, izolat — NU blend_engine_prediction de mai sus (acela e
+    # motorul static blend_engine.py, algoritm neschimbat, fără legătură cu
+    # Model Registry — cele două ar produce numere diferite sub o etichetă
+    # similară dacă s-ar confunda). Populat de
+    # _get_blend_v1_champion_prediction() DOAR dacă
+    # blend_v1_champion_display_enabled=True, din Campionul PROMOVAT al
+    # familiei blend_v1 (learning_core/blend_v1_champion_loader.py) — nu din
+    # Challenger-ul activ (acela rămâne exclusiv shadow,
+    # blend_challenger_shadow.py, neschimbat). Trei stări, niciodată
+    # aproximate: None (flag oprit sau eroare neprevăzută),
+    # {"available": False, "reason": ...} (niciun Campion promovat/utilizabil
+    # pentru această familie), {"available": True, "prob_home"/"prob_draw"/
+    # "prob_away": ...} (succes). Fără fallback pe "antrenare locală" — nu
+    # există un blend_v1 local cu sens (vezi ADR-061).
+    blend_v1_champion_prediction: dict | None = None
 
 
 def build_raw_predictions(
@@ -1949,6 +1972,16 @@ class FootballOracleEngine:
         # mai sus), dacă disponibil — vezi _get_blend_engine_prediction().
         pred.blend_engine_prediction = self._get_blend_engine_prediction(pred)
 
+        # [ADAUGAT — ADR-061] Campion PROMOVAT al familiei blend_v1 (Model
+        # Registry) — a patra voce independentă, afișată simultan cu
+        # Oracle/ML/Blend static de mai sus. Flag dedicat
+        # (blend_v1_champion_display_enabled). Singura mutație:
+        # pred.blend_v1_champion_prediction (câmp izolat) — nu atinge
+        # raw_predictions/prob_home_win/shadow_predictions.
+        pred.blend_v1_champion_prediction = self._get_blend_v1_champion_prediction(
+            pred, home_p, away_p, h2h, home_xg, away_xg, ph, pd, pa, mc, w_pen,
+        )
+
         # [ADAUGAT — ADR-052] Validation Framework — colectare automată,
         # per meci, a ieșirilor disponibile Oracle/ML/Blend, pentru analize
         # periodice ulterioare. Flag DEDICAT (validation_framework_enabled,
@@ -2183,6 +2216,55 @@ class FootballOracleEngine:
             return self.blend.predict(outputs)
         except Exception as exc:
             logger.debug("[BlendEngine] _get_blend_engine_prediction failed: %s", exc)
+            return None
+
+    def _get_blend_v1_champion_prediction(
+        self, pred: MatchPrediction, home_p: TeamProfile, away_p: TeamProfile,
+        h2h: H2HRecord, home_xg: float, away_xg: float,
+        ph: float, pd_: float, pa: float, mc: dict, weather_penalty: float,
+    ) -> dict | None:
+        """[ADR-061] Predicția Campionului PROMOVAT al familiei blend_v1
+        (Model Registry) — read-only, NU modifică ph/pd_/pa, NU scrie nimic
+        în shadow_predictions (asta rămâne exclusiv
+        blend_challenger_shadow.py, pt Challenger-ul activ, neschimbat).
+        Flag propriu (blend_v1_champion_display_enabled). Distinct de
+        _get_blend_engine_prediction() de mai sus (motor static, algoritm
+        neschimbat, fără Model Registry) — cele două NU trebuie confundate,
+        nici în cod, nici în UI (vezi ADR-061).
+
+        Reutilizează integral learning_core.blend_challenger_shadow.
+        predict_with_blend_challenger() — aceeași funcție deja testată prin
+        shadow logging, apelată acum cu training_run_id-ul Campionului
+        PROMOVAT (blend_v1_champion_loader.py), nu al Challenger-ului activ.
+
+        Trei stări distincte, niciodată aproximate: flag oprit sau eroare
+        neprevăzută -> None; Campion indisponibil (nicio promovare încă,
+        superseded, artefact invalid) -> dict cu motiv explicit; succes ->
+        dict cu probabilități."""
+        if not self.config.get("blend_v1_champion_display_enabled", False):
+            return None
+        try:
+            from learning_core.blend_v1_champion_loader import load_blend_v1_champion_or_none
+            from learning_core.blend_challenger_shadow import predict_with_blend_challenger
+            from ml_predictor import _LEAGUE_SCOPE
+
+            champion = load_blend_v1_champion_or_none(_LEAGUE_SCOPE)
+            if champion is None:
+                return {"available": False, "reason": "champion_indisponibil"}
+
+            ml_features = self._build_ml_features(
+                home_p, away_p, h2h, home_xg, away_xg, ph, pd_, pa, mc, weather_penalty,
+            )
+            blend_probs = predict_with_blend_challenger(
+                oracle_probs=(pred.prob_home_win, pred.prob_draw, pred.prob_away_win),
+                features=ml_features, training_run_id=champion.training_run_id,
+            )
+            if blend_probs is None:
+                return {"available": False, "reason": "predictie_esuata"}
+            b_ph, b_pd, b_pa = blend_probs
+            return {"available": True, "prob_home": b_ph, "prob_draw": b_pd, "prob_away": b_pa}
+        except Exception as exc:
+            logger.debug("[BlendV1Champion] _get_blend_v1_champion_prediction failed: %s", exc)
             return None
 
     def _resolve_ml_traceability(self) -> dict:
