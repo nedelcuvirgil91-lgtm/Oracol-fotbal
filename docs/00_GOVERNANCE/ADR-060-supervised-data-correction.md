@@ -177,7 +177,7 @@ Confirmă, măsurat nu presupus, că rebuild-ul a rezolvat exact problema care l
 
 **Suită de teste**: `pytest tests/` — **2.560 passed, 2 skipped**, verde, rulată după rebuild (nicio regresie introdusă de reset+replay).
 
-**Backup**: `match_history_backfill_backup_20260822` păstrat neșters — decizie de retenție (cât timp se păstrează) neluată încă, va fi propusă explicit proprietarului produsului separat de această execuție.
+**Backup — decizie de retenție (2026-08-23)**: `match_history_backfill_backup_20260822` verificat izolat — 9,77 MB, 51.046 rânduri, niciun cod din repo nu-l referențiază (`grep` exhaustiv, doar acest document îl menționează). Proprietarul produsului a decis explicit: **păstrare 30 de zile de la rebuild, cu revizuire la ~2026-09-21** (nu ștergere imediată, nu păstrare pe termen nelimitat fără termen) — programat un reminder separat pentru acea dată. La revizuire, decizia se ia din nou explicit (ștergere sau prelungire), nu automat.
 
 ## Referințe
 
