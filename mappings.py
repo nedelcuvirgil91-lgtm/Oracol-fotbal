@@ -327,7 +327,26 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "Kairat Almaty": ["FK Kairat"],
     "Shakhtar Donetsk": ["FK Shakhtar Donetsk"],
     "Galatasaray": ["Galatasaray SK"],
-    "Dinamo Zagreb": ["GNK Dinamo Zagreb"],
+    # [2026-08-23] Cele trei perechi de mai jos aveau forma ABREVIATA (Flashscore)
+    # si forma LUNGA (surse istorice) traind in paralel, ca doua cluburi diferite:
+    # doua lanturi ELO, doua istorii H2H. Canonicul ales e forma LUNGA, iar
+    # abrevierea devine alias — decizia proprietarului produsului, cu motivatia
+    # ca stratul de alias exista tocmai ca forma unui provider sa nu dicteze
+    # vocabularul stocat (ADR-058). Precedent identic, deja functional:
+    # "PSG" -> "Paris Saint-Germain", 244 de randuri.
+    # Costul migrarii a cantarit in aceeasi directie: 29 de randuri de rescris
+    # in loc de 315.
+    #
+    # ATENTIE la regenerare: "Din. Zagreb" si "St. Truiden" erau emise ca baze
+    # canonice de scripts/identity_f3_emit_aliases.py (blocul F3 de mai jos).
+    # Auditul F0 le-a vazut DOAR cu sufix de tara ("Din. Zagreb (CRO)",
+    # "St. Truiden (BEL)") si nu a avut cum sa stie ca exista o forma lunga in
+    # istoric. Au fost scoase din blocul generat; o regenerare oarba le-ar
+    # reintroduce ca al doilea canonic. Garda: testele de mai jos plus
+    # test_team_identity_invariants.py (o cheie canonica nu poate fi si alias).
+    "Dinamo Zagreb": ["GNK Dinamo Zagreb", "Din. Zagreb"],
+    "St Mirren": ["St. Mirren"],
+    "St Truiden": ["St. Truiden"],
     "Malmo FF": ["Malmö FF"],
     "Olympiacos": ["PAE Olympiakos SFP","OLYMPIACOS PIRAEUS","Olympiakos"],
     "Paphos FC": [],
@@ -419,7 +438,9 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "CSKA Sofia":       [],
     "Celje":            [],
     "Derry City":       [],
-    "Din. Zagreb":      [],
+    # "Din. Zagreb": [] — SCOASA 2026-08-23, mutata ca alias al "Dinamo Zagreb"
+    # (vezi nota din sectiunea curata de mai sus). NU o reintroduce la
+    # regenerare: ar deveni al doilea canonic pentru acelasi club.
     "GKS Katowice":     [],
     "Gent":             [],
     "Gornik Zabrze":    [],
@@ -468,7 +489,9 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "Shelbourne":       [],
     "Sion":             [],
     "St. Gallen":       [],
-    "St. Truiden":      [],
+    # "St. Truiden": [] — SCOASA 2026-08-23, mutata ca alias al "St Truiden"
+    # (vezi nota din sectiunea curata de mai sus). NU o reintroduce la
+    # regenerare: ar deveni al doilea canonic pentru acelasi club.
     "Thun":             [],
     "Trabzonspor":      [],
     "Tromso":           [],

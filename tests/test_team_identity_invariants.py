@@ -307,7 +307,13 @@ def test_save_consensus_capture_sample_normalizes(monkeypatch):
         ("Ajax (NED)", "Ajax"),
         ("AC Milan (ITA)", "AC Milan"),
         ("Gent (BEL)", "Gent"),
-        ("Din. Zagreb (CRO)", "Din. Zagreb"),
+        # [ACTUALIZAT 2026-08-23] Asteptarea era "Din. Zagreb" pentru ca ACELA
+        # era canonicul cand s-a scris testul. Intre timp s-a descoperit ca
+        # forma lunga "Dinamo Zagreb" exista in paralel in istoric (19 randuri,
+        # lant ELO separat) — auditul F0 nu o vazuse. Canonicul e acum forma
+        # lunga, iar abrevierea e alias. Scopul testului (regula de sufix duce
+        # la canonic) ramane neschimbat; s-a schimbat CARE e canonicul.
+        ("Din. Zagreb (CRO)", "Dinamo Zagreb"),
         ("Lincoln Red Imps (GIB)", "Lincoln Red Imps"),
     ],
 )
