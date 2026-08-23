@@ -148,7 +148,19 @@ def main() -> int:
     print(BAR)
 
     # ── 1. Fixture-uri stale ──────────────────────────────────────────────
-    recent, stale = [], []
+    #
+    # [CORECTAT — prima rulare reala, 2026-08-23] Competitiile INCHEIATE sunt
+    # separate de cele active. Fara separare, World Cup 2026 (turneu terminat
+    # in iulie) producea 19 din cele 31 de constatari — zgomot permanent, care
+    # nu se va rezolva niciodata, sub care semnalul real (amanari, duplicate
+    # in ligi active) ramanea ascuns. O competitie e considerata incheiata
+    # daca nu mai are NICIUN meci programat in viitor.
+    active_leagues = {
+        r.get("league") for r in rows
+        if (r.get("kickoff_date") or "")[:10] >= today.isoformat()
+    }
+
+    recent, stale, stale_incheiate = [], [], defaultdict(int)
     for r in rows:
         if r.get("actual_result") is not None:
             continue
@@ -161,14 +173,23 @@ def main() -> int:
             continue
         if d >= now:
             continue
-        (stale if (now - d).days > STALE_DAYS else recent).append(r)
+        if (now - d).days <= STALE_DAYS:
+            recent.append(r)
+        elif r.get("league") not in active_leagues:
+            stale_incheiate[r.get("league")] += 1
+        else:
+            stale.append(r)
 
     print(f"  1. FIXTURE-URI TRECUTE FĂRĂ REZULTAT")
     print(f"     recente (≤{STALE_DAYS} zile, probabil rundă în curs): {len(recent)}")
-    print(f"     VECHI  (>{STALE_DAYS} zile, cer atenție)            : {len(stale)}")
+    print(f"     VECHI în competiții ACTIVE (cer atenție)          : {len(stale)}")
     for r in sorted(stale, key=lambda x: x.get("kickoff_date") or "")[:15]:
         print(f"       {(r.get('kickoff_date') or '')[:10]}  [{r.get('league')}]  "
               f"{r.get('home_team')} – {r.get('away_team')}  ({r.get('fixture_id')})")
+    if stale_incheiate:
+        total_inch = sum(stale_incheiate.values())
+        detalii = ", ".join(f"{lg} ({n})" for lg, n in sorted(stale_incheiate.items()))
+        print(f"     în competiții ÎNCHEIATE (context, nu acțiune)     : {total_inch} — {detalii}")
     if stale:
         findings += 1
     print(BAR)
@@ -188,12 +209,29 @@ def main() -> int:
     print(BAR)
 
     # ── 3. Forme abreviate vs forme lungi ────────────────────────────────
-    teams = sorted({t for r in rows for t in (r.get("home_team"), r.get("away_team")) if t})
+    #
+    # [CORECTAT — prima rulare reala, 2026-08-23] Scaneaza TOT istoricul, nu
+    # doar sezonul curent. Prima versiune filtra pe sezon si rata exact
+    # problema pe care trebuie s-o vada: forma lunga traieste de obicei DOAR
+    # in istoric (ex. "Dinamo Zagreb", 18 meciuri pana in 2025-01), iar cea
+    # abreviata doar in sezonul curent ("Din. Zagreb", Flashscore). Cu filtru
+    # de sezon, perechea devenea invizibila imediat ce ultimul rand istoric
+    # iesea din fereastra — monitorizarea ar fi incetat sa raporteze tocmai
+    # fragmentarea pe care a descoperit-o.
+    #
+    # Se aduc DOAR numele (2 coloane), nu randuri intregi — costul e
+    # acceptabil pentru un job zilnic.
+    all_name_rows = _fetch_all(
+        client, "match_history", "id,home_team,away_team",
+        lambda q: q.is_("superseded_by", "null"),
+    )
+    teams = sorted({t for r in all_name_rows for t in (r.get("home_team"), r.get("away_team")) if t})
     pairs = find_abbreviation_pairs(teams)
     print(f"  3. FORME ABREVIATE cu posibilă formă lungă: {len(pairs)}")
+    print(f"     (scanat pe TOT istoricul: {len(all_name_rows)} rânduri, {len(teams)} nume distincte)")
     for short, long in pairs:
-        n_s = sum(1 for r in rows if short in (r.get("home_team"), r.get("away_team")))
-        n_l = sum(1 for r in rows if long in (r.get("home_team"), r.get("away_team")))
+        n_s = sum(1 for r in all_name_rows if short in (r.get("home_team"), r.get("away_team")))
+        n_l = sum(1 for r in all_name_rows if long in (r.get("home_team"), r.get("away_team")))
         print(f"       {short!r} ({n_s} rânduri)  vs  {long!r} ({n_l} rânduri)")
     if pairs:
         findings += 1
