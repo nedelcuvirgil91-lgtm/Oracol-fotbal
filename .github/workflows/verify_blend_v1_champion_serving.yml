@@ -1,0 +1,42 @@
+name: Football Oracle — Verify blend_v1 Champion Serving (read-only, ADR-061)
+
+# [ADAUGAT — 2026-08-23] Verificare, ZERO scriere. Confirma ca lantul real
+# de servire pentru Campionul blend_v1 (ADR-061) functioneaza capat la capat
+# contra Supabase de productie — mediul de dezvoltare nu are acces direct la
+# streamlit.app (blocat de politica de retea a mediului) sau la
+# credentialele Supabase locale, deci verificarea reala se face aici.
+#
+# Reutilizabil oricand se promoveaza un Campion nou pentru blend_v1 (nu doar
+# o rulare unica) — pastrat, nu sters dupa aceasta verificare, exact
+# precedentul scripts/measure_elo_divergence.py.
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: verify-blend-v1-champion-serving
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Verify blend_v1 Champion serving (zero writes)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: python scripts/verify_blend_v1_champion_serving.py
