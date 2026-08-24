@@ -93,12 +93,35 @@ def find_abbreviation_pairs(teams: list[str]) -> list[tuple[str, str]]:
     return sorted(set(pairs))
 
 
-def build_home_stadiums(rows: list[dict], min_dovezi: int = 2) -> dict[str, str]:
+def build_home_stadiums(
+    rows: list[dict], min_dovezi: int = 2, raport_dominanta: float = 2.0,
+) -> dict[str, str]:
     """Stadionul „de acasă" al fiecărei echipe, dedus empiric — FUNCȚIE PURĂ.
 
-    E cel mai frecvent stadion din meciurile în care echipa e gazdă. `min_dovezi`
-    cere cel puțin atâtea meciuri pe acel stadion: o singură apariție ar putea
-    fi chiar rândul inversat pe care încercăm să-l detectăm."""
+    E cel mai frecvent stadion din meciurile în care echipa e gazdă, dar DOAR
+    dacă e și DOMINANT. Două condiții, ambele obligatorii:
+
+    - `min_dovezi` — cel puțin atâtea meciuri pe acel stadion. O singură
+      apariție ar putea fi chiar rândul inversat pe care îl căutăm.
+    - `raport_dominanta` — de câte ori trebuie să depășească stadionul
+      următorul clasat. Exprimă direct „clar dominant, nu doar cel mai
+      frecvent". Un prag pe PROCENT a fost încercat întâi și respins: chiar
+      rândul inversat contribuie la numărătoarea gazdei și îi coboară ponderea
+      sub prag, făcând cazul indetectabil — dovada se autosabota. Raportul e
+      robust la asta, pentru că +1 pe locul doi contează mult mai puțin.
+
+    [ADAUGAT 2026-08-24, la semnalarea proprietarului produsului] A doua
+    condiție lipsea, iar fără ea „cel mai frecvent" nu e o dovadă de teren.
+    Multe echipe joacă acasă pe stadioane diferite — verificat în date:
+    FCSB (Arena Națională / Stadionul Steaua), Paris FC (Jean Bouin /
+    Sébastien Charléty), Kairat Almaty (Almaty / Turkestan). Există și
+    terenuri NEUTRE: PSG a jucat „acasă" la Budapesta (Supercupă), iar
+    H. Beer Sheva chiar pe Giulești, în București — același stadion care e
+    teren propriu pentru Rapid.
+
+    Pentru o echipă cu 3 meciuri pe un stadion și 2 pe altul, „modalul" e o
+    coincidență statistică, nu identitate. Astfel de echipe rămân în afara
+    hărții — necunoscut, nu ghicit (Regula #8)."""
     frecventa: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for r in rows:
         echipa, stadion = r.get("home_team"), r.get("stadium")
@@ -106,8 +129,10 @@ def build_home_stadiums(rows: list[dict], min_dovezi: int = 2) -> dict[str, str]
             frecventa[echipa][stadion] += 1
     rezultat: dict[str, str] = {}
     for echipa, stadioane in frecventa.items():
-        stadion, n = max(stadioane.items(), key=lambda kv: (kv[1], kv[0]))
-        if n >= min_dovezi:
+        ordonate = sorted(stadioane.items(), key=lambda kv: (-kv[1], kv[0]))
+        stadion, n = ordonate[0]
+        al_doilea = ordonate[1][1] if len(ordonate) > 1 else 0
+        if n >= min_dovezi and n >= raport_dominanta * al_doilea:
             rezultat[echipa] = stadion
     return rezultat
 
@@ -134,12 +159,25 @@ def find_home_away_inversions(rows: list[dict], min_dovezi: int = 2) -> tuple[li
     for r in rows:
         stadion = r.get("stadium")
         gazda, oaspete = r.get("home_team"), r.get("away_team")
-        if not stadion or not oaspete or oaspete not in acasa:
+        # AMBELE echipe trebuie sa aiba teren propriu cunoscut si dominant.
+        #
+        # [CORECTAT 2026-08-24] Varianta anterioara cerea asta doar pentru
+        # OASPETE. Daca gazda lipsea din harta, `acasa.get(gazda)` intorcea
+        # None, care nu e egal cu stadionul, deci randul era SEMNALAT — adica
+        # exact pe dos: se concluziona din stadion tocmai cand lipsea dovada
+        # de teren pentru gazda. Un club care joaca pe stadioane diferite (sau
+        # unul nou, sub prag) putea fi acuzat de inversare fara nicio baza.
+        #
+        # Numele raman identitatea; stadionul e cel mult indiciu coroborant,
+        # si doar cand e stabil pentru ambele parti.
+        if not stadion or not gazda or not oaspete:
             continue
+        if gazda not in acasa or oaspete not in acasa:
+            continue  # necunoscut, nu acuzatie (Regula #8)
         judecabile += 1
         if acasa[oaspete] != stadion:
             continue
-        if acasa.get(gazda) == stadion:
+        if acasa[gazda] == stadion:
             continue  # stadion partajat — nu e dovada de inversare
         candidati.append({
             "id": r.get("id"), "league": r.get("league"),

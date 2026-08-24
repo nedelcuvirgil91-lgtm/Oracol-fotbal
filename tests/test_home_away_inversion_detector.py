@@ -106,6 +106,63 @@ def test_lista_goala_nu_arunca():
     assert find_home_away_inversions([]) == ([], 0)
 
 
+def test_gazda_fara_teren_cunoscut_nu_poate_fi_acuzata():
+    """GARDA CENTRALĂ, semnalată de proprietarul produsului (2026-08-24).
+
+    Varianta anterioară cerea teren cunoscut doar pentru OASPETE. Dacă gazda
+    lipsea din hartă, `acasa.get(gazda)` întorcea None ≠ stadion și rândul era
+    SEMNALAT — se concluziona din stadion tocmai când lipsea dovada de teren
+    pentru gazdă.
+
+    Aici `NouPromovata` nu are meciuri acasă în corpus, deci nu poate fi
+    judecată. Fără fix, meciul ei pe Pittodrie ar fi raportat ca inversare."""
+    rows = [
+        _r(1, "Aberdeen", "X", "Pittodrie"), _r(2, "Aberdeen", "Y", "Pittodrie"),
+        _r(9, "NouPromovata", "Aberdeen", "Pittodrie"),
+    ]
+    candidati, judecabile = find_home_away_inversions(rows)
+    assert candidati == [], f"gazda fara teren cunoscut nu are voie sa fie acuzata: {candidati}"
+    assert judecabile == 0, "un meci pe care nu-l putem judeca nu intra in acoperire"
+
+
+def test_echipa_cu_doua_terenuri_nu_capata_teren_propriu():
+    """Cazul real semnalat: FCSB (Arena Națională / Stadionul Steaua), Paris FC,
+    Kairat Almaty. La 3 vs 2 meciuri, „cel mai frecvent" e o coincidență
+    statistică, nu identitate — echipa rămâne în afara hărții."""
+    rows = [
+        _r(1, "FCSB", "A", "Arena Nationala"), _r(2, "FCSB", "B", "Arena Nationala"),
+        _r(3, "FCSB", "C", "Arena Nationala"),
+        _r(4, "FCSB", "D", "Stadionul Steaua"), _r(5, "FCSB", "E", "Stadionul Steaua"),
+    ]
+    assert "FCSB" not in build_home_stadiums(rows), (
+        "3 din 5 meciuri (60%) nu e dovada de teren propriu"
+    )
+
+
+def test_teren_dominant_ramane_acceptat():
+    """Pragul nu are voie să elimine cazurile normale: o echipă cu un teren
+    propriu clar, plus o excepție izolată (finală pe teren neutru), rămâne
+    judecabilă."""
+    rows = [_r(i, "Liverpool", f"Adv{i}", "Anfield") for i in range(1, 8)]
+    rows.append(_r(99, "Liverpool", "Final", "Teren Neutru"))
+    assert build_home_stadiums(rows).get("Liverpool") == "Anfield", (
+        "7 din 8 meciuri (87,5%) e teren propriu clar"
+    )
+
+
+def test_teren_neutru_partajat_nu_produce_acuzatie():
+    """Verificat în date: H. Beer Sheva a jucat „acasă" pe Giulești, terenul
+    lui Rapid. Dacă niciunul nu are teren dominant, nu se judecă nimic."""
+    rows = [
+        _r(1, "Rapid", "A", "Giulesti"), _r(2, "Rapid", "B", "Giulesti"),
+        _r(3, "Rapid", "C", "Giulesti"), _r(4, "Rapid", "D", "Giulesti"),
+        _r(5, "Beer Sheva", "E", "Giulesti"), _r(6, "Beer Sheva", "F", "Giulesti"),
+        _r(9, "Rapid", "Beer Sheva", "Giulesti"),
+    ]
+    candidati, _ = find_home_away_inversions(rows)
+    assert candidati == [], "stadion partajat nu e dovada de inversare"
+
+
 def test_candidatul_arata_stadionul_asteptat_al_gazdei():
     """Raportul trebuie sa spuna si CE se astepta, nu doar ca ceva e in neregula
     — altfel verificarea umana (regula D3) porneste de la zero."""
