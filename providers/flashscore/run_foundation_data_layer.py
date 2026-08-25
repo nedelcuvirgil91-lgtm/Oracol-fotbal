@@ -126,6 +126,34 @@ def run(
           f"{fail_count} eșuate din {len(reports)} meciuri.")
     _print_separator("═")
     print()
+    # [REEVALUAT 2026-08-25 — pragul RAMANE 0 tolerant, cu date, nu din inertie]
+    #
+    # `CLAUDE.md` nota pragul ca „de reevaluat dupa cateva rulari curate".
+    # Reevaluarea s-a facut pe istoricul complet al celor doua workflow-uri care
+    # folosesc aceasta functie — 27 de rulari:
+    #
+    #   Foundation Data Layer (16 rulari): 2 esecuri, ambele la inceput
+    #     (2026-07-29) — un jucator duplicat in lot care facea sa esueze TOT
+    #     meciul (ON CONFLICT ... cannot affect row a second time), si o
+    #     excludere documentata de player-stats raportata gresit ca esec.
+    #     Ambele erau defecte REALE, ambele reparate. De atunci: 9 rulari verzi.
+    #
+    #   Weekly Fixtures (11 rulari): 3 esecuri (17, 20, 23 august), toate cu
+    #     ACEEASI cauza — meciul reprogramat Celta Vigo – Osasuna. Descoperirea
+    #     de fixture-uri noi a fost blocata 10 zile. Reparat prin migrarea 048.
+    #     Rularea urmatoare (24 august): verde.
+    #
+    # CONCLUZIA: in 27 de rulari, ZERO alarme false. Fiecare rosu a fost un
+    # defect real si actionabil. Un prag relaxat (ex. „esueaza doar sub 95%")
+    # ar fi ascuns exact reprogramarea — pe 20 august rata a fost 389/393
+    # (99,0%), deci ar fi trecut drept verde, iar bugul ar fi continuat sa
+    # blocheze descoperirea.
+    #
+    # Problema reala de pe 20 august nu era pragul, ci RAPORTAREA: „4 esecuri
+    # din 393" si „intreaga rulare s-a prabusit" arata la fel in interfata.
+    # Aia se rezolva prin raport mai bun (ce anume a esuat, gruparea pe cauza),
+    # nu prin slabirea semnalului. Vezi lista de sub, in raportul de mai sus,
+    # care deja enumera fiecare meci esuat cu motivul lui.
     return 0 if fail_count == 0 else 1
 
 
