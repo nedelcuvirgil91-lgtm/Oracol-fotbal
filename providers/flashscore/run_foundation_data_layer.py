@@ -70,9 +70,13 @@ def run(
     _print_separator("─")
     print()
 
+    # [ADR-067] `persist_calendar=not dry_run` — un dry-run nu scrie NIMIC,
+    # nici macar calendarul sezonului, altfel mesajul „Dry run — nicio scriere"
+    # de mai jos ar fi fals.
     matches = discover_matches(leagues=leagues, limit_per_league=limit_per_league,
                                 include_future_fixtures=include_future_fixtures,
-                                future_fixtures_only=future_fixtures_only)
+                                future_fixtures_only=future_fixtures_only,
+                                persist_calendar=not dry_run)
     print(f"Discovery: {len(matches)} meciuri găsite.")
     for m in matches:
         print(f"  [{m.league}] {m.match_base_url} (mid={m.mid}, source={m.source})")

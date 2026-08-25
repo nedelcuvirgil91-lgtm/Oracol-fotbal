@@ -166,6 +166,64 @@ def test_discover_matches_chiar_scrie_calendarul():
     )
 
 
+def test_dry_run_nu_scrie_nici_calendarul():
+    """GARDA, dupa un defect prins in aceeasi zi in care a fost introdus.
+
+    `discover_matches()` scrie calendarul, iar `run(dry_run=True)` o apeleaza
+    INAINTE de verificarea de dry-run — deci ar fi scris in
+    `competition_season` si ar fi tiparit apoi „Dry run — nicio scriere".
+    O afirmatie falsa in propriul output. Un dry-run care scrie ceva nu mai e
+    dry-run.
+
+    Verificat prin AST: apelul din `run()` trebuie sa lege `persist_calendar`
+    de `dry_run`, nu sa-l lase pe implicitul True."""
+    import ast
+    import inspect
+
+    from providers.flashscore import run_foundation_data_layer as runner
+
+    arbore = ast.parse(inspect.getsource(runner.run))
+    apel = next(
+        n for n in ast.walk(arbore)
+        if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "discover_matches"
+    )
+    kw = {k.arg: k.value for k in apel.keywords}
+    assert "persist_calendar" in kw, (
+        "run() trebuie sa transmita persist_calendar — altfel dry-run-ul scrie"
+    )
+    val = kw["persist_calendar"]
+    assert isinstance(val, ast.UnaryOp) and isinstance(val.op, ast.Not) \
+        and getattr(val.operand, "id", None) == "dry_run", (
+        "persist_calendar trebuie sa fie `not dry_run`"
+    )
+
+
+def test_discover_matches_chiar_onoreaza_flagul():
+    """A doua jumatate a aceleiasi garzi — descoperita tot printr-o mutatie:
+    testul de mai sus verifica doar ca `run()` TRANSMITE flagul, nu ca
+    `discover_matches()` il ONOREAZA. Cu scrierea neconditionata, dry-run-ul
+    scria din nou si niciun test nu cadea."""
+    import ast
+    import inspect
+
+    from providers.flashscore import discovery
+
+    arbore = ast.parse(inspect.getsource(discovery.discover_matches))
+    gardat = any(
+        isinstance(n, ast.If)
+        and getattr(n.test, "id", None) == "persist_calendar"
+        and any(
+            isinstance(c, ast.Call) and getattr(c.func, "id", None) == "persist_season_calendars"
+            for sub in n.body for c in ast.walk(sub)
+        )
+        for n in ast.walk(arbore)
+    )
+    assert gardat, (
+        "scrierea calendarului trebuie sa fie sub `if persist_calendar:` — "
+        "altfel flagul e decorativ si dry-run-ul scrie oricum"
+    )
+
+
 def test_ziua_interogata_e_cea_ceruta_nu_azi(monkeypatch):
     """GARDA: `as_of` trebuie sa ajunga la interogare, altfel orice evaluare
     retroactiva ar primi calendarul de AZI — scurgere temporala."""

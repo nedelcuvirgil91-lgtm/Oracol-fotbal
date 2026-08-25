@@ -376,6 +376,7 @@ def _discover_for_hub(
 def discover_matches(
     leagues: list[str] | None = None, limit_per_league: int | None = None,
     include_future_fixtures: bool = True, future_fixtures_only: bool = False,
+    persist_calendar: bool = True,
 ) -> list[DiscoveredMatch]:
     """Punct de intrare M1 - o singura sesiune Playwright, un singur
     browser, pacing explicit intre hub-uri succesive
@@ -416,7 +417,14 @@ def discover_matches(
     # `_discover_for_hub()`: acea functie ramane fara I/O catre Supabase in
     # mijlocul buclei Playwright, iar scrierea se face o singura data, dupa ce
     # browserul e deja inchis.
-    persist_season_calendars(rezultate)
+    #
+    # `persist_calendar=False` exista pentru dry-run. Fara el, `run(dry_run=
+    # True)` ar fi scris in `competition_season` si ar fi tiparit apoi „Dry
+    # run — nicio scriere" — o afirmatie FALSA in propriul output. Un dry-run
+    # care scrie ceva nu mai e dry-run; defectul a fost introdus si prins in
+    # aceeasi zi, inainte de prima rulare.
+    if persist_calendar:
+        persist_season_calendars(rezultate)
     return rezultate
 
 
