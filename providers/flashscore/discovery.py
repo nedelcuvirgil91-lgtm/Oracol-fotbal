@@ -73,6 +73,7 @@ from __future__ import annotations
 import logging
 import os
 import random
+import re
 import time
 from dataclasses import dataclass
 from typing import Any
@@ -388,6 +389,91 @@ def discover_matches(
         finally:
             browser.close()
     return dedupe_by_mid(results)
+
+
+_SEASON_LABEL_RE = re.compile(r"^\s*(20\d{2})\s*(?:/\s*(20\d{2}))?\s*$")
+_SEASON_DAY_RE = re.compile(r"^\s*(\d{2})\.(\d{2})\.\s*$")
+
+
+def parse_season_from_hub(html: str) -> dict | None:
+    """Sezonul competiției din pagina de hub — FUNCȚIE PURĂ, fără I/O.
+
+    [ADR-066] Datele erau pe pagină de la bun început. `CLAUDE.md` (2026-08-03)
+    concluziona că sezonul e „genuin necolectat de pe pagină, ar cere
+    investigație live nouă" — greșit: dovada era deja în repo, în HTML-ul de
+    hub salvat ca evidență POC, adică exact pagina pe care Discovery o descarcă
+    la fiecare rulare. Costul de rețea al extragerii e ZERO.
+
+    Trei elemente, verificate pe două competiții cu calendare diferite:
+
+        div.heading__info                       -> "2026/2027"  (sau "2026")
+        .wcl-progressBarContainer_ .wcl-start_  -> "17.07."
+        .wcl-progressBarContainer_ .wcl-end_    -> "30.05."
+
+    Anul se derivă DETERMINIST din etichetă, niciodată din calendar: pentru
+    „2026/2027", luna de start (07) o plasează în 2026, cea de sfârșit (05) în
+    2027. Pentru un sezon într-un singur an („2026", ex. MLS) ambele cad în
+    același an. Dacă eticheta lipsește sau nu se potrivește, se întoarce None —
+    `season_cleanup.py` interzice deja aproximarea calendaristică, iar regula
+    nu se slăbește aici (Regula #8).
+
+    Ancorare pe PREFIXUL clasei (`wcl-start_`), nu pe numele complet: sufixul
+    e un hash care se schimbă la orice redeploy Flashscore. Absența e logată,
+    nu ghicită — aceeași lecție ca la inversarea de teren din 2026-08-23.
+
+    Întoarce `{"season", "start_date", "end_date"}` sau None."""
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html or "", "html.parser")
+
+    eticheta_el = soup.select_one("div.heading__info")
+    if eticheta_el is None:
+        return None
+    m = _SEASON_LABEL_RE.match(eticheta_el.get_text(strip=True))
+    if not m:
+        return None
+    an_start = int(m.group(1))
+    an_final = int(m.group(2)) if m.group(2) else an_start
+    eticheta = f"{an_start}-{an_final}"  # format canonic YYYY-YYYY (ADR-066 §4)
+
+    def _zi(prefix: str) -> tuple[int, int] | None:
+        for el in soup.find_all("span"):
+            clase = el.get("class") or []
+            if not any(c.startswith(prefix) for c in clase):
+                continue
+            z = _SEASON_DAY_RE.match(el.get_text(strip=True))
+            if z:
+                return int(z.group(1)), int(z.group(2))
+        return None
+
+    start = _zi("wcl-start_")
+    final = _zi("wcl-end_")
+    if start is None or final is None:
+        logger.warning(
+            "[Flashscore.Discovery] bara de sezon absentă sau cu altă structură "
+            "(prefixe wcl-start_/wcl-end_) — eticheta %r găsită, dar fără date. "
+            "Sezonul rămâne fără interval.", eticheta,
+        )
+        return {"season": eticheta, "start_date": None, "end_date": None}
+
+    # Anul fiecărei margini vine din etichetă, nu din calendar. Pentru un sezon
+    # care traversează anul, marginea de start ia primul an DOAR dacă luna ei e
+    # >= luna de sfârșit; altfel ambele cad în al doilea an (sezon scurt, de
+    # primăvară). Pentru un sezon într-un singur an, ambele iau acel an.
+    zi_s, luna_s = start
+    zi_f, luna_f = final
+    if an_final == an_start:
+        an_pentru_start, an_pentru_final = an_start, an_start
+    elif luna_s > luna_f:
+        an_pentru_start, an_pentru_final = an_start, an_final
+    else:
+        an_pentru_start, an_pentru_final = an_final, an_final
+
+    return {
+        "season": eticheta,
+        "start_date": f"{an_pentru_start:04d}-{luna_s:02d}-{zi_s:02d}",
+        "end_date": f"{an_pentru_final:04d}-{luna_f:02d}-{zi_f:02d}",
+    }
 
 
 def dedupe_by_mid(matches: list) -> list:
