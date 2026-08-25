@@ -2748,6 +2748,61 @@ def count_matches_with_sufficient_history(rows: list[dict], window: int) -> int:
     return evaluable
 
 
+def get_current_season_start(league: str) -> str | None:
+    """Prima zi a sezonului CURENT al unei ligi, derivată din date — sau None.
+
+    [ADR-066 P3] Înlocuiește pragul fix de 1 iulie folosit de
+    `oracle_engine._current_season_start_date()`. Pragul e corect pentru ligile
+    europene și greșit pentru cele care joacă într-un singur an calendaristic
+    (MLS: februarie–decembrie). Din februarie 2027, pentru MLS, pragul „1 iulie
+    2026" ar amesteca două sezoane într-un singur profil de echipă — exact ce
+    mărginirea trebuia să prevină („loturile se schimbă între sezoane").
+
+    Doi pași, deliberat, în loc de un `max(season)`:
+      1. sezonul celui mai recent meci al ligii (cea mai mare `kickoff_date`
+         cu `season` nenul) — nu cea mai mare etichetă lexicografic;
+      2. cea mai mică `kickoff_date` din acel sezon.
+
+    Motivul pasului 1: coloana `season` e fragmentată în două formate
+    (`YYYY-YYYY`, 7.592 rânduri, și `YYYY-YY`, 5.471 — vezi ADR-066 §4), iar o
+    comparație lexicografică între formate diferite nu are sens garantat.
+    „Sezonul celui mai recent meci" nu depinde de format deloc.
+
+    Întoarce None dacă liga nu are niciun meci cu sezon cunoscut — caz REAL
+    azi: toate cele 1.058 de rânduri Flashscore au `season` NULL până când
+    cablarea din P2b începe să scrie. Apelantul cade atunci pe pragul vechi,
+    explicit, nu ghicește (North Star #8)."""
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        recent = (client.table("match_history")
+                  .select("season")
+                  .eq("league", league)
+                  .not_.is_("season", "null")
+                  .order("kickoff_date", desc=True)
+                  .limit(1).execute())
+        randuri = getattr(recent, "data", None) or []
+        if not randuri:
+            return None
+        sezon = randuri[0].get("season")
+        if not sezon:
+            return None
+
+        primul = (client.table("match_history")
+                  .select("kickoff_date")
+                  .eq("league", league)
+                  .eq("season", sezon)
+                  .order("kickoff_date", desc=False)
+                  .limit(1).execute())
+        randuri = getattr(primul, "data", None) or []
+        zi = (randuri[0].get("kickoff_date") if randuri else None)
+        return zi[:10] if zi else None
+    except Exception as exc:
+        logger.warning("[Queries] get_current_season_start(%s) failed: %s", league, exc)
+        return None
+
+
 def get_finishing_data_readiness(since_date: str) -> dict:
     """Progres agregat, pe ligile domestice ale sezonului curent (kickoff_date
     >= since_date, cu excluderea TEAM_PROFILE_EXCLUDED_LEAGUES) — spre

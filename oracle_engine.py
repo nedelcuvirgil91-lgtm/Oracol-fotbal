@@ -91,7 +91,7 @@ try:
         get_team_stats_tsdb, get_freelf_h2h_snapshot, get_freelf_lineup_snapshot,
         get_team_recent_advanced_stats, get_team_recent_statistics_extended,
         get_team_recent_player_ratings, get_team_standings_row,
-        get_team_recent_form_context,
+        get_team_recent_form_context, get_current_season_start,
     )
     DB_QUERIES_MODULE_AVAILABLE = True
 except ModuleNotFoundError:
@@ -976,16 +976,51 @@ class FootballOracleEngine:
         }
 
     @staticmethod
-    def _current_season_start_date(as_of: date | None = None) -> str:
-        """Data de start a sezonului curent de fotbal european (convenția
-        deja folosită de oracle_api._tsdb_season_string() — sezonul începe
-        în iulie, calculat dinamic din data curentă, niciodată hardcodat).
-        Reimplementată local (nu importată din oracle_api) ca să evite o
-        dependință nouă între module pentru un calcul de o linie — vezi
-        architecture-review."""
+    def _season_start_fallback(as_of: date | None = None) -> str:
+        """Pragul calendaristic de iulie — convenția europeană, aceeași cu
+        `oracle_api._tsdb_season_string()`. Calculat dinamic din data curentă,
+        niciodată hardcodat. Reimplementat local (nu importat din oracle_api)
+        ca să evite o dependință nouă între module pentru un calcul de o linie
+        — vezi architecture-review.
+
+        [ADR-066 P3] Nu mai e răspunsul PRIMAR, ci plasa de siguranță pentru
+        ligile fără sezon cunoscut în date."""
         d = as_of or date.today()
         start_year = d.year if d.month >= 7 else d.year - 1
         return date(start_year, 7, 1).isoformat()
+
+    @staticmethod
+    def _current_season_start_date(
+        as_of: date | None = None, league: str | None = None,
+    ) -> str:
+        """Începutul sezonului curent, pentru mărginirea Team DNA.
+
+        [ADR-066 P3] Startul REAL al sezonului ligii, când e cunoscut din date
+        (`get_current_season_start`, derivat din `match_history.season` — scris
+        de cablarea P2b din hub-ul Flashscore). Pragul fix de 1 iulie rămâne
+        DOAR ca plasă de siguranță.
+
+        De ce contează: pragul e corect pentru ligile europene și greșit pentru
+        MLS (februarie–decembrie), Scandinavia, Brazilia. Azi nu produce
+        pagubă — verificat 2026-08-25: zero meciuri Flashscore înainte de 1
+        iulie 2026, în oricare dintre cele 17 ligi cu date. Dar din februarie
+        2027, pentru MLS, „1 iulie 2026" ar amesteca sezonul 2026 cu 2027 în
+        același profil de echipă — exact ce mărginirea trebuia să prevină.
+
+        `league=None` sau ligă fără sezon cunoscut -> pragul vechi, explicit.
+        Comportament identic cu cel de dinainte pentru orice apelant care nu
+        transmite liga, și pentru TOATE ligile azi (nicio linie Flashscore nu
+        are încă sezon — se populează de la următoarea rulare de Discovery)."""
+        if league and DB_QUERIES_MODULE_AVAILABLE:
+            try:
+                real = get_current_season_start(league)
+            except Exception as exc:
+                logger.warning(
+                    "[OracleEngine] start de sezon indisponibil pentru %s: %s", league, exc)
+                real = None
+            if real:
+                return real
+        return FootballOracleEngine._season_start_fallback(as_of)
 
     @staticmethod
     def _build_flashscore_dna(canonical: str, league: str, last_n: int = 5) -> dict | None:
@@ -1014,7 +1049,9 @@ class FootballOracleEngine:
         if not (DB_QUERIES_MODULE_AVAILABLE and FLASHSCORE_TEAM_DNA_AVAILABLE):
             return None
         try:
-            since = FootballOracleEngine._current_season_start_date()
+            # [ADR-066 P3] Liga e transmisă: pentru ligile cu sezon cunoscut în
+            # date se folosește startul REAL, nu pragul calendaristic de iulie.
+            since = FootballOracleEngine._current_season_start_date(league=league)
             advanced_rows = get_team_recent_advanced_stats(canonical, league, last_n=last_n, since_date=since)
             extended_rows = get_team_recent_statistics_extended(canonical, league, last_n=last_n, since_date=since)
             player_rows = get_team_recent_player_ratings(canonical, league, last_n=last_n, since_date=since)

@@ -92,10 +92,28 @@ gol. Există exact două formate, niciun al treilea.
 **5. `_current_season_start_date()` folosește startul real al sezonului**,
 per ligă, în locul pragului fix pe 1 iulie. Pragul fix e corect pentru ligile
 europene, dar greșit pentru MLS (februarie–decembrie), Scandinavia și Brazilia.
-Azi nu produce pagubă — verificat: MLS și Ekstraklasa au **0 meciuri** înainte
-de 1 iulie în corpus, deci pragul nu taie nimic — dar e o eroare latentă care
-mușcă din februarie 2027. Cu sezonul real, dispare fără să mai fie nevoie de
-un prag.
+Azi nu produce pagubă — re-verificat 2026-08-25: **zero** meciuri Flashscore
+înainte de 1 iulie 2026, în oricare dintre cele 17 ligi cu date — dar e o
+eroare latentă care mușcă din februarie 2027, când pentru MLS „1 iulie 2026"
+ar amesteca sezonul 2026 cu 2027 în același profil de echipă.
+
+**Sursa startului real: `match_history` însuși, nu o tabelă nouă.**
+`get_current_season_start(league)` face doi pași — (a) sezonul celui mai
+**recent meci** al ligii, (b) prima zi a acelui sezon. Pasul (a) e deliberat
+„cel mai recent meci", nu `max(season)` lexicografic: coloana are două formate
+incompatibile (§4), iar o comparație între ele nu are sens garantat.
+
+Alternativa evaluată și respinsă: o tabelă nouă cu metadate de sezon per
+competiție, alimentată din `start_date`/`end_date` deja parsate din hub. Ar fi
+fost un contract nou (Discovery Rule) pentru un câștig pe care datele existente
+îl oferă oricum. Intervalul din hub rămâne folosit acolo unde chiar e nevoie de
+el — garda `season_for_kickoff()` — fără să fie persistat.
+
+Pragul de iulie rămâne ca **plasă de siguranță explicită**
+(`_season_start_fallback()`), pentru ligile fără sezon cunoscut în date. Azi
+asta înseamnă TOATE ligile (zero rânduri cu `season`), deci comportamentul e
+neschimbat pentru toată lumea; fixul se activează singur pe măsură ce cablarea
+din decizia 2 scrie sezoane.
 
 ### Fragilitate asumată, cu gardă
 
