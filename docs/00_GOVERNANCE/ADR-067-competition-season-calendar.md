@@ -79,8 +79,24 @@ inferențele care au cedat. Dacă nicio linie nu conține ziua de azi (pauză
    ligile fără hub Flashscore
 3. pragul de 1 iulie — plasa de siguranță
 
-Fiecare treaptă e strict mai slabă decât cea de deasupra. Nicio treaptă nu
-poate lărgi fereastra peste ce dă pragul.
+Fiecare treaptă e strict mai slabă decât cea de deasupra, dar **treptele 1 și 2
+nu au aceeași semantică**, iar diferența e miezul acestui ADR:
+
+- **Treapta 1 se folosește DIRECT, fără gardă** — are voie să *lărgească*
+  fereastra. Un interval care CONȚINE ziua de azi definește sezonul curent prin
+  construcție, deci nu poate amesteca două sezoane nici când lărgește.
+- **Treapta 2 păstrează garda `max()`** — nu are această garanție. Eticheta
+  celui mai recent meci poate descrie un sezon deja încheiat (cazul Premier
+  League de mai sus), iar folosirea ei ar lărgi fereastra *greșit*.
+
+Cazul care le separă concret: **MLS în noiembrie 2026.** Sezonul real e
+februarie–decembrie, deci calendarul spune `2026-02-21` iar pragul ar spune
+`2026-07-01`. Răspunsul corect e al calendarului; garda `max()`, aplicată și
+aici, ar tăia jumătate din sezonul în curs.
+
+*(Corectat 2026-08-25: prima versiune a acestui paragraf afirma că nicio
+treaptă nu poate lărgi fereastra. Fals — și ar fi anulat exact motivul pentru
+care există ADR-ul.)*
 
 **5. RLS activ, FĂRĂ policy**, `CREATE TABLE IF NOT EXISTS`. Verificat la
 implementare că acesta e tiparul real al proiectului, nu doar cel din
