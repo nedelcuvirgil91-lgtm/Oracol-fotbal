@@ -94,12 +94,26 @@ def test_discover_matches_chiar_aplica_deduplicarea():
     returnuri = [n for n in ast.walk(arbore) if isinstance(n, ast.Return)]
     assert returnuri, "discover_matches() nu are niciun return"
 
-    apeluri_dedupe = [
-        r for r in returnuri
-        if isinstance(r.value, ast.Call)
-        and getattr(r.value.func, "id", None) == "dedupe_by_mid"
-    ]
-    assert len(apeluri_dedupe) == len(returnuri), (
-        "fiecare return din discover_matches() trebuie sa treaca prin "
-        "dedupe_by_mid() — altfel duplicatele din hub-uri ajung la fetch"
-    )
+    def _e_dedupe(nod) -> bool:
+        return isinstance(nod, ast.Call) and getattr(nod.func, "id", None) == "dedupe_by_mid"
+
+    # [INTARIT 2026-08-25, ADR-067] Varianta anterioara cerea LITERAL
+    # `return dedupe_by_mid(...)`. A cazut cand functia a fost refactorizata in
+    # `rezultate = dedupe_by_mid(results)` / `return rezultate` — desi
+    # deduplicarea se aplica in continuare. Era un fals pozitiv: garda verifica
+    # FORMA, nu invariantul. Acum verifica invariantul real — tot ce se
+    # intoarce a trecut prin dedupe_by_mid — deci accepta si varianta prin
+    # variabila, dar respinge in continuare disparitia apelului.
+    nume_dedupate = {
+        t.id
+        for n in ast.walk(arbore) if isinstance(n, ast.Assign) and _e_dedupe(n.value)
+        for t in n.targets if isinstance(t, ast.Name)
+    }
+
+    for r in returnuri:
+        direct = _e_dedupe(r.value)
+        prin_variabila = isinstance(r.value, ast.Name) and r.value.id in nume_dedupate
+        assert direct or prin_variabila, (
+            "fiecare return din discover_matches() trebuie sa treaca prin "
+            "dedupe_by_mid() — altfel duplicatele din hub-uri ajung la fetch"
+        )

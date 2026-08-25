@@ -411,7 +411,13 @@ def discover_matches(
                                                   include_future_fixtures, future_fixtures_only))
         finally:
             browser.close()
-    return dedupe_by_mid(results)
+    rezultate = dedupe_by_mid(results)
+    # [ADR-067] Calendarul se scrie AICI, la nivel de orchestrare, nu in
+    # `_discover_for_hub()`: acea functie ramane fara I/O catre Supabase in
+    # mijlocul buclei Playwright, iar scrierea se face o singura data, dupa ce
+    # browserul e deja inchis.
+    persist_season_calendars(rezultate)
+    return rezultate
 
 
 _SEASON_LABEL_RE = re.compile(r"^\s*(20\d{2})\s*(?:/\s*(20\d{2}))?\s*$")
@@ -497,6 +503,60 @@ def parse_season_from_hub(html: str) -> dict | None:
         "start_date": f"{an_pentru_start:04d}-{luna_s:02d}-{zi_s:02d}",
         "end_date": f"{an_pentru_final:04d}-{luna_f:02d}-{zi_f:02d}",
     }
+
+
+def season_calendar_rows(matches: list) -> list[dict]:
+    """Calendarele DISTINCTE de sezon, din meciurile descoperite — FUNCTIE
+    PURA, fara I/O.
+
+    [ADR-067] Separata deliberat de scriere: partea care decide CE se scrie
+    ramane testabila fara baza de date, iar `_discover_for_hub()` ramane fara
+    I/O de retea catre Supabase in mijlocul buclei Playwright.
+
+    Un calendar fara interval complet e inutil pentru intrebarea „ce sezon
+    contine ziua de azi", dar eticheta tot merita pastrata — de aceea randul
+    e emis si atunci, cu interval None (cazul hub-ului `/fixtures/`, verificat
+    live: poarta eticheta, nu si bara de progres)."""
+    vazute: dict[tuple, dict] = {}
+    for m in matches:
+        liga = getattr(m, "league", None)
+        sezon = getattr(m, "season", None)
+        if not liga or not sezon:
+            continue
+        cheie = (liga, sezon)
+        rand = {
+            "competition": liga, "season": sezon,
+            "start_date": getattr(m, "season_start", None),
+            "end_date": getattr(m, "season_end", None),
+        }
+        # Prima aparitie CU interval castiga; altfel prima aparitie, oricare.
+        veche = vazute.get(cheie)
+        if veche is None or (veche["start_date"] is None and rand["start_date"]):
+            vazute[cheie] = rand
+    return list(vazute.values())
+
+
+def persist_season_calendars(matches: list) -> int:
+    """Scrie calendarele in `competition_season`. Intoarce cate au fost scrise.
+
+    [ADR-067] Esecul aici NU opreste Discovery: calendarul e un fapt auxiliar,
+    iar descoperirea meciurilor e treaba principala. Se logheaza, nu se ridica."""
+    randuri = season_calendar_rows(matches)
+    if not randuri:
+        return 0
+    try:
+        from database.queries import upsert_competition_season
+    except ModuleNotFoundError:
+        return 0
+    scrise = 0
+    for r in randuri:
+        if upsert_competition_season(r["competition"], r["season"],
+                                     r["start_date"], r["end_date"]):
+            scrise += 1
+        else:
+            logger.warning("[Flashscore.Discovery] calendar nescris pentru %s/%s",
+                           r["competition"], r["season"])
+    return scrise
 
 
 def season_for_kickoff(

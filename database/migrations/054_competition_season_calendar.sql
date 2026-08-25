@@ -53,18 +53,9 @@ COMMENT ON COLUMN competition_season.end_date IS
 COMMENT ON COLUMN competition_season.observed_at IS
   'Cand a fost vazut ultima oara pe hub. Face INVECHIREA vizibila: daca Flashscore isi schimba clasele hash-uite ale barei, tabela inceteaza sa se actualizeze, iar asta trebuie sa se vada — nu sa treaca tacut.';
 
+-- RLS activ, FARA policy — exact tiparul din 001_odds_history.sql, verificat
+-- 2026-08-25 ca fiind cel real in acest proiect: `pg_policies` nu contine
+-- nicio politica nici pe `odds_history`, nici pe `challenger_evaluations`.
+-- `service_role` ocoleste RLS prin definitie, deci o politica dedicata lui ar
+-- fi redundanta; absenta ei e strict mai restrictiva pentru orice alt rol.
 ALTER TABLE competition_season ENABLE ROW LEVEL SECURITY;
-
--- Scriere exclusiv prin service_role; nicio politica de scriere pentru anon.
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies
-    WHERE schemaname = 'public' AND tablename = 'competition_season'
-      AND policyname = 'competition_season_service_role_all'
-  ) THEN
-    CREATE POLICY competition_season_service_role_all
-      ON competition_season FOR ALL TO service_role
-      USING (true) WITH CHECK (true);
-  END IF;
-END $$;

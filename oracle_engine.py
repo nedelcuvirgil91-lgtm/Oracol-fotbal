@@ -91,7 +91,7 @@ try:
         get_team_stats_tsdb, get_freelf_h2h_snapshot, get_freelf_lineup_snapshot,
         get_team_recent_advanced_stats, get_team_recent_statistics_extended,
         get_team_recent_player_ratings, get_team_standings_row,
-        get_team_recent_form_context, get_current_season_start,
+        get_team_recent_form_context, get_current_season_start, get_season_calendar,
     )
     DB_QUERIES_MODULE_AVAILABLE = True
 except ModuleNotFoundError:
@@ -1013,6 +1013,24 @@ class FootballOracleEngine:
         are încă sezon — se populează de la următoarea rulare de Discovery)."""
         prag = FootballOracleEngine._season_start_fallback(as_of)
         if league and DB_QUERIES_MODULE_AVAILABLE:
+            # ── Treapta 1: calendarul declarat de provider (ADR-067) ────────
+            # Se foloseste DIRECT, fara garda `max()` — si asta e diferenta
+            # esentiala fata de treapta 2. Un interval care CONTINE ziua de azi
+            # defineste sezonul curent prin constructie, deci nu poate amesteca
+            # doua sezoane nici cand largeste fereastra. Exemplu real: MLS in
+            # noiembrie 2026 — calendarul spune 2026-02-21, pragul ar spune
+            # 2026-07-01; raspunsul CORECT e cel al calendarului, iar `max()`
+            # l-ar respinge si ar taia jumatate din sezonul in curs.
+            try:
+                cal = get_season_calendar(league, (as_of or date.today()).isoformat())
+            except Exception as exc:
+                logger.warning(
+                    "[OracleEngine] calendar de sezon indisponibil pentru %s: %s", league, exc)
+                cal = None
+            if cal and cal.get("start_date"):
+                return str(cal["start_date"])[:10]
+
+            # ── Treapta 2: derivarea din match_history (ADR-066 P3) ─────────
             try:
                 real = get_current_season_start(league)
             except Exception as exc:

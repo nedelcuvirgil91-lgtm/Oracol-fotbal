@@ -1,6 +1,6 @@
 # ADR-067 — Calendarul sezonului devine fapt stocat, nu dedus
 
-**Status**: Proposed (2026-08-25)
+**Status**: Accepted (2026-08-25) — migrarea 054 aplicată, cablare completă
 **Atinge contractul**: tabelă nouă `competition_season`, `providers/flashscore/discovery.py`,
 `oracle_engine._current_season_start_date()`
 **Nu atinge**: `match_history.season` (ADR-066 rămâne neschimbat), criteriile de promovare, RLS existent
@@ -82,8 +82,13 @@ inferențele care au cedat. Dacă nicio linie nu conține ziua de azi (pauză
 Fiecare treaptă e strict mai slabă decât cea de deasupra. Nicio treaptă nu
 poate lărgi fereastra peste ce dă pragul.
 
-**5. RLS activ, scriere doar prin `service_role`**, `CREATE TABLE IF NOT
-EXISTS` — aceeași disciplină ca `001_odds_history.sql`.
+**5. RLS activ, FĂRĂ policy**, `CREATE TABLE IF NOT EXISTS`. Verificat la
+implementare că acesta e tiparul real al proiectului, nu doar cel din
+`001_odds_history.sql`: `pg_policies` nu conține nicio politică nici pe
+`odds_history`, nici pe `challenger_evaluations`. `service_role` ocolește RLS
+prin definiție, deci o politică dedicată lui ar fi redundantă; absența ei e
+strict mai restrictivă pentru orice alt rol. Prima versiune a migrării crea o
+politică — corectată înainte de aplicare.
 
 ---
 

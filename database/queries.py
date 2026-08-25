@@ -2748,6 +2748,76 @@ def count_matches_with_sufficient_history(rows: list[dict], window: int) -> int:
     return evaluable
 
 
+def upsert_competition_season(
+    competition: str, season: str,
+    start_date: str | None = None, end_date: str | None = None,
+) -> bool:
+    """[ADR-067] Calendarul sezonului, declarat de provider. Scriitor UNIC:
+    Discovery (ADR-036 — o coloană, un owner).
+
+    Scriere atomică, `ON CONFLICT (competition, season)` — niciodată
+    check-then-act. `observed_at` se reîmprospătează la fiecare vedere, chiar
+    dacă datele n-au variat: exact asta face INVECHIREA vizibilă. Dacă
+    Flashscore își schimbă clasele hash-uite ale barei, tabela încetează să se
+    actualizeze, iar `observed_at` rămâne în urmă — semnal, nu tăcere."""
+    if not competition or not season:
+        return False
+    client = get_client()
+    if client is None:
+        return False
+    payload = {
+        "competition": competition, "season": season,
+        "source": "flashscore_hub",
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    # Datele lipsă NU se trimit: `COALESCE`-ul de la nivel de payload lipsește
+    # aici, deci o vedere fără interval (hub-ul `/fixtures/`) n-are voie să
+    # șteargă un interval deja cunoscut dintr-o vedere pe `/results/`.
+    if start_date:
+        payload["start_date"] = start_date
+    if end_date:
+        payload["end_date"] = end_date
+    try:
+        client.table("competition_season").upsert(
+            payload, on_conflict="competition,season",
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.error("[Queries] upsert_competition_season(%s/%s) failed: %s",
+                     competition, season, exc)
+        return False
+
+
+def get_season_calendar(competition: str, on_date: str) -> dict | None:
+    """[ADR-067] Sezonul competiției care CONȚINE ziua dată — sau None.
+
+    „Sezonul curent" e definit prin apartenență la interval, nu prin „eticheta
+    cea mai recentă" și nici prin „cea mai mare lexicografic". Exact acele două
+    inferențe au cedat: derivarea din `match_history` întorcea pentru Premier
+    League startul sezonului TRECUT, fiindcă acoperirea propriei baze de date e
+    inegală (ADR-067, Context).
+
+    Un rând fără interval complet nu poate răspunde la întrebare, deci e
+    exclus din interogare — necunoscutul rămâne necunoscut (North Star #8)."""
+    if not competition or not on_date:
+        return None
+    client = get_client()
+    if client is None:
+        return None
+    try:
+        res = (client.table("competition_season")
+               .select("season,start_date,end_date,observed_at")
+               .eq("competition", competition)
+               .lte("start_date", on_date[:10])
+               .gte("end_date", on_date[:10])
+               .limit(1).execute())
+        randuri = getattr(res, "data", None) or []
+        return randuri[0] if randuri else None
+    except Exception as exc:
+        logger.warning("[Queries] get_season_calendar(%s) failed: %s", competition, exc)
+        return None
+
+
 def get_current_season_start(league: str) -> str | None:
     """Prima zi a sezonului CURENT al unei ligi, derivată din date — sau None.
 
