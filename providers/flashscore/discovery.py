@@ -230,6 +230,13 @@ class DiscoveredMatch:
     match_base_url: str
     mid: str
     source: str  # "results" sau "fixtures"
+    # [ADR-066 P2b] Sezonul competitiei, citit din ACELASI HTML de hub din care
+    # se extrag si linkurile — zero cereri suplimentare. Implicit None, deci
+    # niciun apelant existent nu se rupe. `season_start`/`season_end` NU sunt
+    # scrise nicaieri: servesc exclusiv ca garda in `season_for_kickoff()`.
+    season: str | None = None
+    season_start: str | None = None
+    season_end: str | None = None
 
 
 def _dismiss_gdpr_if_present(page) -> None:
@@ -338,12 +345,28 @@ def _discover_for_hub(
         _dismiss_gdpr_if_present(page)
         page.wait_for_timeout(POST_LOAD_WAIT_MS)
         _check_protection(page, http_status, tag=f"{league}-{source}-hub")
-        pairs = parse_match_links(page.content())
+        # [ADR-066 P2b] UN SINGUR `page.content()` pentru ambele extrageri —
+        # linkurile si sezonul vin din exact acelasi HTML, deci sezonul nu poate
+        # descrie alta pagina decat cea din care s-au luat meciurile.
+        html = page.content()
+        pairs = parse_match_links(html)
         if pairs:
             if limit is not None:
                 pairs = pairs[:limit]
+            sezon = parse_season_from_hub(html) or {}
+            if not sezon:
+                logger.warning(
+                    "[Flashscore.Discovery] sezon negasit pe hub-ul %s (%s) — "
+                    "meciurile raman fara sezon (Regula #8: necunoscut ramane "
+                    "necunoscut, nu se deduce din calendar).", league, source,
+                )
             return [
-                DiscoveredMatch(league=league, match_base_url=base, mid=mid, source=source)
+                DiscoveredMatch(
+                    league=league, match_base_url=base, mid=mid, source=source,
+                    season=sezon.get("season"),
+                    season_start=sezon.get("start_date"),
+                    season_end=sezon.get("end_date"),
+                )
                 for base, mid in pairs
             ]
         polite_delay()
@@ -474,6 +497,42 @@ def parse_season_from_hub(html: str) -> dict | None:
         "start_date": f"{an_pentru_start:04d}-{luna_s:02d}-{zi_s:02d}",
         "end_date": f"{an_pentru_final:04d}-{luna_f:02d}-{zi_f:02d}",
     }
+
+
+def season_for_kickoff(
+    season: str | None, season_start: str | None, season_end: str | None,
+    kickoff_date: str | None,
+) -> str | None:
+    """Sezonul care se SCRIE efectiv pentru un meci — FUNCTIE PURA, fara I/O.
+
+    [ADR-066 P2b] Eticheta de pe hub descrie sezonul afisat de Flashscore, iar
+    meciurile listate acolo apartin, prin constructie, acelui sezon. Garda de
+    aici e o centura in plus, nu o neincredere in provider: daca hub-ul ofera
+    si intervalul, un meci cu data IN AFARA lui nu primeste sezon deloc.
+
+    Motivul e cel invatat pe 2026-08-23, la inversarea de teren: o eticheta
+    aplicata gresit e mai rea decat o eticheta lipsa, pentru ca nu produce
+    niciun semnal. Un `season` gresit ar contamina tacit walk-forward-ul si
+    `season_cleanup.py` (care sterge pe baza sezonului).
+
+    Fara interval (cazul hub-ului `/fixtures/`, unde bara de progres nu apare)
+    eticheta ramane singurul semnal si se foloseste ca atare — nu se inventeaza
+    un interval ca sa avem ce verifica.
+
+    Fara eticheta -> None (Regula #8, necunoscut ramane necunoscut)."""
+    if not season:
+        return None
+    if not season_start or not season_end or not kickoff_date:
+        return season
+    zi = kickoff_date[:10]
+    if season_start <= zi <= season_end:
+        return season
+    logger.warning(
+        "[Flashscore.Discovery] meci pe %s in afara intervalului sezonului %s "
+        "(%s .. %s) — sezonul NU se scrie pentru acest meci.",
+        zi, season, season_start, season_end,
+    )
+    return None
 
 
 def dedupe_by_mid(matches: list) -> list:
@@ -620,8 +679,18 @@ def run_foundation_data_layer_for_discovered_matches(
         # FLASHSCORE_TRACKED_COMPETITIONS), o furnizeaza direct in loc sa
         # ceara normalizer-ului sa o extraga din pagina (gol real, documentat
         # in FLASHSCORE_FIELD_MAPPING_MATRIX.md - "Cross-provider dependency").
+        # [ADR-066 P2b] `season` provine din hub-ul din care a fost descoperit
+        # meciul, filtrat prin `season_for_kickoff()`. Plumbing-ul exista de la
+        # migratia 038 (`persist_match_foundation_data(..., season=...)`), dar
+        # nimeni nu i-a dat vreodata o valoare — de aceea toate cele 1.058 de
+        # randuri Flashscore aveau season NULL, alaturi de celelalte trei tabele
+        # FDL care primesc acelasi parametru.
         report = persist_match_with_data_trust_layer(
             record["_pages"], match_ref=match_ref, league=match.league, competition=match.league,
+            season=season_for_kickoff(
+                match.season, match.season_start, match.season_end,
+                record.get("kickoff_date"),
+            ),
         )
         reports.append({**report, "match": match})
     return reports

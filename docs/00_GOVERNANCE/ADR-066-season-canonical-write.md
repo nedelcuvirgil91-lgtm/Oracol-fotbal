@@ -76,10 +76,18 @@ rămâne `NULL`. `season_cleanup.py` interzice deja explicit aproximarea
 calendaristică — regula nu se slăbește aici (North Star #8).
 
 **4. Format canonic pentru scrierile NOI: `YYYY-YYYY`.** Coloana e azi
-fragmentată — 7.591 de rânduri `YYYY-YYYY` (football_data), 5.245 `YYYY-YY`
-(kaggle și altele). Se scrie formatul majoritar și neambiguu. **Normalizarea
-celor 5.245 de rânduri istorice NU face parte din acest ADR** — e o decizie
-separată, documentată ca gol.
+fragmentată. Măsurat exact la aplicarea migrării 052 (2026-08-25):
+
+| Sursă | Format | Rânduri | Ultima zi acoperită |
+|---|---|---|---|
+| football_data | `YYYY-YYYY` | 7.534 | 2026-05-30 |
+| kaggle | `YYYY-YY` | 3.352 | 2025-05-31 |
+| openfootball | `YYYY-YY` | 2.119 | 2025-05-31 |
+| kaggle | `YYYY-YYYY` | 58 | 2025-05-18 |
+
+Se scrie formatul majoritar și neambiguu. **Normalizarea celor 5.471 de rânduri
+`YYYY-YY` NU face parte din acest ADR** — e o decizie separată, documentată ca
+gol. Există exact două formate, niciun al treilea.
 
 **5. `_current_season_start_date()` folosește startul real al sezonului**,
 per ligă, în locul pragului fix pe 1 iulie. Pragul fix e corect pentru ligile
@@ -97,6 +105,47 @@ schimba la orice redeploy Flashscore. Ancorarea se face pe **prefix**
 — nu se ghicește. Aceeași lecție ca la inversarea de teren din 2026-08-23:
 o structură care se schimbă tăcut trebuie să producă un semnal, nu o valoare
 inventată. `div.heading__info` e o clasă semantică stabilă, fără hash.
+
+---
+
+## Ce s-a dovedit diferit la implementare (2026-08-25)
+
+Trei lucruri au ieșit la iveală abia la aplicare. Rămân notate aici, nu
+corectate tăcut în textul de mai sus.
+
+**1. Golul e de patru ori mai mare decât spunea Contextul.** ADR-ul vorbea
+despre 1.058 de rânduri `match_history`. `persistence.py` transmite același
+parametru `season` la încă trei tabele (liniile 142, 158, 167), toate la fel de
+goale:
+
+```
+match_history (flashscore_*)        1.058 rânduri →  0 cu sezon
+flashscore_match_context           12.569 rânduri →  0 cu sezon
+match_statistics_extended          11.454 rânduri →  0 cu sezon
+flashscore_standings_snapshot         267 rânduri →  0 cu sezon
+                                   ──────────────────────────────
+                                   25.348 rânduri →  0 cu sezon
+```
+
+Nu e o extindere de scop: aceeași cauză unică (`season=None` propagat pe tot
+lanțul), aceeași reparație de o linie. Cele trei tabele suplimentare nu trec
+prin RPC-ul canonic — beneficiază direct de cablare, fără migrare.
+
+**2. `openfootball` e scriitor ACTIV de format `YYYY-YY`.** Comentariul din
+`sync/sources/openfootball.py` („0 rânduri openfootball_* în producție azi",
+verificat 2026-08-03) e depășit: azi sunt 2.119. Deci fragmentarea de format nu
+e un rest istoric înghețat, ci e produsă în continuare de o cale vie din
+`run_daily.py` (`use_openfootball=True`). Nu se schimbă aici — migrarea 038 cere
+explicit sezonul „exact cum îl oferă sursa", iar schimbarea formatului unui
+provider e o decizie separată. Notat ca gol real, nu ca detaliu.
+
+**3. Hub-ul `/fixtures/` poartă eticheta, dar nu și bara de interval.**
+Verificat live (2026-08-25): pagina `/fixtures/` a SuperLigii afișează
+„Superliga 2026/2027", fără bara de progres. Contează pentru că exact acel hub
+e folosit de `flashscore_weekly_fixtures.yml` (`future_fixtures_only=True`).
+De aceea garda de interval (`season_for_kickoff()`) se aplică **doar când
+intervalul e cunoscut** — fără el, eticheta rămâne singurul semnal și se
+folosește ca atare. Nu se inventează un interval doar ca să existe ce verifica.
 
 ---
 

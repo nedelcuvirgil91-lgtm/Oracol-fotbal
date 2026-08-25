@@ -137,7 +137,14 @@ def test_run_foundation_data_layer_passes_league_to_persist(monkeypatch):
     reports = run_foundation_data_layer_for_discovered_matches([match])
 
     assert reports == [{"ok": True, "match": match}]
-    assert calls == [{"league": "Romania SuperLiga", "competition": "Romania SuperLiga"}]
+    # [ADR-066 P2b] `season` face acum parte din contractul de persistare.
+    # Aici meciul e construit FARA sezon (hub fara eticheta), deci trebuie sa
+    # ajunga `None` — niciodata o valoare inventata (Regula #8). Asertiunea
+    # ramane pe dict-ul COMPLET, deliberat: orice kwarg nou trebuie sa treaca
+    # printr-o decizie explicita, nu sa se strecoare tacit.
+    assert calls == [{
+        "league": "Romania SuperLiga", "competition": "Romania SuperLiga", "season": None,
+    }]
 
 
 def test_run_foundation_data_layer_skips_already_collected_match_delta_sync(monkeypatch):
