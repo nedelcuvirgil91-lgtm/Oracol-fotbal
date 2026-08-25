@@ -759,14 +759,33 @@ def normalize_match_context(
     return rows_out
 
 
+# Tooltipuri pe care Flashscore le concateneaza IN ACELASI element cu numele
+# echipei, pe randurile de faza eliminatorie. Lista e deschisa deliberat: al
+# doilea tipar a fost gasit la doua saptamani dupa primul, si nu exista niciun
+# motiv sa credem ca sunt ultimele.
+_TOOLTIP_MARKERS = (
+    "Advancing to next round",   # gasit 2026-08-10
+    "Winner:",                   # gasit 2026-08-25 — 201 randuri, defect ACTIV
+)
+
+
 def _strip_advancing_note(raw: str) -> str:
-    """[GĂSIT LA AUDIT, 2026-08-10] Pe rândurile "Last matches" ale unei
-    echipe care a promovat dintr-o fază eliminatorie, Flashscore
-    concatenează în același element numele echipei cu un tooltip
-    ("Univ. CraiovaAdvancing to next round: Univ. Craiova") — confirmat
-    live, `flashscore_match_context`, context_match_id=131057. Taie orice
-    de la "Advancing to next round" încolo, păstrează doar numele real."""
-    return raw.split("Advancing to next round")[0].strip()
+    """[GĂSIT LA AUDIT, 2026-08-10; EXTINS 2026-08-25] Pe rândurile de fază
+    eliminatorie, Flashscore concatenează în același element numele echipei cu
+    un tooltip. Două variante confirmate live:
+
+        "Univ. CraiovaAdvancing to next round: Univ. Craiova"
+        "FCSBWinner: FCSB"
+
+    A doua a fost găsită abia pe 2026-08-25, în 201 rânduri din
+    `flashscore_match_context`, și era ÎNCĂ ACTIVĂ — fixul din august acoperea
+    doar prima. Contează pentru că numele corupt nu se potrivește niciodată cu
+    forma canonică la interogările de H2H: "FCSBWinner: FCSB" ≠ "FCSB".
+
+    Taie de la primul marker încolo, păstrează doar numele real."""
+    for marker in _TOOLTIP_MARKERS:
+        raw = raw.split(marker)[0]
+    return raw.strip()
 
 
 def _parse_h2h_date(raw: str | None) -> str | None:
@@ -776,8 +795,22 @@ def _parse_h2h_date(raw: str | None) -> str | None:
     if not m:
         return None
     day, month, yy = m.groups()
+    # [FIX 2026-08-25] Fereastra de secol. Flashscore afiseaza anul din DOUA
+    # cifre, iar `2000 + yy` necondiționat trimitea meciurile vechi cu exact
+    # 100 de ani in VIITOR. Masurat in productie: 35 de randuri, toate
+    # `h2h_overall` — Coventry–Fulham stocat ca 2067-11-10 (real 1967, cand
+    # Coventry chiar juca in prima liga), Nice–Paris FC ca 2074 (real 1974),
+    # Dyn. Kyiv–PAOK ca 2076 (real 1976, Cupa Campionilor).
+    #
+    # Regula nu ghiceste nimic: o confruntare DIRECTA e prin definitie un meci
+    # deja jucat, deci un an rezultat in viitor e imposibil si apartine
+    # secolului trecut. Se recalculeaza fata de anul curent, nu fata de un prag
+    # fix — altfel fixul insusi ar expira.
+    an = 2000 + int(yy)
+    if an > datetime.now().year:
+        an -= 100
     try:
-        return datetime(2000 + int(yy), int(month), int(day)).date().isoformat()
+        return datetime(an, int(month), int(day)).date().isoformat()
     except ValueError:
         return None
 
