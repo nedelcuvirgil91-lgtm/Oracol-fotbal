@@ -1,0 +1,78 @@
+{
+  "_despre": [
+    "Constatari CUNOSCUTE si explicate ale check_data_health.py.",
+    "",
+    "SCOP: un monitor care e permanent rosu nu mai e citit de nimeni. Intrarile",
+    "de aici RAMAN afisate integral in raport, cu motivul lor — se schimba doar",
+    "codul de iesire: alarma se declanseaza pentru constatari NOI, nu pentru",
+    "cele deja intelese.",
+    "",
+    "A FI IN ACEASTA LISTA NU INSEAMNA 'REZOLVAT'. Inseamna 'stim de ce'.",
+    "Cand un meci amanat isi capata data noua, Discovery il redescopera cu",
+    "acelasi mid, migrarea 048 ii muta data, iar el iese singur din raport —",
+    "moment in care intrarea de aici devine moarta si trebuie stearsa.",
+    "",
+    "`verificat_extern: true` = starea a fost confirmata pe surse din afara",
+    "sistemului, citate in `sursa`. `false` = motiv plauzibil, NEconfirmat",
+    "individual; ramane afisat ca atare, nu se pretinde ca e stabilit."
+  ],
+  "fixture_stale": {
+    "flashscore_rX6GkgVb": {
+      "meci": "Braga - Gil Vicente, 2026-08-16, Primeira Liga",
+      "motiv": "AMANAT. Nu e rezultat lipsa — meciul nu s-a jucat la data stocata.",
+      "verificat_extern": true,
+      "sursa": "footlive.com marcheaza 'Postp.' pentru 16.08.2026",
+      "verificat_la": "2026-08-25"
+    },
+    "flashscore_W4Nlhbwh": {
+      "meci": "Rijeka - Dinamo Zagreb, 2026-08-08, HNL",
+      "motiv": "AMANAT. Nu e rezultat lipsa — meciul nu s-a jucat la data stocata.",
+      "verificat_extern": true,
+      "sursa": "sofascore.com si sportytrader.com, ambele 'Postponed 08/08/2026'",
+      "verificat_la": "2026-08-25"
+    },
+    "flashscore_KWAKPPdt": {
+      "meci": "CFR Cluj - Universitatea Cluj, 2026-08-10, Romania SuperLiga",
+      "motiv": "AMANAT OFICIAL de LPF, la cererea CFR Cluj (program de cupe europene). REPROGRAMAT pe 2026-10-08. Se va autocorecta cand Discovery redescopera meciul cu data noua (migrarea 048).",
+      "verificat_extern": true,
+      "sursa": "flashscore.ro, digisport.ro, as.ro — anunt LPF din 2026-08-03",
+      "verificat_la": "2026-08-25"
+    },
+    "flashscore_h4o7BhBL": {
+      "meci": "Wisla Plock - Lech Poznan, 2026-08-16, Ekstraklasa",
+      "motiv": "Fara rezultat nici in match_history, nici in RAW-ul Flashscore — deci necolectat, nu aruncat la scriere. Cauza exacta NEstabilita.",
+      "verificat_extern": false,
+      "verificat_la": "2026-08-25"
+    },
+    "tsdb_2532700": {
+      "meci": "Mjallby - Lincoln Red Imps, 2026-07-21, Champions League",
+      "motiv": "Calificari cupe europene — descoperire structural incompleta, gol upstream deja documentat in CLAUDE.md. NEverificat individual.",
+      "verificat_extern": false,
+      "verificat_la": "2026-08-25"
+    },
+    "tsdb_2536534": {
+      "meci": "Omonia Nicosia - Kairat Almaty, 2026-07-22, Champions League",
+      "motiv": "Calificari cupe europene — descoperire structural incompleta, gol upstream deja documentat in CLAUDE.md. NEverificat individual.",
+      "verificat_extern": false,
+      "verificat_la": "2026-08-25"
+    },
+    "tsdb_2538969": {
+      "meci": "Qarabag - CSKA Sofia, 2026-07-23, Europa League",
+      "motiv": "Calificari cupe europene — descoperire structural incompleta, gol upstream deja documentat in CLAUDE.md. NEverificat individual.",
+      "verificat_extern": false,
+      "verificat_la": "2026-08-25"
+    },
+    "tsdb_2536536": {
+      "meci": "Kairat Almaty - Omonia Nicosia, 2026-07-29, Champions League",
+      "motiv": "Calificari cupe europene — descoperire structural incompleta, gol upstream deja documentat in CLAUDE.md. NEverificat individual.",
+      "verificat_extern": false,
+      "verificat_la": "2026-08-25"
+    },
+    "tsdb_2554858": {
+      "meci": "Brann - Apollon Limassol, 2026-08-05, Conference League",
+      "motiv": "Calificari cupe europene — descoperire structural incompleta, gol upstream deja documentat in CLAUDE.md. NEverificat individual.",
+      "verificat_extern": false,
+      "verificat_la": "2026-08-25"
+    }
+  }
+}

@@ -57,6 +57,35 @@ BAR = "=" * 78
 # desfasurare" — e fie duplicat, fie amanare cu data invechita.
 STALE_DAYS = 5
 
+BASELINE_PATH = Path(__file__).resolve().parent / "data_health_baseline.json"
+
+
+def load_baseline(path: Path | None = None) -> dict:
+    """Constatarile deja intelese, cu motivul fiecareia — vezi
+    `data_health_baseline.json`. Fisier lipsa sau corupt => dictionar gol:
+    monitorizarea degradeaza spre a raporta TOT, niciodata spre a tace.
+    Un monitor care tace din cauza unei erori de configurare e mai rau decat
+    unul zgomotos."""
+    p = path or BASELINE_PATH
+    try:
+        import json
+        date_ = json.loads(p.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"  [ATENTIE] linia de baza nu a putut fi citita ({p.name}: {exc}) — "
+              f"se raporteaza TOATE constatarile.")
+        return {}
+    return {k: v for k, v in date_.items() if not k.startswith("_")}
+
+
+def split_known(randuri: list[dict], baseline_clasa: dict) -> tuple[list[dict], list[dict]]:
+    """Imparte constatarile in (NOI, CUNOSCUTE), dupa `fixture_id` — functie
+    pura. Doar cele NOI ridica alarma; cele cunoscute raman afisate integral,
+    cu motivul lor, ca sa nu dispara din vedere (North Star #9)."""
+    noi, cunoscute = [], []
+    for r in randuri:
+        (cunoscute if r.get("fixture_id") in baseline_clasa else noi).append(r)
+    return noi, cunoscute
+
 # Tipar de forma abreviata: un cuvant scurt urmat de punct si spatiu.
 # Ex. "Din. Zagreb", "St. Mirren", "Lok. Zagreb".
 _ABBREV = re.compile(r"^[A-Za-zĂÂÎȘȚăâîșț]{1,4}\. ")
@@ -228,6 +257,7 @@ def main() -> int:
     today = date.today()
     now = datetime.now(timezone.utc)
     findings = 0
+    baseline = load_baseline()
 
     print(BAR)
     print("  SĂNĂTATEA DATELOR DE MECI (read-only, ADR-063)")
@@ -275,17 +305,33 @@ def main() -> int:
         else:
             stale.append(r)
 
+    # [ADAUGAT 2026-08-25] Cele mai multe dintre aceste "fixture-uri stale" nu
+    # sunt rezultate lipsa, ci meciuri AMANATE — o stare pe care modelul de
+    # date nu o poate exprima azi. Verificat extern: 3 din 4 meciuri Flashscore
+    # raportate erau amanate (CFR Cluj - U Cluj chiar reprogramat oficial pe 8
+    # octombrie). Raportate ca "cer atentie", faceau monitorizarea permanent
+    # rosie, iar un monitor permanent rosu nu mai e citit de nimeni.
+    stale_noi, stale_cunoscute = split_known(stale, baseline.get("fixture_stale", {}))
+
     print(f"  1. FIXTURE-URI TRECUTE FĂRĂ REZULTAT")
     print(f"     recente (≤{STALE_DAYS} zile, probabil rundă în curs): {len(recent)}")
-    print(f"     VECHI în competiții ACTIVE (cer atenție)          : {len(stale)}")
-    for r in sorted(stale, key=lambda x: x.get("kickoff_date") or "")[:15]:
+    print(f"     NOI, în competiții ACTIVE (cer atenție)           : {len(stale_noi)}")
+    for r in sorted(stale_noi, key=lambda x: x.get("kickoff_date") or "")[:15]:
         print(f"       {(r.get('kickoff_date') or '')[:10]}  [{r.get('league')}]  "
               f"{r.get('home_team')} – {r.get('away_team')}  ({r.get('fixture_id')})")
+    if stale_cunoscute:
+        print(f"     CUNOSCUTE, cu motiv documentat (context, nu acțiune): {len(stale_cunoscute)}")
+        for r in sorted(stale_cunoscute, key=lambda x: x.get("kickoff_date") or ""):
+            intrare = baseline["fixture_stale"][r["fixture_id"]]
+            marcaj = "✓ verificat" if intrare.get("verificat_extern") else "· neverificat"
+            print(f"       {(r.get('kickoff_date') or '')[:10]}  [{r.get('league')}]  "
+                  f"{r.get('home_team')} – {r.get('away_team')}  [{marcaj}]")
+            print(f"           {intrare.get('motiv')}")
     if stale_incheiate:
         total_inch = sum(stale_incheiate.values())
         detalii = ", ".join(f"{lg} ({n})" for lg, n in sorted(stale_incheiate.items()))
         print(f"     în competiții ÎNCHEIATE (context, nu acțiune)     : {total_inch} — {detalii}")
-    if stale:
+    if stale_noi:
         findings += 1
     print(BAR)
 
