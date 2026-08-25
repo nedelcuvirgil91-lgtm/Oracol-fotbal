@@ -1011,6 +1011,7 @@ class FootballOracleEngine:
         Comportament identic cu cel de dinainte pentru orice apelant care nu
         transmite liga, și pentru TOATE ligile azi (nicio linie Flashscore nu
         are încă sezon — se populează de la următoarea rulare de Discovery)."""
+        prag = FootballOracleEngine._season_start_fallback(as_of)
         if league and DB_QUERIES_MODULE_AVAILABLE:
             try:
                 real = get_current_season_start(league)
@@ -1018,9 +1019,26 @@ class FootballOracleEngine:
                 logger.warning(
                     "[OracleEngine] start de sezon indisponibil pentru %s: %s", league, exc)
                 real = None
-            if real:
+            # [FIX 2026-08-25, gasit la verificarea pe date REALE — testele cu
+            # mock-uri nu-l puteau prinde] Se ia data cea mai TARZIE dintre
+            # cele doua, niciodata direct cea derivata.
+            #
+            # Motivul, masurat: pentru Premier League, `get_current_season_start`
+            # intorcea `2025-08-15` — startul sezonului TRECUT. Cel mai recent
+            # meci PL CU eticheta de sezon e din 2026-05-24 (football_data nu a
+            # mai scris nimic dupa 2026-08-04), iar meciurile noi n-au inca
+            # sezon. Eticheta descrie deci un sezon INCHEIAT, iar folosirea ei
+            # ar fi LARGIT fereastra Team DNA peste tot sezonul 2025-26 — exact
+            # amestecul intre sezoane pe care marginirea trebuie sa-l previna.
+            #
+            # `max()` e sigur prin constructie: nu poate largi niciodata
+            # fereastra peste ce dadea pragul, deci nu poate introduce un
+            # amestec de sezoane. Poate doar sa o stranga — cazul MLS din
+            # februarie 2027 (derivat 2027-02-21 > prag 2026-07-01), care e
+            # chiar scopul ADR-066 P3.
+            if real and real > prag:
                 return real
-        return FootballOracleEngine._season_start_fallback(as_of)
+        return prag
 
     @staticmethod
     def _build_flashscore_dna(canonical: str, league: str, last_n: int = 5) -> dict | None:

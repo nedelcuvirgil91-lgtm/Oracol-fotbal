@@ -49,6 +49,31 @@ def test_startul_real_are_prioritate_asupra_pragului(monkeypatch):
     assert Motor._current_season_start_date(date(2027, 3, 1), league="MLS") == "2027-02-20"
 
 
+def test_eticheta_de_sezon_INCHEIAT_nu_largeste_fereastra(monkeypatch):
+    """GARDA CENTRALA, gasita pe date REALE (2026-08-25), nu prin mock-uri.
+
+    Pentru Premier League, `get_current_season_start` intorcea `2025-08-15` —
+    startul sezonului TRECUT: cel mai recent meci PL cu eticheta e din
+    2026-05-24 (football_data s-a oprit pe 2026-08-04), iar meciurile noi n-au
+    inca sezon scris. Folosind-o direct, fereastra Team DNA s-ar fi LARGIT
+    peste tot sezonul 2025-26 — exact amestecul pe care marginirea il previne.
+
+    Regula: se ia data cea mai tarzie. `max()` nu poate largi niciodata
+    fereastra peste prag, deci nu poate introduce un amestec de sezoane."""
+    monkeypatch.setattr(oracle_engine, "DB_QUERIES_MODULE_AVAILABLE", True, raising=False)
+    monkeypatch.setattr(oracle_engine, "get_current_season_start",
+                        lambda liga: "2025-08-15", raising=False)
+    out = Motor._current_season_start_date(date(2026, 8, 25), league="Premier League")
+    assert out == "2026-07-01", f"eticheta unui sezon incheiat a largit fereastra: {out}"
+
+
+def test_start_derivat_egal_cu_pragul_nu_schimba_nimic(monkeypatch):
+    monkeypatch.setattr(oracle_engine, "DB_QUERIES_MODULE_AVAILABLE", True, raising=False)
+    monkeypatch.setattr(oracle_engine, "get_current_season_start",
+                        lambda liga: "2026-07-01", raising=False)
+    assert Motor._current_season_start_date(date(2026, 8, 25), league="X") == "2026-07-01"
+
+
 def test_liga_fara_sezon_cunoscut_cade_pe_prag(monkeypatch):
     """Situatia REALA de azi: nicio linie Flashscore nu are inca sezon."""
     monkeypatch.setattr(oracle_engine, "DB_QUERIES_MODULE_AVAILABLE", True, raising=False)
