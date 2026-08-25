@@ -154,8 +154,30 @@ def persist_match_foundation_data(
     context_rows = normalize_match_context(
         pages, match_id, base.get("home_team"), base.get("away_team"),
     )
-    for row in context_rows:
-        row["season"] = season
+    # [FIX 2026-08-25, ADR-067] `season` NU se mai propaga aici, deliberat.
+    #
+    # Randurile de context descriu ALTE meciuri — confruntari directe si forma
+    # recenta — adesea din alte competitii SI din alte sezoane. Sezonul
+    # meciului-SUBIECT nu le descrie. Masurat live dupa ce cablarea ADR-066 P2b
+    # a dat prima data o valoare acestui parametru: din 210 randuri etichetate,
+    # 55 descriau confruntari din alte sezoane, cea mai veche din 2022-07-02,
+    # etichetata "2026-2027".
+    #
+    # Bugul exista dinainte (linia scria `row["season"] = season` de la migratia
+    # 038) dar era INVIZIBIL cat timp `season` era mereu None. Cablarea l-a
+    # activat, nu l-a creat.
+    #
+    # Conteaza pentru ca `season_cleanup.py` listeaza tabela in
+    # FOUNDATION_DATA_LAYER_SEASON_TABLES si foloseste `season` ca sa decida ce
+    # s-ar sterge la retentie (azi strict dry-run, fara DELETE — deci nicio
+    # paguba produsa, dar eticheta gresita ar taia randurile gresite daca
+    # stergerea s-ar activa vreodata).
+    #
+    # Derivarea corecta ar fi per rand, din `meeting_date` + `competition_code`.
+    # E blocata azi de doua lucruri masurate: codurile sunt scurte (`CF`, `PL`,
+    # `SL`, `EKS`... 51 distincte, doar 2 se potrivesc accidental cu numele
+    # canonice) si 35 de randuri au date corupte (2068, 2079, 2089). Pana
+    # atunci, coloana ramane NULL — necunoscut, nu gresit (North Star #8).
     steps["match_context"] = upsert_match_context(context_rows)
 
     event_rows = normalize_match_events(pages, match_id)

@@ -100,10 +100,23 @@ def test_persist_match_foundation_data_full_orchestration(monkeypatch, full_tabs
 
 
 def test_persist_match_foundation_data_propagates_season_when_provided(monkeypatch, full_tabs_pages):
-    """[TASK APROBAT M1, Raspuns oficial] season se propaga uniform la
-    toate scrierile FK-dependente ale meciului - NU e derivat aici, doar
-    transmis de la apelant (Flashscore nu il ofera robust azi, verificat
-    pe fixture - vezi normalize_odds/normalize_match_context docstrings)."""
+    """[TASK APROBAT M1, Raspuns oficial] season se propaga la scrierile
+    FK-dependente ale meciului - NU e derivat aici, doar transmis de la apelant.
+
+    [CORECTAT 2026-08-25, ADR-067] „Uniform" era gresit, si a fost dovedit pe
+    date de productie. `flashscore_match_context` face EXCEPTIE: randurile de
+    acolo descriu ALTE meciuri (confruntari directe + forma recenta), adesea
+    din alte competitii SI din alte sezoane. Sezonul meciului-subiect nu le
+    descrie.
+
+    Masurat dupa ce cablarea ADR-066 P2b a dat prima data o valoare acestui
+    parametru: din 210 randuri etichetate, 55 descriau confruntari din alte
+    sezoane — cea mai veche din 2022-07-02, etichetata „2026-2027". Bugul
+    exista de la migratia 038, dar era invizibil cat timp `season` era mereu
+    None.
+
+    Restul destinatiilor raman neschimbate: pentru ele sezonul chiar descrie
+    randul scris."""
     match_history_mock = MagicMock(return_value=123)
     monkeypatch.setattr("providers.flashscore.persistence.upsert_match_and_get_id", match_history_mock)
     extended_mock = MagicMock(return_value=True)
@@ -125,7 +138,11 @@ def test_persist_match_foundation_data_propagates_season_when_provided(monkeypat
     assert all(r["season"] == "2026-2027" for r in extended_mock.call_args[0][1])
     assert roster_mock.call_args[1]["season"] == "2026-2027"
     assert player_ext_mock.call_args[1]["season"] == "2026-2027"
-    assert all(r["season"] == "2026-2027" for r in context_mock.call_args[0][0])
+    # EXCEPTIA, vezi docstring: contextul descrie ALTE meciuri, deci NU
+    # mosteneste sezonul subiectului. Necunoscut, nu gresit (North Star #8).
+    assert all(r.get("season") is None for r in context_mock.call_args[0][0]), (
+        "randurile de context nu au voie sa primeasca sezonul meciului-subiect"
+    )
     assert events_mock.call_args[1]["season"] == "2026-2027"
     assert all(r["season"] == "2026-2027" for r in standings_mock.call_args[0][0])
 

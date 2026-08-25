@@ -2306,6 +2306,26 @@ def upsert_standings_snapshot(rows: list[dict]) -> bool:
         for r in rows
     ]
     rows = _dedupe_by_keys(rows, ("competition", "team"), "upsert_standings_snapshot")
+    # [FIX 2026-08-25, ADR-067] `captured_at` reimprospatat la FIECARE scriere.
+    #
+    # Randul e un snapshot CURENT (`on_conflict="competition,team"` —
+    # actualizeaza in loc, nu acumuleaza istoric), dar `captured_at` ramanea la
+    # data PRIMEI inserari a acelei echipe. Coloana spunea deci cand a fost
+    # vazuta prima oara echipa, nu ce descriu cifrele — iar cifrele sunt mereu
+    # de acum.
+    #
+    # Dovada masurata: pe 2026-08-25, clasamentul Premier League arata etapa 1
+    # jucata (sezonul a inceput pe 21 august), dar `captured_at` pretindea
+    # 30 iulie. Corespondenta a fost verificata pe toate cele 8 competitii
+    # afectate, inclusiv Bundesliga cu 0 meciuri jucate fiindca sezonul chiar
+    # nu incepuse inca (28 august).
+    #
+    # Consecinta concreta: sezonul ajunsese fragmentat IN INTERIORUL aceleiasi
+    # competitii (Serie A 1 rand din 20 cu sezon, Premier League 9 din 21),
+    # fiindca fiecare echipa avea propriul `captured_at` de prima inserare.
+    # Un clasament are un singur sezon.
+    acum = datetime.now(timezone.utc).isoformat()
+    rows = [{**r, "captured_at": acum} for r in rows]
     try:
         client.table("flashscore_standings_snapshot").upsert(
             rows, on_conflict="competition,team",
