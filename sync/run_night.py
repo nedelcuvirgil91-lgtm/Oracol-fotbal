@@ -203,8 +203,34 @@ def _stage_cleanup() -> dict:
     prin construcție de `season_cleanup.py`, care nu conține niciun DELETE)."""
     from providers.flashscore.season_cleanup import build_cleanup_dry_run_report
     report = build_cleanup_dry_run_report()
-    return {"delete_executed": report.get("delete_executed", False),
-            "cleanup_candidates": report.get("cleanup_candidates", [])}
+    rezultat = {"delete_executed": report.get("delete_executed", False),
+                "cleanup_candidates": report.get("cleanup_candidates", [])}
+
+    # [ADAUGAT — ADR-069] Raportul de retentie pe cheia de DATA, alaturi de cel
+    # pe `season`. Nu il inlocuieste: cele doua spun lucruri diferite si ambele
+    # sunt oneste. Raportul pe `season` arata ca retentia clasica NU poate
+    # actiona (coloana e NULL pe toate cele 12.573 de randuri din
+    # `flashscore_match_context`); cel de aici arata ce ar sterge efectiv
+    # regula ancorata in calendarele reale (ADR-067).
+    #
+    # STRICT dry-run aici, indiferent de flag — `execute_retention(dry_run=True)`
+    # returneaza inainte de orice poarta de stergere. Prima rulare reala cere
+    # aprobare separata (ADR-069, decizia 6), deci nu se declanseaza din
+    # orchestratorul de noapte.
+    try:
+        from providers.flashscore.retention import execute_retention
+        retentie = execute_retention(dry_run=True)
+        rezultat["retention_adr069"] = {
+            "prag": retentie.get("prag"),
+            "delete_activat": retentie.get("delete_activat"),
+            "candidati": {t: i.get("candidati") for t, i in retentie.get("tabele", {}).items()},
+            "fara_data": {t: i.get("fara_data") for t, i in retentie.get("tabele", {}).items()},
+        }
+    except Exception as exc:
+        logger.warning("[NightSync] raportul de retentie ADR-069 a esuat: %s", exc)
+        rezultat["retention_adr069"] = {"error": str(exc)}
+
+    return rezultat
 
 
 def _stage_backup() -> dict:
