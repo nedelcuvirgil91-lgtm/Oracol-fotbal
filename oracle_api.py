@@ -1322,7 +1322,33 @@ class FootballOracleAPI:
                 result[ev_id]             = entry
         self._cset(cache_key, result); return result
 
+    def _oddsapi_quota_exhausted(self) -> bool:
+        """[ADAUGAT 2026-08-26] Scurt-circuit la nivel de etapă — gol notat
+        explicit în CLAUDE.md. `should_request("oddsapi")` (deja corect)
+        blochează CORECT orice cerere HTTP reală după epuizarea cotei
+        zilnice — dar fără acest control, `_attach_odds()` tot iterează
+        fiecare ligă distinctă din meciurile primite și tot verifică
+        gating-ul per ligă, de la zero, la FIECARE apel al
+        `get_matches_for_week()` — iar acea funcție e apelată independent
+        de mai multe etape în aceeași rulare de noapte (odds_persistence,
+        weather_forecast, team_health, Challenger Shadow Batch), fiecare cu
+        propria instanță `FootballOracleAPI()`. Verificat o singură dată,
+        aici, înainte de bucla per-ligă — nu per-ligă, nu per-meci.
+        Fail-open la eroare, identic cu `should_request()` însuși — o
+        eroare de citire a cotei nu blochează tacit cote care ar fi fost
+        disponibile."""
+        try:
+            return not self._request_manager.should_request("oddsapi")
+        except Exception:
+            return False
+
     def _attach_odds(self, matches: list[dict]) -> list[dict]:
+        if matches and self._oddsapi_quota_exhausted():
+            logger.warning(
+                "[WeekLoop] oddsapi: cotă epuizată — sar atașarea cotelor pentru "
+                "toate cele %d meciuri dintr-o dată, nu per ligă.", len(matches),
+            )
+            return matches
         league_odds: dict[str, dict] = {}
         for m in matches:
             if m.get("home_odds"): continue

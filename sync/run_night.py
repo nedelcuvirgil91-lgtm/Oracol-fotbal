@@ -87,12 +87,28 @@ def _run_stage(name: str, fn: Callable[[], Any], report: list[dict]) -> None:
         print(f"   ❌ EȘUAT: {exc}")
 
 
-def _stage_api_providers() -> str:
+def _stage_api_providers() -> dict:
     """1. Discovery + Provideri API + Validation + Canonical Database —
-    întreg `sync/run_daily.py` (Pașii 0-6, cadență Tier 1, deja idempotent)."""
+    întreg `sync/run_daily.py` (Pașii 0-6, cadență Tier 1, deja idempotent).
+
+    [ADAUGAT 2026-08-26] Pana acum, `run_daily_sync()` era apelat orb —
+    valoarea intoarsa nu era citita, deci durata reala din interior (15
+    pasi, inclusiv `odds_persistence`, locul unde se face cererea catre
+    Odds API) era complet invizibila in raportul de noapte, ascunsa sub un
+    singur nume ("1-4. Discovery + API Providers..."). Golul era notat
+    explicit in CLAUDE.md ca "NEVERIFICAT inca". `run()` acum intoarce
+    `step_durations_s` (vezi `sync/run_daily.py`) — cablat aici, nu doar
+    calculat si aruncat."""
     from sync.run_daily import run as run_daily_sync
-    run_daily_sync()
-    return "sync/run_daily.py rulat complet (Pașii 0-6)"
+    rezultat = run_daily_sync()
+    durate = (rezultat or {}).get("step_durations_s", {})
+    lente = sorted(durate.items(), key=lambda kv: kv[1], reverse=True)[:5]
+    return {
+        "detail": "sync/run_daily.py rulat complet (Pașii 0-6)",
+        "total_duration_s": (rezultat or {}).get("total_duration_s"),
+        "step_durations_s": durate,
+        "cei_mai_lenti_5_pasi": lente,
+    }
 
 
 def _stage_flashscore() -> str:

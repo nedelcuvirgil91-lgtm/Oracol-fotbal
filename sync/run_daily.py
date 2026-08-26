@@ -47,6 +47,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 # Root în path
 root = Path(__file__).parent.parent
@@ -240,8 +241,16 @@ def _print_features_report(result: dict) -> None:
 def run(
     skip_features: bool = False,
     dry_run:       bool = False,
-) -> None:
+) -> dict[str, Any]:
     start_total = time.time()
+    # [ADAUGAT 2026-08-26] Cronometrare per pas — golul notat in CLAUDE.md:
+    # "NEVERIFICAT inca cat din durata totala a night_sync provine efectiv
+    # din acest tipar (vs. alte etape genuin lente)". Pana acum, toata
+    # durata acestei functii era invizibila, ascunsa intr-un singur bloc
+    # ("1-4. Discovery + API Providers...") in raportul run_night.py.
+    # Cheile sunt EXACT numele din PIPELINE_STEPS (sursa de adevar declarata
+    # mai sus) — validat la finalul functiei, nu presupus.
+    durations: dict[str, float] = {}
     _print_header()
 
     if dry_run:
@@ -249,6 +258,7 @@ def run(
 
     # ── Pasul 0 (PIPELINE_STEPS: "results") — Rezultate de ieri ────────────
     print("▶  Pasul 0/6 — Rezultate meciuri de ieri...")
+    _t0 = time.time()
 
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
@@ -264,6 +274,7 @@ def run(
         except Exception as exc:
             logger.error("[DailySync] sync_yesterday_results failed: %s", exc)
             print(f"  ⚠️  Eroare la sync rezultate: {exc}")
+    durations["results"] = round(time.time() - _t0, 1)
 
     # ── Pasul 1 (PIPELINE_STEPS: "match_statistics", depends_on="results") ─
     # [ADAUGAT Sprint 1, extins ADR-041 Faza 1] Owner nou (Soccer Football
@@ -276,6 +287,7 @@ def run(
     # deliberat de backfill istoric (`sync/backfill_match_stats.py`,
     # `sync/backfill_match_statistics_freelf.py`).
     print("\n▶  Pasul 1/6 — Match Statistics (Soccer Football Info + fallback FreeLF)...")
+    _t0 = time.time()
 
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
@@ -287,9 +299,11 @@ def run(
         except Exception as exc:
             logger.error("[DailySync] sync_match_statistics failed: %s", exc)
             print(f"  ⚠️  Eroare la sync statistici meci: {exc}")
+    durations["match_statistics"] = round(time.time() - _t0, 1)
 
     # ── Pasul 2 (PIPELINE_STEPS: "history_sync") ───────────────────────────
     print("▶  Pasul 2/6 — Sincronizare meciuri istorice...")
+    _t0 = time.time()
 
     if not dry_run:
         from sync.sync_matches import sync_all
@@ -310,11 +324,13 @@ def run(
         ]
 
     _print_sync_report(sync_reports)
+    durations["history_sync"] = round(time.time() - _t0, 1)
 
     # ── (PIPELINE_STEPS: "scheduled_fixtures") ──────────────────────────────
     # [ADAUGAT Sprint 3, Prioritatea 2] Vezi comentariul din PIPELINE_STEPS —
     # rulează în PARALEL cu calea live veche, Oracle Engine neatins aici.
     print("\n▶  Descoperire meciuri Database-First (scheduled_fixtures, paralel cu calea live)...")
+    _t0 = time.time()
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
     else:
@@ -326,6 +342,7 @@ def run(
         except Exception as exc:
             logger.error("[DailySync] sync_scheduled_fixtures failed: %s", exc)
             print(f"  ⚠️  Eroare la descoperire meciuri: {exc}")
+    durations["scheduled_fixtures"] = round(time.time() - _t0, 1)
 
     # ── (PIPELINE_STEPS: "team_stats_tsdb") ─────────────────────────────────
     # [ADAUGAT Sprint 3, Pasul 3 — R-Sync-8] Owner nou (TheSportsDB events)
@@ -334,6 +351,7 @@ def run(
     # citește echipele de sincronizat din tsdb_home_team_id/
     # tsdb_away_team_id, scrise de acel pas.
     print("\n▶  Sincronizare team stats — TheSportsDB...")
+    _t0 = time.time()
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
     else:
@@ -345,6 +363,7 @@ def run(
         except Exception as exc:
             logger.error("[DailySync] sync_team_stats_tsdb failed: %s", exc)
             print(f"  ⚠️  Eroare la sync team stats (TheSportsDB): {exc}")
+    durations["team_stats_tsdb"] = round(time.time() - _t0, 1)
 
     # ── (PIPELINE_STEPS: "h2h_freelf") ───────────────────────────────────────
     # [ADAUGAT Sprint 3, Pasul 3 — R-Sync-9] Owner nou (Free Live Football
@@ -353,6 +372,7 @@ def run(
     # "scheduled_fixtures" — citește fixture-urile de sincronizat din
     # freelf_event_id, scris de acel pas.
     print("\n▶  Sincronizare H2H — Free Live Football...")
+    _t0 = time.time()
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
     else:
@@ -364,6 +384,7 @@ def run(
         except Exception as exc:
             logger.error("[DailySync] sync_h2h_freelf failed: %s", exc)
             print(f"  ⚠️  Eroare la sync H2H (FreeLF): {exc}")
+    durations["h2h_freelf"] = round(time.time() - _t0, 1)
 
     # ── (PIPELINE_STEPS: "team_form_freelf") ────────────────────────────────
     # [ADAUGAT Sprint 2, Etapa C — Data Quality] Owner nou (FreeLF standings)
@@ -372,6 +393,7 @@ def run(
     # dependință de descoperirea meciurilor — iterează exclusiv
     # mappings.FREE_LF_LEAGUE_IDS (8 ligi statice).
     print("\n▶  Sincronizare formă echipe — FreeLF...")
+    _t0 = time.time()
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
     else:
@@ -383,6 +405,7 @@ def run(
         except Exception as exc:
             logger.error("[DailySync] sync_team_form_freelf failed: %s", exc)
             print(f"  ⚠️  Eroare la sync formă echipe (FreeLF): {exc}")
+    durations["team_form_freelf"] = round(time.time() - _t0, 1)
 
     # ── (PIPELINE_STEPS: "team_form_footballdata") ──────────────────────────
     # [ADAUGAT Sprint 2, Etapa C — Data Quality] Owner nou (football-data.org
@@ -391,6 +414,7 @@ def run(
     # de descoperirea meciurilor — iterează exclusiv mappings.FD_COMPETITIONS
     # (8 ligi statice).
     print("\n▶  Sincronizare formă echipe — football-data.org...")
+    _t0 = time.time()
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
     else:
@@ -402,6 +426,7 @@ def run(
         except Exception as exc:
             logger.error("[DailySync] sync_team_form_footballdata failed: %s", exc)
             print(f"  ⚠️  Eroare la sync formă echipe (football-data.org): {exc}")
+    durations["team_form_footballdata"] = round(time.time() - _t0, 1)
 
     # ── (PIPELINE_STEPS: "weather_forecast") ────────────────────────────────
     # [ADAUGAT Sprint 2, Etapa C — Data Quality] Owner nou (WeatherAPI) pentru
@@ -411,6 +436,7 @@ def run(
     # nu optimizarea lui; every-6h rămâne o extensie viitoare, dacă se
     # dovedește necesară.
     print("\n▶  Sincronizare prognoză meteo...")
+    _t0 = time.time()
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
     else:
@@ -422,6 +448,7 @@ def run(
         except Exception as exc:
             logger.error("[DailySync] sync_weather_forecast failed: %s", exc)
             print(f"  ⚠️  Eroare la sync prognoză meteo: {exc}")
+    durations["weather_forecast"] = round(time.time() - _t0, 1)
 
     # ── (PIPELINE_STEPS: "team_health") ──────────────────────────────────────
     # [ADAUGAT Sprint 2, Etapa C — Data Quality] Owner nou (API-Football
@@ -431,6 +458,7 @@ def run(
     # consumatorul real de cotă API-Football, activat ultimul dintre cele
     # cinci sync-uri ieftine/gratuite, conform ordinii aprobate.
     print("\n▶  Sincronizare stare sănătate echipe (API-Football)...")
+    _t0 = time.time()
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
     else:
@@ -442,6 +470,7 @@ def run(
         except Exception as exc:
             logger.error("[DailySync] sync_team_health failed: %s", exc)
             print(f"  ⚠️  Eroare la sync stare sănătate echipe: {exc}")
+    durations["team_health"] = round(time.time() - _t0, 1)
 
     # ── (PIPELINE_STEPS: "odds_recent_results") ─────────────────────────────
     # [ADAUGAT Sprint 2, Etapa C — Data Quality] Owner nou (Odds API /scores)
@@ -450,6 +479,7 @@ def run(
     # echipe ȘI H2H (audit R-Sync-6, opțiunea A) — ultimul din cele 6
     # sync-uri orfane activate, conform ordinii aprobate.
     print("\n▶  Sincronizare rezultate recente (Odds API)...")
+    _t0 = time.time()
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
     else:
@@ -461,6 +491,7 @@ def run(
         except Exception as exc:
             logger.error("[DailySync] sync_odds_recent_results failed: %s", exc)
             print(f"  ⚠️  Eroare la sync rezultate recente (Odds API): {exc}")
+    durations["odds_recent_results"] = round(time.time() - _t0, 1)
 
     # ── Pasul 3 (PIPELINE_STEPS: "feature_update", depends_on="history_sync") ──
     # [ADAUGAT — ADR-014] Completează implementarea ADR-004 ("Toate
@@ -471,6 +502,7 @@ def run(
     # de rulat zilnic pe tot dataset-ul, cost marginal pentru rândurile deja
     # complete.
     print("\n▶  Pasul 3/6 — Actualizare feature-uri derivate (formă, H2H, cornere, cartonașe, faulturi)...")
+    _t0 = time.time()
 
     if skip_features:
         print("  ℹ️  Sărit (--no-features)")
@@ -487,12 +519,14 @@ def run(
             features_result = {"status": "error", "message": str(exc)}
 
     _print_features_report(features_result)
+    durations["feature_update"] = round(time.time() - _t0, 1)
 
     # ── Pasul 4 (PIPELINE_STEPS: "shadow_evaluation", depends_on="feature_update") ──
     # [ADAUGAT] Vezi architecture/ADR-004-continuous-learning.md — ordinea
     # corectă e ELO/formă/standings -> shadow evaluation -> ML retraining,
     # NU recalibrare automată per-meci (deja discutat, dezactivat separat).
     print("\n▶  Pasul 4/6 — Evaluare experimente shadow...")
+    _t0 = time.time()
 
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
@@ -528,11 +562,23 @@ def run(
                 )
             except Exception:
                 pass
+    durations["shadow_evaluation"] = round(time.time() - _t0, 1)
 
     # ── Pasul 5 (PIPELINE_STEPS: "odds_persistence") — cote de piață ───────
     # [ADAUGAT] Conform docs/03_ENGINE/ODDS_PERSISTENCE_DESIGN.md (Frozen,
     # ADR-005, ADR-006). Domain service independent - vezi services/.
+    #
+    # [MASURAT — 2026-08-26, golul din CLAUDE.md] Acest pas e locul unde
+    # `get_matches_for_week()` (oracle_api.py) declanseaza cererile catre
+    # Odds API, deci exact pasul unde spam-ul `[RateLimit] oddsapi: cota
+    # zilnica epuizata` (`rate_limit_manager.py:can_request`) s-ar acumula
+    # daca durata lui creste anormal. Durata masurata aici raspunde direct
+    # la intrebarea ramasa deschisa — fara sa mai fie nevoie de grep prin
+    # log-uri GitHub Actions, care s-au dovedit prea lungi pentru instrumentele
+    # curente (peste 100.000 de linii per rulare, doar ultimele ~5.000
+    # accesibile).
     print("\n▶  Pasul 5/6 — Persistare cote de piață (odds_history)...")
+    _t0 = time.time()
 
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
@@ -572,6 +618,7 @@ def run(
                 )
             except Exception:
                 pass
+    durations["odds_persistence"] = round(time.time() - _t0, 1)
 
     # [ELIMINAT ADR-054] Pasul "ml_retrain" — vezi comentariul din
     # PIPELINE_STEPS de mai sus și ADR-054 pentru motiv complet.
@@ -582,6 +629,7 @@ def run(
     # nu cron SQL, nu trigger, nu job separat (cerinta explicita). Retentie
     # 9 zile — marja peste fereastra de 7 zile folosita de Health Score.
     print("\n▶  Curățenie — provider_call_log (retenție 9 zile)...")
+    _t0 = time.time()
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
     else:
@@ -592,6 +640,7 @@ def run(
         except Exception as exc:
             logger.error("[DailySync] cleanup_provider_call_log failed: %s", exc)
             print(f"  ⚠️  Eroare la curățenie provider_call_log: {exc}")
+    durations["provider_call_log_cleanup"] = round(time.time() - _t0, 1)
 
     # ── Raport final ──────────────────────────────────────────────────────
     total_duration = round(time.time() - start_total, 1)
@@ -600,8 +649,38 @@ def run(
     total_new = sum(r.matches_new for r in sync_reports)
     print(f"  ✅ Sincronizare completă în {total_duration}s")
     print(f"     +{total_new} meciuri noi în Supabase")
+
+    # [ADAUGAT 2026-08-26] Cei mai lenti 5 pasi, afisati direct in raport —
+    # nu doar stocati tacit in `durations`. Un raport care aduna date dar nu
+    # le arata nu rezolva golul din CLAUDE.md, doar il muta.
+    lente = sorted(durations.items(), key=lambda kv: kv[1], reverse=True)[:5]
+    print("  Cei mai lenți pași:")
+    for nume, secunde in lente:
+        print(f"     {secunde:>7.1f}s  {nume}")
+
+    # Validare, nu presupunere (North Star #8): daca un pas nou apare in
+    # PIPELINE_STEPS fara sa fie instrumentat mai sus (sau invers), raportam
+    # explicit — nu lasam `durations` sa para complet cand nu e.
+    nume_declarate = {s.name for s in PIPELINE_STEPS}
+    nume_masurate = set(durations)
+    lipsa_din_masuratori = nume_declarate - nume_masurate
+    in_plus_fata_de_manifest = nume_masurate - nume_declarate
+    if lipsa_din_masuratori:
+        logger.warning("[DailySync] pași declarați în PIPELINE_STEPS dar necronometrați: %s",
+                       sorted(lipsa_din_masuratori))
+    if in_plus_fata_de_manifest:
+        logger.warning("[DailySync] durate măsurate pentru pași absenți din PIPELINE_STEPS: %s",
+                       sorted(in_plus_fata_de_manifest))
+
     _print_separator("═")
     print()
+
+    return {
+        "total_duration_s": total_duration,
+        "step_durations_s": durations,
+        "steps_missing_from_manifest": sorted(in_plus_fata_de_manifest),
+        "manifest_steps_not_timed": sorted(lipsa_din_masuratori),
+    }
 
 
 def main() -> None:
