@@ -1,6 +1,6 @@
 # ADR-069 — Retenția Foundation Data Layer se numără pe sezoane, ancorate în date reale
 
-**Status**: Propus (2026-08-26) · așteaptă aprobarea proprietarului produsului
+**Status**: Aprobat și **executat** (2026-08-26) — prima rulare reală, varianta A
 **Atinge contractul**: `providers/flashscore/season_cleanup.py` (cheia de retenție), fluxul oficial Discovery → … → Final Report din ADR-044
 **Nu atinge**: `match_history`, `match_events`, `player_match_stats` (excluse explicit de ADR-044 — istoricul ML), `odds_history` (Frozen, ADR-005/006/010), niciun criteriu de promovare, niciun motor de predicție
 
@@ -232,6 +232,68 @@ real, observat, al celui de-al șaselea sezon. Regula de azi e proiectată să f
 - Pragul rămâne o proiecție câțiva ani.
 - Perechile cu H2H rar pierd adâncime — fără consecință azi, de reevaluat dacă
   tabela ajunge vreodată în cascada H2H.
+
+---
+
+## Prima rulare reală — 2026-08-26, varianta A
+
+Prag recalculat live: **2021-02-21** (min `start_date` = 2026-02-21, MLS).
+Cifrele au coincis exact cu cele codificate în teste.
+
+### Ce s-a găsit uitându-ne la rânduri, nu la sume
+
+Cele 459 de rânduri atingeau 175 de meciuri. Pentru **25 dintre ele ștergerea
+însemna zero H2H rămas** — și nu meciuri oarecare, ci **meciuri VIITOARE**
+(august–noiembrie 2026): Manchester City–Coventry, Real Madrid–Málaga,
+Arsenal–Hull City, Nice–Le Mans, Mainz–Paderborn și încă 20.
+
+Tiparul: **echipe nou-promovate**. Nu s-au întâlnit cu adversarii lor de 5+ ani
+tocmai pentru că erau în divizii diferite, deci singurul lor H2H era cel vechi.
+Exact contra-argumentul scris mai sus („taie perechile cu istoric rar"), apărut
+cu nume și date.
+
+S-a oprit execuția și s-au prezentat trei variante (Discovery Rule): (A) ștergere
+completă, 459 rânduri; (B) retenția scoate surplusul dar cruță ultima
+înregistrare — 343 rânduri, 25 de meciuri neatinse; (C) amânare.
+
+### Decizia proprietarului produsului: varianta A
+
+Recomandarea mea fusese (B). Argumentul care a decis (A), și care e mai bun:
+**forma recentă acoperă deja nevoia** — chiar fără H2H între cele două echipe
+nou-promovate, avem meciurile lor din ultimele etape ale campionatelor proprii,
+din care se deduce forma. Un H2H vechi de 10–30 de ani e **cosmetic, nu util**.
+
+Rândurile `recent_form_*` nu erau oricum atinse (toate cele 459 erau
+`h2h_overall`) — deci exact informația pe care se bazează argumentul a rămas
+intactă, verificat: 8.150 înainte, 8.150 după.
+
+### Execuție
+
+1. **Backup** — `flashscore_match_context_retention_backup_20260826`, tabelă
+   creată prin `CREATE TABLE ... AS SELECT`. Verificată înainte de ștergere:
+   459 rânduri, 459 ID-uri distincte, 1967-11-10 → 2021-02-20, zero categorii
+   greșite.
+2. **Delete** — pe ID-uri luate **din backup**, nu re-evaluând condiția de dată:
+   `DELETE ... WHERE id IN (SELECT id FROM <backup>)`. Prin construcție nu putea
+   șterge nimic ce nu era deja salvat.
+3. **Integrity Check** — rulat prin `retention.verify_integrity()`, funcția
+   reală din modul, nu o verificare ad-hoc:
+
+```
+randuri_inainte      12.573
+randuri_sterse          459
+randuri_dupa         12.114   (asteptat 12.114)   ✔
+fara_data      311  ->   311   protejate, intacte  ✔
+recent_form  8.150  -> 8.150   neatinse            ✔
+ramase sub prag           0                        ✔
+cea mai veche ramasa   2021-02-23                  ✔
+```
+
+Flagul `fdl_retention_delete_enabled` **nu a fost activat** — rularea s-a făcut
+prin SQL explicit, arătat integral înainte de execuție, cu aprobare separată pe
+lista exactă. Flagul rămâne pentru automatizarea viitoare, dacă se decide.
+
+---
 
 **Ce NU face acest ADR**
 - Nu atinge `match_history`/`match_events`/`player_match_stats` — istoricul ML
