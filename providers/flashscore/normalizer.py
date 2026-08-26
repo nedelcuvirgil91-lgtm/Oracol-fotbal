@@ -406,6 +406,18 @@ def normalize_match_statistics(pages: dict[str, str]) -> dict[str, Any]:
         "home_ht_goals": home_ht_goals,
         "away_ht_goals": away_ht_goals,
         "stats_source": "flashscore",
+        # [ADR-068, Faza A] Litera BRUTA a starii, necoloana canonica. Nu
+        # exista `flashscore_status_raw` in `match_history`, iar RPC-ul citeste
+        # doar chei cunoscute (`p->>'...'`), deci o cheie in plus e ignorata
+        # inofensiv acolo. Scopul ei e stratul RAW: `_raw_snapshot_by_tab()`
+        # salveaza output-ul acestei functii in `flashscore_raw_extraction`,
+        # unde valorile distincte devin observabile dupa o rulare reala.
+        #
+        # Numele contine deliberat `_raw`: semnaleaza ca e neinterpretata si
+        # ca NU trebuie citita ca stare a meciului pana la Faza B.
+        "flashscore_status_raw": (
+            extract_detail_status(summary_soup) or extract_detail_status(stats_soup)
+        ),
     }
     for label, (home_field, away_field) in STAT_LABEL_TO_FIELDS.items():
         home_val, away_val = stats.get(label, (None, None))
@@ -786,6 +798,45 @@ def _strip_advancing_note(raw: str) -> str:
     for marker in _TOOLTIP_MARKERS:
         raw = raw.split(marker)[0]
     return raw.strip()
+
+
+def extract_detail_status(soup) -> str | None:
+    """Starea meciului, EXACT cum o scrie Flashscore — FARA interpretare.
+
+    [ADR-068, Faza A — colectare] Faza A extrage litera brută și atât. Nicio
+    traducere, nicio mapare, nicio coloană canonică. Motivul e disciplina
+    „verificat, nu presupus": vocabularul real nu e cunoscut.
+
+    Ce E verificat, pe HTML real din repo (55 de fișiere salvate):
+
+        <span class="detailStatus">Finished</span>              88 aparitii
+        <div class="fixedHeaderDuel__detailStatus">Finished</div>
+        „After Extra Time"                                      12 aparitii
+
+    Ce NU e verificat: litera pentru un meci AMANAT. Niciunul din cele 55 de
+    fișiere nu conține un meci amânat, sandbox-ul nu ajunge la flashscore.com
+    (403 la proxy), iar pagina randată prin JS nu se poate citi din afară.
+    Două proiecte externe de scraping listează `postponed`/`cancelled`/
+    `abandoned`, dar acelea sunt valorile LOR normalizate, nu literalul din DOM.
+
+    De aceea Faza A doar COLECTEAZĂ: valoarea ajunge verbatim în
+    `flashscore_raw_extraction` (stratul RAW există deja), iar după o rulare de
+    noapte se pot citi valorile distincte REALE. Abia atunci Faza B mapează
+    literalele observate într-o coloană `match_status`.
+
+    Clasele sunt semantice, fără hash — spre deosebire de bara de sezon din
+    ADR-067, deci mai robuste. Absența nu se loghează ca eroare: un meci fără
+    element de stare e un caz normal, nu un defect."""
+    if soup is None:
+        return None
+    for selector in (".detailStatus", ".fixedHeaderDuel__detailStatus"):
+        el = soup.select_one(selector)
+        if el is None:
+            continue
+        text = el.get_text(strip=True)
+        if text:
+            return text
+    return None
 
 
 def _parse_h2h_date(raw: str | None) -> str | None:

@@ -1,6 +1,6 @@
 # ADR-068 — Starea „amânat" devine explicită, nu dedusă din absența rezultatului
 
-**Status**: Proposed (2026-08-25)
+**Status**: Faza A implementată (2026-08-26) · Faza B așteaptă datele Fazei A
 **Atinge contractul**: `match_history` (coloană nouă), `scripts/check_data_health.py`
 **Nu atinge**: `_upsert_match_canonical_locked` (migrarea 048 rămâne mecanismul de reprogramare), criteriile de promovare, `season`
 
@@ -112,6 +112,52 @@ Ordinea corectă e: (a) confirmăm live că marcajul de amânare există în pag
 Flashscore pe care le descărcăm deja; (b) abia apoi migrarea și cablarea. Dacă
 marcajul nu există, ADR-ul se închide ca „blocat upstream", nu se implementează
 pe jumătate.
+
+---
+
+## Verificarea cerută — făcută 2026-08-26, rezultat PARȚIAL
+
+**Confirmat**, pe HTML real din repo (55 de fișiere salvate ca evidență POC):
+
+```html
+<span class="detailStatus">Finished</span>              88 apariții
+<div class="fixedHeaderDuel__detailStatus">Finished</div>
+„After Extra Time"                                      12 apariții
+```
+
+Câmpul **există**, e în pagina `summary` pe care pipeline-ul o descarcă deja
+(cost de rețea **zero**), iar clasele sunt **semantice — fără hash**, deci
+structural mai robuste decât bara de sezon din ADR-067. Normalizatorul nu îl
+extrăgea deloc: singura potrivire pe „status" în tot fișierul era
+`wcl-stageTime`, altceva.
+
+**NEconfirmat: litera pentru un meci AMÂNAT.** Niciunul din cele 55 de fișiere
+nu conține un meci amânat. Sandbox-ul de dezvoltare nu ajunge la
+flashscore.com (403 la proxy, verificat), iar pagina e randată prin JS, deci nu
+poate fi citită printr-un fetch extern. Două proiecte independente de scraping
+listează `postponed`/`cancelled`/`abandoned`, dar acelea sunt valorile **lor
+normalizate**, nu literalul din DOM — dovadă de a doua mână, insuficientă
+pentru a defini un vocabular canonic.
+
+### Consecință: ADR-ul se împarte în două faze
+
+**Faza A — COLECTARE, fără interpretare** *(implementată 2026-08-26)*.
+`extract_detail_status()` extrage litera **verbatim** — fără traducere, fără
+`lower()`, fără mapare. Valoarea ajunge în `flashscore_raw_extraction` prin
+`flashscore_status_raw`, o cheie care NU e coloană canonică (RPC-ul citește
+doar chei cunoscute, deci o ignoră inofensiv). Numele conține deliberat `_raw`:
+semnalează că valoarea nu trebuie citită ca stare a meciului.
+
+Faza A **este** verificarea cerută, făcută prin conductă în loc de ad-hoc: după
+o rulare de noapte, valorile distincte reale devin observabile în RAW.
+
+**Faza B — INTERPRETARE** *(neîncepută, așteaptă datele Fazei A)*. Coloana
+`match_status`, migrarea, maparea literalelor **observate**. Nu se pornește
+până când vocabularul nu e citit din date proprii.
+
+Aceeași disciplină ca la ADR-067: se colectează faptul întâi, se interpretează
+după. Și evită exact ce interzice acest ADR în propriul text — o coloană
+construită pe un vocabular ghicit.
 
 ---
 
