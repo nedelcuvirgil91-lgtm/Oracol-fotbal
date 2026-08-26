@@ -18,6 +18,44 @@ from mappings import normalize_team_name
 logger = logging.getLogger("FootballOracle.Queries")
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# CAPCANA TIMESTAMP-ULUI INGHETAT — explicatia, o singura data
+# ════════════════════════════════════════════════════════════════════════════
+# Un `upsert` cu `on_conflict` care NU pune marcajul temporal in payload il
+# INGHEATA tacit: `DEFAULT now()` din schema se aplica DOAR pe ramura INSERT;
+# pe ramura DO UPDATE valoarea veche supravietuieste la nesfarsit. Randul isi
+# improspateaza corect continutul, dar poarta ora PRIMEI scrieri.
+#
+# Nu e pierdere de date. E ceva mai insidios: un instrument de diagnostic care
+# minte. Costul lui a fost demonstrat direct, pe 2026-08-26 — o investigatie
+# intreaga a pornit de la "clasamentele sunt vechi de 16-21 de zile", concluzie
+# trasa exact din aceste timestamp-uri. Verificarea pe CONTINUT (numarul de
+# etape din clasament vs. meciurile jucate) a aratat ca fiecare clasament era
+# la zi. Datele erau bune; ceasul mintea.
+#
+# Sase instante gasite pana acum, in trei valuri:
+#   flashscore_raw_extraction.captured_at        (observata intai, reparata 08-26)
+#   flashscore_standings_snapshot.captured_at    (reparata 2026-08-25)
+#   flashscore_match_context.captured_at         (reparata 2026-08-26)
+#   match_statistics_extended.captured_at        (reparata 2026-08-26)
+#   player_match_stats_extended.captured_at      (reparata 2026-08-26)
+#   flashscore_data_completeness.computed_at     (reparata 2026-08-26)
+#
+# REGULA, de acum inainte: orice upsert pe o tabela cu marcaj temporal il scrie
+# EXPLICIT, prin `_acum_utc()`. Garda automata care impune asta e in
+# `tests/test_upsert_timestamp_freshness.py` — nu se bazeaza pe memoria
+# nimanui, citeste codul si cade la a saptea instanta.
+
+def _acum_utc() -> str:
+    """Momentul curent, ISO-8601 cu fus orar explicit — pentru orice coloana
+    `timestamptz` scrisa printr-un upsert (vezi nota de mai sus).
+
+    Fusul NU e optional: coloanele sunt `timestamptz`, iar un timestamp naiv
+    ar fi interpretat dupa fusul serverului, nu dupa UTC — aceeasi clasa de
+    eroare tacuta, alt mecanism."""
+    return datetime.now(timezone.utc).isoformat()
+
+
 def get_client():
     """Importă și returnează clientul Supabase."""
     try:
@@ -1872,7 +1910,7 @@ def upsert_raw_extraction(
         "match_ref": match_ref, "tab_name": tab_name, "raw_extracted": raw_extracted,
         "validation_status": validation_status, "validation_errors": validation_errors,
         "canonical_written": canonical_written, "season": season,
-        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "captured_at": _acum_utc(),
     }
     try:
         client.table("flashscore_raw_extraction").upsert(
@@ -1920,12 +1958,17 @@ def upsert_data_completeness(
     `coverage_percent` - vezi `providers.flashscore.persistence.
     compute_data_completeness()`. `on_conflict="match_ref"` -
     idempotent, snapshot curent per meci. `season` (migratia 038) - DOAR
-    daca providerul il ofera, niciodata dedus."""
+    daca providerul il ofera, niciodata dedus.
+
+    [FIX 2026-08-26] `computed_at` scris EXPLICIT — vezi nota comuna de la
+    `_acum_utc()`. Un scor de completitudine RE-calculat azi arata cat de
+    complet e meciul ACUM; fara asta purta ora primei calculari."""
     client = get_client()
     if client is None:
         return False
     payload = {
         "match_ref": match_ref, "match_id": match_id, "season": season,
+        "computed_at": _acum_utc(),
         "has_summary": completeness.get("summary", False),
         "has_stats": completeness.get("stats", False),
         "has_lineups": completeness.get("lineups", False),
@@ -1962,7 +2005,7 @@ def upsert_odds_fallback_flashscore(
     payload = {
         "fixture_id": fixture_id, "bookmaker": bookmaker,
         "home": home, "draw": draw, "away": away,
-        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "captured_at": _acum_utc(),
     }
     try:
         client.table("odds_fallback_flashscore").upsert(
@@ -2120,13 +2163,18 @@ def _dedupe_by_keys(rows: list[dict], keys: tuple[str, ...], context: str) -> li
 
 def upsert_match_statistics_extended(match_id: int, rows: list[dict]) -> bool:
     """`match_statistics_extended` (EAV) - `on_conflict="match_id,stat_key"`,
-    exact cheia UNIQUE a tabelei (migratia 035)."""
+    exact cheia UNIQUE a tabelei (migratia 035).
+
+    [FIX 2026-08-26] `captured_at` scris EXPLICIT — vezi nota de la
+    `_acum_utc()`. Statisticile unui meci se rescriu la fiecare re-procesare
+    (scor final dupa prelungiri, corectie de provider); fara asta, randul
+    purta ora primei capturi, adesea de dinainte ca meciul sa se termine."""
     if not rows:
         return True
     client = get_client()
     if client is None:
         return False
-    payload = [{**r, "match_id": match_id} for r in rows]
+    payload = [{**r, "match_id": match_id, "captured_at": _acum_utc()} for r in rows]
     payload = _dedupe_by_keys(payload, ("stat_key",), "upsert_match_statistics_extended")
     try:
         client.table("match_statistics_extended").upsert(
@@ -2234,6 +2282,11 @@ def upsert_player_match_stats_extended(
                 "stat_label": e["stat_label"], "value_raw": e.get("value_raw"),
                 "value_numeric": e.get("value_numeric"), "source": "flashscore",
                 "season": season,
+                # [FIX 2026-08-26] `captured_at` explicit — vezi nota de la
+                # `_acum_utc()`. Ratingurile si statisticile per jucator se
+                # rescriu la re-procesarea meciului; timestamp-ul trebuie sa
+                # spuna cand au fost citite ULTIMA data, nu prima.
+                "captured_at": _acum_utc(),
             }
             for e in extended
         ]
@@ -2276,7 +2329,13 @@ def _normalize_context_team_fields(row: dict) -> dict:
 def upsert_match_context(rows: list[dict]) -> bool:
     """`flashscore_match_context` (H2H + forma recenta, segmentate) -
     `on_conflict="context_match_id,category,meeting_order"`, cheia
-    UNIQUE existenta (migratia 035)."""
+    UNIQUE existenta (migratia 035).
+
+    [FIX 2026-08-26] `captured_at` scris EXPLICIT — vezi nota de la
+    `_acum_utc()`. Randurile de context descriu confruntari directe si forma
+    recenta, deci se REscriu la fiecare re-procesare a meciului-subiect (lista
+    ultimelor N intalniri se schimba pe masura ce se joaca meciuri noi);
+    timestamp-ul trebuie sa spuna cand a fost citita ultima oara acea lista."""
     if not rows:
         return True
     client = get_client()
@@ -2285,7 +2344,8 @@ def upsert_match_context(rows: list[dict]) -> bool:
     # [ADR-058 F2] Normalizare INAINTEA dedup-ului — altfel doua variante
     # brute ale aceleiasi echipe ar trece de `_dedupe_by_keys` ca randuri
     # distincte, exact defectul pe care normalizarea il elimina.
-    rows = [_normalize_context_team_fields(r) for r in rows]
+    acum = _acum_utc()
+    rows = [{**_normalize_context_team_fields(r), "captured_at": acum} for r in rows]
     rows = _dedupe_by_keys(rows, ("context_match_id", "category", "meeting_order"), "upsert_match_context")
     try:
         client.table("flashscore_match_context").upsert(
@@ -2343,7 +2403,7 @@ def upsert_standings_snapshot(rows: list[dict]) -> bool:
     # competitii (Serie A 1 rand din 20 cu sezon, Premier League 9 din 21),
     # fiindca fiecare echipa avea propriul `captured_at` de prima inserare.
     # Un clasament are un singur sezon.
-    acum = datetime.now(timezone.utc).isoformat()
+    acum = _acum_utc()
     rows = [{**r, "captured_at": acum} for r in rows]
     try:
         client.table("flashscore_standings_snapshot").upsert(
