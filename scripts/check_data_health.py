@@ -420,7 +420,49 @@ def main() -> int:
               "verifică extern înainte de orice corecție, regula D3)")
     print(BAR)
 
-    print(f"  Clase cu constatări: {findings}/5")
+    # ── 6. Rânduri de clasament sub formă NEcanonică ──────────────────────
+    #
+    # [ADĂUGAT 2026-08-26] Clasă găsită pe date reale, ca efect secundar al
+    # reîmprospătării `captured_at`: 19 rânduri orfane, aceeași echipă sub
+    # două nume („Heerenveen" lângă „SC Heerenveen", „Atl. Madrid" lângă
+    # „Atletico Madrid"). Scrise ÎNAINTE de fixul de normalizare din
+    # 2026-08-15; `UNIQUE(competition, team)` le ține separate, deci rândul
+    # vechi nu se rescrie NICIODATĂ în loc — rămâne fantomă la nesfârșit,
+    # cu cifre înghețate în trecut.
+    #
+    # Invariantul e exact și ieftin: scriitorul normalizează la fiecare
+    # scriere, deci orice rând al cărui `team` diferă de forma canonică e,
+    # prin construcție, un orfan. Se poate reactiva oricând se ADAUGĂ un
+    # alias nou (o formă azi canonică devine mâine alias) — de aceea merită
+    # monitorizat permanent, nu curățat o dată.
+    orfane: list[dict] = []
+    try:
+        from mappings import normalize_team_name
+
+        standings = _fetch_all(
+            client, "flashscore_standings_snapshot", "id,competition,team,captured_at",
+            lambda q: q.order("id"),
+        )
+        orfane = [
+            r for r in standings
+            if r.get("team") and normalize_team_name(r["team"]) != r["team"]
+        ]
+    except Exception as exc:
+        print(f"  [ATENȚIE] clasa 6 nu a putut rula ({exc}) — se raportează ca necunoscută.")
+        standings = []
+
+    print(f"  6. CLASAMENTE SUB FORMĂ NECANONICĂ (rânduri orfane): {len(orfane)}")
+    for r in orfane[:15]:
+        canonic = normalize_team_name(r["team"])
+        print(f"       [{r.get('competition')}]  {r['team']!r} → canonic {canonic!r}  "
+              f"(id={r.get('id')})")
+    if orfane:
+        findings += 1
+        print("     (rândul canonic există separat, cu date mai noi — cel vechi nu se "
+              "va rescrie niciodată în loc)")
+    print(BAR)
+
+    print(f"  Clase cu constatări: {findings}/6")
     print("  Verificare încheiată. ZERO scriere efectuată.")
     print(BAR)
     return 1 if findings else 0
