@@ -295,6 +295,45 @@ lista exactă. Flagul rămâne pentru automatizarea viitoare, dacă se decide.
 
 ---
 
+## Notă — automatizare completă, NEÎNCEPUTĂ (2026-08-26)
+
+Discutat cu proprietarul produsului după prima rulare: activarea flagului
+`fdl_retention_delete_enabled` **nu** e suficientă, singură, ca să facă
+ștergerea automată. `night_sync._stage_cleanup()` are o gardă AST care îl
+obligă azi să cheme `execute_retention(dry_run=True)` — codat direct, nu
+citește flagul. Deci chiar cu flagul pornit, rularea de noapte tot produce doar
+raport.
+
+Ca ștergerea să ruleze singură, fără verificare manuală de fiecare dată, ar
+trebui **amândouă**: flagul activat ȘI o schimbare de cod care cere
+`night_sync` să apeleze `dry_run=False`, plus slăbirea gărzii AST care azi
+interzice exact asta.
+
+**Nu se face acum, deliberat.** Rularea de azi a arătat de ce contează pasul de
+verificare manuală: agregatul (`459 candidați`) nu arăta ce a ieșit la iveală
+abia uitându-ne la rândurile individuale — 25 de meciuri VIITOARE ale unor
+echipe nou-promovate, care ar fi rămas fără niciun H2H. Decizia finală (varianta
+A, cu un argument diferit de recomandarea inițială) a necesitat judecată umană,
+nu doar cifre.
+
+**De făcut altă dată, cu plan propriu, dacă se decide vreodată:**
+1. Discuție explicită dacă merită — retenția rulează rar (nu zilnic), deci
+   câștigul de timp al automatizării complete e mic; costul e pierderea
+   verificării manuale care a prins cazul de mai sus.
+2. Dacă da: ADR nou (schimbare de contract — retenția devine un proces automat,
+   nu unul supravegheat), nu un amendament tacit la acesta.
+3. Implementare: relaxarea gărzii AST din `test_fdl_retention.py` (deliberat, cu
+   motiv scris, nu ștearsă), schimbarea `_stage_cleanup()` să citească flagul în
+   loc să cheme mereu `dry_run=True`, plus un mecanism de raportare a ce s-a
+   șters automat (log dedicat sau tabelă), ca nicio ștergere automată să nu
+   treacă neobservată (North Star #9).
+4. Testare + mutații, ca la restul modulului `retention.py`.
+
+Până atunci: flagul rămâne stins, orice ștergere reală trece prin SQL explicit,
+arătat integral, cu aprobare separată — exact fluxul de azi.
+
+---
+
 **Ce NU face acest ADR**
 - Nu atinge `match_history`/`match_events`/`player_match_stats` — istoricul ML
   rămâne intact, cu adâncimea lui deliberată.
@@ -303,3 +342,4 @@ lista exactă. Flagul rămâne pentru automatizarea viitoare, dacă se decide.
 - Nu decide retenția pentru `flashscore_raw_extraction` și
   `flashscore_standings_snapshot`.
 - Nu schimbă `RETENTION_SEASON_COUNT = 6`.
+- Nu automatizează ștergerea recurentă — vezi nota de mai sus.
