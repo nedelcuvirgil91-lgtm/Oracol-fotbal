@@ -24,6 +24,34 @@ amânate**, confirmat pe surse independente:
 
 Al patrulea (Wisla Plock – Lech Poznan) rămâne neverificat individual.
 
+### Actualizare 2026-08-26 — 7 din 7, aceeași cauză structurală
+
+Al patrulea s-a verificat, și au apărut încă trei (22 august). **Toate șapte
+sunt amânări, toate din calificări europene**, confirmate pe comunicate
+oficiale de ligă sau de club, nu pe agregatoare de scoruri:
+
+| Meci | Cauză | Sursă oficială |
+|---|---|---|
+| Wisla Plock – Lech Poznan, 16 aug | cerere Lech (tur-retur Klaksvik, UEL) | ekstraklasa.org, lechpoznan.pl |
+| Rangers – St Mirren, 22 aug | play-off UEFA | spfl.co.uk, rangers.co.uk |
+| St Johnstone – Celtic, 22 aug | play-off UCL | spfl.co.uk, perthstjohnstonefc.co.uk, BBC |
+| NEC Nijmegen – Excelsior, 22 aug | KNVB, tur-retur Bodø/Glimt | eredivisie.nl, nec-nijmegen.nl |
+
+**Asta schimbă greutatea unui contra-argument.** „Rezolvă o problemă care se
+autovindecă" presupunea evenimente rare. Nu sunt rare — sunt **drept
+regulamentar**: SPFL confirmă că toate cele 5 cluburi scoțiene din Europa au
+cerut amânarea rundei 3; Ekstraklasa acordă două amânări per club pe durata
+eliminatoriilor; KNVB mută meciul ca echipa să nu joace între tur și retur.
+Fenomenul se repetă previzibil în fiecare august și la fiecare pauză de cupe.
+
+**Ce s-a confirmat în favoarea mecanismului existent**: migrarea 048 chiar
+funcționează. Celelalte 3 meciuri scoțiene amânate în aceeași zi
+(Falkirk–Hearts, Hibernian–Kilmarnock, Motherwell–Aberdeen) și-au primit data
+nouă și s-au mutat singure 22 aug → 15 sept în `match_history`. Rămân
+fantome doar cele fără dată nouă publicată — exact intervalul pe care acest
+ADR îl vizează, și exact cel pe care SPFL îl anunță ca durând până după
+tragerile UEFA de la finalul lui august.
+
 ### Ce funcționează deja
 
 Migrarea 048 tratează **reprogramarea**: același `fixture_id`, dată nouă → se

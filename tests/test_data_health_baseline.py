@@ -102,13 +102,32 @@ def test_fiecare_intrare_reala_are_motiv_si_marcaj_de_verificare():
             assert intrare.get("sursa"), f"{fid}: pretinde verificare externa fara sursa"
 
 
-def test_cele_trei_amanari_confirmate_sunt_marcate_ca_verificate():
-    """Cele trei stari confirmate pe surse independente — daca cineva le
-    retrogradeaza la 'neverificat', testul cade si obliga la o explicatie."""
+def test_amanarile_confirmate_sunt_marcate_ca_verificate():
+    """Starile confirmate pe surse independente — daca cineva le retrogradeaza
+    la 'neverificat', testul cade si obliga la o explicatie.
+
+    [EXTINS 2026-08-26] De la 3 la 7. Cele 4 adaugate au fost confirmate pe
+    comunicate OFICIALE de liga sau de club (SPFL, Ekstraklasa, KNVB/Eredivisie,
+    NEC), nu doar pe agregatoare de scoruri."""
     b = load_baseline()["fixture_stale"]
-    for fid in ("flashscore_rX6GkgVb", "flashscore_W4Nlhbwh", "flashscore_KWAKPPdt"):
+    for fid in ("flashscore_rX6GkgVb", "flashscore_W4Nlhbwh", "flashscore_KWAKPPdt",
+                "flashscore_h4o7BhBL", "flashscore_jFwdNbHj", "flashscore_ILVso29c",
+                "flashscore_UozGEIIk"):
         assert b[fid]["verificat_extern"] is True, fid
         assert "AMANAT" in b[fid]["motiv"].upper(), fid
+
+
+def test_toate_cele_sapte_amanari_flashscore_sunt_documentate():
+    """Toate fixture-urile-fantoma Flashscore cunoscute au aceeasi cauza —
+    calificarile europene. Daca apare unul NOU, nu e in lista si monitorizarea
+    il semnaleaza: exact comportamentul dorit, nu unul de suprimat aici."""
+    b = load_baseline()["fixture_stale"]
+    flashscore = {k: v for k, v in b.items() if k.startswith("flashscore_")}
+    assert len(flashscore) == 7, (
+        "numarul s-a schimbat — daca un meci si-a capatat data noua, intrarea "
+        "lui e moarta si trebuie STEARSA, nu lasata sa putrezeasca"
+    )
+    assert all(v["verificat_extern"] for v in flashscore.values())
 
 
 def test_fisierul_e_json_valid_pe_disc():

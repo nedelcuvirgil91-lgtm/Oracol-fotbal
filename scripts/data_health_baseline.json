@@ -14,7 +14,17 @@
     "",
     "`verificat_extern: true` = starea a fost confirmata pe surse din afara",
     "sistemului, citate in `sursa`. `false` = motiv plauzibil, NEconfirmat",
-    "individual; ramane afisat ca atare, nu se pretinde ca e stabilit."
+    "individual; ramane afisat ca atare, nu se pretinde ca e stabilit.",
+    "",
+    "TIPAR OBSERVAT (2026-08-26, dupa verificarea a 7 din 7 cazuri Flashscore):",
+    "amanarile NU sunt evenimente izolate — sunt STRUCTURALE, produse de",
+    "calificarile europene. Ligile dau explicit cluburilor din cupele europene",
+    "dreptul de a amana meciuri de campionat: SPFL confirma ca TOATE cele 5",
+    "cluburi scotiene din Europa au cerut amanarea rundei 3; Ekstraklasa acorda",
+    "doua amanari per club pe durata eliminatoriilor; KNVB a mutat NEC-Excelsior",
+    "ca sa nu cada intre turul si returul cu Bodo/Glimt. Deci fenomenul se va",
+    "repeta previzibil in fiecare august si in fiecare pauza de cupe — argument",
+    "direct pentru ADR-068 (starea explicita, nu dedusa din absenta rezultatului)."
   ],
   "fixture_stale": {
     "flashscore_rX6GkgVb": {
@@ -40,9 +50,31 @@
     },
     "flashscore_h4o7BhBL": {
       "meci": "Wisla Plock - Lech Poznan, 2026-08-16, Ekstraklasa",
-      "motiv": "Fara rezultat nici in match_history, nici in RAW-ul Flashscore — deci necolectat, nu aruncat la scriere. Cauza exacta NEstabilita.",
-      "verificat_extern": false,
-      "verificat_la": "2026-08-25"
+      "motiv": "AMANAT OFICIAL de Departamentul de Logistica al Ekstraklasei, la cererea lui Lech Poznan (tur-retur cu Klaksvik in eliminatoriile Europa League). Data noua se anunta dupa incheierea eliminatoriilor europene. [CORECTAT 2026-08-26] Intrarea initiala spunea 'cauza exacta NEstabilita' — s-a stabilit, e acelasi tipar european ca la celelalte 6.",
+      "verificat_extern": true,
+      "sursa": "ekstraklasa.org (comunicat oficial, 2026-08-10), lechpoznan.pl, sport.tvp.pl",
+      "verificat_la": "2026-08-26"
+    },
+    "flashscore_jFwdNbHj": {
+      "meci": "Rangers - St Mirren, 2026-08-22, Scottish Premiership",
+      "motiv": "AMANAT. Toate cele 5 cluburi scotiene din cupele europene au uzat de dreptul de a amana runda 3 fara acordul adversarului. Data noua: septembrie 8/9 sau 15/16, se publica DUPA tragerile la sorti UEFA de la finalul lui august — deci ramane fantoma inca ~1 saptamana, apoi migrarea 048 il muta singur.",
+      "verificat_extern": true,
+      "sursa": "spfl.co.uk (comunicat oficial), rangers.co.uk, espn.com — toate marcheaza 'Postponed'",
+      "verificat_la": "2026-08-26"
+    },
+    "flashscore_ILVso29c": {
+      "meci": "St Johnstone - Celtic, 2026-08-22, Scottish Premiership",
+      "motiv": "AMANAT, la cererea lui Celtic (play-off Champions League). Acelasi mecanism SPFL ca la Rangers - St Mirren, aceeasi fereastra de reprogramare.",
+      "verificat_extern": true,
+      "sursa": "spfl.co.uk (comunicat oficial), perthstjohnstonefc.co.uk, bbc.com/sport, espn.com",
+      "verificat_la": "2026-08-26"
+    },
+    "flashscore_UozGEIIk": {
+      "meci": "NEC Nijmegen - SBV Excelsior, 2026-08-22, Eredivisie",
+      "motiv": "AMANAT de KNVB, ca NEC sa nu joace intre turul si returul play-off-ului Champions League cu Bodo/Glimt. Data noua depinde de rezultatul european: 16 septembrie daca NEC ajunge in UCL, 8 septembrie daca ajunge in UEL.",
+      "verificat_extern": true,
+      "sursa": "nec-nijmegen.nl si eredivisie.nl (ambele oficiale, 2026-08-12), nos.nl, nu.nl",
+      "verificat_la": "2026-08-26"
     },
     "tsdb_2532700": {
       "meci": "Mjallby - Lincoln Red Imps, 2026-07-21, Champions League",

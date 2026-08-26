@@ -1844,7 +1844,25 @@ def upsert_raw_extraction(
     validarea, dar randul RAW exista chiar si pentru meciuri respinse.
     `on_conflict="match_ref,tab_name"` - snapshot curent, nu istoric
     acumulat (schema, migratia 035). `season` (migratia 038) - DOAR daca
-    providerul il ofera, niciodata dedus (Raspuns oficial 2026-07-29)."""
+    providerul il ofera, niciodata dedus (Raspuns oficial 2026-07-29).
+
+    [FIX 2026-08-26] `captured_at` se rescrie EXPLICIT la fiecare scriere.
+    Inainte lipsea din payload, iar `DEFAULT now()` se aplica doar la INSERT
+    — pe ramura `DO UPDATE` a upsert-ului ramanea ora PRIMEI capturi, pentru
+    totdeauna. Consecinta nu e pierdere de date (`raw_extracted` se
+    improspata corect), ci una de INTERPRETARE: un rand refetch-uit azi
+    arata o data din urma cu trei saptamani, deci nimeni nu putea deduce
+    din tabela cand a fost vazuta ultima oara pagina. Gasit exact asa: am
+    incercat sa stabilesc daca cele 4 fixture-uri fantoma au fost
+    reincercate dupa amanare si am descoperit ca timestamp-ul nu putea
+    raspunde la intrebare.
+
+    Aceeasi capcana l-a treia oara: intai aici (observata, cand a invalidat
+    o analiza de impact — dar netratata atunci), apoi reparata in
+    `upsert_standings_snapshot`, acum reparata si aici. Un `on_conflict`
+    care nu include timestamp-ul in payload il INGHEATA tacit, fiindca
+    `DEFAULT now()` nu se aplica pe ramura DO UPDATE. Orice upsert nou pe o
+    tabela cu marcaj temporal trebuie sa-l puna EXPLICIT in payload."""
     if not raw_extracted:
         return True
     client = get_client()
@@ -1854,6 +1872,7 @@ def upsert_raw_extraction(
         "match_ref": match_ref, "tab_name": tab_name, "raw_extracted": raw_extracted,
         "validation_status": validation_status, "validation_errors": validation_errors,
         "canonical_written": canonical_written, "season": season,
+        "captured_at": datetime.now(timezone.utc).isoformat(),
     }
     try:
         client.table("flashscore_raw_extraction").upsert(
