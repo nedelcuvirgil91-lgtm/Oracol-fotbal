@@ -293,6 +293,23 @@ Flagul `fdl_retention_delete_enabled` **nu a fost activat** — rularea s-a făc
 prin SQL explicit, arătat integral înainte de execuție, cu aprobare separată pe
 lista exactă. Flagul rămâne pentru automatizarea viitoare, dacă se decide.
 
+### Backup — decizie de retenție (2026-08-26)
+
+`flashscore_match_context_retention_backup_20260826` — tabelă Postgres simplă
+(`CREATE TABLE ... AS SELECT`), instantaneu static al celor 459 de rânduri
+șterse, 72 kB. Verificat: **zero referințe** în tot repo-ul (`.py`/`.sql`) —
+nu e citită de niciun cod, niciun consumator, nicio cascadă de predicție.
+Impact asupra Oracle: zero.
+
+Același precedent ca `ADR-060` (`match_history_backfill_backup_20260822`):
+**păstrare 30 de zile de la creare, cu revizuire la ~2026-09-25** (nu ștergere
+imediată, nu păstrare pe termen nelimitat fără termen). Proprietarul produsului
+a aprobat explicit acest tratament (2026-08-26).
+
+Ca și la ADR-060: fără reminder automat programat — `send_later` a eșuat acolo
+din motive de aprobare inobtenabile din sesiune, deci termenul rămâne doar
+notat aici, de readus în discuție manual la revizuire.
+
 ---
 
 ## Notă — automatizare completă, NEÎNCEPUTĂ (2026-08-26)
