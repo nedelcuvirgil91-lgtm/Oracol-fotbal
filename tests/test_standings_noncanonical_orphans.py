@@ -126,9 +126,29 @@ def test_cu_geaman_canonic_e_clasificat_ca_DUPLICAT():
 
 
 def test_geamanul_se_cauta_in_ACEEASI_competitie():
-    """GARDĂ. Un `Heerenveen` în Eredivisie nu e acoperit de un `SC Heerenveen`
-    din altă competiție — cheia UNIQUE e (competition, team), deci și
-    verificarea geamănului trebuie să fie per competiție."""
+    """GARDĂ PREVENTIVĂ, pe un scenariu care NU poate apărea azi.
+
+    Invariantul: cheia e `UNIQUE(competition, team)`, deci și căutarea
+    geamănului trebuie să fie per competiție. Verificarea trebuie să
+    corespundă cheii, altfel cele două pot diverge tăcut.
+
+    [CORECTAT 2026-08-27 — formularea mea inițială era exagerată] Descrisesem
+    consecința ca fiind „concretă". Nu e. Verificat pe toate cele 248 de
+    rânduri reale de producție:
+      - nicio echipă nu apare în mai mult de o competiție (zero)
+      - rulând mutația „caută geamănul fără competiție" contra datelor reale:
+        ZERO divergențe față de versiunea corectă
+
+    Motivul e structural: clasamentele există DOAR pentru cele 14 ligi
+    domestice. Champions/Europa/Conference League nu au clasament în date,
+    deci un club nu poate apărea decât în liga lui.
+
+    Scenariul de mai jos e deci INVENTAT, ales ca ilustrare a mecanismului —
+    nu observat. Devine real doar dacă se adaugă vreodată clasamente pentru
+    cupele europene, unde același club apare în două competiții: atunci o
+    verificare pe nume simplu l-ar propune spre ștergere din propria ligă
+    fiindcă apare și în UCL. Gardă pentru acea extindere plauzibilă, nu plasă
+    pentru un defect existent."""
     randuri = [
         _r("SC Heerenveen", "Eredivisie", 1),
         _r("Heerenveen", "Jupiler Pro League", 2),
@@ -236,13 +256,20 @@ def test_geamanul_se_cauta_pe_PERECHEA_competitie_echipa_in_codul_real():
 
     `test_geamanul_se_cauta_in_ACEEASI_competitie` verifică replica locală, deci
     rămâne verde chiar dacă în codul real `existente` devine un set de nume
-    simple. Consecința acelei mutații ar fi reală: un `Heerenveen` din Eredivisie
-    ar fi declarat „duplicat" pentru că un `SC Heerenveen` există în ALTĂ
-    competiție — și ar fi propus spre ștergere, deși e singurul rând al echipei
-    acolo. Exact clasa de eroare pe care o repară acest commit.
+    simple. Aici se verifică sursa: atât construcția setului, cât și testul de
+    apartenență trebuie să folosească o PERECHE, nu un nume singur.
 
-    Aici se verifică sursa: atât construcția setului, cât și testul de
-    apartenență trebuie să folosească o PERECHE, nu un nume singur."""
+    [CORECTAT 2026-08-27] Prima formulare spunea „consecința acelei mutații ar
+    fi reală". Măsurat pe cele 248 de rânduri de producție: mutația produce
+    ZERO divergențe azi, fiindcă nicio echipă nu apare în două competiții.
+    Valoarea gărzii nu e că previne un bug existent — e că ține invariantul din
+    cod aliniat cu cheia `UNIQUE(competition, team)`, ca cele două să nu poată
+    diverge tăcut la o extindere viitoare (clasamente pentru cupele europene).
+
+    Motivul pentru care merită totuși păstrată, în ciuda celor de mai sus:
+    divergența dintre o verificare și cheia pe care ar trebui s-o reflecte e
+    exact genul de defect care nu se manifestă până în ziua în care se
+    manifestă costisitor."""
     import ast
 
     arbore = _arbore_main()
