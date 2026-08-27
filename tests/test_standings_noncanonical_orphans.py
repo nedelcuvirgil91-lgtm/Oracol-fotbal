@@ -21,12 +21,28 @@ from __future__ import annotations
 from mappings import normalize_team_name
 
 
+def _imparte(randuri: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Replica exactă a invariantului din `check_data_health`, clasa 6.
+
+    [CORECTAT 2026-08-27] Întoarce (duplicate, unice) — nu o singură listă.
+    Motivul e în docstring-ul modulului: cele două cer acțiuni OPUSE."""
+    existente = {(r.get("competition"), r.get("team")) for r in randuri}
+    duplicate, unice = [], []
+    for r in randuri:
+        if not r.get("team"):
+            continue
+        canonic = normalize_team_name(r["team"])
+        if canonic == r["team"]:
+            continue
+        (duplicate if (r.get("competition"), canonic) in existente else unice).append(r)
+    return duplicate, unice
+
+
 def _orfane(randuri: list[dict]) -> list[dict]:
-    """Replica exactă a invariantului din `check_data_health`, clasa 6."""
-    return [
-        r for r in randuri
-        if r.get("team") and normalize_team_name(r["team"]) != r["team"]
-    ]
+    """Toate rândurile necanonice, indiferent de clasă — pentru testele care
+    verifică doar DETECȚIA, nu și acțiunea recomandată."""
+    d, u = _imparte(randuri)
+    return d + u
 
 
 def _r(team, comp="Eredivisie", rid=1):
@@ -77,6 +93,62 @@ def test_rand_fara_nume_nu_arunca():
     assert _orfane([{"id": 1, "competition": "X"}]) == []
 
 
+# ── separarea celor două clase (defect găsit la prima rulare reală în CI) ────
+
+def test_cazul_REAL_gasit_azi_nu_e_duplicat_ci_inregistrare_unica():
+    """CAZUL CARE A EXPUS DEFECTUL, 2026-08-27, Bundesliga.
+
+    `Schalke` și `B. Monchengladbach` sunt SINGURELE rânduri pentru acele
+    echipe — nu există `Schalke 04`, nu există `Borussia Monchengladbach`.
+    Versiunea inițială le raporta ca duplicate și afișa „rândul canonic există
+    separat"; ștergerea lor ar fi eliminat două echipe din clasament."""
+    bundesliga = [
+        _r("Union Berlin", "Bundesliga", 5023),
+        _r("Bayern Munich", "Bundesliga", 5025),
+        _r("Schalke", "Bundesliga", 5028),
+        _r("B. Monchengladbach", "Bundesliga", 5031),
+        _r("RB Leipzig", "Bundesliga", 5040),
+    ]
+    duplicate, unice = _imparte(bundesliga)
+    assert duplicate == [], "niciunul nu are geamăn canonic în acest clasament"
+    assert {r["team"] for r in unice} == {"Schalke", "B. Monchengladbach"}
+
+
+def test_cu_geaman_canonic_e_clasificat_ca_DUPLICAT():
+    """Cazul de ieri, cel pentru care ștergerea CHIAR e acțiunea corectă."""
+    randuri = [
+        _r("SC Heerenveen", "Eredivisie", 1),
+        _r("Heerenveen", "Eredivisie", 2),
+    ]
+    duplicate, unice = _imparte(randuri)
+    assert [r["id"] for r in duplicate] == [2]
+    assert unice == []
+
+
+def test_geamanul_se_cauta_in_ACEEASI_competitie():
+    """GARDĂ. Un `Heerenveen` în Eredivisie nu e acoperit de un `SC Heerenveen`
+    din altă competiție — cheia UNIQUE e (competition, team), deci și
+    verificarea geamănului trebuie să fie per competiție."""
+    randuri = [
+        _r("SC Heerenveen", "Eredivisie", 1),
+        _r("Heerenveen", "Jupiler Pro League", 2),
+    ]
+    duplicate, unice = _imparte(randuri)
+    assert duplicate == [], "geamăn din ALTĂ competiție nu contează"
+    assert [r["id"] for r in unice] == [2]
+
+
+def test_ambele_clase_simultan():
+    randuri = [
+        _r("SC Heerenveen", "Eredivisie", 1),
+        _r("Heerenveen", "Eredivisie", 2),      # duplicat
+        _r("Schalke", "Bundesliga", 3),          # unic
+    ]
+    duplicate, unice = _imparte(randuri)
+    assert [r["id"] for r in duplicate] == [2]
+    assert [r["id"] for r in unice] == [3]
+
+
 # ── garda de cablare ─────────────────────────────────────────────────────────
 
 def _arbore_main():
@@ -91,23 +163,126 @@ def _arbore_main():
 def test_clasa_6_compara_efectiv_cu_forma_canonica():
     """GARDĂ, adăugată după ce o mutație a arătat că lipsea: testele de mai sus
     verifică o REPLICĂ a invariantului, deci rămân verzi chiar dacă filtrul din
-    codul real devine `if False`. Aici se verifică expresia reală."""
+    codul real devine `if False`. Aici se verifică expresia reală.
+
+    [REFĂCUTĂ 2026-08-27] Prima versiune cerea ca apelul `normalize_team_name`
+    să fie chiar ÎN nodul de comparație. A picat la refactorizarea de azi, care
+    a scos apelul într-o variabilă (`canonic = normalize_team_name(...)`) —
+    cod echivalent, gardă căzută. Era o gardă legată de FORMĂ, nu de invariant.
+    Acum acceptă ambele: apel direct în comparație, SAU comparație pe o
+    variabilă provenită din acel apel."""
     import ast
 
     arbore = _arbore_main()
+
+    # Variabilele care primesc rezultatul lui normalize_team_name(...)
+    din_normalizare = {
+        t.id
+        for n in ast.walk(arbore)
+        if isinstance(n, ast.Assign)
+        and isinstance(n.value, ast.Call)
+        and getattr(n.value.func, "id", None) == "normalize_team_name"
+        for t in n.targets
+        if isinstance(t, ast.Name)
+    }
+
+    def _implica_forma_canonica(cmp_nod: ast.Compare) -> bool:
+        for sub in ast.walk(cmp_nod):
+            if isinstance(sub, ast.Call) and getattr(sub.func, "id", None) == "normalize_team_name":
+                return True
+            if isinstance(sub, ast.Name) and sub.id in din_normalizare:
+                return True
+        return False
+
     comparatii = [
         n for n in ast.walk(arbore)
         if isinstance(n, ast.Compare)
-        and isinstance(n.ops[0], ast.NotEq)
-        and any(
-            isinstance(c, ast.Call) and getattr(c.func, "id", None) == "normalize_team_name"
-            for c in ast.walk(n)
-        )
+        and isinstance(n.ops[0], (ast.NotEq, ast.Eq))
+        and _implica_forma_canonica(n)
     ]
     assert comparatii, (
-        "clasa 6 trebuie sa compare `team` cu `normalize_team_name(team)` — "
-        "fara comparatia reala, filtrul nu detecteaza nimic"
+        "clasa 6 trebuie sa compare `team` cu forma lui canonica — fara "
+        "comparatia reala, filtrul nu detecteaza nimic"
     )
+
+
+def test_clasa_6_chiar_separa_duplicatele_de_inregistrarile_unice():
+    """GARDA CENTRALĂ a corecturii din 2026-08-27.
+
+    Testele de mai sus verifică o REPLICĂ; dacă în codul real cele două liste
+    se contopesc la loc, ele rămân verzi. Aici se verifică sursa: trebuie să
+    existe DOUĂ colecții distincte, și decizia dintre ele să depindă de o
+    verificare de apartenență (`in existente`) — nu de altceva."""
+    import inspect
+
+    from scripts import check_data_health
+
+    sursa = inspect.getsource(check_data_health.main)
+    assert "duplicate" in sursa and "unice" in sursa, (
+        "cele doua clase trebuie sa fie colectii SEPARATE — au actiuni opuse"
+    )
+    assert "in existente" in sursa, (
+        "decizia duplicat-vs-unic trebuie sa se ia verificand daca forma "
+        "canonica EXISTA deja in aceeasi competitie"
+    )
+    assert "REDENUMIT" in sursa.upper(), (
+        "raportul trebuie sa spuna explicit ca inregistrarile unice se "
+        "REDENUMESC, nu se sterg — altfel se repeta exact eroarea de azi"
+    )
+
+
+def test_geamanul_se_cauta_pe_PERECHEA_competitie_echipa_in_codul_real():
+    """GARDĂ adăugată după o mutație NEPRINSĂ (2026-08-27).
+
+    `test_geamanul_se_cauta_in_ACEEASI_competitie` verifică replica locală, deci
+    rămâne verde chiar dacă în codul real `existente` devine un set de nume
+    simple. Consecința acelei mutații ar fi reală: un `Heerenveen` din Eredivisie
+    ar fi declarat „duplicat" pentru că un `SC Heerenveen` există în ALTĂ
+    competiție — și ar fi propus spre ștergere, deși e singurul rând al echipei
+    acolo. Exact clasa de eroare pe care o repară acest commit.
+
+    Aici se verifică sursa: atât construcția setului, cât și testul de
+    apartenență trebuie să folosească o PERECHE, nu un nume singur."""
+    import ast
+
+    arbore = _arbore_main()
+
+    perechi_construite = [
+        n for n in ast.walk(arbore)
+        if isinstance(n, ast.SetComp) and isinstance(n.elt, ast.Tuple) and len(n.elt.elts) == 2
+    ]
+    assert perechi_construite, (
+        "`existente` trebuie construit din PERECHI (competitie, echipa) — "
+        "un set de nume simple ar confunda competitiile intre ele"
+    )
+
+    apartenente_pe_pereche = [
+        n for n in ast.walk(arbore)
+        if isinstance(n, ast.Compare)
+        and any(isinstance(op, ast.In) for op in n.ops)
+        and isinstance(n.left, ast.Tuple) and len(n.left.elts) == 2
+    ]
+    assert apartenente_pe_pereche, (
+        "testul de apartenenta trebuie sa fie pe PERECHEA (competitie, canonic), "
+        "nu doar pe numele canonic"
+    )
+
+
+def test_raportul_nu_mai_pretinde_neconditionat_ca_exista_geaman():
+    """Propoziția care a produs eroarea: „rândul canonic există separat, cu
+    date mai noi", afișată pentru ORICE rând necanonic. Nu are voie să
+    reapară ca afirmație necondiționată."""
+    import inspect
+
+    from scripts import check_data_health
+
+    corp = inspect.getsource(check_data_health.main)
+    # Mesajul poate exista, dar DOAR sub ramura `if duplicate:`.
+    if "rândul canonic există separat" in corp:
+        dupa_duplicate = corp.split("if duplicate:")[-1]
+        assert "rândul canonic există separat" in dupa_duplicate.split("if unice:")[0], (
+            "afirmatia ca exista geaman canonic e valida DOAR pentru duplicate"
+        )
 
 
 def test_clasa_6_chiar_ridica_alarma():

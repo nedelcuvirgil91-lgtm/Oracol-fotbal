@@ -435,7 +435,25 @@ def main() -> int:
     # prin construcție, un orfan. Se poate reactiva oricând se ADAUGĂ un
     # alias nou (o formă azi canonică devine mâine alias) — de aceea merită
     # monitorizat permanent, nu curățat o dată.
-    orfane: list[dict] = []
+    #
+    # [CORECTAT 2026-08-27 — defect găsit la PRIMA rulare reală a acestei
+    # clase în CI] Versiunea inițială trata toate rândurile necanonice la
+    # fel și afișa necondiționat „rândul canonic există separat". FALS
+    # pentru cazul găsit azi: `Schalke` și `B. Monchengladbach` (Bundesliga)
+    # sunt SINGURELE rânduri pentru acele echipe — nu există `Schalke 04`,
+    # nu există `Borussia Monchengladbach`. Ștergerea lor, tratament corect
+    # pentru cele 19 duplicate reale de ieri, ar fi ELIMINAT două echipe din
+    # clasament.
+    #
+    # Cele două situații arată identic la detecție dar cer acțiuni OPUSE:
+    #   - cu geamăn canonic  -> DUPLICAT, se șterge rândul vechi
+    #   - fără geamăn        -> ÎNREGISTRARE UNICĂ sub nume greșit, se
+    #                           REDENUMEȘTE; ștergerea pierde definitiv echipa
+    #
+    # De aceea se raportează separat, cu acțiunea recomandată per grup —
+    # niciodată o singură etichetă pentru amândouă.
+    duplicate: list[dict] = []
+    unice: list[dict] = []
     try:
         from mappings import normalize_team_name
 
@@ -443,23 +461,38 @@ def main() -> int:
             client, "flashscore_standings_snapshot", "id,competition,team,captured_at",
             lambda q: q.order("id"),
         )
-        orfane = [
-            r for r in standings
-            if r.get("team") and normalize_team_name(r["team"]) != r["team"]
-        ]
+        # Perechile (competiție, echipă) EXISTENTE — baza pentru „are geamăn?".
+        existente = {(r.get("competition"), r.get("team")) for r in standings}
+        for r in standings:
+            if not r.get("team"):
+                continue
+            canonic = normalize_team_name(r["team"])
+            if canonic == r["team"]:
+                continue
+            if (r.get("competition"), canonic) in existente:
+                duplicate.append(r)
+            else:
+                unice.append(r)
     except Exception as exc:
         print(f"  [ATENȚIE] clasa 6 nu a putut rula ({exc}) — se raportează ca necunoscută.")
         standings = []
 
-    print(f"  6. CLASAMENTE SUB FORMĂ NECANONICĂ (rânduri orfane): {len(orfane)}")
-    for r in orfane[:15]:
-        canonic = normalize_team_name(r["team"])
-        print(f"       [{r.get('competition')}]  {r['team']!r} → canonic {canonic!r}  "
-              f"(id={r.get('id')})")
+    orfane = duplicate + unice
+    print(f"  6. CLASAMENTE SUB FORMĂ NECANONICĂ: {len(orfane)}")
+    if duplicate:
+        print(f"     DUPLICATE (rândul canonic există separat) — de ȘTERS: {len(duplicate)}")
+        for r in duplicate[:10]:
+            print(f"       [{r.get('competition')}]  {r['team']!r} → "
+                  f"{normalize_team_name(r['team'])!r}  (id={r.get('id')})")
+    if unice:
+        print(f"     SINGURUL rând al echipei — de REDENUMIT, NU de șters: {len(unice)}")
+        for r in unice[:10]:
+            print(f"       [{r.get('competition')}]  {r['team']!r} → "
+                  f"{normalize_team_name(r['team'])!r}  (id={r.get('id')})")
+        print("     (ștergerea acestora ar elimina echipa din clasament — "
+              "nu există rând canonic care să o înlocuiască)")
     if orfane:
         findings += 1
-        print("     (rândul canonic există separat, cu date mai noi — cel vechi nu se "
-              "va rescrie niciodată în loc)")
     print(BAR)
 
     print(f"  Clase cu constatări: {findings}/6")
