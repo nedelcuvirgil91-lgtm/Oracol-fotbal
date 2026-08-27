@@ -142,3 +142,77 @@ def test_stage_api_providers_calculeaza_top_5_cei_mai_lenti(monkeypatch):
     detaliu = run_night._stage_api_providers()
     assert len(detaliu["cei_mai_lenti_5_pasi"]) == 5
     assert detaliu["cei_mai_lenti_5_pasi"][0] == ("pas7", 7.0)
+
+
+# ── raportul final chiar TIPĂREȘTE defalcarea ────────────────────────────────
+
+def _raport_cu_durate(monkeypatch, capsys, durate: dict):
+    """Rulează `run_night.run()` cu toate etapele înlocuite, ca să izolăm
+    STRICT raportul final. Fără rețea, fără Supabase."""
+    import sync.run_night as run_night
+
+    fals = {
+        "detail": "test", "total_duration_s": 100.0,
+        "step_durations_s": durate,
+        "steps_missing_from_manifest": [], "manifest_steps_not_timed": [],
+    }
+    for nume in ("_stage_api_providers", "_stage_flashscore", "_stage_team_dna",
+                 "_stage_oracle_data_layer", "_stage_challenger_shadow_batch",
+                 "_stage_ml_refresh_pre_existing", "_stage_diagnostics",
+                 "_stage_cleanup", "_stage_backup"):
+        monkeypatch.setattr(run_night, nume, (lambda f=fals: f) if nume == "_stage_api_providers"
+                            else (lambda: "ok"))
+    run_night.run()
+    return capsys.readouterr().out
+
+
+def test_raportul_final_TIPARESTE_defalcarea_pe_pasi(monkeypatch, capsys):
+    """GARDA CENTRALĂ a acestui fix.
+
+    Înainte, `step_durations_s` era calculat, cablat și stocat în
+    `report[...]["detail"]` — dar raportul final tipărea doar numele etapei și
+    durata ei totală. Măsurătoarea exista și era invizibilă; verificat pe
+    rularea reală din 2026-08-27, unde n-a putut fi citită deloc."""
+    out = _raport_cu_durate(monkeypatch, capsys, {"odds_persistence": 1234.5, "results": 12.3})
+    assert "odds_persistence" in out, "pasul nu apare in raportul final"
+    assert "1234.5" in out
+    assert "results" in out
+
+
+def test_pasii_sunt_ordonati_descrescator_dupa_durata(monkeypatch, capsys):
+    """Un raport care listează 15 pași în ordine arbitrară nu răspunde la
+    întrebarea pentru care a fost construit („unde se duce timpul?")."""
+    out = _raport_cu_durate(monkeypatch, capsys, {"mic": 1.0, "mare": 900.0, "mediu": 50.0})
+    linii = [l for l in out.splitlines() if any(k in l for k in ("mic", "mare", "mediu"))]
+    assert [l.split()[-1] for l in linii] == ["mare", "mediu", "mic"]
+
+
+def test_etapele_fara_defalcare_nu_produc_zgomot(monkeypatch, capsys):
+    """Contrapondere: cele 8 etape care nu întorc durate nu au voie să adauge
+    linii goale sau `{}` în raport."""
+    out = _raport_cu_durate(monkeypatch, capsys, {})
+    assert "step_durations_s" not in out
+    assert "ATENȚIE" not in out
+
+
+def test_driftul_fata_de_manifest_e_semnalat_in_raport(monkeypatch, capsys):
+    """Dacă un pas declarat rămâne necronometrat, raportul o spune — nu se
+    aproximează tăcut că defalcarea e completă (North Star #8)."""
+    import sync.run_night as run_night
+
+    fals = {
+        "detail": "test", "total_duration_s": 100.0,
+        "step_durations_s": {"results": 1.0},
+        "steps_missing_from_manifest": ["fantoma"],
+        "manifest_steps_not_timed": ["odds_persistence"],
+    }
+    for nume in ("_stage_api_providers", "_stage_flashscore", "_stage_team_dna",
+                 "_stage_oracle_data_layer", "_stage_challenger_shadow_batch",
+                 "_stage_ml_refresh_pre_existing", "_stage_diagnostics",
+                 "_stage_cleanup", "_stage_backup"):
+        monkeypatch.setattr(run_night, nume, (lambda f=fals: f) if nume == "_stage_api_providers"
+                            else (lambda: "ok"))
+    run_night.run()
+    out = capsys.readouterr().out
+    assert "necronometrați" in out and "odds_persistence" in out
+    assert "absenți din manifest" in out and "fantoma" in out

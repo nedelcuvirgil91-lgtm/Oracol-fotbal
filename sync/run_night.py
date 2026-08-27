@@ -296,6 +296,30 @@ def run() -> list[dict[str, Any]]:
     for r in report:
         status = "✅" if r["ok"] else "❌"
         print(f"    {status} {r['stage']} ({r['duration_s']}s)")
+
+        # [ADAUGAT 2026-08-27] Defalcarea pe pasii interiori, pentru etapele
+        # care o intorc. Fara asta, `step_durations_s` era calculat corect,
+        # cablat corect prin `_stage_api_providers()`, stocat in
+        # `report[...]["detail"]` — si NICIODATA afisat. Cablare cu un pas mai
+        # putin decat trebuia: exact clasa de defect "extragere buna, fir
+        # netaiat" pe care o semnalam in alta parte.
+        #
+        # Locul conteaza: `run_daily.run()` isi tiparea deja propriul rezumat,
+        # dar la MIJLOCUL rularii de noapte (~06:45 la rularea din 27 august),
+        # iar API-ul de log-uri GitHub intoarce doar ultimele ~5.000 de linii —
+        # fereastra incepea la 07:28. Tiparit aici, la final, intra garantat
+        # in fereastra citibila.
+        durate = (r.get("detail") or {}) if isinstance(r.get("detail"), dict) else {}
+        pasi = durate.get("step_durations_s") or {}
+        if pasi:
+            for nume, secunde in sorted(pasi.items(), key=lambda kv: kv[1], reverse=True):
+                print(f"         {secunde:>8.1f}s  {nume}")
+            netimed = durate.get("manifest_steps_not_timed") or []
+            extra = durate.get("steps_missing_from_manifest") or []
+            if netimed:
+                print(f"         [ATENȚIE] pași declarați dar necronometrați: {netimed}")
+            if extra:
+                print(f"         [ATENȚIE] durate pentru pași absenți din manifest: {extra}")
     print("═" * 78)
     print()
 
