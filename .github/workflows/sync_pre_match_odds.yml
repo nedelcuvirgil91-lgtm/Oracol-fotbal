@@ -83,7 +83,14 @@ jobs:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+        # [FIX 2026-08-27] `tee` — vezi explicația completă în night_sync.yml.
+        # Pe scurt: pasul de upload de mai jos încărca `logs/` de la crearea lui,
+        # dar nimic nu scria acolo. `set -o pipefail` e obligatoriu — shell-ul
+        # implicit e `bash -e`, fără pipefail, deci fără el `tee` ar masca un
+        # eșec al scriptului și rularea ar fi raportată ca reușită.
         run: |
+          mkdir -p logs
+          set -o pipefail
           ARGS=(--days-ahead "${{ github.event.inputs.days_ahead || '7' }}")
           if [ -n "${{ github.event.inputs.leagues }}" ]; then
             ARGS+=(--leagues "${{ github.event.inputs.leagues }}")
@@ -91,7 +98,7 @@ jobs:
           if [ -n "${{ github.event.inputs.limit_per_league }}" ]; then
             ARGS+=(--limit-per-league "${{ github.event.inputs.limit_per_league }}")
           fi
-          python -m sync.sync_pre_match_odds "${ARGS[@]}"
+          python -m sync.sync_pre_match_odds "${ARGS[@]}" 2>&1 | tee "logs/pre_match_odds_$(date -u +%Y%m%dT%H%M%SZ).log"
 
       - name: Upload sync logs
         if: always()

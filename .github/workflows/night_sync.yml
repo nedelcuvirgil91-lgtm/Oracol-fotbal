@@ -80,7 +80,32 @@ jobs:
           WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
           FOOTBALL_DATA_KEY: ${{ secrets.FOOTBALL_DATA_KEY }}
           ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
-        run: python -m sync.run_night
+        # [FIX 2026-08-27] `tee` — pasul "Upload sync logs" de mai jos incarca
+        # `logs/` de la crearea lui (commit 3532e6b), dar NIMIC nu scria acolo:
+        # tot logging-ul mergea in `StreamHandler(sys.stdout)`, iar `logs/` nu
+        # exista. `if-no-files-found: ignore` facea esecul complet tacut.
+        #
+        # COSTUL, masurat de doua ori pe 2026-08-27: API-ul de log-uri GitHub
+        # intoarce doar ultimele ~5.000 de linii, iar aceasta rulare produce
+        # peste 100.000. Raportul cu `step_durations_s` era la ~06:45, fereastra
+        # citibila incepea la 07:28 — masuratoarea exista si era inaccesibila.
+        # Un artefact contine log-ul COMPLET, indiferent de lungime.
+        #
+        # DE CE `tee` SI NU UN FileHandler in Python: rapoartele se emit prin
+        # `print()`, nu prin `logger` (verificat: `run_night.run()`,
+        # `run_daily.run()`). Un FileHandler ar captura logging-ul si ar rata
+        # exact rapoartele — adica fix ce ne-a lipsit. `tee` prinde stdout +
+        # stderr, deci si print, si logging, fara nicio schimbare de cod Python.
+        #
+        # `set -o pipefail` NU e optional: shell-ul implicit GitHub e `bash -e`,
+        # FARA pipefail (verificat: niciun workflow din repo nu declara `shell:`).
+        # Fara el, `tee` intoarce 0 si masheaza codul de iesire al scriptului —
+        # o rulare ESUATA ar fi raportata ca succes. Adica exact opusul scopului:
+        # am transforma o imbunatatire de observabilitate intr-o pierdere de semnal.
+        run: |
+          mkdir -p logs
+          set -o pipefail
+          python -m sync.run_night 2>&1 | tee "logs/night_sync_$(date -u +%Y%m%dT%H%M%SZ).log"
 
       - name: Upload sync logs
         if: always()
