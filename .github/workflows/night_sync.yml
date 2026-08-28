@@ -27,13 +27,28 @@ name: Football Oracle — Night Sync (Faza 2)
 
 on:
   schedule:
-    # Zilnic, 03:00 UTC - slotul original din Faza 2 (consolidare
-    # scheduler). timeout-minutes: 180 mai jos -> ora cea mai tarzie
-    # posibila de finalizare e 06:00 UTC (GitHub Actions opreste jobul
-    # exact la limita, nu doar estimeaza). `live_sync.yml` ruleaza la
-    # 09:00/13:00/17:00 UTC (verificat direct in live_sync.yml — comentariul
-    # vechi de aici mentiona gresit sloturi 02:00/06:00/10:00, corectat
-    # 2026-08-23) - oricum in afara ferestrei [03:00, 06:00], fara coliziune.
+    # [MODIFICAT — 2026-08-28, cerere explicita proprietar produs] Mutat cu o
+    # ora mai devreme, 03:00 -> 02:00 UTC. timeout-minutes: 180 mai jos -> ora
+    # cea mai tarzie posibila de finalizare devine 05:00 UTC (era 06:00).
+    # Verificat direct (nu presupus) ca noua fereastra [02:00, 05:00] nu
+    # coliziona cu niciun alt workflow programat: `identity_drift_check.yml`
+    # (06:30 UTC, marja creste de la 30 la 90 min), `check_data_health.yml`
+    # (07:30 UTC), `sync_pre_match_odds.yml` (08:00/20:00 UTC), `live_sync.yml`
+    # si `consensus_validation.yml` (09:00 UTC), `validation_analysis.yml`
+    # (10:00 UTC) - toate raman in afara ferestrei, cu marja mai mare ca
+    # inainte, nu mai mica. Comentariile din acele fisiere care citeaza
+    # "night_sync.yml (03:00 UTC)" pentru propriul lor calcul de coliziune NU
+    # au fost actualizate in acest commit (schimbare cosmetica in alte
+    # fisiere, in afara cererii explicite) - raman corecte ca marja (devenita
+    # mai larga), doar cifra sursa e invechita. `live_sync.yml` ruleaza la
+    # 09:00/13:00/17:00 UTC (verificat direct in live_sync.yml).
+    #
+    # Singura coliziune preexistenta gasita, NEATINSA de aceasta schimbare
+    # (nu mai buna, nu mai rea): `weekly.yml`, duminica 04:00 UTC, cade in
+    # continuare in fereastra [02:00, 05:00] a lui night_sync - exista si
+    # inainte de schimbarea de azi (fereastra veche [03:00, 06:00] includea
+    # deja 04:00). Semnalat proprietarului produsului, nu reparat aici -
+    # afara scopul cererii curente.
     #
     # [MODIFICAT — 2026-08-23] timeout-minutes 120 -> 180. Verificat direct
     # (nu presupus): 3 din ultimele 5 rulari (2026-08-20, 2026-08-21,
@@ -45,9 +60,7 @@ on:
     # Cauza exacta a duratei (volum de evaluare shadow vs. alt blocaj) NU
     # a fost investigata separat -- interventie minima, reversibila, ca sa
     # lase pipeline-ul sa se termine; investigatia ramane pas ulterior.
-    # `identity_drift_check.yml` mutat 05:30->06:30 UTC ca sa pastreze
-    # aceeasi marja de 30 min fata de noua ora tarzie de finalizare.
-    - cron: "0 3 * * *"
+    - cron: "0 2 * * *"
   workflow_dispatch: {}
 
 jobs:
