@@ -26,10 +26,53 @@ name: Football Oracle — Lineup Sync (Free Live Football)
 # a dispărut: repo-ul a devenit public (2026-08-10) — pe repo public,
 # GitHub Actions e gratuit, fără plafon de minute. Revenit la */30 min,
 # acoperire completă pe toată ziua restaurată.
+#
+# ── [REDUS 2026-08-29, */30 -> 3 rulari/zi] ──────────────────────────────
+# Decizie explicita proprietar produs, dupa un audit al scheduler-ului.
+# DOUA motive independente, ambele MASURATE, nu presupuse:
+#
+# 1. Workflow-ul nu produce NIMIC. `provider_call_log`, 19-29 august:
+#    122 apeluri `freelivefootball`, din care 0 (ZERO) reusite — 89
+#    `other_error`, 33 `quota`. Ambele tabele-tinta sunt goale:
+#    `freelf_lineup_snapshot` = 0 randuri, `upcoming_lineups` = 0 randuri.
+#    Cota FreeLF cronic epuizata era deja documentata in CLAUDE.md; ce NU
+#    era documentat e ca rezultatul e zero absolut, de cel putin 10 zile.
+#    NU se opreste complet (decizie explicita) — ramane viu, ca sa reia
+#    acoperirea automat daca/cand cota FreeLF se reface.
+#
+# 2. Consuma 81% din toata incarcarea programata a repo-ului (48 din ~59
+#    rulari declarate/zi) intr-un moment in care scheduler-ul GitHub
+#    livreaza doar ~8-11 rulari/zi pe tot repo-ul (throttle activ din 27
+#    august, corelat cu incidentul GitHub Actions din 26 august). ATENTIE
+#    la interpretare: cronologia arata ca volumul nostru NU a cauzat
+#    degradarea — `*/30` era in vigoare din 10 august, iar 26 august a fost
+#    normal (44 min intarziere mediana). Reducerea e un EXPERIMENT de
+#    eliberare a alocatiei, cu cost zero fiindca oricum nu producea nimic;
+#    nu o reparatie dovedita.
+#
+# ORELE (ora Romaniei, EEST=UTC+3 vara): 17:00, 20:00, 21:30.
+# Alese pe distributia REALA a loviturilor de start (311 meciuri, 14 zile):
+# cu fereastra T-15min..T+240min acopera 17:45->01:30 ora Romaniei = 232
+# din 311 meciuri (75%). Prima rulare e la 17:00, nu 18:00, tocmai fiindca
+# ora 17:00 concentreaza 38 de meciuri — a doua cea mai incarcata a zilei,
+# altfel ratata la 15 minute distanta. Ramane neacoperit intervalul de
+# noapte (02:00-05:00 ora Romaniei, ~42 de meciuri, tipic MLS).
+#
+# ⚠️ ORA DE IARNA: cron-ul GitHub e mereu UTC, fara DST. La trecerea la
+# EET (UTC+2, ultima duminica din octombrie) aceste sloturi vor cadea la
+# 16:00/19:00/20:30 ora Romaniei — cu o ora mai devreme decat intentionat.
+# De reevaluat atunci, deliberat.
+#
+# ⚠️ `0 17 * * *` coincide cu slotul de 17:00 UTC al `live_sync.yml`.
+# Semnalat explicit, acceptat: provideri diferiti (FreeLF vs. Flashscore),
+# iar repo-ul are deja suprapuneri tolerate (live_sync+consensus la 09:00,
+# extra_leagues+validation_analysis la 10:00).
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "0 14 * * *"
+    - cron: "0 17 * * *"
+    - cron: "30 18 * * *"
   workflow_dispatch:
     inputs:
       window_minutes:
