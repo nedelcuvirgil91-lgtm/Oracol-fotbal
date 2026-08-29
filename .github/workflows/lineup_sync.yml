@@ -63,15 +63,33 @@ name: Football Oracle — Lineup Sync (Free Live Football)
 # 16:00/19:00/20:30 ora Romaniei — cu o ora mai devreme decat intentionat.
 # De reevaluat atunci, deliberat.
 #
-# ⚠️ `0 17 * * *` coincide cu slotul de 17:00 UTC al `live_sync.yml`.
-# Semnalat explicit, acceptat: provideri diferiti (FreeLF vs. Flashscore),
-# iar repo-ul are deja suprapuneri tolerate (live_sync+consensus la 09:00,
+# [DECALAJ PREVENTIV — decizie proprietar produs] Slotul de mijloc e la
+# `10 17`, nu `0 17`, ca sa NU coincida la minut cu slotul de 17:00 UTC al
+# `live_sync.yml` (20:10 in loc de 20:00 ora Romaniei).
+#
+# Nu repara un defect: verificat ca cele doua NU se blocheaza reciproc
+# (workflow-uri diferite ruleaza in paralel, pe runnere separate, fara lock)
+# si NU se calca pe date (provideri diferiti — FreeLF vs. Flashscore; tabele
+# diferite — `freelf_lineup_snapshot` vs. `flashscore_*`/`match_history`).
+# Repo-ul are deja suprapuneri tolerate (live_sync+consensus la 09:00,
 # extra_leagues+validation_analysis la 10:00).
+#
+# Motivul e preventiv, in doua puncte: (1) disciplina scrisa a proiectului
+# ("fara suprapunere prin programare, nu prin lock" — vezi night_sync.yml si
+# flashscore_weekly_fixtures.yml); (2) sub throttle-ul activ, doua workflow-uri
+# declarate la EXACT acelasi minut ar putea concura pentru acelasi slot de
+# livrare din coada — SPECULATIE, nu ceva masurat, dar costul evitarii e zero.
+#
+# Nota conexa, documentata public: minutul :00 al fiecarei ore e un moment de
+# incarcare maxima pentru scheduler-ul GitHub (acolo se aglomereaza cron-urile
+# scrise naiv), deci un decalaj de cateva minute e util si independent de
+# coliziunea cu live_sync. Celelalte doua sloturi de aici raman la `0 14` si
+# `30 18` — de reevaluat impreuna, daca observarea arata ca merita.
 
 on:
   schedule:
     - cron: "0 14 * * *"
-    - cron: "0 17 * * *"
+    - cron: "10 17 * * *"
     - cron: "30 18 * * *"
   workflow_dispatch:
     inputs:
