@@ -4,6 +4,8 @@ fara retea. Verifica exact frontiera cu discovery.py/normalizer.py
 atinge DOAR 2 taburi (summary + odds), niciodata cele 7 din adapter.py."""
 from __future__ import annotations
 
+import logging
+import time
 from datetime import datetime
 
 import pytest
@@ -403,3 +405,181 @@ def test_sync_week_odds_from_flashscore_wires_discover_and_persist(monkeypatch):
     assert report["matches_seen"] == 1
     assert report["leagues"] == ["Europa League"]
     assert report["days_ahead"] == 7
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Instrumentare (adaugata 2026-08-30)
+#
+# MOTIVUL: rularea sync_pre_match_odds din 2026-08-29 13:45 a fost TAIATA de
+# `timeout-minutes: 45` la 45m21s, iar log-ul Python tacea 43 de minute —
+# ultima linie utila era "181 meciuri din sursa primara" la 13:47:36, apoi
+# nimic pana la taiere. Nu se putea spune cate ligi apucase, cate meciuri
+# descarcase, unde s-a dus timpul. Durata crescuse constant: 36m -> 37m ->
+# 45m (taiat).
+#
+# Se masoara INAINTE de a decide intre marirea timeout-ului si optimizare —
+# un timeout marit orbeste exact semnalul de care avem nevoie (aceeasi
+# disciplina ca la run_daily.step_durations_s).
+# ════════════════════════════════════════════════════════════════════════
+
+def _monteaza_playwright_fals(monkeypatch):
+    """Playwright + polite_delay neutralizate — reutilizeaza fake-urile deja
+    definite mai sus (_FakeBrowser/_FakePlaywright), nu creeaza altele noi."""
+    monkeypatch.setattr("playwright.sync_api.sync_playwright", lambda: _FakePlaywright(_FakeBrowser()))
+    monkeypatch.setattr("providers.flashscore.pre_match_odds.polite_delay", lambda: None)
+
+
+def test_raportul_per_liga_numara_descarcate_pastrate_sarite(monkeypatch, caplog):
+    """GARDA CENTRALA. `sarite` e cifra de interes: fetch-uri PLATITE (delay +
+    2 pagini Playwright) si apoi ARUNCATE. Daca e mare, exista risipa reala
+    de optimizat; daca e ~0, durata e munca genuina si raspunsul corect e
+    marirea timeout-ului, nu o 'optimizare' inventata."""
+    now = datetime(2026, 8, 4, 12, 0, 0)
+    pairs = [
+        ("https://x/a", "m1"),   # in fereastra  -> pastrat
+        ("https://x/b", "m2"),   # data lipsa    -> descarcat si ARUNCAT
+        ("https://x/c", "m3"),   # in fereastra  -> pastrat
+    ]
+    identities = {
+        "m1": {"home_team": "A1", "away_team": "A2", "kickoff_date": "2026-08-05T12:00:00", "mid": "m1"},
+        "m2": {"home_team": "B1", "away_team": "B2", "kickoff_date": None, "mid": "m2"},
+        "m3": {"home_team": "C1", "away_team": "C2", "kickoff_date": "2026-08-06T12:00:00", "mid": "m3"},
+    }
+    _patch_discovery_internals(monkeypatch, pairs, identities)
+
+    with caplog.at_level(logging.INFO, logger="FootballOracle.Flashscore.PreMatchOdds"):
+        _discover_league_fixtures_with_odds(
+            _FakeLightPage(), "Europa League", days_ahead=7, limit_per_league=None, now=now,
+        )
+
+    linie = next(l for l in caplog.messages if "Europa League" in l and "descarcate" in l)
+    assert "3 pe hub" in linie
+    assert "3 descarcate" in linie
+    assert "2 pastrate" in linie
+    assert "1 sarite" in linie
+    assert "oprire_devreme=False" in linie
+
+
+def test_raportul_marcheaza_oprirea_devreme(monkeypatch, caplog):
+    """`oprire_devreme=True` distinge 'am terminat hub-ul' de 'am iesit
+    din fereastra' — fara asta, un numar mic de descarcari arata identic
+    in ambele cazuri, desi inseamna lucruri opuse."""
+    now = datetime(2026, 8, 4, 12, 0, 0)
+    pairs = [("https://x/a", "m1"), ("https://x/b", "m2"), ("https://x/c", "m3")]
+    identities = {
+        "m1": {"home_team": "A1", "away_team": "A2", "kickoff_date": "2026-08-05T12:00:00", "mid": "m1"},
+        "m2": {"home_team": "B1", "away_team": "B2", "kickoff_date": "2026-09-01T12:00:00", "mid": "m2"},
+        "m3": {"home_team": "C1", "away_team": "C2", "kickoff_date": "2026-08-06T12:00:00", "mid": "m3"},
+    }
+    _patch_discovery_internals(monkeypatch, pairs, identities)
+
+    with caplog.at_level(logging.INFO, logger="FootballOracle.Flashscore.PreMatchOdds"):
+        _discover_league_fixtures_with_odds(
+            _FakeLightPage(), "Europa League", days_ahead=7, limit_per_league=None, now=now,
+        )
+
+    linie = next(l for l in caplog.messages if "Europa League" in l and "descarcate" in l)
+    assert "oprire_devreme=True" in linie
+    assert "2 descarcate" in linie, "m3 nu trebuie atins dupa break"
+
+
+def test_progresul_se_logheaza_INAINTE_de_fiecare_liga(monkeypatch, caplog):
+    """Daca jobul e omorat la mijloc, ultima linie trebuie sa spuna la ce liga
+    ERA, nu la care terminase. Diferenta conteaza exact cand se taie — a fost
+    singura informatie care ne-a lipsit pe 29 august.
+
+    [INTARIT dupa o mutatie NEPRINSA] Prima versiune verifica doar CONTINUTUL
+    mesajelor. Mutand logul de dinainte de liga la dupa ea, mesajele ramaneau
+    identice si testul trecea — desi tocmai proprietatea care conteaza
+    (ordinea) disparuse. Acum liga falsa isi logheaza propriul marcaj de
+    lucru, iar testul verifica INTRETESEREA: anunt-1, lucru-1, anunt-2,
+    lucru-2. Aceeasi clasa de eroare ca la garda `_doar_cod()`: o verificare
+    care pare sa confirme ceva, dar confirma altceva."""
+    import providers.flashscore.pre_match_odds as m
+
+    def _fals(page, league, days_ahead, limit):
+        logger_modul = logging.getLogger("FootballOracle.Flashscore.PreMatchOdds")
+        logger_modul.info("[PreMatchOdds] LUCRU efectiv: %s", league)
+        return []
+
+    monkeypatch.setattr(m, "_discover_league_fixtures_with_odds", _fals)
+    _monteaza_playwright_fals(monkeypatch)
+
+    with caplog.at_level(logging.INFO, logger="FootballOracle.Flashscore.PreMatchOdds"):
+        discover_week_fixtures_with_odds(leagues=["Europa League", "Premier League"], days_ahead=7)
+
+    secventa = [l for l in caplog.messages if "▶ liga" in l or "LUCRU efectiv" in l]
+    assert secventa == [
+        "[PreMatchOdds] ▶ liga 1/2: Europa League",
+        "[PreMatchOdds] LUCRU efectiv: Europa League",
+        "[PreMatchOdds] ▶ liga 2/2: Premier League",
+        "[PreMatchOdds] LUCRU efectiv: Premier League",
+    ], f"anuntul trebuie sa PRECEADA lucrul, nu sa-l urmeze: {secventa}"
+
+
+def test_liga_esuata_e_totusi_anuntata_inainte(monkeypatch, caplog):
+    """Cazul in care anuntul conteaza cel mai mult: liga care ARUNCA. Daca
+    anuntul s-ar face doar pe calea de succes, exact liga problematica ar
+    ramane nenumita in log."""
+    import providers.flashscore.pre_match_odds as m
+
+    def _fals(page, league, days_ahead, limit):
+        raise RuntimeError("protectie Flashscore (simulat)")
+
+    monkeypatch.setattr(m, "_discover_league_fixtures_with_odds", _fals)
+    _monteaza_playwright_fals(monkeypatch)
+
+    with caplog.at_level(logging.INFO, logger="FootballOracle.Flashscore.PreMatchOdds"):
+        discover_week_fixtures_with_odds(leagues=["La Liga"], days_ahead=7)
+
+    assert "[PreMatchOdds] ▶ liga 1/1: La Liga" in caplog.messages
+
+
+def test_raportul_final_ordoneaza_ligile_descrescator_dupa_durata(monkeypatch, caplog):
+    """Un raport care listeaza 17 ligi in ordine arbitrara nu raspunde la
+    intrebarea pentru care a fost construit ('unde se duce timpul?')."""
+    import providers.flashscore.pre_match_odds as m
+
+    durate = {"Europa League": 0.05, "Premier League": 0.0, "La Liga": 0.02}
+
+    def _fals(page, league, days_ahead, limit):
+        time.sleep(durate[league])
+        return [{"mid": league}]
+
+    monkeypatch.setattr(m, "_discover_league_fixtures_with_odds", _fals)
+    _monteaza_playwright_fals(monkeypatch)
+
+    with caplog.at_level(logging.INFO, logger="FootballOracle.Flashscore.PreMatchOdds"):
+        discover_week_fixtures_with_odds(
+            leagues=["Premier League", "Europa League", "La Liga"], days_ahead=7,
+        )
+
+    linii = [l for l in caplog.messages if "înregistrări" in l]
+    assert len(linii) == 3
+    # cea mai LENTA prima, cea mai rapida ultima
+    assert "Europa League" in linii[0], f"cea mai lenta nu e prima: {linii}"
+    assert "La Liga" in linii[1], f"ordine gresita la mijloc: {linii}"
+    assert "Premier League" in linii[2], f"cea mai rapida nu e ultima: {linii}"
+
+
+def test_o_liga_esuata_apare_in_raport_si_nu_opreste_restul(monkeypatch, caplog):
+    """Izolarea per-liga exista deja; aici se verifica doar ca raportul o
+    NUMESTE — altfel un esec tacut ar arata ca o liga pur si simplu lenta."""
+    import providers.flashscore.pre_match_odds as m
+
+    def _fals(page, league, days_ahead, limit):
+        if league == "La Liga":
+            raise RuntimeError("protectie Flashscore (simulat)")
+        return [{"mid": league}]
+
+    monkeypatch.setattr(m, "_discover_league_fixtures_with_odds", _fals)
+    _monteaza_playwright_fals(monkeypatch)
+
+    with caplog.at_level(logging.INFO, logger="FootballOracle.Flashscore.PreMatchOdds"):
+        records = discover_week_fixtures_with_odds(
+            leagues=["Europa League", "La Liga", "Premier League"], days_ahead=7,
+        )
+
+    assert len(records) == 2, "ligile sanatoase trebuie sa continue"
+    raport = next(l for l in caplog.messages if "RAPORT:" in l)
+    assert "1 ligi esuate (La Liga)" in raport

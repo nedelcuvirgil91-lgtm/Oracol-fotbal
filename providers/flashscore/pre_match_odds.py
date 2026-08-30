@@ -44,6 +44,7 @@ doar populează tabela.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -154,18 +155,36 @@ def _discover_league_fixtures_with_odds(
     if limit_per_league is not None:
         pairs = pairs[:limit_per_league]
 
+    # [INSTRUMENTAT 2026-08-30] Contoare per liga. Motivul: rularea din
+    # 2026-08-29 13:45 a fost TAIATA de `timeout-minutes: 45` la 45m21s, iar
+    # log-ul Python tacea 43 de minute — ultima linie utila era "181 meciuri
+    # din sursa primara" la 13:47:36, apoi nimic pana la taiere. Nu se putea
+    # spune cate ligi apucase, cate meciuri descarcase, unde s-a dus timpul.
+    # Aceeasi disciplina ca la `run_daily.step_durations_s`: se masoara
+    # INAINTE de a decide intre marirea timeout-ului si optimizare — un
+    # timeout marit orbeste exact semnalul de care avem nevoie.
+    t_start = time.monotonic()
+    descarcate = 0      # meciuri pentru care s-a facut fetch real (2 pagini)
+    pastrate = 0        # au intrat in fereastra -> record produs
+    sarite = 0          # descarcate, dar in afara ferestrei -> aruncate
+    oprire_devreme = False
+
     records: list[dict[str, Any]] = []
     for base_url, mid in pairs:
         polite_delay()
         pages = _fetch_summary_and_odds(page, base_url, mid)
+        descarcate += 1
         identity = normalize_upcoming_match(pages)
         kickoff = identity.get("kickoff_date")
         if _kickoff_confirmed_beyond_window(kickoff, days_ahead, now=now):
             # cronologic (hub /fixtures/) - restul sunt si mai departe,
             # oprire aici economiseste fetch-uri inutile (politete Flashscore).
+            oprire_devreme = True
             break
         if not _within_window(kickoff, days_ahead, now=now):
+            sarite += 1
             continue
+        pastrate += 1
         records.append({
             "league": league,
             "home_team": identity.get("home_team"),
@@ -174,6 +193,18 @@ def _discover_league_fixtures_with_odds(
             "mid": identity.get("mid"),
             "odds": normalize_odds(pages),
         })
+
+    durata = time.monotonic() - t_start
+    # `sarite` e cifra de interes: fetch-uri platite (delay + 2 pagini
+    # Playwright) si apoi ARUNCATE. Daca e mare, exista risipa reala de
+    # optimizat — daca e ~0, durata e munca genuina si atunci raspunsul
+    # corect e marirea timeout-ului, nu o "optimizare" inventata.
+    logger.info(
+        "[PreMatchOdds] %s: %d pe hub, %d descarcate, %d pastrate, %d sarite "
+        "(in afara ferestrei), oprire_devreme=%s, %.1fs (%.1fs/meci)",
+        league, len(pairs), descarcate, pastrate, sarite, oprire_devreme,
+        durata, durata / descarcate if descarcate else 0.0,
+    )
     return records
 
 
@@ -200,6 +231,15 @@ def discover_week_fixtures_with_odds(
     from playwright.sync_api import sync_playwright
 
     records: list[dict[str, Any]] = []
+    # [INSTRUMENTAT 2026-08-30] Vezi motivul complet in
+    # `_discover_league_fixtures_with_odds`. Aici se cronometreaza fiecare
+    # liga si se tipareste un raport final ordonat descrescator — asa incat,
+    # daca rularea e taiata din nou de timeout, log-ul sa arate exact PANA
+    # UNDE a ajuns si CARE ligi consuma timpul, nu sa taca 43 de minute.
+    t_total = time.monotonic()
+    per_liga: list[tuple[str, float, int]] = []
+    esuate: list[str] = []
+
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True, executable_path=_CHROMIUM_EXECUTABLE_PATH)
         page = browser.new_page()
@@ -207,13 +247,31 @@ def discover_week_fixtures_with_odds(
             for i, league in enumerate(targets):
                 if i > 0:
                     polite_delay()
+                # Progresul se logheaza INAINTE de a incepe liga: daca jobul e
+                # omorat la mijloc, ultima linie spune la ce liga era, nu la
+                # care terminase. Diferenta conteaza exact cand se taie.
+                logger.info("[PreMatchOdds] ▶ liga %d/%d: %s", i + 1, len(targets), league)
+                t_liga = time.monotonic()
                 try:
-                    records.extend(_discover_league_fixtures_with_odds(page, league, days_ahead, limit_per_league))
+                    noi = _discover_league_fixtures_with_odds(page, league, days_ahead, limit_per_league)
+                    records.extend(noi)
+                    per_liga.append((league, time.monotonic() - t_liga, len(noi)))
                 except Exception as exc:
                     logger.warning("[PreMatchOdds] liga '%s' eșuată, sar la următoarea: %s", league, exc)
+                    esuate.append(league)
+                    per_liga.append((league, time.monotonic() - t_liga, 0))
                     continue
         finally:
             browser.close()
+
+    total = time.monotonic() - t_total
+    logger.info(
+        "[PreMatchOdds] RAPORT: %d ligi in %.1f min, %d inregistrari, %d ligi esuate%s",
+        len(per_liga), total / 60.0, len(records), len(esuate),
+        f" ({', '.join(esuate)})" if esuate else "",
+    )
+    for liga, secunde, n in sorted(per_liga, key=lambda x: x[1], reverse=True):
+        logger.info("[PreMatchOdds]     %6.1fs  %-26s %d înregistrări", secunde, liga, n)
     return records
 
 
