@@ -886,8 +886,9 @@ LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
     # CONFIRMAT live, /v4/competitions (planul gratuit, 13 competiții
     # returnate) nu include Belgia/Polonia/Scoția. api_football —
     # CONFIRMAT live cu cheia nouă (contul vechi era suspendat, migrare
-    # separată — vezi sync/poc_api_football_new_key_validation.py, run
-    # 31421142891), /leagues?country=<țară>, id-uri reale. espn/freelf/
+    # separată — dovada: GitHub Actions run 31421142891; POC-ul care a
+    # produs-o a fost șters la închiderea migrării, conform regulii din
+    # CLAUDE.md §chei API), /leagues?country=<țară>, id-uri reale. espn/freelf/
     # soccerfootballinfo rămân "necunoscut" — neverificate azi, în afara
     # scopului cerut (tracking cote pre-meci).
     "Jupiler Pro League": LeagueDefinition(

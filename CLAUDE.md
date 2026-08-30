@@ -289,6 +289,22 @@ streamlit run app.py                   # UI local
 - Supabase (`Prediction`, `eu-central-1`) conectat prin MCP — vezi „Regulile bazelor de date" mai sus.
 - Aplicația live (Streamlit Cloud, deploy automat din `main`): `oracol-fotbal-7vp422diucqvparx6monei.streamlit.app` (confirmat de proprietarul produsului, 2026-08-06).
 
+## Audit workflow-uri (2026-08-30) — starea declanșatoarelor
+
+Auditate toate cele 42 de workflow-uri locale (GitHub listează 61: diferența o fac 14+ POC-uri Sprint 3 al căror **fișier a fost deja șters corect**, GitHub păstrând doar intrarea istorică — nu e defect).
+
+**11 programate + dispatch** · **30 doar dispatch** · **1 CI** (`predictor_regression_suite`, pe `pull_request`+`push`).
+
+**Nimic nu e manual când ar trebui automat.** Cele trei care par suspecte sunt deliberat fără cron, ca să nu ruleze de DOUĂ ori pe noapte — verificat că `night_sync` chiar le apelează: `daily.yml` (etapa 1-4, 2803,9 s măsurat), `flashscore_foundation_data_layer.yml` (etapa 5, 3173,1 s), `continuous_learning.yml` (etapa 8, 11,3 s pe 28 aug).
+
+**Nimic nu lipsește din rulările periodice.** Identitatea e acoperită corect asimetric: **detecția** e automată (`identity_drift_check`, zilnic 06:30), **propunerile de alias** rămân manuale (`detect_identity_alias_candidates`) — schimbă vocabularul, deci cer review uman. Backfill-urile, reparațiile unice, importul Kaggle și `verify_freshness` sunt corect manuale.
+
+**O încălcare de regulă găsită și reparată**: `poc_api_football_new_key_validation.yml` + `sync/poc_api_football_new_key_validation.py` supraviețuiseră 34 de zile după închiderea migrării cheii API-Football (2026-07-27), contrar regulii din §chei API („POC-ul se șterge din cod după închiderea migrării... nu ca infrastructură vie permanentă"). **Agravant: `CHANGELOG.md` le declara deja șterse** — ștergerea fusese documentată, niciodată executată. Testele POC-ului chiar fuseseră șterse; doar workflow-ul și scriptul rămăseseră. Șterse acum; referința din `mappings.py` a fost rescrisă să citeze DOAR numărul rulării GitHub Actions (31421142891), care e dovada durabilă cerută de regulă. Că regula se aplică efectiv se vede din contrast: 14 POC-uri Sprint 3 fuseseră șterse corect.
+
+**Secretul `API_FOOTBALL_KEY_NEW` NU a fost atins** — ștergerea fișierelor POC e pasul documentat de închidere, dar orice atingere a unui secret cere audit scris separat + aprobare explicită (regula interzice „curățenia preventivă"). Rămâne de făcut, dacă se dorește.
+
+**Observație minoră, neatinsă**: `weekly.yml` (duminică 04:00 UTC) cade în fereastra `night_sync` `[02:00, 05:00]`, dar rulează ~2 minute — suprapunere neglijabilă. Celelalte 4 POC-uri rămase nu sunt POC-uri de migrare de cheie, deci regula strictă nu li se aplică; pot fi utile la adăugarea de ligi noi.
+
 ## Infrastructura de skill-uri
 
 Nucleul obligatoriu pentru v4.1 (`.claude/skills/`): `supabase-safety`, `frozen-doc-guard`, `security-review`, `architecture-review`, `walk-forward-validation`, `test-coverage-guard`. Restul (16 skill-uri suplimentare) e planificat etapizat pentru v4.2/v5.0, activat doar când apare nevoie reală — nu implementat preventiv.
