@@ -130,4 +130,20 @@ fereastra de cote (ADR-043), fără s-o compare cu `match_history`.
 
 ## Jurnal de execuție
 
-De completat după implementare + activare.
+**Implementare** (2026-08-30, commit `0f04e5c`): `flashscore_kickoff_correction_config.py`, `database.queries.correct_flashscore_kickoff_if_mismatched()`, cablare în `pre_match_odds.py::persist_week_odds()`. 13 teste noi, 2 mutații verificate. `pytest tests/`: 2935 passed, 2 skipped.
+
+**Activare** (2026-08-30, `UPDATE model_config`, confirmat explicit): `flashscore_kickoff_correction_enabled` → `true`.
+
+**Verificare live** (`sync_pre_match_odds.yml`, `run 33312884975`, 12:57:59-13:43:18 UTC): toate cele 3 meciuri diagnosticate corectate cu succes în `match_history`, confirmat prin interogare directă:
+
+| Meci | Înainte | După |
+|---|---|---|
+| Farul Constanța – Botoșani | 2026-08-29 | **2026-08-30 13:00** |
+| FCSB – UTA Arad | 2026-08-29 | **2026-08-30 18:00** |
+| Rapid – Universitatea Craiova | 2026-08-29 | **2026-08-31 17:30** |
+
+Cote reale scrise imediat după corecție pentru toate trei (4 case de pariuri fiecare, `odds_fallback_flashscore`).
+
+**Amploare reală mai mare decât diagnosticul inițial**: 12 corectări confirmate în log înainte de tăierea rulării de timeout, pe 4 ligi (Romania SuperLiga, La Liga, Ligue 1) — placeholder-ul de dată la descoperire timpurie e un tipar general Flashscore, nu specific unei ligi. Cel mai mare caz observat: Real Sociedad–Celta Vigo, înregistrat 16 septembrie, corectat la 3 septembrie (13 zile diferență).
+
+**Efect secundar găsit**: faza de descoperire (17 ligi) consumă 42,7 din cele 45 de minute ale plafonului `sync_pre_match_odds.yml`, lăsând insuficient timp fazei de scriere pentru toate cele 181 de meciuri găsite într-o rulare completă — vezi analiza dedicată din `CLAUDE.md` (propunere 45→60 min, în așteptarea aprobării).

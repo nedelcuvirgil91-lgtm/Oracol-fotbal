@@ -294,6 +294,28 @@ Cheile API sunt tratate ca infrastructură critică — nu ca detalii de configu
   - **Gatat de `flashscore_kickoff_correction_enabled`, implicit `False`** (North Star #3) — cod complet, 13 teste noi (9 pe funcția de corecție, 4 pe cablarea în `persist_week_odds()`), 2 mutații verificate (garda `actual_result` și garda de egalitate a datei — ambele prinse). `persist_week_odds()` rulează corecția pentru FIECARE meci descoperit, indiferent dacă are cotă găsită — corectarea identității e independentă de cote. `pytest tests/`: 2935 passed, 2 skipped.
   - **De făcut, separat, cu confirmare explicită**: activarea flagului în producție (`UPDATE model_config`, arătat + confirmat conform `supabase-safety`).
 
+  **[ACTIVAT ȘI VERIFICAT LIVE — 2026-08-30]** Flag activat în producție (`UPDATE model_config`, confirmat explicit). Prima rulare reală (`sync_pre_match_odds.yml`, `run 33312884975`, 12:57:59-13:43:18 UTC) a corectat toate cele 3 meciuri diagnosticate, verificat direct în `match_history`:
+
+  | Meci | Înainte | După corecție |
+  |---|---|---|
+  | Farul Constanța – Botoșani | 29 aug (fantomă) | **30 aug, 13:00 UTC** — identic cu sursa externă (TSDB) |
+  | FCSB – UTA Arad | 29 aug (fantomă) | **30 aug, 18:00 UTC** — identic cu sursele externe (fanatik.ro, pontul-zilei.com) |
+  | Rapid – Universitatea Craiova | 29 aug (fantomă) | **31 aug, 17:30** |
+
+  Toate trei cu cote reale scrise imediat după corecție (4 case de pariuri fiecare). **Amploarea reală depășește diagnosticul inițial**: 12 corectări confirmate în log înainte ca rularea să fie tăiată de timeout, pe 4 ligi diferite, nu doar SuperLiga — La Liga (5 meciuri, unul cu **13 zile** diferență: Real Sociedad–Celta Vigo, înregistrat 16 septembrie, real 3 septembrie) și Ligue 1 (Lyon–Auxerre). Placeholder-ul de dată la descoperire timpurie e un tipar general Flashscore, nu specific unei ligi.
+
+  **Constatare operațională colaterală, găsită prin aceeași rulare**: descoperirea (17 ligi) a consumat 42,7 din cele 45 de minute ale plafonului — rularea a fost tăiată de timeout în timpul fazei de scriere (cote + corectări), cu doar ~66 s disponibile din cele ~3 min necesare pentru cele 181 de meciuri găsite. Vezi analiza timeout-ului mai jos.
+
+  ### Analiza timeout-ului `sync_pre_match_odds.yml` (2026-08-30) — propunere 45→60 min, AȘTEAPTĂ aprobare
+
+  **Nevoia reală, măsurată, nu presupusă**: faza de descoperire (17 ligi) = 42,7 min; faza de scriere (269 upsert-uri de cote + 12 corectări confirmate în 66 s, ritm ~1 rând/secundă) ar fi cerut încă ~3 min pentru toate cele 181 de meciuri găsite. Total real: **~46 min** — plafonul de 45 min era insuficient cu o marjă mică, nu cu mult.
+
+  **Constrângerea de programare**: cron-ul `08:00 UTC` are următorul workflow la `09:00 UTC` (`live_sync.yml` + `consensus_validation.yml`) — un plafon prea mărit ar ajunge exact la coliziune, încălcând disciplina „fără suprapunere prin programare" respectată peste tot în proiect.
+
+  **Propunere, NEimplementată încă**: `timeout-minutes: 45 → 60` — acoperă confortabil nevoia reală (~46 min) cu ~14 min marjă pentru variație (etape cu mai multe meciuri pe hub, zile de weekend). Dacă rularea de dimineață (08:00 UTC) ar consuma vreodată tot plafonul de 60 min, s-ar termina exact la 09:00 — coliziune de programare cu `live_sync.yml`/`consensus_validation.yml`. Riscul rezidual e totuși acceptabil: **verificat deja empiric, colateral, la analiza throttling-ului de coadă din 29 august** — workflow-uri Flashscore suprapuse (din cauza cozii FIFO, nu a programării) au produs 0 dubluri pe cheia naturală, protejate de `pg_advisory_xact_lock` + constrângeri UNIQUE — deci un contact scurt cu fereastra de 09:00 nu ar risca integritatea datelor, doar ar folosi puțin mai mult timp de rulare simultan.
+
+  Rularea de seară (`20:00 UTC`) nu are nicio constrângere similară — următorul workflow apropiat e la 21:30 UTC (`lineup_sync.yml`), marjă amplă chiar la plafonul mărit.
+
 ## Comenzi de bază
 
 ```bash
