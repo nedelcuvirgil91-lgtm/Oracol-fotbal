@@ -292,6 +292,73 @@ def upsert_match(row: dict) -> bool:
         return False
 
 
+def correct_flashscore_kickoff_if_mismatched(
+    fixture_id: str, home_team: str, away_team: str, league: str, scraped_kickoff_date: str,
+) -> bool:
+    """ADR-070 — corectează `kickoff_date` pe un rând deja canonic, când
+    `pre_match_odds.py` (rulat de 2x/zi, ADR-043) găsește pe `/fixtures/`
+    Flashscore o dată diferită de cea deja scrisă în `match_history` pentru
+    ACELAȘI `fixture_id`. Cazul real: o etapă anunțată cu ~3 săptămâni
+    înainte capătă o oră placeholder (identică pentru toate meciurile),
+    orele reale confirmându-se abia cu câteva zile înainte de fluier —
+    `flashscore_weekly_fixtures.yml` (2x/săptămână) poate rata fereastra.
+
+    NU e o cale nouă de scriere — apelează `upsert_match()`, care rutează
+    prin RPC-ul canonic deja existent (`upsert_match_canonical` →
+    `_upsert_match_canonical_locked`, migrarea 048), a cărui ramură de
+    reprogramare (același `fixture_id`, dată nouă) e deja dovedită live
+    (Celta Vigo–Osasuna). Payload minim — COALESCE pe restul coloanelor,
+    nimic altceva nu se atinge.
+
+    Gardă explicită: un meci cu `actual_result` deja scris NU se atinge
+    NICIODATĂ — corectarea e strict pentru meciuri încă nejucate (altfel
+    ar rescrie identitatea unui rezultat istoric real). Fără rândul
+    existent (`fixture_id` necunoscut încă), nimic de corectat — Delta
+    Sync / discovery obișnuit rămân responsabile de scrierea inițială.
+    Compară DOAR componenta de dată (`YYYY-MM-DD`) — diferențe de oră în
+    aceeași zi nu declanșează o rescriere (RPC-ul le tratează oricum
+    identic prin `left(kickoff_date, 10)`)."""
+    client = get_client()
+    if client is None:
+        return False
+    if not fixture_id or not scraped_kickoff_date:
+        return False
+    try:
+        res = (
+            client.table("match_history")
+            .select("kickoff_date,actual_result")
+            .eq("fixture_id", fixture_id)
+            .limit(1)
+            .execute()
+        )
+        rows = res.data or []
+        if not rows:
+            return False
+        row = rows[0]
+        if row.get("actual_result") is not None:
+            return False
+        stored_date_only = (row.get("kickoff_date") or "")[:10]
+        scraped_date_only = scraped_kickoff_date[:10]
+        if not scraped_date_only or stored_date_only == scraped_date_only:
+            return False
+        payload = {
+            "fixture_id": fixture_id, "home_team": home_team, "away_team": away_team,
+            "league": league, "kickoff_date": scraped_kickoff_date,
+        }
+        ok = upsert_match(payload)
+        if ok:
+            logger.info(
+                "[Queries] ADR-070 kickoff corectat: %s (%s vs %s) %s -> %s",
+                fixture_id, home_team, away_team, stored_date_only, scraped_date_only,
+            )
+        return ok
+    except Exception as exc:
+        logger.warning(
+            "[Queries] correct_flashscore_kickoff_if_mismatched failed pentru %s: %s", fixture_id, exc,
+        )
+        return False
+
+
 def _strip_none_values(row: dict) -> dict:
     """
     [FIX 2026-07-13 — Protecția Writer-ilor] Elimină cheile cu valoare None

@@ -35,10 +35,21 @@ Dacă Flashscore a găsit un meci pe care nicio altă sursă nu l-a găsit înc�
 `match_history` pentru meciuri descoperite întâi de Flashscore
 (`normalizer.normalize_match_statistics()`), niciodată un format nou.
 
-Scriere: DOAR `odds_fallback_flashscore` (ADR-043) — niciodată
-`odds_history` (Frozen). Citirea de fallback în Predictor (regula ADR-043
-§Decizie pct. 3) rămâne, deliberat, un pas separat, ulterior — acest modul
-doar populează tabela.
+Scriere: `odds_fallback_flashscore` (ADR-043) — niciodată `odds_history`
+(Frozen). Citirea de fallback în Predictor (regula ADR-043 §Decizie pct. 3)
+rămâne, deliberat, un pas separat, ulterior — acest modul doar populează
+tabela.
+
+[ADAUGAT ADR-070, 2026-08-30] `persist_week_odds()` mai corectează, gatat de
+`flashscore_kickoff_correction_config.is_enabled()` (implicit False), un
+`match_history.kickoff_date` deja scris, dar greșit — cazul unei etape
+anunțate cu ~3 săptămâni înainte, cu oră placeholder identică pentru toate
+meciurile, orele reale confirmându-se abia cu câteva zile înainte de fluier.
+NU e o cale nouă de scriere — refolosește RPC-ul canonic deja existent
+(migrarea 048, `database.queries.correct_flashscore_kickoff_if_mismatched()`
+→ `upsert_match()`), niciodată un meci cu `actual_result` deja scris. Vezi
+ADR-070 pentru justificarea completă (de ce Flashscore rămâne singura sursă,
+de ce TSDB a fost respins explicit).
 ================================================================================
 """
 from __future__ import annotations
@@ -290,21 +301,44 @@ def resolve_fixture_id(record: dict[str, Any], live_matches: list[dict[str, Any]
 def persist_week_odds(
     records: list[dict[str, Any]], live_matches: list[dict[str, Any]] | None = None,
 ) -> dict[str, int]:
-    """Scrie DOAR `odds_fallback_flashscore` (ADR-043) — niciodată
+    """Scrie cotele în `odds_fallback_flashscore` (ADR-043) — niciodată
     `odds_history`. Meciuri fără nicio cotă găsită (piață încă
-    nepublicată) nu scriu nimic — numărate, nu aproximate."""
-    from database.queries import upsert_odds_fallback_flashscore
+    nepublicată) nu scriu nimic la cote — numărate, nu aproximate.
+
+    [ADR-070] Rulează, gatat de `flashscore_kickoff_correction_config.
+    is_enabled()`, corectarea de `kickoff_date` pentru FIECARE meci
+    descoperit — indiferent dacă are cotă găsită sau nu. Corectarea
+    identității (dată greșită) e independentă de disponibilitatea cotelor:
+    un meci fără cotă publicată încă tot poate avea o dată placeholder,
+    deja scrisă în `match_history`, de corectat."""
+    from database.queries import correct_flashscore_kickoff_if_mismatched, upsert_odds_fallback_flashscore
+    import flashscore_kickoff_correction_config
+
+    kickoff_correction_enabled = flashscore_kickoff_correction_config.is_enabled()
 
     report = {
         "matches_seen": len(records), "odds_rows_written": 0,
         "odds_rows_failed": 0, "matches_without_odds": 0,
+        "kickoff_corrections": 0,
     }
     for record in records:
+        fixture_id = resolve_fixture_id(record, live_matches)
+
+        if kickoff_correction_enabled:
+            corrected = correct_flashscore_kickoff_if_mismatched(
+                fixture_id=fixture_id,
+                home_team=record.get("home_team", "") or "",
+                away_team=record.get("away_team", "") or "",
+                league=record.get("league", "") or "",
+                scraped_kickoff_date=record.get("kickoff_date") or "",
+            )
+            if corrected:
+                report["kickoff_corrections"] += 1
+
         odds_rows = record.get("odds") or []
         if not odds_rows:
             report["matches_without_odds"] += 1
             continue
-        fixture_id = resolve_fixture_id(record, live_matches)
         for row in odds_rows:
             ok = upsert_odds_fallback_flashscore(
                 fixture_id=fixture_id, bookmaker=row["bookmaker"],

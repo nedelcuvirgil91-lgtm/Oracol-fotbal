@@ -159,7 +159,10 @@ def test_persist_week_odds_writes_one_row_per_bookmaker(monkeypatch):
     }]
     report = persist_week_odds(records)
 
-    assert report == {"matches_seen": 1, "odds_rows_written": 2, "odds_rows_failed": 0, "matches_without_odds": 0}
+    assert report == {
+        "matches_seen": 1, "odds_rows_written": 2, "odds_rows_failed": 0,
+        "matches_without_odds": 0, "kickoff_corrections": 0,
+    }
     assert written == [
         ("flashscore_m1", "bet365", 1.5, 3.5, 6.0),
         ("flashscore_m1", "Unibet", 1.55, 3.4, 5.8),
@@ -169,7 +172,10 @@ def test_persist_week_odds_writes_one_row_per_bookmaker(monkeypatch):
 def test_persist_week_odds_counts_matches_without_any_odds_row():
     records = [{"home_team": "A", "away_team": "B", "kickoff_date": "2026-08-10", "mid": "m1", "odds": []}]
     report = persist_week_odds(records)
-    assert report == {"matches_seen": 1, "odds_rows_written": 0, "odds_rows_failed": 0, "matches_without_odds": 1}
+    assert report == {
+        "matches_seen": 1, "odds_rows_written": 0, "odds_rows_failed": 0,
+        "matches_without_odds": 1, "kickoff_corrections": 0,
+    }
 
 
 def test_persist_week_odds_counts_write_failures_separately(monkeypatch):
@@ -196,6 +202,64 @@ def test_persist_week_odds_uses_resolved_fixture_id_from_live_matches(monkeypatc
     live_matches = [{"home_team": "FC Botosani", "away_team": "Universitatea Cluj", "kickoff_date": "2026-08-10", "fixture_id": "odds_api_999"}]
     persist_week_odds(records, live_matches=live_matches)
     assert seen_fixture_ids == ["odds_api_999"]
+
+
+# ── persist_week_odds — corectarea de kickoff_date (ADR-070) ──────────────
+
+def test_persist_week_odds_kickoff_correction_disabled_by_default():
+    """North Star #3 — flag implicit oprit, fara mock-uire explicita a
+    config-ului. Chiar cu o data care ar diverge, nicio corectie nu se
+    incearca (get_client() intoarce None in test env, fara Supabase live)."""
+    records = [{"home_team": "A", "away_team": "B", "kickoff_date": "2026-08-30", "mid": "m1", "odds": []}]
+    report = persist_week_odds(records)
+    assert report["kickoff_corrections"] == 0
+
+
+def test_persist_week_odds_runs_correction_for_every_record_when_enabled(monkeypatch):
+    """Corectarea ruleaza pentru FIECARE meci descoperit, indiferent daca
+    are cota gasita sau nu — independenta de disponibilitatea cotelor."""
+    monkeypatch.setattr("flashscore_kickoff_correction_config.is_enabled", lambda: True)
+    seen = []
+    monkeypatch.setattr(
+        "database.queries.correct_flashscore_kickoff_if_mismatched",
+        lambda fixture_id, home_team, away_team, league, scraped_kickoff_date: seen.append(fixture_id) or False,
+    )
+    records = [
+        {"home_team": "A", "away_team": "B", "kickoff_date": "2026-08-30", "mid": "m1", "odds": []},
+        {"home_team": "C", "away_team": "D", "kickoff_date": "2026-08-31", "mid": "m2",
+         "odds": [{"bookmaker": "bet365", "home": 1.5, "draw": 3.5, "away": 6.0, "source": "flashscore"}]},
+    ]
+    monkeypatch.setattr("database.queries.upsert_odds_fallback_flashscore", lambda **kw: True)
+    persist_week_odds(records)
+    assert seen == ["flashscore_m1", "flashscore_m2"]
+
+
+def test_persist_week_odds_counts_only_actual_corrections(monkeypatch):
+    monkeypatch.setattr("flashscore_kickoff_correction_config.is_enabled", lambda: True)
+    results = iter([True, False])
+    monkeypatch.setattr(
+        "database.queries.correct_flashscore_kickoff_if_mismatched",
+        lambda fixture_id, home_team, away_team, league, scraped_kickoff_date: next(results),
+    )
+    records = [
+        {"home_team": "A", "away_team": "B", "kickoff_date": "2026-08-30", "mid": "m1", "odds": []},
+        {"home_team": "C", "away_team": "D", "kickoff_date": "2026-08-31", "mid": "m2", "odds": []},
+    ]
+    report = persist_week_odds(records)
+    assert report["kickoff_corrections"] == 1
+
+
+def test_persist_week_odds_skips_correction_call_when_flag_disabled(monkeypatch):
+    monkeypatch.setattr("flashscore_kickoff_correction_config.is_enabled", lambda: False)
+    called = []
+    monkeypatch.setattr(
+        "database.queries.correct_flashscore_kickoff_if_mismatched",
+        lambda *a, **kw: called.append(1) or True,
+    )
+    records = [{"home_team": "A", "away_team": "B", "kickoff_date": "2026-08-30", "mid": "m1", "odds": []}]
+    report = persist_week_odds(records)
+    assert called == []
+    assert report["kickoff_corrections"] == 0
 
 
 # ── discover_week_fixtures_with_odds — validare fara retea ────────────────
