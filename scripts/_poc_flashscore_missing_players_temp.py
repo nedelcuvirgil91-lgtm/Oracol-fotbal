@@ -116,25 +116,52 @@ def discover_match_links(page, hub_url, tag, limit, log):
 
 
 def _find_missing_players_widget(page) -> dict:
-    """Detecție STRUCTURALĂ — caută heading-ul vizibil „Missing Players",
-    apoi extrage textul din containerul lui (nume reale, nu string de
-    traducere). Un heading găsit dar fără nume dedesubt = widget exista dar
-    gol pentru acest meci (posibil, nu presupus). Niciun heading găsit =
-    widget-ul nu se randeaza deloc aici."""
-    result = {"heading_found": False, "container_text": None, "container_html_length": 0}
+    """Detecție STRUCTURALĂ, MAI PRECISĂ (a 2-a trecere) — [CORECTAT]
+    varianta anterioară urca la „cel mai apropiat ancestor wcl-/section" și
+    a prins din greșeală un articol întreg de previzualizare („FLASHSCORE
+    PREVIEW"), nu widget-ul real. Aici NU se presupune care nivel e
+    corect — se colectează TOATE aparițiile textului „Missing Players" (nu
+    doar prima), pentru fiecare: tag-ul propriu, părintele imediat (1
+    nivel), bunicul (2 niveluri) ȘI elementele care urmează în ordinea
+    DOM (`following::*`) — un heading real e de obicei urmat de lista lui,
+    nu înglobat într-un container comun cu alt conținut. Evidența brută
+    (toate nivelurile) se raportează, decizia „care e cel corect" se ia
+    manual, pe date reale, nu ghicind un selector."""
+    result: dict = {"occurrences_count": 0, "occurrences": []}
     try:
-        heading = page.get_by_text("Missing Players", exact=False).first
-        if heading.is_visible(timeout=2000):
-            result["heading_found"] = True
+        locators = page.get_by_text("Missing Players", exact=False)
+        count = locators.count()
+        result["occurrences_count"] = count
+        for i in range(min(count, 5)):
+            loc = locators.nth(i)
+            entry: dict = {"index": i}
             try:
-                container = heading.locator(
-                    "xpath=ancestor::div[contains(@class,'wcl-') or contains(@class,'section')][1]",
-                )
-                text = container.inner_text(timeout=2000)
-                result["container_text"] = text[:2000]
-                result["container_html_length"] = len(container.inner_html(timeout=2000))
+                entry["own_text"] = loc.inner_text(timeout=1500)[:200]
             except Exception as exc:
-                result["container_error"] = str(exc)[:200]
+                entry["own_text_error"] = str(exc)[:150]
+            try:
+                entry["tag_name"] = loc.evaluate("el => el.tagName")
+            except Exception:
+                pass
+            try:
+                entry["parent_text"] = loc.locator("xpath=..").inner_text(timeout=1500)[:500]
+            except Exception as exc:
+                entry["parent_text_error"] = str(exc)[:150]
+            try:
+                entry["grandparent_text"] = loc.locator("xpath=../..").inner_text(timeout=1500)[:800]
+            except Exception as exc:
+                entry["grandparent_text_error"] = str(exc)[:150]
+            try:
+                following = loc.locator("xpath=following::*[position()<=8]")
+                texts = []
+                for j in range(min(following.count(), 8)):
+                    t = following.nth(j).inner_text(timeout=800).strip()
+                    if t:
+                        texts.append(t[:150])
+                entry["following_elements_text"] = texts
+            except Exception as exc:
+                entry["following_error"] = str(exc)[:150]
+            result["occurrences"].append(entry)
     except Exception as exc:
         result["lookup_error"] = str(exc)[:200]
     return result
@@ -149,8 +176,14 @@ def inspect_match(page, match_url, tag, index, log) -> dict:
     _dismiss_gdpr_if_present(page)
     record["page_title"] = page.title()
 
-    slug = match_url.rstrip("/").split("/")[-2:]
-    file_prefix = f"{tag}_{index}_{'_'.join(slug)}"[:120]
+    # [CORECTAT] URL-ul conține query string (?mid=...), nu doar path —
+    # split("/") pe URL-ul brut lăsa "?mid=..." în numele fișierului,
+    # caracter interzis pe sistemul de fișiere (bug găsit la prima rulare,
+    # artefactul a eșuat la încărcare). Se elimină query string-ul ÎNAINTE
+    # de a extrage slug-ul, apoi orice caracter rămas nepermis e înlocuit.
+    path_only = match_url.split("?")[0].rstrip("/")
+    slug = path_only.split("/")[-2:]
+    file_prefix = re.sub(r"[^a-zA-Z0-9_-]", "_", f"{tag}_{index}_{'_'.join(slug)}")[:120]
 
     # Tab summary — unele site-uri arata "Missing Players" direct pe pagina
     # principala de meci, nu doar pe un tab dedicat.
@@ -193,7 +226,12 @@ def main() -> dict:
         try:
             all_targets: list[tuple[str, str]] = []
             for tag, hub in FIXTURE_HUBS:
-                links = discover_match_links(page, hub, tag, limit=3, log=result["log"])
+                # [MĂRIT — a 2-a trecere] Premier League a dat singurul semnal
+                # promițător la prima rulare (heading găsit pe pagina de
+                # meci) — mai multe meciuri din aceeași ligă, ca să vedem
+                # dacă tiparul se repetă sau a fost un caz izolat.
+                limit = 6 if tag == "premier_league" else 3
+                links = discover_match_links(page, hub, tag, limit=limit, log=result["log"])
                 result["discovery"][tag] = links
                 all_targets.extend((tag, url) for url in links)
                 time.sleep(POLITENESS_DELAY_S)
@@ -209,15 +247,10 @@ def main() -> dict:
 
     result["total_matches_tested"] = len(result["matches"])
     result["summary"] = {
-        "any_missing_players_heading_found": any(
-            (m.get("summary_missing_players", {}) or {}).get("heading_found")
-            or (m.get("lineups_missing_players", {}) or {}).get("heading_found")
-            for m in result["matches"]
-        ),
-        "matches_with_real_names_under_heading": sum(
+        "matches_with_any_occurrence": sum(
             1 for m in result["matches"]
-            if (m.get("summary_missing_players", {}) or {}).get("container_text")
-            or (m.get("lineups_missing_players", {}) or {}).get("container_text")
+            if (m.get("summary_missing_players", {}) or {}).get("occurrences_count")
+            or (m.get("lineups_missing_players", {}) or {}).get("occurrences_count")
         ),
     }
     return result
