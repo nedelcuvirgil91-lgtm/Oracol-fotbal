@@ -181,6 +181,129 @@ def test_run_foundation_data_layer_skips_already_collected_match_delta_sync(monk
 
 
 # ════════════════════════════════════════════════════════════════════════
+# polite_delay() se cheltuie DOAR pe cereri reale (reparat 2026-08-30)
+#
+# DEFECTUL: `polite_delay()` (2-4s) rula neconditionat la inceputul fiecarei
+# iteratii (`if i > 0`), INAINTE de verificarea Delta Sync — deci si pentru
+# meciurile sarite, care nu contacteaza deloc Flashscore.
+#
+# COSTUL, masurat pe rulari live_sync reale (2026-08-29): in rularea reusita
+# de la 14:10 (457 descoperite, 438 sarite) ~22 din 44 de minute au fost somn
+# pur; rularea de la 19:36 a fost TAIATA de timeout-ul de 50 min dupa ce
+# atinsese doar 327 din 487 de meciuri. A doua taiere in 3 zile.
+# ════════════════════════════════════════════════════════════════════════
+
+def _pregateste_fdl(monkeypatch, deja_colectate: set[str], fetch_arunca: set[str] = frozenset()):
+    """Monteaza un Foundation Data Layer complet fals si intoarce
+    `(delay_calls, fetch_calls)` — liste care se umplu in timpul rularii."""
+    delay_calls: list[str] = []
+    fetch_calls: list[str] = []
+
+    monkeypatch.setattr(FlashscoreAdapter, "preflight", lambda self: None)
+    monkeypatch.setattr("providers.flashscore.discovery.polite_delay",
+                        lambda: delay_calls.append("delay"))
+    monkeypatch.setattr("database.queries.is_flashscore_match_already_collected",
+                        lambda mid: mid in deja_colectate)
+
+    def _fetch(self, params):
+        fetch_calls.append(params["mid"])
+        if params["mid"] in fetch_arunca:
+            raise RuntimeError("fetch esuat (simulat)")
+        return {"summary": "<html></html>"}
+
+    monkeypatch.setattr(FlashscoreAdapter, "fetch", _fetch)
+    monkeypatch.setattr(FlashscoreAdapter, "normalize", lambda self, raw: [raw])
+    monkeypatch.setattr(FlashscoreAdapter, "validate_detailed",
+                        lambda self, records: _valid_result(records))
+    monkeypatch.setattr("providers.flashscore.persistence.persist_match_with_data_trust_layer",
+                        lambda pages, match_ref, **kw: {"ok": True})
+    return delay_calls, fetch_calls
+
+
+def _meci(mid: str) -> DiscoveredMatch:
+    return DiscoveredMatch(league="Romania SuperLiga", match_base_url=f"https://x/{mid}",
+                           mid=mid, source="results")
+
+
+def test_toate_sarite_zero_delay(monkeypatch):
+    """GARDA CENTRALA a fixului. 100 de meciuri deja colectate = 0 apeluri
+    `polite_delay()`. Inainte ar fi fost 99 — ~5 minute de somn pur pentru
+    zero cereri catre Flashscore."""
+    mids = [f"m{i}" for i in range(100)]
+    delay_calls, fetch_calls = _pregateste_fdl(monkeypatch, deja_colectate=set(mids))
+
+    rapoarte = run_foundation_data_layer_for_discovered_matches([_meci(m) for m in mids])
+
+    assert len(delay_calls) == 0, (
+        f"{len(delay_calls)} apeluri polite_delay() pentru meciuri SARITE — "
+        "acestea nu contacteaza deloc Flashscore, deci nu au ce distanta"
+    )
+    assert fetch_calls == []
+    assert all(r["skipped"] for r in rapoarte)
+
+
+def test_delay_doar_INTRE_cereri_reale(monkeypatch):
+    """3 cereri reale -> 2 delay-uri (nu 3): niciodata inaintea primeia."""
+    delay_calls, fetch_calls = _pregateste_fdl(monkeypatch, deja_colectate=set())
+
+    run_foundation_data_layer_for_discovered_matches([_meci(m) for m in ("a", "b", "c")])
+
+    assert fetch_calls == ["a", "b", "c"]
+    assert len(delay_calls) == 2
+
+
+def test_sariturile_dintre_cereri_nu_umfla_numarul_de_delay_uri(monkeypatch):
+    """Cazul REAL de productie: putine fetch-uri, multe sarituri intercalate.
+    2 cereri reale printre 8 sarituri -> exact 1 delay."""
+    mids = ["s1", "s2", "REAL1", "s3", "s4", "s5", "REAL2", "s6", "s7", "s8"]
+    sarite = {m for m in mids if m.startswith("s")}
+    delay_calls, fetch_calls = _pregateste_fdl(monkeypatch, deja_colectate=sarite)
+
+    run_foundation_data_layer_for_discovered_matches([_meci(m) for m in mids])
+
+    assert fetch_calls == ["REAL1", "REAL2"]
+    assert len(delay_calls) == 1, (
+        "delay-ul trebuie sa distanteze DOAR cele doua cereri reale, "
+        "indiferent cate sarituri sunt intre ele"
+    )
+
+
+def test_un_fetch_care_arunca_ramane_o_cerere_reala(monkeypatch):
+    """Contrapondere impotriva unei 'optimizari' gresite: daca `fetch()`
+    arunca, cererea a plecat oricum spre Flashscore — deci urmatoarea TREBUIE
+    distantata de ea. A nu numara esecul ar face ca doua cereri consecutive
+    sa plece fara pauza exact cand providerul da semne de problema."""
+    delay_calls, fetch_calls = _pregateste_fdl(
+        monkeypatch, deja_colectate=set(), fetch_arunca={"a"},
+    )
+
+    rapoarte = run_foundation_data_layer_for_discovered_matches([_meci("a"), _meci("b")])
+
+    assert fetch_calls == ["a", "b"]
+    assert len(delay_calls) == 1, "esecul lui 'a' tot a contactat Flashscore"
+    assert rapoarte[0]["ok"] is False
+
+
+def test_ordinea_in_cod_delta_sync_INAINTEA_delay_ului():
+    """GARDA STRUCTURALA, citita din sursa. Testele de mai sus verifica efectul;
+    asta verifica *ordinea*, ca o rescriere viitoare sa nu reintroduca defectul
+    intr-o forma care intamplator trece testele de numarare."""
+    import inspect
+    from providers.flashscore import discovery as d
+
+    sursa = inspect.getsource(d.run_foundation_data_layer_for_discovered_matches)
+    doar_cod = "\n".join(l for l in sursa.splitlines() if not l.strip().startswith("#"))
+
+    poz_delta = doar_cod.find("is_flashscore_match_already_collected(match.mid)")
+    poz_delay = doar_cod.find("polite_delay()")
+    assert poz_delta != -1 and poz_delay != -1
+    assert poz_delta < poz_delay, (
+        "polite_delay() a ajuns din nou INAINTEA verificarii Delta Sync — "
+        "asta reintroduce ~22 min de somn pur per rulare (masurat 2026-08-29)"
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════
 # _discover_for_hub — include_future_fixtures (Pasul 1 Master Repair Plan,
 # rafinat dupa feedback) — vezi docstring _discover_for_hub() pentru
 # justificarea completa: rularile automate NU mai incearca /fixtures/

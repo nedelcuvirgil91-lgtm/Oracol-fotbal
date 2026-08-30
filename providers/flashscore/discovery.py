@@ -680,9 +680,11 @@ def run_foundation_data_layer_for_discovered_matches(
     adapter.py) + `persist_match_with_data_trust_layer()` direct (nu
     `adapter.persist()`, care intoarce doar bool - contractul
     `SyncAdapter`) pentru fiecare meci descoperit, secvential, cu pacing
-    explicit intre meciuri (`FLASHSCORE_MIN_DELAY_SECONDS`) - "Foundation
-    Data Layer va rula apoi peste fiecare meci descoperit" (aprobare
-    explicita, 2026-07-29). `preflight()` verificat o singura data, inainte
+    explicit intre CERERILE REALE catre Flashscore
+    (`FLASHSCORE_MIN_DELAY_SECONDS`; un meci sarit prin Delta Sync nu
+    contacteaza providerul, deci nu se distanteaza - vezi bucla) -
+    "Foundation Data Layer va rula apoi peste fiecare meci descoperit"
+    (aprobare explicita, 2026-07-29). `preflight()` verificat o singura data, inainte
     de bucla - `tos_reviewed` nu se schimba intre meciuri in aceeasi
     rulare. Fiecare rezultat e raportul complet intors de
     `persist_match_with_data_trust_layer()` (niciodata doar True/False -
@@ -699,19 +701,44 @@ def run_foundation_data_layer_for_discovered_matches(
     adapter.preflight()
 
     reports: list[dict[str, Any]] = []
-    for i, match in enumerate(matches):
-        if i > 0:
-            polite_delay()
+    # [REPARAT 2026-08-30] Numara CERERILE REALE catre Flashscore, nu iteratiile.
+    # Vezi blocul de mai jos pentru masuratoare — asta e pivotul fixului.
+    cereri_reale = 0
+    for match in matches:
         # [Delta Sync — Faza 2] `mid` e cunoscut ÎNAINTE de fetch (Discovery
         # îl extrage din URL-ul hub-ului) — dacă acest meci a fost deja
         # persistat canonic (fixture_id="flashscore_{mid}" pe match_history),
         # sărim fetch-ul complet (7 tab-uri Playwright), nu doar persist().
+        #
+        # [ORDINE REPARATA 2026-08-30] Verificarea Delta Sync e ACUM prima, iar
+        # `polite_delay()` s-a mutat DUPA ea. Inainte, delay-ul rula
+        # neconditionat la inceputul fiecarei iteratii (`if i > 0`), deci si
+        # pentru meciurile sarite — care nu fac NICIUN apel catre Flashscore
+        # (verificarea Delta Sync e o interogare Supabase). Politetea aparea
+        # pe un canal pe care nu se cerea nimic.
+        #
+        # MASURAT pe doua rulari live_sync reale din 2026-08-29:
+        #   14:10 (reusita, 44m44s): 457 descoperite, 438 sarite, 19 procesate
+        #     -> ~22 min din 44 (JUMATATE din rulare) au fost somn pur.
+        #   19:36 (TAIATA de timeout la 50m18s): 487 descoperite, doar 327
+        #     atinse (67%), 289 sarite, 38 procesate -> ~14,5 min irositi;
+        #     160 de meciuri nu au mai fost atinse deloc.
+        # A doua taiere in 3 zile (si 2026-08-27, la 50m19s). Setul descoperit
+        # creste pe masura ce sezoanele avanseaza (457 -> 487 in 5 ore), deci
+        # timpul irosit creste liniar cu el — s-ar fi agravat de la sine.
         if is_flashscore_match_already_collected is not None and is_flashscore_match_already_collected(match.mid):
             reports.append({
                 "match_id": None, "ok": True, "skipped": True,
                 "reason": "already_collected", "match": match,
             })
             continue
+        # Politete DOAR intre cereri reale: nu inaintea primeia (nimic de
+        # distantat inca), niciodata inaintea unei sariri. `cereri_reale` se
+        # incrementeaza chiar daca `fetch()` arunca — cererea a plecat
+        # oricum spre Flashscore, deci urmatoarea trebuie distantata de ea.
+        if cereri_reale > 0:
+            polite_delay()
+        cereri_reale += 1
         try:
             pages = adapter.fetch({"match_base_url": match.match_base_url, "mid": match.mid})
         except Exception as exc:
