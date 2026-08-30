@@ -10,7 +10,16 @@ on:
   schedule:
     # Oră distinctă de daily.yml (03:00 UTC) ȘI de continuous_learning.yml
     # (06:00 UTC) — evită orice coliziune, nu doar directă.
-    - cron: "0 9 * * *"
+    #
+    # [DECALAJ PREVENTIV — 2026-08-30, decizie explicită proprietar produs]
+    # 0 9 -> 20 9 — coincidea la minut cu live_sync.yml (09:00 UTC). Nu
+    # repară un defect: `validation_analysis` doar CITEȘTE din
+    # `match_history`, iar `consensus_validation` scrie doar în
+    # `automation_*`/verdictul de consens — zero țintă de scriere comună,
+    # verificat înainte (vezi CLAUDE.md). Motiv pur preventiv, aceeași
+    # disciplină „fără suprapunere prin programare" folosită peste tot în
+    # proiect — nu se aștepta un defect real să apară, doar se evită.
+    - cron: "20 9 * * *"
   workflow_dispatch: {}
 
 concurrency:

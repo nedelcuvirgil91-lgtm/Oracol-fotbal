@@ -29,7 +29,16 @@ name: Football Oracle — Flashscore Extra Leagues (extindere etapizată)
 
 on:
   schedule:
-    - cron: "0 10 * * *"
+    # [DECALAJ PREVENTIV — 2026-08-30, decizie explicită proprietar produs]
+    # 0 10 -> 30 10 — coincidea la minut cu flashscore_extra_leagues (acest
+    # workflow) și validation_analysis. Nu repară un defect: verificat
+    # deja (CLAUDE.md) că live_sync.yml rulează cu toate cele 17 ligi
+    # urmărite (le include implicit pe cele 3 de-aici), și cele două
+    # coliziuni observate empiric n-au produs niciun dublu pe cheia
+    # naturală, protejate de pg_advisory_xact_lock + constrângeri UNIQUE.
+    # Motiv pur preventiv, aceeași disciplină „fără suprapunere prin
+    # programare" folosită peste tot în proiect.
+    - cron: "30 10 * * *"
   workflow_dispatch: {}
 
 concurrency:
