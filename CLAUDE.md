@@ -306,15 +306,23 @@ Cheile API sunt tratate ca infrastructură critică — nu ca detalii de configu
 
   **Constatare operațională colaterală, găsită prin aceeași rulare**: descoperirea (17 ligi) a consumat 42,7 din cele 45 de minute ale plafonului — rularea a fost tăiată de timeout în timpul fazei de scriere (cote + corectări), cu doar ~66 s disponibile din cele ~3 min necesare pentru cele 181 de meciuri găsite. Vezi analiza timeout-ului mai jos.
 
-  ### Analiza timeout-ului `sync_pre_match_odds.yml` (2026-08-30) — propunere 45→60 min, AȘTEAPTĂ aprobare
+  ### Analiza timeout-ului `sync_pre_match_odds.yml` (2026-08-30) — IMPLEMENTAT ȘI VERIFICAT LIVE (45→60 min)
 
   **Nevoia reală, măsurată, nu presupusă**: faza de descoperire (17 ligi) = 42,7 min; faza de scriere (269 upsert-uri de cote + 12 corectări confirmate în 66 s, ritm ~1 rând/secundă) ar fi cerut încă ~3 min pentru toate cele 181 de meciuri găsite. Total real: **~46 min** — plafonul de 45 min era insuficient cu o marjă mică, nu cu mult.
 
   **Constrângerea de programare**: cron-ul `08:00 UTC` are următorul workflow la `09:00 UTC` (`live_sync.yml` + `consensus_validation.yml`) — un plafon prea mărit ar ajunge exact la coliziune, încălcând disciplina „fără suprapunere prin programare" respectată peste tot în proiect.
 
-  **Propunere, NEimplementată încă**: `timeout-minutes: 45 → 60` — acoperă confortabil nevoia reală (~46 min) cu ~14 min marjă pentru variație (etape cu mai multe meciuri pe hub, zile de weekend). Dacă rularea de dimineață (08:00 UTC) ar consuma vreodată tot plafonul de 60 min, s-ar termina exact la 09:00 — coliziune de programare cu `live_sync.yml`/`consensus_validation.yml`. Riscul rezidual e totuși acceptabil: **verificat deja empiric, colateral, la analiza throttling-ului de coadă din 29 august** — workflow-uri Flashscore suprapuse (din cauza cozii FIFO, nu a programării) au produs 0 dubluri pe cheia naturală, protejate de `pg_advisory_xact_lock` + constrângeri UNIQUE — deci un contact scurt cu fereastra de 09:00 nu ar risca integritatea datelor, doar ar folosi puțin mai mult timp de rulare simultan.
+  **Decizie, aprobată explicit**: `timeout-minutes: 45 → 60` — acoperă confortabil nevoia reală (~46 min) cu ~14 min marjă pentru variație. Riscul rezidual (coliziune cu 09:00 UTC dacă rularea de dimineață ar consuma vreodată tot plafonul) acceptat conștient: **verificat deja empiric, colateral, la analiza throttling-ului de coadă din 29 august** — workflow-uri Flashscore suprapuse (din cauza cozii FIFO, nu a programării) au produs 0 dubluri pe cheia naturală, protejate de `pg_advisory_xact_lock` + constrângeri UNIQUE. Rularea de seară (`20:00 UTC`) nu are nicio constrângere similară — următorul workflow apropiat e la 21:30 UTC (`lineup_sync.yml`), marjă amplă.
 
-  Rularea de seară (`20:00 UTC`) nu are nicio constrângere similară — următorul workflow apropiat e la 21:30 UTC (`lineup_sync.yml`), marjă amplă chiar la plafonul mărit.
+  **[VERIFICAT LIVE — 2026-08-30, prima rulare completă sub noul plafon]** `run 33319216071`, declanșată manual (17 ligi, fără plafon per ligă), **s-a terminat singură, fără nicio tăiere** — 45m57s din cele 60 min disponibile (42,5 min descoperire + restul scriere). Raport final complet, prima dată când acest flux a apucat să tipărească linia de raport (rulările anterioare fuseseră mereu tăiate înainte s-o atingă):
+
+  ```
+  165 meciuri descoperite, 0 ligi eșuate
+  482 cote scrise, 0 eșecuri, 40 meciuri fără cotă publicată încă
+  16 corecții de kickoff_date NOI
+  ```
+
+  **Amploarea reală, confirmată la scară completă acum**: cele 16 corecții noi acoperă **Primeira Liga** (5, Portugalia), **Super Lig** (5, Turcia — inclusiv Fenerbahce–Beșiktaș) și **HNL** (6, Croația) — inclusiv două meciuri de azi/mâine cu dată complet greșită (Osijek–Slaven Belupo, înregistrat 29 august, real 30 august; Hajduk Split–Lok. Zagreb, real 31 august). **Total pe cele 2 rulări din 30 august: 28 de meciuri corectate, pe 6 ligi diferite** (Romania SuperLiga, La Liga, Ligue 1, Primeira Liga, Super Lig, HNL) — confirmă definitiv că placeholder-ul de dată la descoperirea timpurie e un tipar structural Flashscore, prezent pe majoritatea ligilor urmărite, nu un caz izolat de ligă. Cele 3 meciuri corectate în rularea anterioară (Farul–Botoșani, FCSB–UTA Arad, Rapid–Craiova) n-au mai apărut în listă a doua oară — stabile, fără rescrieri inutile (gardă „doar dacă diferă" funcțională, confirmat).
 
 ## Comenzi de bază
 

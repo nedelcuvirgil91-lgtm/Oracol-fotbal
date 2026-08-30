@@ -146,4 +146,14 @@ Cote reale scrise imediat după corecție pentru toate trei (4 case de pariuri f
 
 **Amploare reală mai mare decât diagnosticul inițial**: 12 corectări confirmate în log înainte de tăierea rulării de timeout, pe 4 ligi (Romania SuperLiga, La Liga, Ligue 1) — placeholder-ul de dată la descoperire timpurie e un tipar general Flashscore, nu specific unei ligi. Cel mai mare caz observat: Real Sociedad–Celta Vigo, înregistrat 16 septembrie, corectat la 3 septembrie (13 zile diferență).
 
-**Efect secundar găsit**: faza de descoperire (17 ligi) consumă 42,7 din cele 45 de minute ale plafonului `sync_pre_match_odds.yml`, lăsând insuficient timp fazei de scriere pentru toate cele 181 de meciuri găsite într-o rulare completă — vezi analiza dedicată din `CLAUDE.md` (propunere 45→60 min, în așteptarea aprobării).
+**Efect secundar găsit**: faza de descoperire (17 ligi) consumă 42,7 din cele 45 de minute ale plafonului `sync_pre_match_odds.yml`, lăsând insuficient timp fazei de scriere pentru toate cele 181 de meciuri găsite într-o rulare completă — vezi analiza dedicată din `CLAUDE.md`.
+
+**Timeout mărit și verificat live** (2026-08-30, commit `779485b`, aprobat explicit): `timeout-minutes: 45 → 60`. Prima rulare completă sub noul plafon (`run 33319216071`, declanșată manual) **s-a terminat singură, fără nicio tăiere** — 45m57s din 60 min disponibile. Primul raport final complet obținut vreodată de la acest flux:
+
+```
+165 meciuri descoperite, 0 ligi eșuate
+482 cote scrise, 0 eșecuri, 40 meciuri fără cotă publicată încă
+16 corecții de kickoff_date NOI
+```
+
+Cele 16 corecții acoperă Primeira Liga (5), Super Lig (5), HNL (6) — inclusiv două meciuri de azi/mâine cu dată complet greșită (HNL: Osijek–Slaven Belupo, Hajduk Split–Lok. Zagreb). **Total pe cele 2 rulări din 30 august: 28 de meciuri corectate, pe 6 ligi** (Romania SuperLiga, La Liga, Ligue 1, Primeira Liga, Super Lig, HNL) — confirmă la scară completă că placeholder-ul de dată e un tipar structural Flashscore, nu un caz izolat. Cele 3 meciuri corectate în prima rulare n-au reapărut în a doua — gardă „doar dacă diferă" confirmată idempotentă, fără rescrieri inutile.
