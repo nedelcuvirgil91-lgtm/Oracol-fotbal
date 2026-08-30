@@ -21,6 +21,23 @@ name: Football Oracle — Sync Pre-Match Odds (Flashscore)
 # (09:00/13:00/17:00 UTC), ca să nu suprapună trafic Flashscore simultan
 # din workflow-uri diferite.
 #
+# timeout-minutes: 60 — [MĂRIT de la 45, 2026-08-30, ADR-070] MĂSURAT, nu
+# estimat: rularea din 30 august (run 33312884975, corectare kickoff_date
+# activată) a arătat descoperirea (17 ligi) consumând 42,7 din cele 45 min
+# ale plafonului vechi, lăsând faza de scriere (cote + corectări pentru
+# 181 de meciuri găsite, ~3 min necesare la ritmul măsurat) fără timp —
+# rularea a fost tăiată de timeout în mijlocul scrierii. Nevoia reală
+# totală: ~46 min. 60 min lasă ~14 min marjă pentru variație (etape
+# aglomerate, weekend-uri), fără să elimine complet riscul: dacă rularea
+# de 08:00 UTC ar consuma vreodată tot plafonul, s-ar termina exact la
+# 09:00 — ora la care pornesc live_sync.yml/consensus_validation.yml.
+# Risc acceptat conștient, nu ipotetic: verificat deja empiric (analiza
+# throttling-ului de coadă din 29 august, CLAUDE.md) — workflow-uri
+# Flashscore suprapuse accidental au produs 0 dubluri pe cheia naturală,
+# protejate de pg_advisory_xact_lock + constrângeri UNIQUE. Rularea de
+# 20:00 UTC nu are nicio constrângere similară (următorul workflow
+# apropiat: lineup_sync.yml, 21:30 UTC, marjă amplă).
+#
 # Declanșare programată (schedule) vs. manuală (workflow_dispatch) diferă
 # în domeniul de acoperire, intenționat: rularea programată acoperă
 # TOATE ligile din FLASHSCORE_TRACKED_COMPETITIONS, fără plafon
@@ -57,7 +74,7 @@ concurrency:
 jobs:
   sync-pre-match-odds:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
