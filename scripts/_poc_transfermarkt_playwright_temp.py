@@ -44,6 +44,7 @@ POST_LOAD_WAIT_MS = 5000  # marjă mai mare — provocările WAF au nevoie de ti
 POLITENESS_DELAY_S = 3.0
 
 _PREMIER_LEAGUE_URL = "https://www.transfermarkt.com/premier-league/startseite/wettbewerb/GB1"
+_INJURY_LINK_PATTERNS = [r"sperrenundverletzungen", r"injuries", r"verletzungen"]
 
 # Marcaje de PROVOCARE INTERACTIVĂ — dacă apar, ne oprim, NU interacționăm.
 _INTERACTIVE_CAPTCHA_MARKERS = (
@@ -94,6 +95,30 @@ def _inspect(page, url: str, tag: str) -> dict:
     entry["real_club_links_found"] = club_links[:10]
     entry["real_club_links_count"] = len(club_links)
 
+    # Link-uri reale spre accidentari/suspendari, daca exista pe pagina.
+    injury_links = set()
+    for pat in _INJURY_LINK_PATTERNS:
+        for m in re.finditer(rf'href="([^"]*{pat}[^"]*)"', html, re.IGNORECASE):
+            injury_links.add(m.group(1))
+    entry["injury_links_found"] = sorted(injury_links)
+
+    return entry
+
+
+def _inspect_injury_content(page, url: str, tag: str) -> dict:
+    """Ca `_inspect()`, dar verifica in plus continutul REAL de pe pagina
+    de accidentari — coloana "Market value" (campul care lipsea la
+    Flashscore) si cuvinte-cheie de accidentare/suspendare."""
+    entry = _inspect(page, url, tag)
+    html = (EVIDENCE_DIR / f"{re.sub(r'[^a-z0-9]+', '_', tag.lower()).strip('_')[:120]}.html").read_text(encoding="utf-8")
+    entry["has_market_value_column"] = bool(re.search(r"market\s*value", html, re.IGNORECASE))
+    entry["injury_suspension_keyword_hits"] = len(
+        re.findall(r"\binjur|suspen", html, re.IGNORECASE),
+    )
+    # Extrage cateva nume reale de jucatori din tabelul de profil, daca
+    # exista structura tipica Transfermarkt (link catre pagina de jucator).
+    player_names = re.findall(r'title="([^"]{3,40})"[^>]*href="/[a-z0-9-]+/profil/spieler/\d+"', html)
+    entry["sample_player_names_found"] = list(dict.fromkeys(player_names))[:10]
     return entry
 
 
@@ -117,20 +142,43 @@ def main() -> dict:
 
             # Daca am gasit link-uri reale de club, mergem un pas mai departe
             # - pagina unui club real, cautam link spre accidentari.
+            club_entry = None
             if entry.get("real_club_links_count"):
                 club_path = entry["real_club_links_found"][0]
                 club_url = f"https://www.transfermarkt.com{club_path}"
                 time.sleep(POLITENESS_DELAY_S)
                 club_entry = _inspect(page, club_url, "club_profile")
                 result["checks"].append(club_entry)
+
+            # Pasul final — pagina REALA de accidentari, daca a fost gasita
+            # pe profilul clubului; altfel fallback structural (tipar deja
+            # confirmat), NU un ID ghicit orbeste.
+            injury_url = None
+            if club_entry and club_entry.get("injury_links_found"):
+                href = club_entry["injury_links_found"][0]
+                injury_url = href if href.startswith("http") else f"https://www.transfermarkt.com{href}"
+            elif club_entry:
+                m = re.search(r"/([a-z0-9-]+)/startseite/verein/(\d+)", club_entry["url"])
+                if m:
+                    slug, club_id = m.group(1), m.group(2)
+                    injury_url = f"https://www.transfermarkt.com/{slug}/sperrenundverletzungen/verein/{club_id}"
+            if injury_url:
+                time.sleep(POLITENESS_DELAY_S)
+                injury_entry = _inspect_injury_content(page, injury_url, "club_injuries")
+                result["checks"].append(injury_entry)
         except InteractiveCaptchaDetected as exc:
             result["stopped_due_to_interactive_captcha"] = str(exc)
         finally:
             browser.close()
 
     any_real_content = any(c.get("real_club_links_count", 0) > 0 for c in result["checks"])
+    injury_checks = [c for c in result["checks"] if c["tag"] == "club_injuries"]
     result["summary"] = {
         "any_real_club_links_found": any_real_content,
+        "injury_page_reached": bool(injury_checks),
+        "injury_page_has_market_value_column": any(c.get("has_market_value_column") for c in injury_checks),
+        "injury_page_keyword_hits": sum(c.get("injury_suspension_keyword_hits", 0) for c in injury_checks),
+        "sample_player_names": injury_checks[0].get("sample_player_names_found") if injury_checks else [],
         "conclusion": (
             "Playwright standard a trecut de provocarea AWS WAF prin randare normala."
             if any_real_content else
