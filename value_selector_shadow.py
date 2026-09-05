@@ -415,28 +415,70 @@ def _load_odds(client, fixture_ids: Sequence[str]) -> dict[str, dict]:
 
 # ── Scriere (exclusiv in tabela proprie) ─────────────────────────────────────
 
+DIMENSIUNE_LOT = 500
+CHEIE_NATURALA = "run_id,policy_id,fixture_id,selection_code"
+
+
+class ShadowPersistError(RuntimeError):
+    """Un lot nu a putut fi scris. Ridicata DELIBERAT, nu inghitita — vezi
+    `persist_rows()` pentru contractul de esec."""
+
+
 def persist_rows(rows: Sequence[dict]) -> int:
-    """Upsert atomic pe cheia naturala. Scrie DOAR in `value_selector_shadow`."""
+    """Scrie randurile in `value_selector_shadow`, in loturi de
+    `DIMENSIUNE_LOT`, prin upsert pe cheia naturala.
+
+    CONTRACT DE ATOMICITATE, formulat exact ca sa nu poata fi citit gresit:
+      - fiecare LOT e o singura cerere, deci atomic in sine;
+      - atomicitatea la nivel de RULARE nu e garantata: un esec la lotul 4 lasa
+        loturile 1-3 deja scrise;
+      - esecul unui lot e FAIL-FAST: se logheaza contextul complet si excepția
+        se re-arunca imediat, fara sa se incerce loturile ramase;
+      - functia NU intoarce niciodata un numar partial ca si cum rularea ar fi
+        reusit — ori intoarce totalul, ori arunca;
+      - un `run_id` e idempotent: rerularea aceluiasi run_id converge la setul
+        complet prin upsert, fara `DELETE` si fara `TRUNCATE`.
+
+    De ce fail-fast si nu "continua si raporteaza": inainte de aceasta corectie
+    un lot esuat producea doar un avertisment, functia intorcea un contor
+    partial, iar workflow-ul iesea cu cod 0. O scriere incompleta arata ca
+    succes. Pentru date de shadow care trebuie sa fie complete si auditabile,
+    asta e inacceptabil — idempotenta e o protectie buna, dar nu inlocuieste o
+    semantica de esec corecta.
+
+    Scrie DOAR in `value_selector_shadow`. Nicio alta tabela, niciun `DELETE`,
+    niciun `UPDATE` direct, niciun `TRUNCATE` — nici macar pentru recuperare
+    dupa un esec partial (recuperarea corecta e rerularea aceluiasi `run_id`)."""
     if not rows:
         return 0
     from database.queries import get_client
 
     client = get_client()
     if client is None:
-        logger.warning("[ValueSelectorShadow] fara client Supabase — nimic persistat.")
-        return 0
+        raise ShadowPersistError(
+            f"fara client Supabase, dar sunt {len(rows)} randuri de persistat — "
+            "rularea nu are voie sa raporteze succes fara sa fi scris nimic")
 
     scrise = 0
-    for start in range(0, len(rows), 500):
-        lot = list(rows[start:start + 500])
+    total_loturi = (len(rows) + DIMENSIUNE_LOT - 1) // DIMENSIUNE_LOT
+    for index, start in enumerate(range(0, len(rows), DIMENSIUNE_LOT), start=1):
+        lot = list(rows[start:start + DIMENSIUNE_LOT])
         try:
-            client.table(SHADOW_TABLE).upsert(
-                lot, on_conflict="run_id,policy_id,fixture_id,selection_code"
-            ).execute()
-            scrise += len(lot)
+            client.table(SHADOW_TABLE).upsert(lot, on_conflict=CHEIE_NATURALA).execute()
         except Exception as exc:
-            logger.warning("[ValueSelectorShadow] upsert esuat pentru %d randuri: %s",
-                           len(lot), exc)
+            run_ids = sorted({r.get("run_id") for r in lot})
+            politici = sorted({r.get("policy_id") for r in lot})
+            logger.error(
+                "[ValueSelectorShadow] lotul %d/%d a esuat (offset=%d, randuri=%d, "
+                "scrise pana acum=%d, run_id=%s, policy_id=%s): %s",
+                index, total_loturi, start, len(lot), scrise, run_ids, politici, exc,
+            )
+            raise ShadowPersistError(
+                f"lotul {index}/{total_loturi} a esuat dupa {scrise} randuri deja "
+                f"scrise; rularea e INCOMPLETA. Recuperare: rerularea aceluiasi "
+                f"run_id, care converge prin upsert. Nu se sterge nimic."
+            ) from exc
+        scrise += len(lot)
     return scrise
 
 

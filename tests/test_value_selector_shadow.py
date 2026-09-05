@@ -626,3 +626,184 @@ def test_predictia_cea_mai_veche_ramane_cea_aleasa():
 
     ales = _load_predictions(_TabelaFalsa([noua, veche]), ["fx"])
     assert ales["fx"]["prediction_time"] == "2026-09-01T03:00:00+00:00"
+
+
+# ── FAIL-LOUD la persistare (T1-T10) ─────────────────────────────────────────
+# Esecul se simuleaza cu un client fals. NU se produce niciodata o scriere
+# reala, partiala sau nu — scopul e verificarea fluxului de control.
+
+class _ClientFals:
+    """Client Supabase minimal care numara loturile si poate esua la unul anume."""
+
+    def __init__(self, esueaza_la: int | None = None):
+        self.esueaza_la = esueaza_la
+        self.loturi: list[list[dict]] = []
+        self.on_conflict: list[str] = []
+        self.tabele: list[str] = []
+        self.operatii: list[str] = []
+        self._lot_curent: list[dict] = []
+
+    def table(self, nume):
+        self.tabele.append(nume)
+        return self
+
+    def upsert(self, lot, on_conflict=None):
+        self.operatii.append("upsert")
+        self._lot_curent = list(lot)
+        self.on_conflict.append(on_conflict)
+        return self
+
+    def delete(self, *_a, **_k):        # nu trebuie apelat niciodata
+        self.operatii.append("delete")
+        return self
+
+    def update(self, *_a, **_k):
+        self.operatii.append("update")
+        return self
+
+    def execute(self):
+        if self.esueaza_la is not None and len(self.loturi) + 1 == self.esueaza_la:
+            raise RuntimeError("esec simulat de retea")
+        self.loturi.append(self._lot_curent)
+        return type("R", (), {"data": self._lot_curent})()
+
+
+def _randuri_de_test(n: int) -> list[dict]:
+    return [{"run_id": "r", "policy_id": "p@v1:abc", "fixture_id": f"fx-{i}",
+             "selection_code": "1", "model_probability": 0.5} for i in range(n)]
+
+
+def _cu_client(monkeypatch, client):
+    import database.queries as dq
+    monkeypatch.setattr(dq, "get_client", lambda: client)
+
+
+def test_T1_toate_loturile_reusesc_returneaza_totalul(monkeypatch):
+    from value_selector_shadow import persist_rows
+
+    client = _ClientFals()
+    _cu_client(monkeypatch, client)
+    assert persist_rows(_randuri_de_test(1250)) == 1250
+    assert [len(l) for l in client.loturi] == [500, 500, 250]
+
+
+@pytest.mark.parametrize("lot_care_cade, eticheta", [(1, "primul"), (2, "din mijloc"), (3, "ultimul")])
+def test_T2_T3_T4_orice_lot_esuat_propaga_exceptia(monkeypatch, lot_care_cade, eticheta):
+    from value_selector_shadow import ShadowPersistError, persist_rows
+
+    client = _ClientFals(esueaza_la=lot_care_cade)
+    _cu_client(monkeypatch, client)
+    with pytest.raises(ShadowPersistError) as exc:
+        persist_rows(_randuri_de_test(1250))
+
+    assert "INCOMPLETA" in str(exc.value)
+    assert exc.value.__cause__ is not None          # cauza originala se pastreaza
+    # fail-fast: nu se mai incearca loturile de dupa cel esuat
+    assert len(client.loturi) == lot_care_cade - 1
+
+
+def test_T5_rularea_nu_poate_raporta_succes_dupa_o_exceptie_de_persistare(monkeypatch):
+    """`run()` nu prinde exceptia, deci procesul iese cu cod != 0 si workflow-ul
+    devine ROSU — nu verde cu date partiale."""
+    import value_selector_shadow as vss
+
+    monkeypatch.setattr(vss, "is_shadow_logging_enabled", lambda: True)
+    monkeypatch.setattr(vss, "load_inputs", lambda **kw: ([make_row()], {"retinute": 1}))
+    _cu_client(monkeypatch, _ClientFals(esueaza_la=1))
+
+    with pytest.raises(vss.ShadowPersistError):
+        vss.run(now=MOMENT)
+
+
+def test_T5b_fara_client_dar_cu_randuri_de_scris_se_arunca(monkeypatch):
+    """Altfel rularea ar iesi verde fara sa fi scris nimic."""
+    from value_selector_shadow import ShadowPersistError, persist_rows
+
+    _cu_client(monkeypatch, None)
+    with pytest.raises(ShadowPersistError):
+        persist_rows(_randuri_de_test(10))
+
+
+def test_T5c_lista_goala_ramane_un_zero_legitim(monkeypatch):
+    from value_selector_shadow import persist_rows
+
+    _cu_client(monkeypatch, _ClientFals())
+    assert persist_rows([]) == 0
+
+
+def test_T6_dimensiunea_lotului_ramane_500():
+    from value_selector_shadow import DIMENSIUNE_LOT
+
+    assert DIMENSIUNE_LOT == 500
+
+
+def test_T7_cheia_naturala_ramane_neschimbata(monkeypatch):
+    from value_selector_shadow import CHEIE_NATURALA, persist_rows
+
+    assert CHEIE_NATURALA == "run_id,policy_id,fixture_id,selection_code"
+    client = _ClientFals()
+    _cu_client(monkeypatch, client)
+    persist_rows(_randuri_de_test(600))
+    assert set(client.on_conflict) == {"run_id,policy_id,fixture_id,selection_code"}
+
+
+def test_T8_nicio_operatie_distructiva_pentru_recuperare(monkeypatch):
+    """Nici la succes, nici la esec nu se apeleaza delete/update, si nu exista
+    DELETE/TRUNCATE in codul runner-ului."""
+    from value_selector_shadow import ShadowPersistError, persist_rows
+
+    client = _ClientFals()
+    _cu_client(monkeypatch, client)
+    persist_rows(_randuri_de_test(600))
+    assert set(client.operatii) == {"upsert"}
+    assert set(client.tabele) == {SHADOW_TABLE}
+
+    client_esec = _ClientFals(esueaza_la=1)
+    _cu_client(monkeypatch, client_esec)
+    with pytest.raises(ShadowPersistError):
+        persist_rows(_randuri_de_test(600))
+    assert set(client_esec.operatii) == {"upsert"}
+
+    apelate = _nume_apelate(RUNNER.read_text(encoding="utf-8"))
+    assert not (apelate & {"delete", "truncate", "drop"})
+
+
+def test_T9_rerularea_aceluiasi_run_id_ramane_idempotenta(monkeypatch):
+    """Aceleasi randuri, scrise de doua ori: acelasi upsert, aceeasi cheie,
+    nicio operatie de stergere intre ele."""
+    from value_selector_shadow import persist_rows
+
+    randuri = _randuri_de_test(300)
+    client = _ClientFals()
+    _cu_client(monkeypatch, client)
+    assert persist_rows(randuri) == 300
+    assert persist_rows(randuri) == 300
+    assert client.loturi[0] == client.loturi[1]
+    assert set(client.operatii) == {"upsert"}
+
+
+def test_T10_runnerul_nu_atinge_niciun_modul_upstream():
+    """Aceeasi garda ca la F1, reverificata dupa corectie."""
+    arbore = ast.parse(RUNNER.read_text(encoding="utf-8"))
+    module: set[str] = set()
+    for nod in ast.walk(arbore):
+        if isinstance(nod, ast.Import):
+            module.update(a.name.split(".")[0] for a in nod.names)
+        elif isinstance(nod, ast.ImportFrom) and nod.module:
+            module.add(nod.module.split(".")[0])
+    interzise = {"oracle_engine", "oracle_api", "feature_engine", "ml_predictor",
+                 "recalibration", "shadow_testing", "supabase_client", "app"}
+    assert not (module & interzise)
+
+
+def test_docstringul_nu_mai_pretinde_atomicitate_la_nivel_de_rulare():
+    """Formularea veche, `Upsert atomic pe cheia naturala`, putea fi citita ca
+    atomicitate globala. Garda verifica textul, pentru ca aici exact textul e
+    contractul care se comunica mai departe."""
+    import inspect
+    import value_selector_shadow as vss
+
+    doc = inspect.getdoc(vss.persist_rows) or ""
+    assert "Upsert atomic pe cheia naturala" not in doc
+    assert "atomicitatea la nivel de RULARE nu e garantata" in doc.replace("\n", " ")
+    assert "FAIL-FAST" in doc.upper()
