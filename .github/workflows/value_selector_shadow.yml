@@ -1,0 +1,69 @@
+name: Football Oracle — Value Selector Shadow (ADR-071 F2)
+
+# Colectare prospectivă pentru experimentul de politică de selecție (ADR-071,
+# faza F2). NU schimbă nimic pentru utilizator: nu activează Top Value Bets, nu
+# atinge nicio predicție, nicio cotă și niciun rând existent. Rulează cele 13
+# profile în paralel pe aceleași intrări și scrie exclusiv în tabela proprie
+# `value_selector_shadow`.
+#
+# Gatat de `value_selector_shadow_logging_enabled` (model_config), implicit
+# FALSE (North Star #3). Cât timp flagul e stins, jobul pornește, constată că e
+# oprit și iese în câteva secunde — cost aproape zero, dar cadența e deja
+# stabilită și verificabilă.
+#
+# Oră: 09:40 UTC. Aleasă deliberat:
+#   - DUPĂ `sync_pre_match_odds` (08:00 UTC, plafon 60 min) — cotele zilei
+#     trebuie să fie deja persistate în `odds_history` când citim;
+#   - fără coliziune la minut cu `live_sync`/`consensus_validation` (09:00 și
+#     09:20 UTC) sau `flashscore_extra_leagues` (10:30 UTC), aceeași disciplină
+#     „fără suprapunere prin programare" aplicată în tot proiectul.
+#
+# Întârzierile cozii GitHub (documentate, până la 11-12h în perioade de
+# throttling) NU falsifică experimentul: `evaluated_at` e persistat per rând,
+# iar prospețimea predicției și `leakage_suspect` se calculează față de el.
+# O rulare întârziată se vede în date, nu se ascunde.
+
+on:
+  schedule:
+    - cron: "40 9 * * *"
+  workflow_dispatch:
+    inputs:
+      days_ahead:
+        description: "Câte zile înainte se evaluează (implicit 1 = ziua curentă)"
+        required: false
+        default: "1"
+      dry_run:
+        description: "true = calculează și raportează, fără să scrie nimic"
+        required: false
+        default: "false"
+
+concurrency:
+  group: value-selector-shadow
+  cancel-in-progress: false
+
+jobs:
+  value-selector-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run value selector shadow collection
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          python -m value_selector_shadow \
+            --days-ahead "${{ github.event.inputs.days_ahead || '1' }}" \
+            ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
