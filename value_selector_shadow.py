@@ -355,7 +355,7 @@ def _load_predictions(client, fixture_ids: Sequence[str]) -> dict[str, dict]:
     try:
         rows = (
             client.table("shadow_predictions")
-            .select("fixture_id,prediction_time,prob_home,prob_draw,prob_away")
+            .select("id,fixture_id,prediction_time,prob_home,prob_draw,prob_away")
             .eq("experiment_name", EXPERIMENT_NAME)
             .eq("experiment_group", EXPERIMENT_GROUP)
             .eq("processing_stage", PROCESSING_STAGE)
@@ -367,24 +367,29 @@ def _load_predictions(client, fixture_ids: Sequence[str]) -> dict[str, dict]:
         logger.warning("[ValueSelectorShadow] citire shadow_predictions esuata: %s", exc)
         return {}
 
+    # Ordonare explicita inainte de alegere: Supabase nu garanteaza ordinea
+    # randurilor, iar la egalitate de `prediction_time` "primul intalnit" ar
+    # depinde de acea ordine. Cheia secundara `id` face alegerea reproductibila.
     best: dict[str, dict] = {}
-    for row in rows:
+    for row in sorted(rows, key=lambda r: (str(r.get("prediction_time") or ""), r.get("id") or 0)):
         fid = row.get("fixture_id")
-        if not fid:
-            continue
-        curent = best.get(fid)
-        if curent is None or str(row.get("prediction_time") or "") < str(curent.get("prediction_time") or ""):
+        if fid and fid not in best:
             best[fid] = row
     return best
 
 
 def _load_odds(client, fixture_ids: Sequence[str]) -> dict[str, dict]:
     """Cote persistate: `opening_*` preferat (capturat cel mai devreme, deci
-    cel mai sigur anterior startului), cu `closing_*` doar ca rezerva."""
+    cel mai sigur anterior startului), cu `closing_*` doar ca rezerva.
+
+    Cand un meci are cote de la mai multe case, alegerea trebuie sa fie
+    REPRODUCTIBILA: Supabase nu garanteaza ordinea randurilor, deci "prima casa
+    intalnita" ar putea diferi intre doua rulari pe aceleasi date. Se ordoneaza
+    explicit dupa `id` (cheia primara) inainte de alegere."""
     try:
         rows = (
             client.table("odds_history")
-            .select("fixture_id,bookmaker,opening_home,opening_draw,opening_away,"
+            .select("id,fixture_id,bookmaker,opening_home,opening_draw,opening_away,"
                     "closing_home,closing_draw,closing_away")
             .in_("fixture_id", list(fixture_ids))
             .execute()
@@ -394,7 +399,7 @@ def _load_odds(client, fixture_ids: Sequence[str]) -> dict[str, dict]:
         return {}
 
     best: dict[str, dict] = {}
-    for row in rows:
+    for row in sorted(rows, key=lambda r: r.get("id") or 0):
         fid = row.get("fixture_id")
         if not fid or fid in best:
             continue

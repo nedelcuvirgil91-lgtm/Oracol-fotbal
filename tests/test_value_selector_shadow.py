@@ -554,3 +554,75 @@ def test_load_inputs_intoarce_si_contoare_de_excludere():
                    "predictie_dupa_kickoff", "retinute", "gasite"):
         assert contor in sursa, f"contor lipsa la incarcare: {contor}"
     assert 'kickoff <= moment' in sursa, "lipseste garda pe momentul exact"
+
+
+# ── Determinism la alegerea sursei (citire) ──────────────────────────────────
+
+class _TabelaFalsa:
+    """Client Supabase minimal, care intoarce randurile in ordinea data — ca sa
+    putem demonstra ca alegerea NU depinde de ordinea de sosire."""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def table(self, _name):
+        return self
+
+    def select(self, *_a, **_k):
+        return self
+
+    def eq(self, *_a, **_k):
+        return self
+
+    def in_(self, *_a, **_k):
+        return self
+
+    def is_(self, *_a, **_k):
+        return self
+
+    def execute(self):
+        return type("R", (), {"data": list(self._rows)})()
+
+
+def test_alegerea_casei_de_pariuri_nu_depinde_de_ordinea_randurilor():
+    """Un meci cu doua case de pariuri trebuie sa produca aceeasi cota
+    indiferent de ordinea in care Supabase intoarce randurile."""
+    from value_selector_shadow import _load_odds
+
+    a = {"id": 10, "fixture_id": "fx", "bookmaker": "Alfa",
+         "opening_home": 2.0, "opening_draw": 3.4, "opening_away": 3.9,
+         "closing_home": None, "closing_draw": None, "closing_away": None}
+    b = {"id": 20, "fixture_id": "fx", "bookmaker": "Beta",
+         "opening_home": 2.2, "opening_draw": 3.2, "opening_away": 3.7,
+         "closing_home": None, "closing_draw": None, "closing_away": None}
+
+    intr_un_sens = _load_odds(_TabelaFalsa([a, b]), ["fx"])
+    in_celalalt = _load_odds(_TabelaFalsa([b, a]), ["fx"])
+
+    assert intr_un_sens == in_celalalt
+    assert intr_un_sens["fx"]["bookmaker"] == "Alfa"     # id-ul mai mic castiga
+
+
+def test_alegerea_predictiei_nu_depinde_de_ordinea_randurilor():
+    """La egalitate de `prediction_time`, alegerea trebuie sa fie tot stabila."""
+    from value_selector_shadow import _load_predictions
+
+    a = {"id": 10, "fixture_id": "fx", "prediction_time": "2026-09-02T03:00:00+00:00",
+         "prob_home": 0.5, "prob_draw": 0.25, "prob_away": 0.25}
+    b = {"id": 20, "fixture_id": "fx", "prediction_time": "2026-09-02T03:00:00+00:00",
+         "prob_home": 0.4, "prob_draw": 0.30, "prob_away": 0.30}
+
+    assert _load_predictions(_TabelaFalsa([a, b]), ["fx"]) == \
+           _load_predictions(_TabelaFalsa([b, a]), ["fx"])
+
+
+def test_predictia_cea_mai_veche_ramane_cea_aleasa():
+    from value_selector_shadow import _load_predictions
+
+    veche = {"id": 99, "fixture_id": "fx", "prediction_time": "2026-09-01T03:00:00+00:00",
+             "prob_home": 0.5, "prob_draw": 0.25, "prob_away": 0.25}
+    noua = {"id": 1, "fixture_id": "fx", "prediction_time": "2026-09-03T03:00:00+00:00",
+            "prob_home": 0.4, "prob_draw": 0.30, "prob_away": 0.30}
+
+    ales = _load_predictions(_TabelaFalsa([noua, veche]), ["fx"])
+    assert ales["fx"]["prediction_time"] == "2026-09-01T03:00:00+00:00"
