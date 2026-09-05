@@ -435,3 +435,67 @@ def test_rularea_cu_flagul_oprit_nu_face_nimic(monkeypatch):
     monkeypatch.setattr(vss, "is_shadow_logging_enabled", lambda: False)
     raport = vss.run()
     assert raport == {"enabled": False, "candidates": 0, "rows": 0, "persisted": 0}
+
+
+# ── Concordanta cod <-> schema migrarii (post-migration guard) ───────────────
+
+MIGRARE = (Path(__file__).resolve().parent.parent / "database" / "migrations"
+           / "055_value_selector_shadow.sql")
+
+
+def _coloane_din_migrare(sql: str) -> set[str]:
+    """Numele coloanelor declarate in CREATE TABLE. Parsare a corpului dintre
+    prima paranteza si `UNIQUE (`, ignorand liniile de comentariu — o coloana
+    mentionata doar intr-un comentariu nu conteaza ca declarata."""
+    corp = sql.split("CREATE TABLE IF NOT EXISTS value_selector_shadow (", 1)[1]
+    corp = corp.split("UNIQUE (", 1)[0]
+    coloane: set[str] = set()
+    for linie in corp.splitlines():
+        linie = linie.strip()
+        if not linie or linie.startswith("--"):
+            continue
+        primul = linie.split()[0]
+        if primul.isidentifier():
+            coloane.add(primul)
+    return coloane
+
+
+def test_toate_cheile_scrise_de_runner_exista_ca_coloane_in_migrare():
+    """Fara aceasta garda, o cheie in plus ar face `upsert` sa esueze in
+    productie — iar esecul e doar logat ca avertisment, deci ar trece
+    neobservat pana la evaluarea F3, cu date lipsa."""
+    candidaturi = candidates_from_rows([make_row()], evaluated_at=MOMENT)
+    rows = build_rows_for_all_profiles(candidaturi, run_id="r", evaluated_at=MOMENT)
+
+    scrise = set(rows[0])
+    declarate = _coloane_din_migrare(MIGRARE.read_text(encoding="utf-8"))
+    lipsa = scrise - declarate
+    assert not lipsa, f"runner-ul scrie chei fara coloana in migrare: {sorted(lipsa)}"
+
+
+def test_migrarea_declara_coloanele_generate_de_baza_de_date():
+    declarate = _coloane_din_migrare(MIGRARE.read_text(encoding="utf-8"))
+    assert {"id", "created_at"} <= declarate
+    assert len(declarate) == 41
+
+
+def test_garda_de_schema_chiar_prinde_o_coloana_lipsa():
+    """CONTRA-TEST: garda trebuie sa vada absenta reala, nu sa treaca vida."""
+    fals = ("CREATE TABLE IF NOT EXISTS value_selector_shadow (\n"
+            "    id BIGINT PRIMARY KEY,\n"
+            "    -- policy_family TEXT,   (doar comentariu, nu declaratie)\n"
+            "    run_id TEXT NOT NULL,\n"
+            "    UNIQUE (run_id)\n);")
+    coloane = _coloane_din_migrare(fals)
+    assert coloane == {"id", "run_id"}
+    assert "policy_family" not in coloane
+
+
+def test_migrarea_are_RLS_si_nicio_policy_publica():
+    sql = MIGRARE.read_text(encoding="utf-8")
+    doar_cod = "\n".join(l for l in sql.splitlines() if not l.strip().startswith("--"))
+    assert "ENABLE ROW LEVEL SECURITY" in doar_cod
+    assert "CREATE POLICY" not in doar_cod
+    for periculos in ("DROP ", "DELETE ", "TRUNCATE", "ALTER TABLE match_history",
+                      "ALTER TABLE odds_history", "ALTER TABLE shadow_predictions"):
+        assert periculos not in doar_cod, f"migrarea contine operatie interzisa: {periculos}"
