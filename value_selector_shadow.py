@@ -256,19 +256,30 @@ def to_db_rows(payload: Sequence[dict], *, policy: SelectorPolicy, family: str) 
 
 # ── Citire (read-only) ───────────────────────────────────────────────────────
 
-def load_inputs(*, days_ahead: int = 1, now: datetime | None = None) -> list[dict]:
+def load_inputs(*, days_ahead: int = 1,
+                now: datetime | None = None) -> tuple[list[dict], dict[str, int]]:
     """Meciurile din fereastra ceruta, imbinate cu cea mai VECHE predictie de
     control si cu cotele persistate. Strict read-only.
 
-    Doar meciuri viitoare la momentul citirii si doar predictii facute inaintea
-    loviturii de start — garda de scurgere temporala se aplica la sursa, nu doar
-    la evaluare."""
+    Doua garzi de scurgere temporala, aplicate la SURSA, nu doar la evaluare:
+      1. meciul trebuie sa fie inca in viitor la momentul evaluarii — filtrul de
+         baza de date e pe DATA (ieftin, indexat), dar comparatia fina se face
+         pe momentul exact, altfel un meci de azi-dimineata ar intra in set si
+         ar produce `leakage_suspect=true`;
+      2. predictia trebuie sa fie anterioara loviturii de start.
+
+    Intoarce (randuri, contoare) — contoarele explica exact cate meciuri au fost
+    excluse si de ce, ca diferenta dintre ce exista si ce s-a evaluat sa nu fie
+    niciodata o cifra neexplicata."""
     from database.queries import get_client
+
+    contoare = {"gasite": 0, "deja_incepute": 0, "fara_predictie": 0,
+                "fara_cote": 0, "predictie_dupa_kickoff": 0, "retinute": 0}
 
     client = get_client()
     if client is None:
         logger.warning("[ValueSelectorShadow] fara client Supabase — nimic de citit.")
-        return []
+        return [], contoare
 
     moment = now or datetime.now(timezone.utc)
     limita = moment + timedelta(days=days_ahead)
@@ -285,11 +296,12 @@ def load_inputs(*, days_ahead: int = 1, now: datetime | None = None) -> list[dic
         ).data or []
     except Exception as exc:
         logger.warning("[ValueSelectorShadow] citire match_history esuata: %s", exc)
-        return []
+        return [], contoare
 
+    contoare["gasite"] = len(meciuri)
     fixture_ids = [m["fixture_id"] for m in meciuri if m.get("fixture_id")]
     if not fixture_ids:
-        return []
+        return [], contoare
 
     predictii = _load_predictions(client, fixture_ids)
     cote = _load_odds(client, fixture_ids)
@@ -297,14 +309,26 @@ def load_inputs(*, days_ahead: int = 1, now: datetime | None = None) -> list[dic
     randuri: list[dict] = []
     for meci in meciuri:
         fid = meci["fixture_id"]
-        predictie = predictii.get(fid)
-        cota = cote.get(fid)
-        if not predictie or not cota:
-            continue
         kickoff = _parse_ts(meci.get("kickoff_date"))
+        # Garda 1: meciul trebuie sa fie inca in viitor. Filtrul de mai sus e pe
+        # DATA, deci un meci de azi-dimineata ar trece de el.
+        if kickoff is None or kickoff <= moment:
+            contoare["deja_incepute"] += 1
+            continue
+        predictie = predictii.get(fid)
+        if not predictie:
+            contoare["fara_predictie"] += 1
+            continue
+        cota = cote.get(fid)
+        if not cota:
+            contoare["fara_cote"] += 1
+            continue
         predicted = _parse_ts(predictie.get("prediction_time"))
-        if kickoff is None or predicted is None or predicted >= kickoff:
-            continue        # garda de scurgere temporala, la sursa
+        # Garda 2: predictia trebuie sa fie anterioara loviturii de start.
+        if predicted is None or predicted >= kickoff:
+            contoare["predictie_dupa_kickoff"] += 1
+            continue
+        contoare["retinute"] += 1
         randuri.append({
             "fixture_id": fid,
             "home_team": meci.get("home_team"),
@@ -322,7 +346,7 @@ def load_inputs(*, days_ahead: int = 1, now: datetime | None = None) -> list[dic
             "odds_away": cota.get("away"),
             "bookmaker": cota.get("bookmaker"),
         })
-    return randuri
+    return randuri, contoare
 
 
 def _load_predictions(client, fixture_ids: Sequence[str]) -> dict[str, dict]:
@@ -431,25 +455,35 @@ def build_rows_for_all_profiles(candidates: Sequence[SelectionCandidate], *,
     return rows
 
 
-def run(*, days_ahead: int = 1, now: datetime | None = None, dry_run: bool = False) -> dict:
-    """Punctul de intrare al rularii zilnice. Gatat de
+def run(*, days_ahead: int = 1, now: datetime | None = None, dry_run: bool = False,
+        force: bool = False) -> dict:
+    """Punctul de intrare al rularii. Gatat de
     `value_selector_shadow_logging_enabled` — implicit OPRIT (North Star #3).
 
-    `dry_run=True` face tot calculul si raporteaza, dar nu scrie nimic."""
-    if not is_shadow_logging_enabled():
+    `dry_run=True` face tot calculul si raporteaza, dar nu scrie nimic.
+
+    `force=True` ocoleste DOAR verificarea flagului, pentru o rulare manuala
+    unica, autorizata explicit. Nu schimba nimic altceva: nu activeaza niciun
+    flag, nu atinge configuratia, nu deblocheaza UI-ul. Calea programata
+    (cron) NU il foloseste niciodata — invariant verificat prin test, ca o
+    rulare automata sa nu poata ocoli gate-ul din greseala."""
+    if not (force or is_shadow_logging_enabled()):
         logger.info("[ValueSelectorShadow] flag oprit — nicio colectare.")
         return {"enabled": False, "candidates": 0, "rows": 0, "persisted": 0}
 
     moment = now or datetime.now(timezone.utc)
     run_id = moment.strftime("%Y-%m-%dT%H:%MZ")
 
-    randuri_brute = load_inputs(days_ahead=days_ahead, now=moment)
+    randuri_brute, contoare = load_inputs(days_ahead=days_ahead, now=moment)
     candidaturi = candidates_from_rows(randuri_brute, evaluated_at=moment)
     rows = build_rows_for_all_profiles(candidaturi, run_id=run_id, evaluated_at=moment)
 
     persistate = 0 if dry_run else persist_rows(rows)
     raport = {
         "enabled": True,
+        "forced": force,
+        "evaluated_at": moment.isoformat(),
+        "input_counters": contoare,
         "run_id": run_id,
         "matches": len(randuri_brute),
         "candidates": len(candidaturi),
@@ -484,6 +518,10 @@ if __name__ == "__main__":  # pragma: no cover
     parser = argparse.ArgumentParser(description="Value Selector Shadow (ADR-071 F2)")
     parser.add_argument("--days-ahead", type=int, default=1)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--force", action="store_true",
+        help="ocoleste DOAR verificarea flagului, pentru o rulare manuala "
+             "autorizata explicit; nu activeaza niciun flag")
     args = parser.parse_args()
-    print(json.dumps(run(days_ahead=args.days_ahead, dry_run=args.dry_run),
-                     indent=2, ensure_ascii=False))
+    print(json.dumps(run(days_ahead=args.days_ahead, dry_run=args.dry_run,
+                         force=args.force), indent=2, ensure_ascii=False))

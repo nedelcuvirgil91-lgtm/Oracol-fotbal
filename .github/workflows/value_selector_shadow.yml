@@ -36,6 +36,15 @@ on:
         description: "true = calculează și raportează, fără să scrie nimic"
         required: false
         default: "false"
+      force:
+        description: >-
+          true = ocolește DOAR verificarea flagului, pentru o rulare manuală
+          autorizată explicit. NU activează niciun flag, NU atinge configurația,
+          NU deblochează UI-ul. Rulările programate nu îl pot folosi:
+          github.event.inputs e gol la cron, deci expresia de mai jos produce
+          șir vid și argumentul nu ajunge niciodată în linia de comandă.
+        required: false
+        default: "false"
 
 concurrency:
   group: value-selector-shadow
@@ -66,4 +75,5 @@ jobs:
         run: |
           python -m value_selector_shadow \
             --days-ahead "${{ github.event.inputs.days_ahead || '1' }}" \
-            ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }}
+            ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }} \
+            ${{ github.event.inputs.force == 'true' && '--force' || '' }}

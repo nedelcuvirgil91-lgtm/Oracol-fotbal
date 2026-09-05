@@ -499,3 +499,58 @@ def test_migrarea_are_RLS_si_nicio_policy_publica():
     for periculos in ("DROP ", "DELETE ", "TRUNCATE", "ALTER TABLE match_history",
                       "ALTER TABLE odds_history", "ALTER TABLE shadow_predictions"):
         assert periculos not in doar_cod, f"migrarea contine operatie interzisa: {periculos}"
+
+
+# ── Rulare manuala fortata: doar gate-ul de flag, nimic altceva ──────────────
+
+def test_forta_ocoleste_doar_verificarea_flagului(monkeypatch):
+    """`force=True` nu activeaza niciun flag si nu atinge configuratia — doar
+    permite unei rulari manuale autorizate sa treaca de gate."""
+    import value_selector_shadow as vss
+
+    monkeypatch.setattr(vss, "is_shadow_logging_enabled", lambda: False)
+    monkeypatch.setattr(vss, "load_inputs", lambda **kw: ([], {"gasite": 0, "retinute": 0}))
+
+    fara = vss.run()
+    assert fara["enabled"] is False
+
+    cu = vss.run(force=True, dry_run=True)
+    assert cu["enabled"] is True and cu["forced"] is True and cu["persisted"] == 0
+
+
+def test_calea_programata_nu_poate_forta_niciodata():
+    """Invariant de workflow: `--force` apare doar sub o expresie legata de
+    `github.event.inputs`, care e goala la rularile de cron. O rulare automata
+    nu poate ocoli gate-ul din greseala."""
+    wf = (Path(__file__).resolve().parent.parent / ".github" / "workflows"
+          / "value_selector_shadow.yml").read_text(encoding="utf-8")
+    doar_cod = "\n".join(l for l in wf.splitlines() if not l.strip().startswith("#"))
+
+    linii_cu_force = [l for l in doar_cod.splitlines() if "--force" in l]
+    assert linii_cu_force, "workflow-ul nu mai expune deloc --force"
+    for linie in linii_cu_force:
+        assert "github.event.inputs.force == 'true'" in linie, (
+            f"--force apare neconditionat de input manual: {linie.strip()}")
+
+
+def test_flagul_de_colectare_ramane_oprit_indiferent_de_forta():
+    """Forta nu scrie nimic in configuratie — verificat pe cod, nu presupus."""
+    sursa = RUNNER.read_text(encoding="utf-8")
+    apelate = _nume_apelate(sursa)
+    assert "save_config" not in apelate and "update_config" not in apelate
+    assert "set_config" not in apelate
+
+
+# ── Garzi de scurgere temporala la incarcare ─────────────────────────────────
+
+def test_load_inputs_intoarce_si_contoare_de_excludere():
+    """Diferenta dintre meciurile gasite si cele evaluate nu are voie sa fie o
+    cifra neexplicata — fiecare excludere are contorul ei."""
+    import inspect
+    import value_selector_shadow as vss
+
+    sursa = inspect.getsource(vss.load_inputs)
+    for contor in ("deja_incepute", "fara_predictie", "fara_cote",
+                   "predictie_dupa_kickoff", "retinute", "gasite"):
+        assert contor in sursa, f"contor lipsa la incarcare: {contor}"
+    assert 'kickoff <= moment' in sursa, "lipseste garda pe momentul exact"
