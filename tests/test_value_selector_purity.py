@@ -276,3 +276,66 @@ def test_clasa_de_calitate_insuficienta_ramane_sincronizata_cu_sursa_canonica():
     assert {oracle_engine.DATA_QUALITY_LIVE, oracle_engine.DATA_QUALITY_PARTIAL,
             oracle_engine.DATA_QUALITY_ELO, oracle_engine.DATA_QUALITY_NEUTRAL} == {
         "live", "partial", "elo", "neutral"}
+
+
+# ── Rezolvarea profilului numit (ADR-071 §10) ────────────────────────────────
+# Garda nascuta dintr-un defect real, prins la un pas de activarea in
+# productie: `build_policy()` construia politica din chei individuale, deci a
+# scrie doar `value_selector_policy_profile = "shrunk_050"` producea o politica
+# NUMITA shrunk_050 dar identica comportamental cu legacy (amprenta 5555df84 in
+# loc de 32ccbf4a). Ecranul ar fi aratat aceleasi 48 de meciuri sub un nume
+# care pretindea altceva, iar UI-ul si experimentul shadow ar fi masurat lucruri
+# diferite fara niciun semnal.
+
+def test_fiecare_profil_numit_se_rezolva_identic_cu_catalogul():
+    """Invariantul care lipsea. Pentru ORICE profil din catalog, politica pe
+    care o construieste configuratia trebuie sa aiba aceeasi amprenta cu cea
+    pe care o foloseste colectorul shadow — altfel UI-ul si experimentul nu
+    mai sunt comparabile."""
+    from value_selector_config import F2_PROFILES, build_policy
+
+    for nume, canonic in F2_PROFILES.items():
+        produs = build_policy({"value_selector_policy_profile": nume})
+        assert produs == canonic, f"profilul {nume} nu se rezolva din catalog"
+        assert produs.policy_id == canonic.policy_id, (
+            f"{nume}: amprenta UI {produs.policy_id} != amprenta shadow "
+            f"{canonic.policy_id}")
+
+
+def test_profilul_numit_ignora_cheile_individuale():
+    """Un profil canonic e un tot. O cheie ramasa din alta configuratie nu are
+    voie sa-i schimbe tacit comportamentul pastrandu-i numele."""
+    from value_selector_config import F2_PROFILES, build_policy
+
+    produs = build_policy({
+        "value_selector_policy_profile": "shrunk_050",
+        "value_selector_top_n_matches": 99,
+        "value_selector_require_rank_one": False,
+        "value_selector_shrinkage_w": 1.0,
+    })
+    assert produs == F2_PROFILES["shrunk_050"]
+    assert produs.top_n_matches == 5
+    assert produs.require_rank_one is True
+    assert produs.shrinkage_w == 0.5
+
+
+def test_configuratia_implicita_ramane_legacy():
+    from value_selector import LEGACY_POLICY
+    from value_selector_config import build_policy
+
+    assert build_policy({}) == LEGACY_POLICY
+
+
+def test_un_profil_necunoscut_se_construieste_camp_cu_camp():
+    """Flexibilitatea nu se pierde: o politica ad-hoc, care nu e in catalog,
+    ramane posibila fara cod nou."""
+    from value_selector_config import build_policy
+
+    produs = build_policy({
+        "value_selector_policy_profile": "experiment_ad_hoc",
+        "value_selector_require_rank_one": True,
+        "value_selector_top_n_matches": 3,
+    })
+    assert produs.profile == "experiment_ad_hoc"
+    assert produs.require_rank_one is True
+    assert produs.top_n_matches == 3

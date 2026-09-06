@@ -77,8 +77,26 @@ def _opt_int(value: object) -> int | None:
 
 def build_policy(config: dict | None = None) -> SelectorPolicy:
     """Construieste politica din `model_config`. Cu valorile implicite intoarce
-    `LEGACY_POLICY` — invariant verificat de teste."""
+    `LEGACY_POLICY` — invariant verificat de teste.
+
+    Un nume de profil din catalogul canonic (`F2_PROFILES`) se rezolva INTREG
+    de acolo, ignorand cheile individuale. Fara asta, a scrie doar
+    `value_selector_policy_profile = "shrunk_050"` producea o politica numita
+    `shrunk_050` dar identica COMPORTAMENTAL cu `legacy` — cu amprenta
+    `5555df84` in loc de `32ccbf4a` — pentru ca toate celelalte campuri
+    ramaneau pe valorile implicite. Un ecran care pretinde un profil si ruleaza
+    altul goleste de sens versionarea din §10 si face incomparabile UI-ul si
+    experimentul shadow (care citeste `F2_PROFILES` direct).
+
+    Un nume necunoscut cade pe constructia camp-cu-camp, deci o politica
+    ad-hoc ramane posibila fara sa fie nevoie de cod nou."""
     cfg = config if config is not None else sb.load_config(_DEFAULT_CONFIG)
+
+    nume = str(cfg.get("value_selector_policy_profile", "legacy") or "legacy")
+    canonic = F2_PROFILES.get(nume)
+    if canonic is not None:
+        return canonic
+
     # `w = 0.0` e o valoare legitima (control market-only), deci nu se poate
     # folosi `or` pentru default — ar transforma 0.0 in 1.0.
     w = _opt_float(cfg.get("value_selector_shrinkage_w"))
