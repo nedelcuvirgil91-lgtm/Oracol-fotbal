@@ -328,6 +328,18 @@ def _handle_monitoring_verdict(
         ar.complete_run(run_id, summary=rezumat)
         return
 
+    # O decizie APROBATĂ, care încă n-a fost executată de Faza C, nu se
+    # repropune. Fără garda asta, fiecare ciclu ar rescrie `evidence`-ul unei
+    # decizii pe care omul a aprobat-o deja — iar omul a aprobat un conținut
+    # anume, nu „ce se va nimeri la execuție". `surface_decision()` e reparat
+    # separat, la nivelul lui, ca invariant; asta e stratul care oprește
+    # zgomotul înainte să se producă.
+    if ar.list_approved_decisions_for_target(target_key):
+        rezumat["expiry_threshold_reached"] = True
+        rezumat["expiry_decision_awaiting_execution"] = True
+        ar.complete_run(run_id, summary=rezumat)
+        return
+
     rezumat["expiry_threshold_reached"] = True
     ar.complete_run(run_id, summary=rezumat)
 

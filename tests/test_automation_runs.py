@@ -319,3 +319,71 @@ def test_list_pending_decisions_shows_surfaced_items(client):
     pending = ar.list_pending_decisions()
     assert len(pending) == 1
     assert pending[0]["id"] == decision_id
+
+
+# ════════════════════════════════════════════════════════════════════════
+# surface_decision — tranziție CONDIȚIONATĂ (regresie, defect real 2026-09-06)
+#
+# `propose_decision()` e idempotentă pe `target_key` și întoarce decizia deja
+# DESCHISĂ dacă există — iar `_OPEN_DECISION_STATUSES` include `approved`. Un
+# producător care propune la fiecare ciclu primea înapoi id-ul unei decizii
+# APROBATE de om, o „surfaca", și o dădea înapoi în `pending`. Aprobarea
+# dispărea tăcut, iar subsistemul proprietar nu mai găsea nimic de executat.
+#
+# Observat live pe calea de expirare a Challenger-ului (ADR-057). Calea de
+# promovare era protejată accidental, cea de rollback e azi inactivă — dar
+# ambele stăteau pe aceeași capcană. Fixul e la nivelul invariantului.
+# ════════════════════════════════════════════════════════════════════════
+
+def _decizie(client, status: str) -> int:
+    store, _ = client._tables.setdefault("decision_feed", ([], client._next_id["decision_feed"]))
+    did = client._next_id["decision_feed"][0]
+    client._next_id["decision_feed"][0] += 1
+    store.append({"id": did, "tier": "T3a", "status": status, "run_id": 1})
+    return did
+
+
+def _status(client, decision_id: int) -> str:
+    store, _ = client._tables["decision_feed"]
+    return next(r["status"] for r in store if r["id"] == decision_id)
+
+
+def test_surface_decision_muta_din_proposed_in_pending(client):
+    did = _decizie(client, "proposed")
+    assert ar.surface_decision(did) is True
+    assert _status(client, did) == "pending"
+
+
+def test_surface_decision_NU_anuleaza_o_aprobare(client):
+    """GARDA CENTRALĂ. Fără ea, următoarea rulare periodică ștergea decizia
+    omului și bloca execuția la nesfârșit, fără niciun semnal."""
+    did = _decizie(client, "approved")
+
+    assert ar.surface_decision(did) is False
+    assert _status(client, did) == "approved", (
+        "o decizie aprobată de om nu are voie să fie împinsă înapoi în pending"
+    )
+
+
+def test_surface_decision_nu_reactiveaza_o_decizie_terminala(client):
+    for stare in ("rejected", "committed", "withdrawn", "commit_failed"):
+        did = _decizie(client, stare)
+        assert ar.surface_decision(did) is False
+        assert _status(client, did) == stare
+
+
+def test_surface_decision_e_idempotenta_pe_pending(client):
+    """A doua chemare nu strică nimic, dar nici nu minte că a schimbat ceva."""
+    did = _decizie(client, "pending")
+    assert ar.surface_decision(did) is False
+    assert _status(client, did) == "pending"
+
+
+def test_celelalte_tranzitii_raman_neconditionate(client):
+    """Fixul e strict pe `surface_decision` — nu schimbă restul ciclului de
+    viață, care are propriile reguli (și propriile teste, mai sus)."""
+    did = _decizie(client, "pending")
+    assert ar.approve_decision(did, resolved_by="owner") is True
+    assert _status(client, did) == "approved"
+    assert ar.commit_decision(did) is True
+    assert _status(client, did) == "committed"

@@ -240,8 +240,29 @@ def propose_decision(
 
 
 def surface_decision(decision_id: int) -> bool:
-    """proposed -> pending (devine vizibil in Decision Feed)."""
-    return _transition_decision(decision_id, {"status": "pending"})
+    """proposed -> pending (devine vizibil in Decision Feed).
+
+    [REPARAT 2026-09-06] Tranzitia era neconditionata, iar docstring-ul de mai
+    sus descria un contract pe care codul nu-l impunea. Consecinta, observata
+    live: `propose_decision()` e idempotenta pe `target_key` si intoarce
+    decizia deja DESCHISA daca exista — iar `_OPEN_DECISION_STATUSES` include
+    `approved`. Deci un producator care propune la fiecare ciclu primea inapoi
+    id-ul unei decizii DEJA APROBATE de om, o "surfacea", si o dadea inapoi in
+    `pending`. Aprobarea omului era anulata tacit de urmatoarea rulare
+    periodica, iar Faza C nu mai gasea nimic de executat.
+
+    S-a manifestat pe calea de expirare (ADR-057), unde nu exista nicio
+    tranzitie FSM care sa opreasca repropunerea. Calea de promovare era
+    protejata accidental (tranzitia SUCCEEDED esueaza la a doua incercare si
+    iese inainte de propunere), iar cea de rollback e azi inactiva
+    (`champion_guardian_proposals_enabled=False`) — dar ambele aveau aceeasi
+    capcana sub ele.
+
+    Fix la nivelul invariantului, nu al unui apelant: `surface_decision` face
+    de acum o tranzitie CONDITIONATA, care se aplica exclusiv unei decizii
+    aflate inca in `proposed`. O decizie aprobata, respinsa, comisa sau
+    retrasa NU mai poate fi impinsa inapoi in `pending` de nimeni."""
+    return _transition_decision(decision_id, {"status": "pending"}, from_status="proposed")
 
 
 def approve_decision(decision_id: int, resolved_by: str) -> bool:
@@ -292,12 +313,29 @@ def resolve_signal(decision_id: int) -> bool:
     return _transition_decision(decision_id, {"status": "resolved", "resolved_at": _now_iso()})
 
 
-def _transition_decision(decision_id: int, payload: dict[str, Any]) -> bool:
+def _transition_decision(decision_id: int, payload: dict[str, Any],
+                          from_status: str | None = None) -> bool:
+    """`from_status` face tranzitia CONDITIONATA: `UPDATE ... WHERE id=? AND
+    status=?`, deci o singura operatie atomica, fara check-then-act (regula de
+    proiect pentru orice scriere). Intoarce False daca decizia nu mai era in
+    starea asteptata — nu ridica exceptie: apelantul afla ca n-a schimbat
+    nimic, iar starea reala ramane cea pe care o pusese altcineva (tipic: omul
+    care a aprobat). Fara `from_status`, comportamentul e cel dinainte."""
     client = get_client()
     if client is None:
         return False
     try:
-        client.table("decision_feed").update(payload).eq("id", decision_id).execute()
+        q = client.table("decision_feed").update(payload).eq("id", decision_id)
+        if from_status is not None:
+            q = q.eq("status", from_status)
+        res = q.execute()
+        if from_status is not None and not (res.data or []):
+            logger.info(
+                "[AutomationRuns] tranzitie decision_id=%s sarita — nu mai era in starea %r "
+                "(o stare ulterioara, pusa de altcineva, nu se suprascrie)",
+                decision_id, from_status,
+            )
+            return False
         return True
     except Exception as exc:
         logger.error("[AutomationRuns] tranzitie decision_id=%s esuata: %s", decision_id, exc)

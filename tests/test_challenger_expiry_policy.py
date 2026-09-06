@@ -422,3 +422,57 @@ def test_rezumatul_ciclului_expune_ambii_contori_de_expirare(rec, monkeypatch):
 
     assert rezultat["expiry_proposed"] == 0
     assert rezultat["expiry_committed"] == 0
+
+
+# ════════════════════════════════════════════════════════════════════════
+# REGRESIE — aprobarea omului nu se anulează la următorul ciclu
+#
+# Defect real, observat live pe 2026-09-06, între aprobare și execuție.
+# `propose_decision()` e idempotentă pe `target_key` și întoarce decizia deja
+# DESCHISĂ dacă există — iar `_OPEN_DECISION_STATUSES` include `approved`.
+# Producătorul primea înapoi id-ul deciziei aprobate de om, o „surfaca", și o
+# dădea în `pending`. Aprobarea dispărea, Faza C nu mai găsea nimic de
+# executat, iar la ciclul următor totul se repeta — blocaj perfect tăcut.
+#
+# Calea de promovare era protejată accidental (tranziția SUCCEEDED eșuează la
+# a doua încercare și iese înainte de propunere); calea de expirare nu avea
+# nicio astfel de plasă, fiindcă deliberat nu atinge FSM-ul.
+# ════════════════════════════════════════════════════════════════════════
+
+def test_nu_se_repropune_cand_o_decizie_aprobata_asteapta_executia(rec, monkeypatch):
+    """GARDA CENTRALĂ a regresiei: cu o decizie aprobată în așteptare, ciclul
+    nu mai propune nimic — deci nu mai are ce să „surfaceze" înapoi."""
+    _config(monkeypatch, challenger_expiry_proposals_enabled=True)
+    _challenger_in_monitoring(monkeypatch, n=506, training_run_id="tr_blocat")
+    monkeypatch.setattr(cl.challenger_manager, "get_challenger",
+                        lambda tid: {"training_run_id": tid, "state": "EVALUATING"})
+    rec.approved_for_target[TARGET] = [
+        {"id": 4, "evidence": {"decision_kind": "expiry", "training_run_id": "tr_blocat"}}
+    ]
+
+    rezultat = cl.run_cycle()
+
+    assert _propuneri(rec) == [], (
+        "o decizie aprobată, neexecutată încă, nu trebuie repropusă — "
+        "repropunerea îi rescrie evidence-ul și îi anulează aprobarea"
+    )
+    assert ("surface_decision", 4) not in rec.calls
+    assert rezultat["expiry_proposed"] == 0
+    # ...dar execuția merge mai departe în același ciclu:
+    assert rezultat["expiry_committed"] == 1
+
+
+def test_starea_de_asteptare_a_executiei_e_consemnata(rec, monkeypatch):
+    _config(monkeypatch, challenger_expiry_proposals_enabled=True)
+    _challenger_in_monitoring(monkeypatch, n=506, training_run_id="tr_blocat")
+    monkeypatch.setattr(cl.challenger_manager, "get_challenger",
+                        lambda tid: {"training_run_id": tid, "state": "EVALUATING"})
+    rec.approved_for_target[TARGET] = [
+        {"id": 4, "evidence": {"decision_kind": "expiry", "training_run_id": "tr_blocat"}}
+    ]
+
+    cl.run_cycle()
+
+    rezumate = [c[2] for c in rec.calls if c[0] == "complete_run" and c[2]]
+    marcate = [s for s in rezumate if s.get("expiry_decision_awaiting_execution")]
+    assert marcate, "starea aprobat-in-curs-de-executie trebuie sa fie vizibila in jurnal"
