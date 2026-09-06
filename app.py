@@ -15,6 +15,7 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+import prediction_cache
 import supabase_client as sb
 
 logger = logging.getLogger(__name__)
@@ -220,8 +221,25 @@ nav = st.session_state["nav"]
 PREDICTION_CACHE_TTL_SECONDS = 900  # 15 min — suficient pt o sesiune de analiză
 
 
+@st.cache_resource(show_spinner=False)
+def _depozit_predictii() -> dict:
+    """Al doilea nivel de cache, PARTAJAT între sesiuni (varianta C).
+
+    `st.session_state` trăiește în memoria unei singure sesiuni de browser: un
+    tab nou, alt dispozitiv sau aplicația readormită pornesc cu cache-ul gol și
+    recalculează de la zero toate meciurile zilei, deși altcineva tocmai
+    plătise acel calcul. `st.cache_resource` garantează o singură instanță per
+    proces, deci sesiunile o împart.
+
+    Logica (expirare, plafon de capacitate) trăiește în `prediction_cache.py`,
+    pur și testabil. Aici e doar depozitul."""
+    return {}
+
+
 def _cache_prediction(fixture_id: str, pred) -> None:
     st.session_state[f"pred_{fixture_id}"] = {"pred": pred, "cached_at": time.time()}
+    prediction_cache.scrie(_depozit_predictii(), fixture_id, pred,
+                           acum=time.time(), ttl=PREDICTION_CACHE_TTL_SECONDS)
 
 
 def _read_cached_prediction(fixture_id: str):
@@ -238,11 +256,15 @@ def _read_fresh_cached_prediction(fixture_id: str, ttl: float = PREDICTION_CACHE
     Dashboard: o predicție prea veche trebuie recalculată, nu doar reafișată,
     ca lista de value bets să nu rămână permanent pe date vechi."""
     entry = st.session_state.get(f"pred_{fixture_id}")
-    if entry is None:
-        return None
-    if time.time() - entry.get("cached_at", 0) > ttl:
-        return None
-    return entry.get("pred")
+    if entry is not None and time.time() - entry.get("cached_at", 0) <= ttl:
+        return entry.get("pred")
+    # Nivelul 2: munca altei sesiuni. Găsit aici, se promovează în sesiunea
+    # curentă, ca următoarele randări să nu mai treacă prin depozitul partajat.
+    partajata = prediction_cache.citeste(_depozit_predictii(), fixture_id,
+                                         acum=time.time(), ttl=ttl)
+    if partajata is not None:
+        st.session_state[f"pred_{fixture_id}"] = {"pred": partajata, "cached_at": time.time()}
+    return partajata
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -914,7 +936,7 @@ if nav == "matches":
 # paralelizare, fără precomputare (optimizări lăsate pentru un sprint separat,
 # dacă timpul de încărcare chiar devine o problemă reală, nu presupusă).
 elif nav == "value_bets":
-    from value_dashboard import collect_value_bets
+    from value_dashboard import collect_value_bets, radar_din_shadow
 
     st.markdown('<div class="section-bar"><div class="section-bar-title">💰 Top Value Bets — Azi</div></div>',
                 unsafe_allow_html=True)
@@ -937,27 +959,41 @@ elif nav == "value_bets":
         st.info("Niciun meci azi în competițiile urmărite.")
     else:
         force_refresh = st.button("🔄 Recalculează tot (ignoră cache-ul)")
+        if force_refresh:
+            prediction_cache.goleste(_depozit_predictii())
+
+        # [ADR-071 §18] Calea rapidă a radarului: rândurile au fost deja
+        # calculate de colectorul de noapte și persistate în
+        # `value_selector_shadow`. Recalcularea live a acelorași cifre ar
+        # însemna zeci de evaluări complete pentru zero informație în plus.
+        # `None` = radar inactiv, fără date pentru ziua asta, sau eroare de
+        # citire — se cade pe calculul live de mai jos, NESCHIMBAT.
+        randuri_radar, radar_calculat_la = (
+            (None, None) if force_refresh else radar_din_shadow(today_iso)
+        )
+        de_analizat = [] if randuri_radar is not None else today_matches
 
         predictions: list = []
         n_reused = n_computed = 0
         cache_hit_times: list[float] = []
         live_compute_times: list[float] = []
         t_loop_start = time.perf_counter()
-        with st.spinner(f"Analizez {len(today_matches)} meciuri de azi..."):
-            for match in today_matches:
-                fid  = match.get("fixture_id", "?")
-                t_match_start = time.perf_counter()
-                pred = None if force_refresh else _read_fresh_cached_prediction(fid)
-                if pred is not None:
-                    n_reused += 1
-                    cache_hit_times.append(time.perf_counter() - t_match_start)
-                else:
-                    pred = engine.evaluate_match(match)
-                    n_computed += 1
-                    live_compute_times.append(time.perf_counter() - t_match_start)
+        if de_analizat:
+            with st.spinner(f"Analizez {len(de_analizat)} meciuri de azi..."):
+                for match in de_analizat:
+                    fid  = match.get("fixture_id", "?")
+                    t_match_start = time.perf_counter()
+                    pred = None if force_refresh else _read_fresh_cached_prediction(fid)
                     if pred is not None:
-                        _cache_prediction(fid, pred)
-                predictions.append(pred)
+                        n_reused += 1
+                        cache_hit_times.append(time.perf_counter() - t_match_start)
+                    else:
+                        pred = engine.evaluate_match(match)
+                        n_computed += 1
+                        live_compute_times.append(time.perf_counter() - t_match_start)
+                        if pred is not None:
+                            _cache_prediction(fid, pred)
+                    predictions.append(pred)
         total_elapsed = time.perf_counter() - t_loop_start
 
         # [ADAUGAT] Mini audit de performanță — doar loguri + Diagnostics, nu
@@ -978,10 +1014,14 @@ elif nav == "value_bets":
             "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
 
-        st.caption(f"{n_reused} din cache · {n_computed} recalculate acum · "
-                   f"TTL cache: {PREDICTION_CACHE_TTL_SECONDS // 60} min")
+        if randuri_radar is not None:
+            st.caption(f"Radar · {len(randuri_radar)} meciuri semnalate din "
+                       f"{len(today_matches)} · calculat la {radar_calculat_la}")
+        else:
+            st.caption(f"{n_reused} din cache · {n_computed} recalculate acum · "
+                       f"TTL cache: {PREDICTION_CACHE_TTL_SECONDS // 60} min")
 
-        rows = collect_value_bets(predictions)
+        rows = randuri_radar if randuri_radar is not None else collect_value_bets(predictions)
 
         if not rows:
             threshold = engine.config.get("value_bet_threshold_pct", 5.0)

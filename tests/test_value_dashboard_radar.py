@@ -276,3 +276,171 @@ def test_politica_moștenită_prin_radar_reproduce_lipsa_plafonului():
     predictii = [_pred_castigator(f"fx{i}", model_home=0.55 + i * 0.02)
                  for i in range(8)]
     assert len(collect_radar_bets(predictii, LEGACY_POLICY)) > 5
+
+
+# ── radar_din_shadow: calea rapidă (ADR-071 §18) ─────────────────────────────
+
+class _Q:
+    def __init__(self, randuri, jurnal):
+        self._r = list(randuri)
+        self._j = jurnal
+
+    def select(self, *a, **k): return self
+    def eq(self, c, v):
+        self._j.append(("eq", c, v)); self._r = [x for x in self._r if x.get(c) == v]; return self
+    def gte(self, c, v):
+        self._r = [x for x in self._r if str(x.get(c, "")) >= v]; return self
+    def lt(self, c, v):
+        self._r = [x for x in self._r if str(x.get(c, "")) < v]; return self
+    def in_(self, c, vals):
+        self._r = [x for x in self._r if x.get(c) in set(vals)]; return self
+    def execute(self):
+        return type("R", (), {"data": self._r})()
+
+
+class _Cl:
+    def __init__(self, tabele):
+        self.tabele = tabele
+        self.jurnal = []
+
+    def table(self, nume):
+        self.jurnal.append(("table", nume))
+        return _Q(self.tabele.get(nume, []), self.jurnal)
+
+
+def _rand_shadow(**kw):
+    baza = {
+        "run_id": "2026-09-06T09:40Z", "fixture_id": "fx1", "league": "Premier League",
+        "kickoff_utc": "2026-09-06T15:00:00+00:00", "market": "1X2",
+        "selection_code": "1", "model_probability": 0.65, "fair_probability": 0.55,
+        "bk_odds": 1.71, "relative_edge_pct": 18.2, "absolute_edge_pp": 10.0,
+        "rank_in_day": 1, "policy_id": "shrunk_050@v1:32ccbf4a", "selected_top": True,
+    }
+    baza.update(kw)
+    return baza
+
+
+@pytest.fixture
+def shadow(monkeypatch):
+    def instaleaza(randuri_shadow, meciuri=None, radar=True):
+        client = _Cl({
+            "value_selector_shadow": randuri_shadow,
+            "match_history": meciuri if meciuri is not None else [
+                {"fixture_id": "fx1", "home_team": "Arsenal", "away_team": "Chelsea"},
+                {"fixture_id": "fx2", "home_team": "Beveren",
+                 "away_team": "Oud-Heverlee Leuven"},
+            ],
+        })
+        import database.queries as dq
+        monkeypatch.setattr(dq, "get_client", lambda: client)
+        monkeypatch.setattr(vd, "_radar_activ", lambda: radar)
+        monkeypatch.setattr("value_selector_config.build_policy", lambda: RADAR)
+        return client
+    return instaleaza
+
+
+def test_radarul_din_shadow_intoarce_randuri_si_ora_rularii(shadow):
+    shadow([_rand_shadow()])
+    randuri, calculat_la = vd.radar_din_shadow("2026-09-06")
+    assert calculat_la == "2026-09-06T09:40Z"
+    (r,) = randuri
+    assert r.home_team == "Arsenal" and r.away_team == "Chelsea"
+    assert r.selection == "Home Win"
+    assert r.bk_odds == 1.71
+    assert r.rating == "+10.0 pp vs piață"
+    assert r.kelly_stake is None
+
+
+def test_echipele_vin_din_match_history_nu_din_despicarea_etichetei(shadow):
+    """`match_label` nu se poate sparge: „Beveren - Oud-Heverlee Leuven" e un
+    caz real din date, cu liniuță în numele echipei."""
+    shadow([_rand_shadow(fixture_id="fx2")])
+    randuri, _ = vd.radar_din_shadow("2026-09-06")
+    assert randuri[0].home_team == "Beveren"
+    assert randuri[0].away_team == "Oud-Heverlee Leuven"
+
+
+def test_se_serveste_rularea_cea_mai_recenta(shadow):
+    shadow([
+        _rand_shadow(run_id="2026-09-05T15:52Z", bk_odds=9.99, rank_in_day=1),
+        _rand_shadow(run_id="2026-09-06T09:40Z", bk_odds=1.71, rank_in_day=1),
+    ])
+    randuri, calculat_la = vd.radar_din_shadow("2026-09-06")
+    assert calculat_la == "2026-09-06T09:40Z"
+    assert len(randuri) == 1 and randuri[0].bk_odds == 1.71
+
+
+def test_ordinea_e_dupa_rank_in_day(shadow):
+    shadow([
+        _rand_shadow(fixture_id="fx2", rank_in_day=2),
+        _rand_shadow(fixture_id="fx1", rank_in_day=1),
+    ])
+    randuri, _ = vd.radar_din_shadow("2026-09-06")
+    assert [r.fixture_id for r in randuri] == ["fx1", "fx2"]
+
+
+def test_filtreaza_pe_politica_activa_si_pe_selectiile_de_top(shadow):
+    client = shadow([_rand_shadow()])
+    vd.radar_din_shadow("2026-09-06")
+    assert ("eq", "policy_id", RADAR.policy_id) in client.jurnal
+    assert ("eq", "selected_top", True) in client.jurnal
+
+
+def test_alta_zi_nu_intoarce_nimic(shadow):
+    shadow([_rand_shadow()])
+    assert vd.radar_din_shadow("2026-09-07") == (None, None)
+
+
+def test_radar_inactiv_nu_citeste_nimic(shadow):
+    client = shadow([_rand_shadow()], radar=False)
+    assert vd.radar_din_shadow("2026-09-06") == (None, None)
+    assert client.jurnal == []
+
+
+def test_fara_randuri_cade_pe_calculul_live(shadow):
+    shadow([])
+    assert vd.radar_din_shadow("2026-09-06") == (None, None)
+
+
+def test_fara_client_supabase_cade_pe_calculul_live(monkeypatch):
+    import database.queries as dq
+    monkeypatch.setattr(dq, "get_client", lambda: None)
+    monkeypatch.setattr(vd, "_radar_activ", lambda: True)
+    assert vd.radar_din_shadow("2026-09-06") == (None, None)
+
+
+def test_o_eroare_de_citire_nu_arunca_ci_cade_pe_calculul_live(monkeypatch):
+    """Un ecran lent e mai bun decât un ecran căzut."""
+    import database.queries as dq
+
+    def explodeaza():
+        raise RuntimeError("Supabase indisponibil")
+
+    monkeypatch.setattr(dq, "get_client", explodeaza)
+    monkeypatch.setattr(vd, "_radar_activ", lambda: True)
+    assert vd.radar_din_shadow("2026-09-06") == (None, None)
+
+
+def test_meciul_fara_rand_in_match_history_ramane_fara_echipe_nu_arunca(shadow):
+    shadow([_rand_shadow(fixture_id="necunoscut")], meciuri=[])
+    randuri, _ = vd.radar_din_shadow("2026-09-06")
+    assert len(randuri) == 1
+    assert randuri[0].home_team == "" and randuri[0].away_team == ""
+
+
+def test_radar_din_shadow_nu_scrie_nimic():
+    """Garda: doar SELECT-uri, niciun insert/upsert/update/delete."""
+    import ast
+    from pathlib import Path
+
+    sursa = (Path(__file__).resolve().parent.parent / "value_dashboard.py")
+    arbore = ast.parse(sursa.read_text(encoding="utf-8"))
+    for nod in ast.walk(arbore):
+        if isinstance(nod, (ast.Module, ast.ClassDef, ast.FunctionDef)):
+            if (nod.body and isinstance(nod.body[0], ast.Expr)
+                    and isinstance(nod.body[0].value, ast.Constant)
+                    and isinstance(nod.body[0].value.value, str)):
+                nod.body.pop(0)
+    cod = ast.unparse(arbore)
+    for metoda in ("insert", "upsert", "update", "delete", "rpc"):
+        assert f".{metoda}(" not in cod

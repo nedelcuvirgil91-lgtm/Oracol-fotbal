@@ -147,3 +147,25 @@ Colectarea zilnică e **ACTIVĂ din 2026-09-06** — `value_selector_shadow_logg
 **F3, NEÎNCEPUT și NEAUTORIZAT**: minimum 8 săptămâni ȘI minimum 150 de selecții (numărate conform §16 — prima apariție), politică înghețată, zero scurgere temporală, fără ajustarea pragurilor pe parcurs. Nu poate începe înainte de închiderea celor două goluri de mai sus.
 
 **F4, NEÎNCEPUT**: activare, doar dacă trec simultan toate criteriile GO/NO-GO stabilite de proprietarul produsului — incluzând „ROI > controlul de piață corespunzător + 3 pp", nu „ROI > 0".
+
+---
+
+## §18 — Radarul se servește din `value_selector_shadow`, nu se recalculează (2026-09-06)
+
+**Problema, observată nu presupusă**: la prima deschidere reală după activare, ecranul a rămas minute întregi pe „Analizez 46 meciuri de azi…". Cauza nu e radarul (`collect_value_bets()` rulează *după* buclă), ci cache-ul de predicții din `st.session_state` — memoria unei singure sesiuni de browser. O sesiune nouă recalculează de la zero toate meciurile zilei, fiecare `evaluate_match()` cu propriile citiri în Supabase, Poisson, Monte Carlo, ML și blend. Comentariul din `app.py` anticipa exact asta și amâna optimizarea „dacă timpul de încărcare chiar devine o problemă reală, nu presupusă". A devenit.
+
+**Absurdul**: colectorul de noapte făcuse deja exact același calcul, pentru toate cele 13 profile, și îl persistase.
+
+**Decizia (A)**: cu radarul activ, ecranul citește rândurile din `value_selector_shadow` pentru ziua curentă, în loc să recalculeze. Două `SELECT`-uri în locul a zeci de evaluări complete.
+
+- **Se servește rularea CEA MAI RECENTĂ**, nu prima. Diferență deliberată față de §16, care guvernează **evaluarea**: acolo prima apariție e singura necontaminată de mișcarea pieței; aici utilizatorul are nevoie de cotele și de setul de meciuri cele mai proaspete. Ora rulării se afișează, ca ecranul să nu pretindă că datele sunt de acum.
+- **Consecință de acceptat**: lista văzută poate diferi de cea scorată în F3. Sunt două scopuri diferite — „unde să te uiți azi" vs. „măsurătoare imparțială" — cu reguli diferite, nu o inconsecvență.
+- **Fără date pentru ziua cerută, radar inactiv, sau orice eroare de citire ⇒ se cade pe calculul live, neschimbat.** Un ecran lent e mai bun decât unul căzut sau gol.
+- **Echipele se citesc din `match_history`, nu prin despicarea lui `match_label`**: „Beveren - Oud-Heverlee Leuven" e un caz real, cu liniuță în numele echipei. O despicare pe separator ar produce tăcut echipe greșite.
+- **Butonul „Recalculează tot" ocolește radarul** și forțează calculul live — rămâne calea de verificare.
+
+**Decizia (C)**: al doilea nivel de cache, partajat între sesiuni (`st.cache_resource`), cu logica de expirare și plafon de capacitate izolată în `prediction_cache.py` — pură, cu ceasul injectat, deci testabilă exact. NU s-a folosit `st.cache_data`: acela serializează prin pickle, iar `MatchPrediction` conține câmpuri `Any` (rapoartele de accidentări) care nu sunt garantat serializabile; un obiect care refuză pickle ar transforma o optimizare într-o eroare de runtime în producție.
+
+Consecință acceptată conștient: valorile sunt partajate, nu copiate. Predicțiile sunt tratate ca imuabile peste tot în UI, deci e sigur — dar e o proprietate de respectat, nu un accident.
+
+**Excepție explicită la scope lock-ul F2**: `app.py` era declarat FROZEN. Bucla trăiește acolo, deci nimic din `value_dashboard.py` nu o putea ocoli. Excepția a fost cerută și aprobată explicit de proprietarul produsului, limitată la blocul `elif nav == "value_bets":` și la helper-ele de cache. Celelalte 10 fișiere upstream rămân UNCHANGED, verificate individual. Corpul buclei de predicții e neatins — doar indentat sub o gardă; `git diff -w` arată exact schimbările semantice.
