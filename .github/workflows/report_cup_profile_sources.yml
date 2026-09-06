@@ -1,0 +1,65 @@
+name: Football Oracle — Surse profil la meciurile de cupă (read-only)
+
+# Raportează, pentru Champions/Europa/Conference League, din ce nivel al
+# cascadei `_build_profile()` vine profilul fiecărei echipe.
+#
+# STRICT READ-ONLY: nu scrie în nicio tabelă, nu importă `oracle_engine`, deci
+# nu poate declanșa nicio predicție ca efect secundar. Ambele proprietăți sunt
+# impuse prin teste (`tests/test_report_cup_profile_sources.py`).
+#
+# DOAR `workflow_dispatch`, fără cron — deliberat: e un instrument de măsură
+# pentru decizii punctuale (reordonarea cascadei pentru cupe, ponderarea formei
+# după forța adversarului), nu ceva ce trebuie să ruleze zilnic.
+
+on:
+  workflow_dispatch:
+    inputs:
+      zile:
+        description: "Fereastra de meciuri viitoare analizată (implicit 14)"
+        required: false
+        default: "14"
+
+concurrency:
+  group: report-cup-profile-sources
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run report
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        # `set -o pipefail` obligatoriu: shell-ul implicit e `bash -e` FĂRĂ
+        # pipefail, deci într-un pipeline `python … | tee` codul de ieșire ar fi
+        # al lui `tee` — o rulare eșuată ar apărea verde.
+        run: |
+          set -o pipefail
+          mkdir -p logs
+          python scripts/report_cup_profile_sources.py \
+            --zile "${{ github.event.inputs.zile || '14' }}" \
+            2>&1 | tee "logs/cup_profile_sources_$(date -u +%Y%m%dT%H%M%SZ).log"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cup-profile-sources-${{ github.run_id }}
+          path: logs/
+          if-no-files-found: error
+          retention-days: 30
