@@ -87,6 +87,22 @@ Motivul alegerii, nu doar alegerea:
 
 Regula e **de evaluare, nu de colectare**: colectorul continuă să scrie toate aparițiile. Deduplicarea se aplică în evaluatorul de rezultate, care nu e încă implementat (vezi „Implementare — stadiu").
 
+**17. Top Value Bets e un RADAR, nu un sistem de pariere — invariant de produs, nu preferință** (decizie proprietar produs, reafirmată explicit 2026-09-06).
+
+Ecranul răspunde la o singură întrebare: *din cele 10-50 de meciuri ale zilei, la care merită să te uiți?* Utilizatorul analizează manual meciul semnalat și decide singur dacă și cât pariază, în afara aplicației.
+
+**Ce nu produce niciodată, prin construcție:** mărimea mizei · Kelly · sumă în euro · bancă · execuție automată · îndemn de tipul „pariază acum".
+
+Invariantul e scris aici tocmai pentru că sistemul *are* toate ingredientele care fac tentantă direcția opusă — probabilități, cote de-vigate, EV, Kelly deja calculat în `MatchPrediction.kelly_stakes`. O sesiune viitoare fără contextul acestei conversații ar putea propune „logic" mize și bankroll, și ar avea dreptate tehnic, greșind produsul. Orice pas în acea direcție cere o decizie explicită a proprietarului produsului, niciodată o extindere naturală. Impus în cod: `value_dashboard.collect_radar_bets()` scrie `kelly_stake=None` necondiționat, verificat prin test și prin mutație.
+
+**Activarea se face ÎN TIMPUL F3, nu după** — amendament conștient la etapizarea inițială. Motivul: regula actuală e *măsurat* proastă (−10,2% ROI pe 364 de meciuri, rată de reușită identică cu a pieței, deci zero informație), iar cea nouă e structural mai sănătoasă (cotă medie 2,1 vs 3,96, cere ca selecția să fie liderul modelului, cere plauzibilitate de piață, cel mult 5 meciuri/zi). Nu se pretinde că e profitabilă — se înlocuiește o regulă despre care se știe că pierde cu una despre care nu se știe nimic rău și care e mult mai puțin volatilă.
+
+**Profilul ales: `shrunk_050`.** NU pe baza rezultatelor de până acum — pe eșantionul curent `shrunk_075` arată +125% ROI, dar cu 4 meciuri decise; aceleași date arată `legacy` la +31%, deși despre `legacy` se știe sigur că pierde. Alegerea e structurală: jumătate model, jumătate piață e singura poziție care nu presupune nimic nedovedit despre model (măsurat mai slab decât cota, dar nu inutil), iar profilul e amprenta comună a celui mai mare grup din experiment (5 din 13), deci ce se învață despre el se transferă.
+
+**F3 continuă neschimbat, în paralel.** Colectorul scrie toate cele 13 profile indiferent ce afișează UI-ul; activarea radarului nu oprește și nu contaminează experimentul. Dacă datele arată ulterior alt profil mai bun, se schimbă o valoare de configurație — nu cod.
+
+**Fără banner „experimental" în această etapă.** Fusese propus, apoi retras: singurul utilizator e proprietarul produsului, care a stabilit el însuși regula, iar `app.py` e declarat FROZEN de scope lock-ul F2. Nu se cheltuie o excepție la o regulă scrisă pentru ceva opțional. Dacă aplicația capătă vreodată alt utilizator, bannerul devine obligatoriu.
+
 ---
 
 ## Ce NU decide acest ADR
