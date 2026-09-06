@@ -444,3 +444,76 @@ def test_radar_din_shadow_nu_scrie_nimic():
     cod = ast.unparse(arbore)
     for metoda in ("insert", "upsert", "update", "delete", "rpc"):
         assert f".{metoda}(" not in cod
+
+
+# ── Ora afișată (raportat ca „oră de începere greșită") ──────────────────────
+
+def test_ora_se_converteste_in_fusul_romaniei():
+    """Cazul real raportat: Telstar - Cambuur, 12:30 UTC = 15:30 ora României,
+    exact ce arată și Flashscore. Datele erau corecte, afișarea nu."""
+    assert vd.ora_locala("2026-09-06T12:30:00") == "15:30"
+    assert vd.ora_locala("2026-09-06T15:30:00") == "18:30"   # Arsenal - Chelsea
+    assert vd.ora_locala("2026-09-06T14:00:00") == "17:00"   # Kortrijk - Waregem
+
+
+def test_marcajul_cu_fus_explicit_e_respectat_nu_reinterpretat():
+    assert vd.ora_locala("2026-09-06T12:30:00+00:00") == "15:30"
+    assert vd.ora_locala("2026-09-06T12:30:00Z") == "15:30"
+    # Deja în ora României: nu se mai adaugă încă trei ore.
+    assert vd.ora_locala("2026-09-06T15:30:00+03:00") == "15:30"
+
+
+def test_ora_de_iarna_foloseste_decalajul_corect():
+    """România e UTC+3 vara și UTC+2 iarna. Un decalaj fix ar greși jumătate
+    de an — de aceea conversia e pe fus, nu pe o constantă."""
+    assert vd.ora_locala("2026-01-15T12:30:00") == "14:30"
+    assert vd.ora_locala("2026-07-15T12:30:00") == "15:30"
+
+
+@pytest.mark.parametrize("intrare", ["", "   ", "TBA", "abc", "2026-09-06", None])
+def test_ce_nu_se_poate_interpreta_ramane_TBA(intrare):
+    """Regula #8: mai bine „nu știu" decât o oră inventată."""
+    assert vd.ora_locala(intrare) == "TBA"
+
+
+def test_fus_indisponibil_cade_pe_UTC_nu_pe_eroare():
+    """Dacă baza de fusuri lipsește din imagine, ecranul arată ora UTC —
+    corectă, doar altfel etichetată — în loc să cadă."""
+    assert vd.ora_locala("2026-09-06T12:30:00", fus="Fus/Inexistent") == "12:30"
+
+
+def test_fusul_de_afisare_e_declarat_explicit():
+    assert vd.FUS_ORAR_AFISARE == "Europe/Bucharest"
+
+
+def test_marcajul_naiv_e_tratat_ca_UTC_indiferent_de_fusul_masinii():
+    """Gaură prinsă prin mutație: containerul rulează pe UTC, deci un test
+    naiv nu distinge „naiv = UTC" de „naiv = ora sistemului". Aici fusul
+    mașinii e forțat pe altceva, ca diferența să devină vizibilă."""
+    import os
+    import time as _time
+
+    vechi = os.environ.get("TZ")
+    try:
+        os.environ["TZ"] = "America/New_York"   # UTC-4 vara
+        _time.tzset()
+        # Dacă marcajul naiv ar fi citit ca oră de New York, 12:30 ar deveni
+        # 19:30 la București, nu 15:30.
+        assert vd.ora_locala("2026-09-06T12:30:00") == "15:30"
+    finally:
+        if vechi is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = vechi
+        _time.tzset()
+
+
+@pytest.mark.parametrize("intrare", [
+    "2026-13-45T99:99:99",     # dată imposibilă, lungime suficientă
+    "nu-e-o-data-dar-e-lung",  # text lung, neinterpretabil
+    "2026-09-06T12:30:0X",
+])
+def test_marcaj_lung_dar_invalid_ramane_TBA(intrare):
+    """Ramura `except ValueError` — pe care testele anterioare nu o atingeau
+    deloc, pentru că intrările lor scurte erau respinse mai devreme."""
+    assert vd.ora_locala(intrare) == "TBA"

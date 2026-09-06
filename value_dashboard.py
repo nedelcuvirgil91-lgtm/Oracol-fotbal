@@ -274,3 +274,40 @@ def _echipe_pentru(client, fixture_ids: list[str]) -> dict[str, tuple[str, str]]
             iesire[str(r.get("fixture_id"))] = (str(r.get("home_team") or ""),
                                                 str(r.get("away_team") or ""))
     return iesire
+
+
+# ── Afișarea orei ────────────────────────────────────────────────────────────
+
+FUS_ORAR_AFISARE = "Europe/Bucharest"
+
+
+def ora_locala(kickoff: str, fus: str = FUS_ORAR_AFISARE) -> str:
+    """`HH:MM` în fusul de afișare, dintr-un marcaj ISO.
+
+    Datele sunt corecte în bază — stocate în UTC — dar ecranul le arăta ca
+    atare, fără etichetă, iar un meci de la 15:30 ora României apărea ca 12:30.
+    Nu era o eroare de date, ci una de citire: raportată ca „ora de începere
+    greșită", pentru că exact așa arăta.
+
+    Acceptă și marcaje cu fus explicit (`...+00:00`), și naive — pe cele naive
+    le tratează ca UTC, ceea ce e adevărat pentru tot ce scrie pipeline-ul.
+    Orice intrare pe care nu o poate interpreta întoarce `"TBA"`: mai bine
+    spune „nu știu" decât să afișeze o oră inventată (Regula #8)."""
+    from datetime import datetime, timezone
+
+    text = (kickoff or "").strip()
+    if len(text) < 16:
+        return "TBA"
+    try:
+        moment = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return "TBA"
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    try:
+        from zoneinfo import ZoneInfo
+        return moment.astimezone(ZoneInfo(fus)).strftime("%H:%M")
+    except Exception:
+        # Fus indisponibil (bază de date de fusuri lipsă în imagine): se arată
+        # ora UTC, corectă, în loc să cadă ecranul.
+        return moment.astimezone(timezone.utc).strftime("%H:%M")

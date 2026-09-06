@@ -936,7 +936,7 @@ if nav == "matches":
 # paralelizare, fără precomputare (optimizări lăsate pentru un sprint separat,
 # dacă timpul de încărcare chiar devine o problemă reală, nu presupusă).
 elif nav == "value_bets":
-    from value_dashboard import collect_value_bets, radar_din_shadow
+    from value_dashboard import collect_value_bets, ora_locala, radar_din_shadow
 
     st.markdown('<div class="section-bar"><div class="section-bar-title">💰 Top Value Bets — Azi</div></div>',
                 unsafe_allow_html=True)
@@ -1029,7 +1029,9 @@ elif nav == "value_bets":
         else:
             table = pd.DataFrame([{
                 "Meci":         f"{r.home_team} - {r.away_team}",
-                "Oră":          r.kickoff_utc[11:16] if len(r.kickoff_utc) > 16 else "TBA",
+                # Ora locală, nu UTC: un meci de la 15:30 ora României apărea
+                # ca 12:30 și se citea, corect, ca „oră greșită".
+                "Oră (RO)":     ora_locala(r.kickoff_utc),
                 "Ligă":         r.league,
                 "Piață":        r.market,
                 "Selecție":     r.selection,
