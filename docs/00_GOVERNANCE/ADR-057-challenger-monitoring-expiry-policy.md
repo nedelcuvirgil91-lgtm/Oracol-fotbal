@@ -1,6 +1,7 @@
 # ADR-057 — Politică de expirare pentru Challenger-ul blocat în „monitoring"
 
-**Status**: PROPUS — neimplementat, în așteptarea deciziei proprietarului produsului
+**Status**: **ACCEPTED (2026-09-06)** — Opțiunea B, aprobată explicit de proprietarul produsului. Implementată în aceeași zi. Vezi §9 pentru ce s-a implementat exact și ce s-a schimbat față de propunere.
+**Status anterior**: PROPUS (2026-08-17 → 2026-09-06)
 **Data**: 2026-08-17
 **Derivat din**: auditul final ADR-051/052 (Prioritatea #2)
 **Nu modifică**: ADR-002 (om în buclă la promovare), North Star #2 (toate trei metricile simultan), ADR-016 (FSM), criteriile de promovare
@@ -152,3 +153,90 @@ decizia poate fi luată fără presiune.
 Trebuie acceptat explicit, în scris, că primul verdict `monitoring`
 oprește permanent evoluția ML până la o intervenție manuală — și că nu
 există azi nicio alertă care să semnaleze acea stare.
+
+---
+
+## 9. Ce s-a întâmplat efectiv (2026-09-06)
+
+### 9.1 Avertismentul din §8 s-a adeverit, integral
+
+Acest ADR a rămas PROPUS 20 de zile. În acel interval:
+
+- **23 august** — `xgboost_v1/all` a depășit cele 200 de meciuri și a primit
+  primul verdict `monitoring` (n=207). Condiția descrisă la §1 a devenit reală.
+- **24 august** — ultima antrenare din proiect. `blend_v1/all` a primit și el
+  un Challenger, deci **ambele** sloturi au devenit ocupate.
+- **24 august – 6 septembrie** — zero antrenări, deși s-au acumulat **470 de
+  meciuri terminate noi** (prag `MIN_SAMPLES_TO_TRAIN` = 30, deci de 15,7×
+  peste). Campionul care servea predicții era antrenat pe 4 august, pe 49.983
+  de meciuri, față de 58.145 disponibile (−14%).
+- **6 septembrie** — starea a ieșit la iveală dintr-o întrebare a
+  proprietarului produsului („de ce este blocat la 403 meciuri?"), nu dintr-o
+  alertă. Exact cum prevedea §8: *„nu există azi nicio alertă care să
+  semnaleze acea stare"*.
+
+**Cauza pentru care a rămas 20 de zile nevăzut, meritată de reținut**:
+`grep -rn "ADR-057"` întorcea **un singur fișier — pe el însuși**. Nu era citat
+în `CLAUDE.md`, în niciun backlog, în niciun cod. Un ADR care așteaptă o decizie
+și nu e referit de nimic nu ajunge înapoi în fața nimănui. Corectat la
+implementare: `CLAUDE.md` §„Regulile Champion vs. Challenger" trimite acum aici,
+iar `BACKLOG_2026-09-06.md` §0.0 ține starea curentă.
+
+### 9.2 Decizia
+
+**Opțiunea B**, ca la §5, fără modificări de fond. Pragul rămâne **n ≥ 300**,
+declarat mai departe **nedovedit empiric** — de recalibrat după primul caz real,
+nu tratat ca validat.
+
+Ce a rămas neschimbat, explicit: criteriile de promovare (North Star #2),
+ADR-002 (om în buclă), ADR-016 (FSM), `MIN_MATCHES_FOR_EVALUATION`.
+
+### 9.3 Ce s-a implementat
+
+| Element | Unde |
+|---|---|
+| Flag dedicat `challenger_expiry_proposals_enabled`, implicit `False` | `continuous_learning.is_challenger_expiry_proposals_enabled()` |
+| Prag `MIN_MATCHES_FOR_EXPIRY = 300` | `continuous_learning.py` |
+| Ramura nouă în Faza A (propune, nu expiră) | `_handle_monitoring_verdict()` |
+| Execuția, după aprobare umană, în Faza C | `_phase_c_execute_expiry()`, dispecerizată prin `evidence["decision_kind"] == "expiry"` |
+| Contori în rezumatul ciclului | `expiry_proposed`, `expiry_committed` |
+
+Zero modificări în `shadow_testing.py`, `promotion_service.py`,
+`challenger_manager.py`, `rollback_service.py`. Zero modificări de schemă —
+`expired` era deja valid și în `VALID_REJECTION_REASONS`, și în constrângerea
+`CHECK` din Postgres (ambele verificate live înainte de implementare), exact
+cum constata §2.
+
+**Trei decizii de implementare care nu erau în ADR-ul original:**
+
+1. **Ținta e ÎNGHEȚATĂ în `evidence` la propunere**, iar Faza C o folosește ca
+   atare — niciodată „Challenger-ul activ acum". Nu e teoretic: între propunere
+   și aprobare pot trece 7 zile (`_T3A_DECISION_TTL_HOURS`), interval în care
+   slotul poate fi ocupat de alt Challenger. Același Execution Contract ca la
+   rollback (ADR-037, R3.2A.1).
+2. **Ținta devenită terminală între timp** (promovată sau deja respinsă) închide
+   decizia ca **no-op idempotent**, nu ca eșec — intenția e deja îndeplinită,
+   slotul e liber.
+3. **Pragul atins cu flagul oprit se CONSEMNEAZĂ** în `automation_runs`
+   (`expiry_threshold_reached: true`), nu se trece sub tăcere. Asta transformă
+   chiar starea descrisă la §8 într-un fapt vizibil.
+
+### 9.4 Verificare
+
+19 teste noi (`tests/test_challenger_expiry_policy.py`), **11 mutații rulate,
+toate prinse** — inclusiv cele care contează cel mai mult: „propunerea expiră
+direct, fără aprobare umană", „flagul e implicit pornit", „ținta nu e
+înghețată", „execuția recalculează ținta", „eșecul tranziției se raportează ca
+succes".
+
+### 9.5 Ce NU s-a făcut
+
+Flagul rămâne **OPRIT în producție**. Activarea e o decizie separată, ulterioară
+— acest ADR autorizează politica, nu pornirea ei.
+
+Când va fi pornit, prima propunere va viza `xgboost_v1/all` (n ≈ 506, mult peste
+prag). `blend_v1/all` (n ≈ 230) e sub prag azi, dar îl va depăși — iar politica
+fiind generică, îi va propune și lui expirarea. **Acela trebuie refuzat**:
+e favorabil pe toate trei metricile, și pe populația completă și pe subsetul
+informat (ADR-065). Faptul că refuzul e posibil, și că e al omului, e chiar
+motivul pentru care Opțiunea B a fost preferată Opțiunii A.

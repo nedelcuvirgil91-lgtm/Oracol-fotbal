@@ -69,6 +69,14 @@ PRODUCER = "ADR-030"
 MIN_MATCHES_FOR_EVALUATION = 200
 _DEFAULT_CONFIG = {"learning_core_enabled": False}
 
+# [ADR-057] Câte meciuri evaluate PESTE pragul de evaluare trebuie să se
+# acumuleze, cu verdictul rămas `monitoring`, înainte ca expirarea să fie
+# PROPUSĂ omului. Valoare de pornire din ADR-057 §5, declarată acolo explicit
+# ca nedovedită empiric — de recalibrat după primul caz real observat, nu
+# tratată ca prag validat. NU e un criteriu de promovare și nu atinge niciunul
+# (North Star #2 rămâne neschimbat).
+MIN_MATCHES_FOR_EXPIRY = 300
+
 # TTL provizoriu pentru deciziile T3a (promovare SAU rollback) — valoare de
 # implementare, nu decizie de arhitectură (per Open Question ADR-030,
 # netratată ca blocantă).
@@ -116,6 +124,28 @@ def is_champion_guardian_proposals_enabled() -> bool:
     return bool(cfg.get("champion_guardian_proposals_enabled", False))
 
 
+def is_challenger_expiry_proposals_enabled() -> bool:
+    """challenger_expiry_proposals_enabled (ADR-057) — flag DEDICAT, separat de
+    `learning_core_enabled` și de flag-urile Champion Guardian. Implicit
+    `False` (North Star #3) — un merge pe `main` NU pornește politica.
+
+    Ce gatează: EXCLUSIV propunerea de expirare a unui Challenger rămas în
+    `monitoring` peste `MIN_MATCHES_FOR_EXPIRY`. Nu gatează nimic altceva —
+    nici evaluarea, nici antrenarea, nici promovarea.
+
+    Ce NU face, nici cu flagul pornit: nu expiră nimic automat. Produce o
+    propunere T3a în decision feed; expirarea se execută abia în Faza C, după
+    aprobare umană explicită — exact tiparul deja folosit pentru promovare
+    (ADR-002) și rollback (ADR-037). Alegerea e deliberată și e chiar motivul
+    pentru care Opțiunea B a fost preferată Opțiunii A din ADR-057 §4: politica
+    e generică, deci va propune expirarea și pentru un Challenger care merită
+    păstrat (cazul concret la aprobare: `blend_v1`, favorabil pe toate trei
+    metricile). Omul care refuză propunerea e mecanismul de siguranță, nu o
+    excepție codată per familie."""
+    cfg = sb.load_config({"challenger_expiry_proposals_enabled": False})
+    return bool(cfg.get("challenger_expiry_proposals_enabled", False))
+
+
 def run_cycle() -> dict:
     """Punctul de intrare public — un ciclu complet peste tot Model
     Registry-ul. Sigur de rerulat oricând (idempotent pe toate fazele) —
@@ -134,6 +164,7 @@ def run_cycle() -> dict:
         "enabled": True, "checked": 0, "trained": 0, "evaluated": 0,
         "proposed": 0, "committed": 0, "guard_failures": 0,
         "health_checked": 0, "rollback_proposed": 0, "rollback_committed": 0,
+        "expiry_proposed": 0, "expiry_committed": 0,
     }
 
     for name, version in model_registry.list_available():
@@ -221,8 +252,10 @@ def _phase_a_monitor_existing(family: str, league: str, target_key: str, summary
         _handle_candidate_for_promotion(run_id, training_run_id, target_key, result, summary)
     elif verdict == "rejected" and training_run_id:
         _handle_rejected_verdict(run_id, training_run_id, result)
+    elif verdict == "monitoring" and training_run_id:
+        _handle_monitoring_verdict(run_id, training_run_id, target_key, result, summary)
     else:
-        # monitoring / insufficient_data — legitim, fara actiune
+        # insufficient_data — legitim, fara actiune
         ar.complete_run(run_id, summary={"verdict": verdict, "n_matches_evaluated": result.get("n_matches_evaluated")})
 
 
@@ -256,6 +289,74 @@ def _handle_candidate_for_promotion(
     if decision_id:
         ar.surface_decision(decision_id)
         summary["proposed"] += 1
+
+
+def _handle_monitoring_verdict(
+    run_id: int, training_run_id: str, target_key: str, result: dict, summary: dict,
+) -> None:
+    """[ADR-057] `monitoring` rămâne, ca înainte, o stare legitimă fără acțiune
+    — cu O SINGURĂ excepție nouă: dacă s-au acumulat `MIN_MATCHES_FOR_EXPIRY`
+    meciuri evaluate și verdictul tot nu s-a mișcat, se PROPUNE expirarea.
+
+    De ce e nevoie: `monitoring` nu e stare terminală și nu expiră de la sine,
+    iar invariantul „cel mult un Challenger activ" (ADR-016 §4, index unic
+    parțial) face ca Faza B să nu mai poată antrena nimic cât timp slotul e
+    ocupat. Fără o regulă de ieșire, primul `monitoring` oprește permanent
+    evoluția familiei — verificat pe cazul real: zero antrenări între 24
+    august și 6 septembrie 2026, cu 470 de meciuri terminate noi acumulate.
+
+    Ce NU face: nu expiră, nu tranziționează, nu atinge Champion-ul. Doar
+    propune. Vezi `is_challenger_expiry_proposals_enabled()`.
+
+    Ținta e ÎNGHEȚATĂ în `evidence` la momentul propunerii — același Execution
+    Contract ca la rollback (ADR-037, R3.2A.1): Faza C expiră EXACT
+    Challenger-ul pentru care s-a cerut aprobarea, niciodată „cel activ acum",
+    care între timp poate fi altul."""
+    n = result.get("n_matches_evaluated") or 0
+    rezumat = {"verdict": "monitoring", "n_matches_evaluated": n}
+
+    if n < MIN_MATCHES_FOR_EXPIRY:
+        ar.complete_run(run_id, summary=rezumat)
+        return
+
+    if not is_challenger_expiry_proposals_enabled():
+        # Pragul e atins, dar politica e oprită. Se consemnează explicit ca
+        # fapt (nu tăcut): asta e exact starea pe care ADR-057 §8 o descria ca
+        # „blocaj fără nicio alertă".
+        rezumat["expiry_threshold_reached"] = True
+        rezumat["expiry_proposals_enabled"] = False
+        ar.complete_run(run_id, summary=rezumat)
+        return
+
+    rezumat["expiry_threshold_reached"] = True
+    ar.complete_run(run_id, summary=rezumat)
+
+    decision_run_id = ar.write_run(PRODUCER, "challenger_expiry_candidate", "T3a", target_key=target_key)
+    if decision_run_id is None:
+        return
+    ar.start_run(decision_run_id)
+    ar.complete_run(decision_run_id)
+
+    evidence = dict(result)
+    evidence["decision_kind"] = "expiry"
+    evidence["training_run_id"] = training_run_id  # ținta înghețată
+    evidence["min_matches_for_expiry"] = MIN_MATCHES_FOR_EXPIRY
+
+    decision_id = ar.propose_decision(
+        decision_run_id, tier="T3a",
+        rollback_plan=(
+            "niciun rollback necesar: expirarea marchează Challenger-ul REJECTED(expired) "
+            "și eliberează slotul, fără să atingă Champion-ul activ sau vreo predicție "
+            "servită. Reluarea se face antrenând un Challenger nou (Faza B), nu revenind "
+            "la cel expirat — artefactele lui rămân în storage, trasabile."
+        ),
+        evidence=evidence,
+        correction_method="none — pre-ADR-034",
+        ttl_hours=_T3A_DECISION_TTL_HOURS,
+    )
+    if decision_id:
+        ar.surface_decision(decision_id)
+        summary["expiry_proposed"] += 1
 
 
 def _handle_rejected_verdict(run_id: int, training_run_id: str, result: dict) -> None:
@@ -626,6 +727,10 @@ def _phase_c_execute_approved(target_key: str, summary: dict) -> None:
             _phase_c_execute_rollback(target_key, decision, evidence, summary)
             continue
 
+        if decision_kind == "expiry":
+            _phase_c_execute_expiry(decision, evidence, summary)
+            continue
+
         training_run_id = evidence.get("training_run_id")
         if not training_run_id:
             ar.fail_decision_commit(decision["id"], "evidence fara training_run_id — nu se poate executa promovarea")
@@ -641,6 +746,59 @@ def _phase_c_execute_approved(target_key: str, summary: dict) -> None:
             summary["committed"] += 1
         else:
             ar.fail_decision_commit(decision["id"], f"promote_challenger: {result.status} — {result.reason}")
+
+
+def _phase_c_execute_expiry(decision: dict, evidence: dict, summary: dict) -> None:
+    """[ADR-057] Execută o expirare APROBATĂ de om, pe ținta ÎNGHEȚATĂ la
+    propunere — niciodată pe „Challenger-ul activ acum".
+
+    Distincția nu e teoretică: între propunere și aprobare pot trece până la
+    7 zile (`_T3A_DECISION_TTL_HOURS`), interval în care Challenger-ul vizat
+    poate fi promovat sau respins, iar altul nou poate ocupa slotul. O
+    execuție care ar recalcula ținta ar expira Challenger-ul greșit — exact
+    clasa de eroare pe care Execution Contract-ul ADR-037 o închide pentru
+    rollback.
+
+    `challenger_manager.transition()` lucrează pe `training_run_id`, deci
+    poate atinge STRICT ținta înghețată. Rămâne un singur caz de tratat:
+    ținta a devenit între timp terminală (promovată sau deja respinsă).
+    Atunci intenția e deja îndeplinită — slotul e liber — și decizia se
+    închide ca no-op idempotent, cu motivul consemnat; nu se raportează un
+    eșec pentru ceva ce nu mai are ce să eșueze."""
+    training_run_id = evidence.get("training_run_id")
+    if not training_run_id:
+        ar.fail_decision_commit(
+            decision["id"],
+            "evidence fara training_run_id — nu se poate executa expirarea",
+        )
+        return
+
+    challenger = challenger_manager.get_challenger(training_run_id)
+    if challenger is None:
+        ar.fail_decision_commit(
+            decision["id"],
+            f"Challenger-ul {training_run_id} nu mai exista — expirarea nu se poate executa",
+        )
+        return
+
+    if challenger.get("state") in challenger_manager.TERMINAL_STATES:
+        logger.info(
+            "[ContinuousLearning] expirare aprobata pentru %s, dar Challenger-ul e deja %s "
+            "— slotul e liber, decizia se inchide ca no-op.",
+            training_run_id, challenger.get("state"),
+        )
+        ar.commit_decision(decision["id"])
+        summary["expiry_committed"] += 1
+        return
+
+    try:
+        challenger_manager.transition(training_run_id, "REJECTED", rejection_reason="expired")
+    except challenger_manager.ChallengerManagerError as exc:
+        ar.fail_decision_commit(decision["id"], f"tranzitie REJECTED(expired) esuata: {exc}")
+        return
+
+    ar.commit_decision(decision["id"])
+    summary["expiry_committed"] += 1
 
 
 def _phase_c_execute_rollback(target_key: str, decision: dict, evidence: dict, summary: dict) -> None:
