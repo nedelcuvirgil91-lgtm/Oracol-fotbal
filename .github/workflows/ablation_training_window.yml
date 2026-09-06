@@ -1,0 +1,81 @@
+name: Football Oracle — Ablație fereastră de antrenare ML (read-only)
+
+# Răspunde la întrebarea „cât istoric merită folosit la antrenarea ML?" —
+# compară ferestre de antrenare (tot / 36 / 24 / 12 / 6 / 3 luni / sezon curent
+# / tot cu ponderare de vechime) pe blocuri de test FIXE, consecutive, cu zero
+# scurgere temporală.
+#
+# STRICT READ-ONLY: nu scrie în nicio tabelă, nu creează Challenger, nu atinge
+# `ml_model_status`, nu persistă niciun artefact. Toate impuse prin teste
+# (`tests/test_ablation_training_window.py`), inclusiv o gardă care cade dacă
+# hiperparametrii divergă de cei din `ml_predictor`.
+#
+# DOAR `workflow_dispatch`, fără cron — deliberat: e un instrument de decizie
+# punctuală, nu ceva ce trebuie să ruleze periodic. Antrenează zeci de modele
+# XGBoost, deci costă minute reale de CPU.
+#
+# Un rezultat favorabil aici NU e o decizie de model: e o ipoteză care trece
+# mai departe ca experiment Challenger, judecat pe trafic real (North Star #2).
+
+on:
+  workflow_dispatch:
+    inputs:
+      blocuri:
+        description: "Câte blocuri de test consecutive (implicit 4)"
+        required: false
+        default: "4"
+      marime_bloc:
+        description: "Câte meciuri per bloc de test (implicit 400)"
+        required: false
+        default: "400"
+      half_life:
+        description: "Half-life în zile pentru varianta cu ponderare (implicit 365)"
+        required: false
+        default: "365"
+
+concurrency:
+  group: ablation-training-window
+  cancel-in-progress: false
+
+jobs:
+  ablatie:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run ablation
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        # `set -o pipefail` obligatoriu: shell-ul implicit e `bash -e` FĂRĂ
+        # pipefail, deci într-un pipeline `python … | tee` codul de ieșire ar fi
+        # al lui `tee` — o rulare eșuată ar apărea verde.
+        run: |
+          set -o pipefail
+          mkdir -p logs
+          python scripts/ablation_training_window.py \
+            --blocuri "${{ github.event.inputs.blocuri || '4' }}" \
+            --marime-bloc "${{ github.event.inputs.marime_bloc || '400' }}" \
+            --half-life "${{ github.event.inputs.half_life || '365' }}" \
+            2>&1 | tee "logs/ablation_training_window_$(date -u +%Y%m%dT%H%M%SZ).log"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ablation-training-window-${{ github.run_id }}
+          path: logs/
+          if-no-files-found: error
+          retention-days: 30
