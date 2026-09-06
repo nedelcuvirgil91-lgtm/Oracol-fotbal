@@ -44,6 +44,13 @@ INSUFFICIENT_DATA_QUALITY: frozenset[str] = frozenset({"neutral"})
 
 _MARKET_1X2 = "1X2"
 
+# Traducerea codului de selectie in codul de rezultat folosit de
+# `match_history.actual_result`. Traieste AICI, nu in evaluator, pentru ca
+# invariantul proiectului e "un singur modul stie ca piata 1X2 are trei
+# rezultate" — la fel cum `candidates_from_prediction()` e singurul loc care
+# construieste cele trei candidaturi. Evaluatorul o consuma, nu o redefineste.
+REZULTAT_PENTRU_SELECTIE: dict[str, str] = {"1": "H", "X": "D", "2": "A"}
+
 
 def _as_float(value: Any) -> float | None:
     try:

@@ -1,0 +1,75 @@
+name: Football Oracle — Value Selector Evaluation (ADR-071 §16)
+
+# Leagă selecțiile deja persistate în `value_selector_shadow` de rezultatele
+# reale din `match_history` și tipărește raportul per politică: rată de reușită,
+# rata implicită a pieței, ROI la miză plată, cotă medie, Brier, log-loss.
+#
+# STRICT READ-ONLY. Nu scrie în nicio tabelă — nici în shadow, nici altundeva.
+# Nu există tabelă de rezultate și nu se creează una: ADR-071 nu prevede una,
+# iar o tabelă nouă e o schimbare de contract care cere decizie explicită
+# (Discovery Rule). Raportul e efemer, în log-ul rulării și în artefact.
+#
+# DOAR `workflow_dispatch`, fără cron — deliberat. Nu există niciun motiv să
+# ruleze automat: nu produce date, doar citește. Cadența se stabilește când
+# eșantionul devine suficient (ADR-071: 150 de selecții), nu înainte.
+#
+# Nu are nevoie de niciun flag: nu schimbă nimic, deci nu are ce să activeze.
+# Spre deosebire de colector, care scrie și deci e gatat (North Star #3), o
+# citire nu poate face rău prin simpla ei execuție.
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: >-
+          Limitează evaluarea la o singură rulare shadow (ex. 2026-09-05T15:52Z).
+          Gol = toate rulările, cu regula §16 aplicată peste ele: per
+          (policy_id, fixture_id) contează cea mai veche apariție.
+        required: false
+        default: ""
+
+concurrency:
+  group: value-selector-evaluation
+  cancel-in-progress: false
+
+jobs:
+  value-selector-evaluation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run value selector evaluation
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        # `set -o pipefail` e obligatoriu, nu cosmetic: shell-ul implicit e
+        # `bash -e` FĂRĂ pipefail, deci într-un pipeline `python … | tee` codul
+        # de ieșire ar fi al lui `tee`, care reușește aproape întotdeauna — o
+        # rulare eșuată ar fi raportată ca verde.
+        run: |
+          set -o pipefail
+          mkdir -p logs
+          python -m value_selector_evaluation \
+            ${{ github.event.inputs.run_id != '' && format('--run-id ''{0}''', github.event.inputs.run_id) || '' }} \
+            2>&1 | tee "logs/value_selector_evaluation_$(date -u +%Y%m%dT%H%M%SZ).log"
+
+      - name: Upload evaluation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: value-selector-evaluation-${{ github.run_id }}
+          path: logs/
+          if-no-files-found: error
+          retention-days: 30
