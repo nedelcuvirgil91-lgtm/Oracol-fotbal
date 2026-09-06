@@ -240,10 +240,33 @@ def radar_din_shadow(zi_iso: str, *, pagina: int = 0,
         if not randuri:
             return None
 
-        # O zi poate fi acoperită de mai multe rulări (fereastra colectorului e
-        # de 24h, deci se suprapune). Se păstrează doar cea mai recentă.
+        # O zi e acoperită de mai multe rulări, iar ele NU sunt echivalente:
+        # garda temporală exclude meciurile deja începute, deci rularea făcută
+        # ÎN ziua respectivă e sistematic incompletă, iar cea din ziua
+        # precedentă o acoperă integral. Măsurat pe rularea din 5 septembrie
+        # 15:52: ziua ei proprie apărea cu 30 de meciuri (primul la 16:00 —
+        # restul începuseră), ziua următoare cu 44 (primul la 00:30).
+        #
+        # A alege pur și simplu rularea cea mai recentă ar fi ales-o exact pe
+        # cea trunchiată: duminica s-ar fi pierdut 48% din meciurile zilei,
+        # sâmbăta 28% (măsurat pe 4 săptămâni). Se ia deci, pentru FIECARE
+        # meci, cea mai recentă apariție a LUI — prospețimea cerută de §18,
+        # fără să sacrifice completitudinea.
+        #
+        # Scorurile rămân comparabile între rulări: `actionability_score` se
+        # calculează per candidatură, din politică și din cotele lui, fără
+        # nicio dependență de setul zilei. Plafonul de 5 nu vine din
+        # `selected_top` (care e relativ la rularea lui), ci din ordonarea și
+        # paginarea de mai jos — de aceea amestecul de rulări nu poate produce
+        # mai mult de cinci sugestii.
+        cea_mai_recenta: dict[tuple[str, str], dict] = {}
+        for r in randuri:
+            cheie = (str(r.get("fixture_id") or ""), str(r.get("selection_code") or ""))
+            curent = cea_mai_recenta.get(cheie)
+            if curent is None or str(r.get("run_id") or "") > str(curent.get("run_id") or ""):
+                cea_mai_recenta[cheie] = r
+        randuri = list(cea_mai_recenta.values())
         ultima = max(str(r.get("run_id") or "") for r in randuri)
-        randuri = [r for r in randuri if str(r.get("run_id") or "") == ultima]
 
         calificate = [r for r in randuri
                       if r.get("selected_top")

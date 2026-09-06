@@ -630,3 +630,109 @@ def test_marimea_paginii_e_parametru_nu_constanta(shadow):
     radar = vd.radar_din_shadow("2026-09-06", pagina=1, marime=3)
     assert len(radar.randuri) == 3
     assert [r.fixture_id for r in radar.randuri] == ["fx03", "fx04", "fx05"]
+
+
+# ── Completitudine: cea mai recentă apariție PER MECI ────────────────────────
+
+def test_o_rulare_trunchiata_nu_mai_ascunde_meciurile_de_dimineata(shadow):
+    """Cazul real. Rularea din ziua precedentă acoperă ziua întreagă; cea din
+    ziua curentă e trunchiată de garda temporală (meciurile începute lipsesc).
+    A alege pur și simplu rularea cea mai recentă ar fi pierdut duminica 48%
+    din meciuri. Aici: dimineața apare doar în rularea veche, seara în ambele."""
+    shadow([
+        _rand_shadow(run_id="2026-09-05T09:40Z", fixture_id="dimineata",
+                     kickoff_utc="2026-09-06T09:00:00+00:00", actionability_score=0.9),
+        _rand_shadow(run_id="2026-09-05T09:40Z", fixture_id="seara",
+                     kickoff_utc="2026-09-06T19:00:00+00:00", actionability_score=0.8,
+                     bk_odds=5.00),
+        _rand_shadow(run_id="2026-09-06T14:40Z", fixture_id="seara",
+                     kickoff_utc="2026-09-06T19:00:00+00:00", actionability_score=0.8,
+                     bk_odds=1.71),
+    ], meciuri=[{"fixture_id": "dimineata", "home_team": "D", "away_team": "D2"},
+                {"fixture_id": "seara", "home_team": "S", "away_team": "S2"}])
+
+    radar = vd.radar_din_shadow("2026-09-06")
+    assert {r.fixture_id for r in radar.randuri} == {"dimineata", "seara"}
+    # Pentru meciul prezent în ambele, contează cota din rularea mai nouă.
+    seara = next(r for r in radar.randuri if r.fixture_id == "seara")
+    assert seara.bk_odds == 1.71
+
+
+def test_pentru_acelasi_meci_castiga_rularea_mai_noua(shadow):
+    shadow([
+        _rand_shadow(run_id="2026-09-05T09:40Z", fixture_id="fx1", bk_odds=9.99),
+        _rand_shadow(run_id="2026-09-06T09:40Z", fixture_id="fx1", bk_odds=1.71),
+    ])
+    radar = vd.radar_din_shadow("2026-09-06")
+    assert len(radar.randuri) == 1
+    assert radar.randuri[0].bk_odds == 1.71
+
+
+def test_amestecul_de_rulari_NU_depaseste_plafonul_de_cinci(shadow):
+    """Plafonul nu vine din `selected_top` (relativ la rularea lui), ci din
+    ordonare + paginare — de aceea două rulări a câte 5 „top" nu produc 10."""
+    randuri, meciuri = [], []
+    for i in range(5):
+        randuri.append(_rand_shadow(run_id="2026-09-05T09:40Z", fixture_id=f"a{i}",
+                                    actionability_score=0.9 - i * 0.01, selected_top=True))
+        meciuri.append({"fixture_id": f"a{i}", "home_team": f"A{i}", "away_team": "X"})
+    for i in range(5):
+        randuri.append(_rand_shadow(run_id="2026-09-06T14:40Z", fixture_id=f"b{i}",
+                                    actionability_score=0.8 - i * 0.01, selected_top=True))
+        meciuri.append({"fixture_id": f"b{i}", "home_team": f"B{i}", "away_team": "X"})
+    shadow(randuri, meciuri=meciuri)
+
+    radar = vd.radar_din_shadow("2026-09-06", pagina=0)
+    assert len(radar.randuri) == 5
+    assert radar.total_meciuri == 10 and radar.pagini == 2
+    # Cele mai bune cinci scoruri, indiferent din ce rulare vin.
+    assert [r.fixture_id for r in radar.randuri] == ["a0", "a1", "a2", "a3", "a4"]
+
+
+def test_selectiile_aceluiasi_meci_se_actualizeaza_independent(shadow):
+    """Cheia e (meci, selecție), nu doar meciul: dacă o rulare nouă are doar
+    una dintre selecții, cealaltă rămâne din rularea veche, nu dispare."""
+    shadow([
+        _rand_shadow(run_id="2026-09-05T09:40Z", fixture_id="fx1", selection_code="1",
+                     actionability_score=0.9, selected_top=True),
+        _rand_shadow(run_id="2026-09-05T09:40Z", fixture_id="fx2", selection_code="X",
+                     actionability_score=0.5, selected_top=False,
+                     rejection_reasons=["outranked_top_n"]),
+        _rand_shadow(run_id="2026-09-06T14:40Z", fixture_id="fx1", selection_code="1",
+                     actionability_score=0.9, selected_top=True, bk_odds=1.50),
+    ], meciuri=[{"fixture_id": "fx1", "home_team": "A", "away_team": "B"},
+                {"fixture_id": "fx2", "home_team": "C", "away_team": "D"}])
+    radar = vd.radar_din_shadow("2026-09-06")
+    assert radar.total_meciuri == 2
+    assert radar.randuri[0].bk_odds == 1.50
+
+
+def test_ora_raportata_e_a_celei_mai_recente_rulari_servite(shadow):
+    shadow([
+        _rand_shadow(run_id="2026-09-05T09:40Z", fixture_id="fx1"),
+        _rand_shadow(run_id="2026-09-06T14:40Z", fixture_id="fx2"),
+    ], meciuri=[{"fixture_id": "fx1", "home_team": "A", "away_team": "B"},
+                {"fixture_id": "fx2", "home_team": "C", "away_team": "D"}])
+    radar = vd.radar_din_shadow("2026-09-06")
+    assert radar.calculat_la == "2026-09-06T14:40Z"
+    assert radar.total_meciuri == 2
+
+
+def test_o_rulare_noua_cu_o_singura_selectie_nu_o_sterge_pe_cealalta(shadow):
+    """Gaură prinsă prin mutație: dacă cheia de deduplicare ar fi doar meciul,
+    o rulare nouă care conține DOAR selecția X ar evacua selecția 1 din rularea
+    veche — iar meciul ar apărea în radar cu selecția greșită, cea mai slabă."""
+    shadow([
+        _rand_shadow(run_id="2026-09-05T09:40Z", fixture_id="fx1", selection_code="1",
+                     actionability_score=0.90, selected_top=True, rejection_reasons=[]),
+        _rand_shadow(run_id="2026-09-05T09:40Z", fixture_id="fx1", selection_code="X",
+                     actionability_score=0.50, selected_top=False,
+                     rejection_reasons=["outranked_top_n"]),
+        _rand_shadow(run_id="2026-09-06T14:40Z", fixture_id="fx1", selection_code="X",
+                     actionability_score=0.60, selected_top=False,
+                     rejection_reasons=["outranked_top_n"]),
+    ], meciuri=[{"fixture_id": "fx1", "home_team": "A", "away_team": "B"}])
+
+    radar = vd.radar_din_shadow("2026-09-06")
+    assert len(radar.randuri) == 1
+    assert radar.randuri[0].selection == "Home Win"

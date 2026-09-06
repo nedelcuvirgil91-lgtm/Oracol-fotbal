@@ -187,3 +187,81 @@ Consecință acceptată conștient: valorile sunt partajate, nu copiate. Predic�
 **Tensiunea de produs, acceptată conștient**: radarul a fost construit ca să reducă 48 de sugestii la 5, iar un buton care dă mereu mai multe redeschide parțial acea ușă. Diferența e că acum fiecare pagină conține exclusiv meciuri care au trecut toate porțile — a patra pagină nu e „a patra tranșă de gunoi", ci locurile 16-20 dintr-un set deja filtrat. Plafonul rămâne pragul de atenție implicit; butonul e o alegere explicită a utilizatorului de a se uita mai adânc.
 
 **„Recalculează tot" resetează paginarea la prima pagină** — altfel un refresh ar lăsa utilizatorul la mijlocul listei fără să înțeleagă de ce.
+
+---
+
+## §20 — Două goluri de date, găsite prin întrebarea potrivită (2026-09-06)
+
+Ambele au ieșit la iveală dintr-o întrebare a proprietarului produsului —
+*„colectarea de cote e zilnică, eu tot nu înțeleg cum nu avem acoperire"* —
+care a mutat verificarea de la meciurile VIITOARE (unde măsuram un gol care se
+închide singur) la meciurile deja JUCATE, singurul test care contează.
+
+**Rezultatul măsurătorii: nu există problemă de acoperire.** Pe meciurile jucate
+între 23 august și 6 septembrie, 13 din 14 ligi domestice au **100%** — Premier
+League 22/22, La Liga 24/24, MLS 38/38, Serie A 20/20, și așa mai departe.
+Colectarea zilnică face exact ce trebuie: un meci intră în fereastră cu zile
+înainte și își ia cotele mult înaintea fluierului. Ziua 7 goală la orizont e
+irelevantă — mâine devine ziua 6, apoi 5.
+
+**Excepția a scos însă la iveală un defect real, în colectorul shadow.**
+Singura ligă la 0% în `odds_history` era HNL (0 din 11). Dar cotele ei
+EXISTĂ — toate 11 în `odds_fallback_flashscore` (ADR-043). Iar
+`value_selector_shadow._load_odds()` citea **exclusiv** `odds_history`.
+
+Amploarea, măsurată pe 7 zile: din 139 de meciuri viitoare, 99 în
+`odds_history`, 123 în fallback, iar **24 EXCLUSIV în fallback** — excluse
+tăcut din radar și din F3 ca „fără cote", deși aveam cotele lor. 17% din setul
+experimentului, inclusiv o ligă întreagă.
+
+Mai grav decât acoperirea: **producția le servea deja.** `oracle_api` citește
+același fallback prin `get_odds_fallback_for_missing_fixtures()`, iar flagul
+`flashscore_odds_fallback_enabled` e **ACTIV** în producție. Experimentul măsura
+alt univers de cote decât cel servit utilizatorului.
+
+**Corecție**: `_load_odds()` completează din fallback meciurile rămase fără
+cote, în aceeași ordine ca producția — primar câștigă întotdeauna, fallback-ul
+doar umple golurile — și sub **același flag**, ca cele două să nu poată diverge
+tacit. Sursa fiecărei cote e contorizată în raport (`cote_din_fallback`), ca
+acoperirea să fie vizibilă, nu presupusă.
+
+---
+
+## §21 — Completitudinea radarului: cea mai recentă apariție PER MECI (2026-09-06)
+
+§18 alegea, pentru afișare, rularea shadow cea mai recentă care acoperă ziua.
+Motivul era prospețimea cotelor. Nu am luat în calcul că **rularea cea mai
+recentă e și cea mai incompletă**: garda temporală exclude meciurile deja
+începute, deci o rulare acoperă integral doar ziua URMĂTOARE, nu ziua ei.
+
+Măsurat pe rularea din 5 septembrie, ora 15:52: ziua ei proprie apărea cu 30 de
+meciuri (primul la 16:00 — restul începuseră), ziua următoare cu 44 (primul la
+00:30).
+
+**Amploarea, corectată după o observație justă a proprietarului produsului.**
+Prima estimare („lovește de mâine, e urgent") era greșită prin generalizare de
+la ziua curentă, o duminică. Distribuția reală a loviturilor de start, pe patru
+săptămâni:
+
+| Zi | Meciuri | Înainte de 14:40 UTC | Pierdere |
+|---|---:|---:|---:|
+| Duminică | 193 | 93 | **48%** |
+| Sâmbătă | 180 | 50 | **28%** |
+| Luni · Joi | 154 | 10 | 6-7% |
+| Marți · Miercuri · Vineri | 92 | 0 | **0%** |
+
+Marțea și miercurea, când se joacă cupele europene, pierderea e zero. Problema
+e reală strict în weekend — dar acolo sunt și cele mai multe meciuri de filtrat.
+
+**Corecție**: pentru FIECARE meci se ia cea mai recentă apariție a LUI, nu
+rândurile unei singure rulări. Cheia e `(meci, selecție)`, nu doar meciul — o
+rulare nouă care conține doar una dintre selecții nu are voie s-o evacueze pe
+cealaltă din rularea veche (gaură prinsă prin mutație, testul inițial nu o
+acoperea).
+
+**De ce amestecul de rulări e corect statistic**: `actionability_score` se
+calculează per candidatură, din politică și din cotele ei, fără nicio dependență
+de setul zilei — deci scorurile sunt comparabile între rulări. Plafonul de 5 nu
+vine din `selected_top` (relativ la rularea lui), ci din ordonarea și paginarea
+din §19. De aceea două rulări a câte cinci „top" nu pot produce zece sugestii,
+invariant verificat prin test.

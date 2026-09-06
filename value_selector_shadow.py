@@ -58,6 +58,11 @@ EXPERIMENT_NAME = "blend_v1"
 EXPERIMENT_GROUP = "control"
 PROCESSING_STAGE = "final"
 
+# Din ce tabela vine cota unui meci. Persistat in raport, ca acoperirea
+# fallback-ului sa fie vizibila, nu presupusa.
+SURSA_PRIMARA = "odds_history"
+SURSA_FALLBACK = "odds_fallback_flashscore"
+
 
 # ── Familii de politici (deduplicare analitica) ──────────────────────────────
 
@@ -274,7 +279,8 @@ def load_inputs(*, days_ahead: int = 1,
     from database.queries import get_client
 
     contoare = {"gasite": 0, "deja_incepute": 0, "fara_predictie": 0,
-                "fara_cote": 0, "predictie_dupa_kickoff": 0, "retinute": 0}
+                "fara_cote": 0, "predictie_dupa_kickoff": 0, "retinute": 0,
+                "cote_din_fallback": 0}
 
     client = get_client()
     if client is None:
@@ -329,6 +335,8 @@ def load_inputs(*, days_ahead: int = 1,
             contoare["predictie_dupa_kickoff"] += 1
             continue
         contoare["retinute"] += 1
+        if cota.get("sursa") == SURSA_FALLBACK:
+            contoare["cote_din_fallback"] += 1
         randuri.append({
             "fixture_id": fid,
             "home_team": meci.get("home_team"),
@@ -409,8 +417,49 @@ def _load_odds(client, fixture_ids: Sequence[str]) -> dict[str, dict]:
         if not (home and draw and away):
             continue
         best[fid] = {"home": home, "draw": draw, "away": away,
-                     "bookmaker": row.get("bookmaker")}
+                     "bookmaker": row.get("bookmaker"), "sursa": SURSA_PRIMARA}
+
+    _completeaza_din_fallback(best, fixture_ids)
     return best
+
+
+def _completeaza_din_fallback(best: dict[str, dict], fixture_ids: Sequence[str]) -> None:
+    """Umple, IN LOC, meciurile ramase fara cote din `odds_fallback_flashscore`.
+
+    De ce exista: `odds_history` e alimentata de Odds API, care nu acopera toate
+    ligile urmarite. Masurat pe date reale (2026-09-06): din 139 de meciuri
+    viitoare, 99 erau in `odds_history` si 24 EXCLUSIV in fallback — o liga
+    intreaga (HNL, 11 din 11 meciuri jucate) plus altele. Fara acest pas,
+    colectorul le numara tacit la `fara_cote` si le excludea din experiment,
+    desi cotele lor exista.
+
+    Mai grav decat acoperirea: PRODUCTIA le serveste deja. `oracle_api`
+    citeste acelasi fallback prin `get_odds_fallback_for_missing_fixtures()`,
+    iar flagul `flashscore_odds_fallback_enabled` e ACTIV. Un experiment care
+    masoara alt univers de cote decat cel servit nu masoara produsul.
+
+    Ordinea oglindeste productia: primar castiga intotdeauna, fallback-ul doar
+    umple golurile. Acelasi flag guverneaza ambele — daca productia il stinge,
+    experimentul il stinge odata cu ea, si nu diverg tacit."""
+    lipsa = [f for f in fixture_ids if f not in best]
+    if not lipsa:
+        return
+    try:
+        from flashscore_odds_fallback_config import is_enabled
+        if not is_enabled():
+            return
+        from database.queries import get_odds_fallback_for_missing_fixtures
+        gasite = get_odds_fallback_for_missing_fixtures(list(lipsa))
+    except Exception as exc:
+        logger.warning("[ValueSelectorShadow] citire fallback de cote esuata: %s", exc)
+        return
+
+    for fid, row in gasite.items():
+        home, draw, away = row.get("home"), row.get("draw"), row.get("away")
+        if not (home and draw and away):
+            continue
+        best[str(fid)] = {"home": home, "draw": draw, "away": away,
+                          "bookmaker": row.get("bookmaker"), "sursa": SURSA_FALLBACK}
 
 
 # ── Scriere (exclusiv in tabela proprie) ─────────────────────────────────────

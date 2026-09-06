@@ -807,3 +807,138 @@ def test_docstringul_nu_mai_pretinde_atomicitate_la_nivel_de_rulare():
     assert "Upsert atomic pe cheia naturala" not in doc
     assert "atomicitatea la nivel de RULARE nu e garantata" in doc.replace("\n", " ")
     assert "FAIL-FAST" in doc.upper()
+
+
+# ── Fallback de cote (ADR-043) — 24 de meciuri recuperate ────────────────────
+
+def _client_cu_fallback(monkeypatch, *, istoric, fallback, flag=True):
+    """Client fals + flagul de fallback, fără rețea."""
+    class _Q:
+        def __init__(self, randuri): self._r = list(randuri)
+        def select(self, *a, **k): return self
+        def eq(self, c, v): self._r = [x for x in self._r if x.get(c) == v]; return self
+        def in_(self, c, vals): self._r = [x for x in self._r if x.get(c) in set(vals)]; return self
+        def order(self, *a, **k): return self
+        def execute(self): return type("R", (), {"data": self._r})()
+
+    class _C:
+        def table(self, nume):
+            return _Q(istoric if nume == "odds_history" else [])
+
+    import database.queries as dq
+    import flashscore_odds_fallback_config as cfg
+    monkeypatch.setattr(dq, "get_client", lambda: _C())
+    monkeypatch.setattr(cfg, "is_enabled", lambda: flag)
+    monkeypatch.setattr(dq, "get_odds_fallback_for_missing_fixtures",
+                        lambda ids: {k: v for k, v in fallback.items() if k in set(ids)})
+    return _C()
+
+
+def _rand_istoric(fid, **kw):
+    baza = {"id": 1, "fixture_id": fid, "bookmaker": "Primar",
+            "opening_home": 2.0, "opening_draw": 3.4, "opening_away": 3.8,
+            "closing_home": None, "closing_draw": None, "closing_away": None}
+    baza.update(kw)
+    return baza
+
+
+def test_meciul_fara_cote_primare_le_ia_din_fallback(monkeypatch):
+    """Cazul HNL: 11 din 11 meciuri jucate aveau cote DOAR in fallback."""
+    from value_selector_shadow import SURSA_FALLBACK, _load_odds
+
+    c = _client_cu_fallback(
+        monkeypatch, istoric=[],
+        fallback={"hnl1": {"home": 1.8, "draw": 3.5, "away": 4.2, "bookmaker": "Flashscore"}})
+    cote = _load_odds(c, ["hnl1"])
+    assert cote["hnl1"]["home"] == 1.8
+    assert cote["hnl1"]["bookmaker"] == "Flashscore"
+    assert cote["hnl1"]["sursa"] == SURSA_FALLBACK
+
+
+def test_sursa_primara_castiga_intotdeauna(monkeypatch):
+    """Oglindeste productia: fallback-ul umple goluri, nu inlocuieste."""
+    from value_selector_shadow import SURSA_PRIMARA, _load_odds
+
+    c = _client_cu_fallback(
+        monkeypatch, istoric=[_rand_istoric("fx1")],
+        fallback={"fx1": {"home": 9.9, "draw": 9.9, "away": 9.9, "bookmaker": "Flashscore"}})
+    cote = _load_odds(c, ["fx1"])
+    assert cote["fx1"]["home"] == 2.0
+    assert cote["fx1"]["sursa"] == SURSA_PRIMARA
+
+
+def test_flagul_stins_inseamna_fara_fallback(monkeypatch):
+    """Acelasi flag guverneaza productia si experimentul — daca productia il
+    stinge, experimentul se stinge odata cu ea, nu diverg tacit."""
+    from value_selector_shadow import _load_odds
+
+    c = _client_cu_fallback(
+        monkeypatch, istoric=[], flag=False,
+        fallback={"hnl1": {"home": 1.8, "draw": 3.5, "away": 4.2, "bookmaker": "F"}})
+    assert _load_odds(c, ["hnl1"]) == {}
+
+
+def test_fallback_incomplet_nu_produce_cote_partiale(monkeypatch):
+    from value_selector_shadow import _load_odds
+
+    c = _client_cu_fallback(
+        monkeypatch, istoric=[],
+        fallback={"x": {"home": 1.8, "draw": None, "away": 4.2, "bookmaker": "F"}})
+    assert _load_odds(c, ["x"]) == {}
+
+
+def test_fallback_interogat_DOAR_pentru_meciurile_lipsa(monkeypatch):
+    """Nu se cere din fallback ce avem deja — cerere inutilă la baza de date."""
+    from value_selector_shadow import _load_odds
+
+    cerute: list[list[str]] = []
+
+    class _Q:
+        def __init__(self, r): self._r = list(r)
+        def select(self, *a, **k): return self
+        def eq(self, c, v): return self
+        def in_(self, c, vals): self._r = [x for x in self._r if x.get(c) in set(vals)]; return self
+        def order(self, *a, **k): return self
+        def execute(self): return type("R", (), {"data": self._r})()
+
+    class _C:
+        def table(self, nume):
+            return _Q([_rand_istoric("are")] if nume == "odds_history" else [])
+
+    import database.queries as dq
+    import flashscore_odds_fallback_config as cfg
+    monkeypatch.setattr(dq, "get_client", lambda: _C())
+    monkeypatch.setattr(cfg, "is_enabled", lambda: True)
+
+    def spion(ids):
+        cerute.append(list(ids))
+        return {}
+
+    monkeypatch.setattr(dq, "get_odds_fallback_for_missing_fixtures", spion)
+    _load_odds(_C(), ["are", "nu_are"])
+    assert cerute == [["nu_are"]]
+
+
+def test_eroarea_de_fallback_nu_arunca(monkeypatch):
+    from value_selector_shadow import _load_odds
+
+    class _C:
+        def table(self, nume):
+            class _Q:
+                def select(s, *a, **k): return s
+                def eq(s, *a, **k): return s
+                def in_(s, *a, **k): return s
+                def order(s, *a, **k): return s
+                def execute(s): return type("R", (), {"data": []})()
+            return _Q()
+
+    import database.queries as dq
+    import flashscore_odds_fallback_config as cfg
+    monkeypatch.setattr(dq, "get_client", lambda: _C())
+    monkeypatch.setattr(cfg, "is_enabled", lambda: True)
+
+    def explodeaza(ids):
+        raise RuntimeError("Supabase indisponibil")
+
+    monkeypatch.setattr(dq, "get_odds_fallback_for_missing_fixtures", explodeaza)
+    assert _load_odds(_C(), ["x"]) == {}
