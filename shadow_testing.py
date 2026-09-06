@@ -49,6 +49,17 @@ logger = logging.getLogger("FootballOracle.ShadowTesting")
 _OUTCOME_INDEX = {"H": 0, "D": 1, "A": 2}
 _OUTCOME_VECTOR = {"H": (1, 0, 0), "D": (0, 1, 0), "A": (0, 0, 1)}
 
+# Plafonul implicit PostgREST („Max Rows", 1000) — o cerere fără paginare e
+# tăiată tăcut la această valoare. Folosit ca dimensiune de pagină: o pagină
+# plină înseamnă „mai sunt", una parțială înseamnă „gata".
+_PAGE_SIZE = 1000
+
+# Câte `fixture_id` intră într-un singur filtru `.in_()`. Două limite, nu una:
+# (a) răspunsul e supus aceluiași plafon de 1000 de rânduri; (b) `.in_()` se
+# serializează în URL, iar o listă de mii de id-uri ar produce un URI pe care
+# gateway-ul îl respinge. 500 ține ambele confortabil sub prag.
+_IN_CHUNK_SIZE = 500
+
 
 # ════════════════════════════════════════════════════════════════════════════
 # LOGGING — shadow_predictions (log brut, per meci, per etapă de procesare)
@@ -126,7 +137,7 @@ def log_shadow_prediction(
 def get_shadow_predictions(
     experiment_name: str, experiment_version: str | None = None,
     league_scope: str | None = None, processing_stage: str | None = None,
-    include_invalidated: bool = False,
+    include_invalidated: bool = False, experiment_group: str | None = None,
 ) -> list[dict]:
     """[ADR-064] Randurile INVALIDATE sunt excluse implicit.
 
@@ -136,24 +147,72 @@ def get_shadow_predictions(
     "gazda castiga" ar iesi corect exact cand castiga cealalta echipa.
 
     `include_invalidated=True` doar pentru audit/inspectie, niciodata pentru
-    evaluare."""
+    evaluare.
+
+    [REPARAT 2026-09-06] Interogarea era un singur `select("*")` fără
+    paginare — iar PostgREST limitează implicit orice astfel de cerere la
+    1000 de rânduri (documentat oficial, „Max Rows"; aceeași capcană a fost
+    deja reparată o dată în acest proiect, vezi comentariul din
+    `supabase_client.get_training_data()`, unde modelul ML se antrena pe
+    1000 din 50.000+ meciuri).
+
+    Efectul măsurat aici, pe Challenger-ul `xgboost_v1` (`e638c1dc…`):
+    cererea aducea 1364 de rânduri (control + treatment), deci era
+    trunchiată; apelantul filtra apoi în Python și rămânea cu 403 meciuri
+    eligibile în loc de 506 reale. Fără `ORDER BY`, Postgres putea întoarce
+    ALTE 1000 de rânduri de la o zi la alta — de aceea
+    `n_matches_evaluated` sărea în sus și în jos (344, 392, 402, 394, 394,
+    402, 413, 403) deși fereastra de evaluare doar creștea. Verdictul se
+    calcula pe un subeșantion arbitrar, nedeterminist. Prima scădere a
+    apărut exact după ce cumulatul a trecut de 1000 (30 august).
+
+    Două schimbări, ambele necesare:
+      1. Paginare KEYSET pe `id` (cheia primară, unică și indexată) —
+         același tipar ca `get_training_data()`, cost O(1) per pagină, nu
+         OFFSET cu cost pătratic.
+      2. `experiment_group` devine filtru de CERERE, nu de Python. Fără el,
+         jumătate din capacitatea fiecărei pagini se consuma pe rânduri
+         `control` pe care apelantul le arunca oricum."""
     client = sb.get_client()
     if client is None:
         return []
+    all_rows: list[dict] = []
+    cursor: int | None = None
     try:
-        q = client.table("shadow_predictions").select("*").eq("experiment_name", experiment_name)
-        if experiment_version is not None:
-            q = q.eq("experiment_version", experiment_version)
-        if league_scope is not None and league_scope != "all":
-            q = q.eq("league", league_scope)
-        if processing_stage is not None:
-            q = q.eq("processing_stage", processing_stage)
-        if not include_invalidated:
-            q = q.is_("invalidated_at", "null")
-        res = q.execute()
-        return res.data or []
+        while True:
+            q = client.table("shadow_predictions").select("*").eq("experiment_name", experiment_name)
+            if experiment_version is not None:
+                q = q.eq("experiment_version", experiment_version)
+            if league_scope is not None and league_scope != "all":
+                q = q.eq("league", league_scope)
+            if processing_stage is not None:
+                q = q.eq("processing_stage", processing_stage)
+            if experiment_group is not None:
+                q = q.eq("experiment_group", experiment_group)
+            if not include_invalidated:
+                q = q.is_("invalidated_at", "null")
+            if cursor is not None:
+                q = q.gt("id", cursor)
+            q = q.order("id").limit(_PAGE_SIZE)
+            res = q.execute()
+            page = res.data or []
+            all_rows.extend(page)
+            if len(page) < _PAGE_SIZE:
+                break
+            cursor = page[-1]["id"]
+        return all_rows
     except Exception as exc:
-        logger.warning("[ShadowTesting] get_shadow_predictions failed: %s", exc)
+        # DELIBERAT `[]`, nu `all_rows` (paginile deja aduse) — spre deosebire
+        # de `get_training_data()`, care întoarce parțialul. Diferența e în
+        # consecință: acolo, mai puține date înseamnă un model mai slab, dar
+        # onest. Aici, un set PARȚIAL produce exact defectul reparat mai sus —
+        # un verdict statistic calculat pe un subeșantion tăcut incomplet.
+        # Zero rânduri produce `insufficient_data`, adică NICIUN verdict, ceea
+        # ce e starea corectă când nu știm. Comportament identic cu cel
+        # dinaintea paginării.
+        logger.warning("[ShadowTesting] get_shadow_predictions failed (după %d rânduri aduse, "
+                       "se întoarce lista goală ca să nu se evalueze pe date parțiale): %s",
+                       len(all_rows), exc)
         return []
 
 
@@ -322,6 +381,41 @@ def _baseline_is_neutral(match_row: dict) -> bool:
             and match_row.get("away_data_quality") == "neutral")
 
 
+def _read_match_history_for_fixtures(client, fixture_ids: list[str]) -> dict[str, dict]:
+    """Rândurile din `match_history` folosite ca BASELINE, pentru fixture-urile
+    date — doar cele cu rezultat real ȘI predicție Oracle prezentă.
+
+    [REPARAT 2026-09-06, același defect ca la `get_shadow_predictions()`]
+    Înainte era un singur `.in_(fixture_ids)`, fără nicio bucată și fără
+    paginare. Nu producea încă pagubă (682 de fixture-uri, sub plafonul de
+    1000), dar plafonul se apropia cu ~90 de rânduri pe zi — iar repararea
+    DOAR a citirii de shadow ar fi mutat trunchierea aici, nu ar fi
+    eliminat-o. Se citește pe bucăți, fiecare bucată paginată keyset pe
+    `fixture_id`.
+
+    Ridică excepția mai departe — apelantul o tratează ca „nu se evaluează",
+    niciodată ca „set complet mai mic"."""
+    gasite: dict[str, dict] = {}
+    coloane = ("fixture_id,actual_result,prob_home_pred,prob_draw_pred,prob_away_pred,"
+               "home_data_quality,away_data_quality")
+    for start in range(0, len(fixture_ids), _IN_CHUNK_SIZE):
+        bucata = fixture_ids[start:start + _IN_CHUNK_SIZE]
+        cursor: str | None = None
+        while True:
+            q = client.table("match_history").select(coloane).in_("fixture_id", bucata)
+            if cursor is not None:
+                q = q.gt("fixture_id", cursor)
+            res = q.order("fixture_id").limit(_PAGE_SIZE).execute()
+            page = res.data or []
+            for r in page:
+                if r.get("actual_result") and r.get("prob_home_pred") is not None:
+                    gasite[r["fixture_id"]] = r
+            if len(page) < _PAGE_SIZE:
+                break
+            cursor = page[-1]["fixture_id"]
+    return gasite
+
+
 def evaluate_experiment(
     experiment_name: str,
     experiment_version: str,
@@ -342,8 +436,18 @@ def evaluate_experiment(
     if client is None:
         return None
 
+    # Filtrele merg în CERERE (`processing_stage`/`experiment_group`), nu doar
+    # în Python — vezi explicația din `get_shadow_predictions()`. Comprehensiunea
+    # de mai jos rămâne DELIBERAT, deși e azi un no-op peste rânduri deja
+    # filtrate: dacă un refactor viitor pierde vreunul din cei doi parametri,
+    # rândurile `control` ar intra tăcut în comparație și ar corupe verdictul —
+    # un eșec sever și invizibil. Costul redundanței e zero; costul absenței ei
+    # e un verdict fals.
     shadow_rows = [
-        r for r in get_shadow_predictions(experiment_name, experiment_version, league_scope)
+        r for r in get_shadow_predictions(
+            experiment_name, experiment_version, league_scope,
+            processing_stage="final", experiment_group="treatment",
+        )
         if r.get("processing_stage") == "final" and r.get("experiment_group") == "treatment"
     ]
     fixture_ids = [r["fixture_id"] for r in shadow_rows]
@@ -354,17 +458,7 @@ def evaluate_experiment(
         return {"status": "insufficient_data", "n_matches_evaluated": 0}
 
     try:
-        res = (
-            client.table("match_history")
-            .select("fixture_id,actual_result,prob_home_pred,prob_draw_pred,prob_away_pred,"
-                    "home_data_quality,away_data_quality")
-            .in_("fixture_id", fixture_ids)
-            .execute()
-        )
-        mh_by_fixture = {
-            r["fixture_id"]: r for r in (res.data or [])
-            if r.get("actual_result") and r.get("prob_home_pred") is not None
-        }
+        mh_by_fixture = _read_match_history_for_fixtures(client, fixture_ids)
     except Exception as exc:
         logger.warning("[ShadowTesting] evaluate_experiment — citire match_history eșuată: %s", exc)
         return None

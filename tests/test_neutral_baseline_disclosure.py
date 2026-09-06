@@ -60,8 +60,14 @@ def _sursa_evaluate() -> str:
 
 def test_evaluarea_citeste_data_quality_din_match_history():
     """Fără cele două coloane în SELECT, diagnosticul ar clasifica TOTUL ca
-    informat și ar raporta tăcut aceleași cifre ca populația completă."""
-    sursa = _sursa_evaluate()
+    informat și ar raporta tăcut aceleași cifre ca populația completă.
+
+    [ACTUALIZAT 2026-09-06] Interogarea `match_history` a fost mutată în
+    `_read_match_history_for_fixtures()` (paginare + citire pe bucăți, plafonul
+    PostgREST de 1000 de rânduri). Garda urmărește acum AMBELE surse: dacă
+    interogarea se mută iar, testul o caută acolo unde e, nu unde era. Ce
+    verifică rămâne neschimbat — cele două coloane trebuie cerute efectiv."""
+    sursa = _sursa_evaluate() + inspect.getsource(st._read_match_history_for_fixtures)
     assert "home_data_quality" in sursa and "away_data_quality" in sursa
 
 
