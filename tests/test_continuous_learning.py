@@ -218,10 +218,15 @@ def test_count_finished_matches_all_scope_ignores_league_filter(monkeypatch):
 
 def test_count_finished_matches_all_scope_respects_since(monkeypatch):
     """Ramura 'all' respecta aceeasi semantica temporala ca ramura pe liga -
-    filtrul since ramane aplicat, doar filtrul de liga e omis."""
+    filtrul since ramane aplicat, doar filtrul de liga e omis.
+
+    [ACTUALIZAT 2026-09-06] Filtrul se aplica pe `kickoff_date` (meciul S-A
+    JUCAT dupa crearea ultimului Challenger), nu pe `created_at` (rândul a
+    fost DESCOPERIT). Vezi tests/test_new_matches_counter.py pentru garda
+    dedicata si pentru amploarea masurata a defectului."""
     rows = [
-        {"id": 1, "league": "Premier League", "created_at": "2026-01-01"},
-        {"id": 2, "league": "La Liga", "created_at": "2026-06-01"},
+        {"id": 1, "league": "Premier League", "kickoff_date": "2026-01-01"},
+        {"id": 2, "league": "La Liga", "kickoff_date": "2026-06-01"},
     ]
     fake_client = _FakeMatchClient(rows)
     monkeypatch.setattr(cl, "get_client", lambda: fake_client)
@@ -231,7 +236,7 @@ def test_count_finished_matches_all_scope_respects_since(monkeypatch):
 
     result_with_since = cl._count_finished_matches("all", since="2026-03-01")
     assert result_with_since == 1
-    assert fake_client.last_query.applied_gt == [("created_at", "2026-03-01")]
+    assert fake_client.last_query.applied_gt == [("kickoff_date", "2026-03-01")]
 
 
 def test_count_finished_matches_specific_league_unchanged(monkeypatch):

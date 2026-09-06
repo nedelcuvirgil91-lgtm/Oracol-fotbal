@@ -530,7 +530,39 @@ def _count_finished_matches(league: str, since: str | None = None) -> int:
     vreun rând real, iar Faza B nu ar porni NICIODATĂ o antrenare automată
     pentru un algoritm cu league_scope="all", indiferent de câte meciuri
     există. Tratat generic (pe valoare, nu pe nume de algoritm) — pentru o
-    ligă reală, filtrul .eq() rămâne exact ca înainte."""
+    ligă reală, filtrul .eq() rămâne exact ca înainte.
+
+    [CORECTAT 2026-09-06] `since` se aplica pe **`created_at`** — ora la care
+    RÂNDUL a fost scris prima dată, adică momentul DESCOPERIRII meciului, nu
+    al jucării lui. Discovery găsește meciuri cu până la 7 zile înainte (iar
+    `flashscore_weekly_fixtures` descoperă etape întregi cu săptămâni
+    înainte), deci un meci jucat pe 1 septembrie, descoperit pe 20 august, NU
+    era „nou" pentru un Challenger creat pe 24 august — deși rezultatul lui
+    apăruse abia în septembrie.
+
+    Amploarea, măsurată live înainte de fix: pentru Challenger-ul `blend_v1`
+    (creat 24 august), interogarea veche număra **5** meciuri noi, în timp ce
+    **285** se jucaseră efectiv. Cu pragul la 30, Faza B ar fi REFUZAT să
+    antreneze un motor care are 285 de meciuri noi de învățat — al doilea
+    blocaj al antrenării, complet independent de cel rezolvat prin ADR-057, și
+    latent doar pentru că slotul lui `blend_v1` e ocupat azi.
+
+    Se numără de acum pe `kickoff_date` — meciul S-A JUCAT după crearea
+    ultimului Challenger, deci e date pe care acel Challenger nu le-a văzut.
+
+    Două imprecizii cunoscute, ambele acceptate conștient:
+      1. Un meci jucat ÎNAINTE de crearea Challenger-ului, al cărui rezultat a
+         sosit DUPĂ, nu e numărat — deși e, tehnic, date noi. Cazul e rar
+         (rezultate întârziate) și alegerea păstrează o numărătoare monotonă,
+         stabilă la rerulare.
+      2. `kickoff_date` e naiv (fără fus orar), `created_at` e UTC. Comparația
+         e deci exactă la nivel de ZI, nu de oră. Irelevant pentru o poartă cu
+         pragul la 30 de meciuri.
+
+    Comparația e lexicografică pe text, ceea ce e CORECT aici pentru că ambele
+    formate reale din coloană sunt ISO-8601 și se ordonează corect între ele:
+    `2026-09-06` < `2026-09-06T14:00:00` (verificat live: 57.323 rânduri doar
+    cu data, 822 cu oră, zero alt format, zero nule)."""
     client = get_client()
     if client is None:
         return 0
@@ -539,12 +571,44 @@ def _count_finished_matches(league: str, since: str | None = None) -> int:
         if league != "all":
             q = q.eq("league", league)
         if since:
-            q = q.gt("created_at", since)
+            q = q.gt("kickoff_date", _prag_kickoff(since))
         res = q.execute()
         return len(res.data or [])
     except Exception as exc:
         logger.error("[ContinuousLearning] _count_finished_matches esuat pentru %s: %s", league, exc)
         return 0
+
+
+def _prag_kickoff(since: str) -> str:
+    """Aduce un `created_at` de Challenger la forma comparabilă lexicografic cu
+    `match_history.kickoff_date`. FUNCȚIE PURĂ, fără I/O.
+
+    Postgres întoarce `created_at` ca `2026-08-24 05:56:40.28055+00` — cu
+    SPAȚIU între dată și oră. `kickoff_date` folosește `T` (sau nimic).
+    Spațiul (0x20) se ordonează ÎNAINTEA lui `T` (0x54), deci o comparație pe
+    șirul brut ar fi dat rezultate corecte din întâmplare, dependente de
+    formatul exact returnat de driver — exact genul de lucru care se strică
+    tăcut la o schimbare de bibliotecă. Normalizarea face regula explicită.
+
+    Cazul în care contează efectiv: un meci jucat în ACEEAȘI ZI cu crearea
+    Challenger-ului, dar mai devreme. `2026-08-24T03:00:00` vs. un prag brut
+    `2026-08-24 05:56:40+00` → `T` (0x54) > spațiu (0x20), deci meciul ar ieși
+    „mai nou" decât Challenger-ul, deși s-a jucat înaintea lui. Cu prag
+    normalizat, comparația e pe ore și iese corect.
+
+    Fracțiunile de secundă și fusul orar se taie: `kickoff_date` nu le are, iar
+    păstrarea lor ar face ca un meci exact la aceeași secundă să fie exclus
+    prin comparație de șiruri de lungimi diferite.
+
+    [NOTĂ, găsită prin testare de mutație] O gardă `if len(text) < 10: return
+    text` a existat aici, justificată ca „conservatoare pentru intrări care nu
+    arată a timestamp". Mutația care o elimina NU a fost prinsă de niciun test
+    — pentru că era cod mort: pe `""`, `None` sau `"2026"`, cele două ramuri
+    întorc identic același lucru. A fost ștearsă în loc să i se scrie un test
+    care să-i justifice existența. Un comentariu frumos nu ține loc de efect."""
+    normalizat = (since or "").strip().replace(" ", "T", 1)
+    # `2026-08-24T05:56:40` — primele 19 caractere, fără fracțiuni și fus orar.
+    return normalizat[:19]
 
 
 # ════════════════════════════════════════════════════════════════════════
