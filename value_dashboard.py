@@ -176,59 +176,108 @@ def collect_radar_bets(predictions: list, policy) -> list[ValueBetRow]:
 SHADOW_TABLE = "value_selector_shadow"
 
 
-def radar_din_shadow(zi_iso: str) -> tuple[list[ValueBetRow] | None, str | None]:
-    """Rândurile de radar pentru o zi, citite din `value_selector_shadow` —
-    calculate deja de colectorul de noapte, nu recalculate acum.
+@dataclass
+class RadarZi:
+    """Rezultatul unei citiri de radar pentru o zi, paginat.
 
-    `(None, None)` înseamnă „nu am ce servi": radar inactiv, fără client
-    Supabase, fără rânduri pentru ziua cerută, sau orice eroare de citire.
-    Apelantul cade atunci pe calculul live, care rămâne neschimbat — un ecran
-    gol ar fi mai rău decât unul lent.
+    `total_meciuri` e numărul de meciuri CALIFICATE — cele care au trecut toate
+    porțile — nu numărul de meciuri ale zilei. Ecranul îl afișează ca să se
+    vadă cât mai e de răsfoit, și ca „încă 5" să nu pară nesfârșit."""
+    randuri: list[ValueBetRow]
+    calculat_la: str
+    total_meciuri: int
+    pagina: int
+    pagini: int
 
-    Se servește rularea CEA MAI RECENTĂ care acoperă ziua, nu prima. E o
-    diferență deliberată față de §16, care guvernează EVALUAREA: acolo prima
-    apariție e singura necontaminată de mișcarea pieței; aici utilizatorul are
-    nevoie de cotele și de setul de meciuri cele mai proaspete. Ora rulării se
-    întoarce ca al doilea element, ca ecranul să poată spune de când sunt
-    datele în loc să pretindă că sunt de acum.
+
+def radar_din_shadow(zi_iso: str, *, pagina: int = 0,
+                     marime: int = 5) -> RadarZi | None:
+    """Radarul unei zile, citit din `value_selector_shadow` — calculat deja de
+    colectorul de noapte, nu recalculat acum.
+
+    `None` înseamnă „nu am ce servi": radar inactiv, fără client Supabase, fără
+    rânduri pentru ziua cerută, sau orice eroare de citire. Apelantul cade
+    atunci pe calculul live, care rămâne neschimbat — un ecran gol ar fi mai
+    rău decât unul lent.
+
+    **Paginarea nu coboară niciodată ștacheta.** Pagina 2 conține exact
+    meciurile care au trecut TOATE porțile și au fost tăiate doar de plafonul
+    de 5 (`outranked_top_n`) — nu candidați respinși, readuși ca să umple
+    pagina. Când setul calificat se termină, se revine la prima pagină; nu se
+    inventează sugestii.
+
+    Ordinea reproduce fidel `value_selector._sort_key`: scor descrescător,
+    apoi valoare absolută descrescătoare, apoi identitate stabilă. De aceea
+    pagina 2 înseamnă cu adevărat „locurile 6-10", nu un alt set arbitrar.
+
+    Se servește rularea CEA MAI RECENTĂ care acoperă ziua, nu prima. Diferență
+    deliberată față de §16, care guvernează EVALUAREA: acolo prima apariție e
+    singura necontaminată de mișcarea pieței; aici utilizatorul are nevoie de
+    cotele cele mai proaspete.
 
     Strict READ-ONLY: două `SELECT`-uri, zero scrieri."""
     if not _radar_activ():
-        return None, None
+        return None
     try:
         from database.queries import get_client
         from value_selector_config import build_policy
 
         client = get_client()
         if client is None:
-            return None, None
+            return None
 
         policy_id = build_policy().policy_id
         randuri = (
             client.table(SHADOW_TABLE)
             .select("run_id,fixture_id,league,kickoff_utc,market,selection_code,"
                     "model_probability,fair_probability,bk_odds,relative_edge_pct,"
-                    "absolute_edge_pp,rank_in_day")
+                    "absolute_edge_pp,actionability_score,selected_top,rejection_reasons")
             .eq("policy_id", policy_id)
-            .eq("selected_top", True)
             .gte("kickoff_utc", f"{zi_iso}T00:00:00")
             .lt("kickoff_utc", f"{zi_iso}T23:59:59.999999")
             .execute()
         ).data or []
         if not randuri:
-            return None, None
+            return None
 
         # O zi poate fi acoperită de mai multe rulări (fereastra colectorului e
         # de 24h, deci se suprapune). Se păstrează doar cea mai recentă.
         ultima = max(str(r.get("run_id") or "") for r in randuri)
         randuri = [r for r in randuri if str(r.get("run_id") or "") == ultima]
 
-        echipe = _echipe_pentru(client, [str(r["fixture_id"]) for r in randuri])
+        calificate = [r for r in randuri
+                      if r.get("selected_top")
+                      or "outranked_top_n" in (r.get("rejection_reasons") or [])]
+        if not calificate:
+            return None
+
+        calificate.sort(key=lambda r: (
+            -float(r.get("actionability_score") or 0.0),
+            -float(r.get("absolute_edge_pp") or 0.0),
+            str(r.get("fixture_id") or ""),
+            str(r.get("selection_code") or ""),
+        ))
+        # Un meci apare o singură dată, oricâte selecții ale lui s-ar califica —
+        # invariantul „o selecție per meci" al politicii (ADR-071 §9).
+        vazute: set[str] = set()
+        unice = []
+        for r in calificate:
+            fid = str(r.get("fixture_id") or "")
+            if fid in vazute:
+                continue
+            vazute.add(fid)
+            unice.append(r)
+
+        marime = max(1, int(marime))
+        pagini = max(1, (len(unice) + marime - 1) // marime)
+        pagina = int(pagina) % pagini          # se reia de la capăt, nu se blochează
+        felie = unice[pagina * marime:(pagina + 1) * marime]
+
+        echipe = _echipe_pentru(client, [str(r["fixture_id"]) for r in felie])
         etichete = {"1": "Home Win", "X": "Draw", "2": "Away Win"}
 
-        randuri.sort(key=lambda r: (r.get("rank_in_day") or 0))
         iesire: list[ValueBetRow] = []
-        for r in randuri:
+        for r in felie:
             gazda, oaspete = echipe.get(str(r["fixture_id"]), ("", ""))
             iesire.append(ValueBetRow(
                 fixture_id=str(r["fixture_id"]),
@@ -244,11 +293,12 @@ def radar_din_shadow(zi_iso: str) -> tuple[list[ValueBetRow] | None, str | None]
                 # Invariantul de radar (ADR-071 §17): niciodată mărime de miză.
                 kelly_stake=None,
             ))
-        return iesire, ultima
+        return RadarZi(randuri=iesire, calculat_la=ultima, total_meciuri=len(unice),
+                       pagina=pagina, pagini=pagini)
     except Exception as exc:
         logger.warning("[ValueDashboard] radarul din shadow nu a putut fi citit "
                        "(cad pe calculul live): %s", exc)
-        return None, None
+        return None
 
 
 def _echipe_pentru(client, fixture_ids: list[str]) -> dict[str, tuple[str, str]]:

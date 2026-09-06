@@ -314,7 +314,8 @@ def _rand_shadow(**kw):
         "kickoff_utc": "2026-09-06T15:00:00+00:00", "market": "1X2",
         "selection_code": "1", "model_probability": 0.65, "fair_probability": 0.55,
         "bk_odds": 1.71, "relative_edge_pct": 18.2, "absolute_edge_pp": 10.0,
-        "rank_in_day": 1, "policy_id": "shrunk_050@v1:32ccbf4a", "selected_top": True,
+        "actionability_score": 0.5, "policy_id": "shrunk_050@v1:32ccbf4a",
+        "selected_top": True, "rejection_reasons": [],
     }
     baza.update(kw)
     return baza
@@ -341,9 +342,10 @@ def shadow(monkeypatch):
 
 def test_radarul_din_shadow_intoarce_randuri_si_ora_rularii(shadow):
     shadow([_rand_shadow()])
-    randuri, calculat_la = vd.radar_din_shadow("2026-09-06")
-    assert calculat_la == "2026-09-06T09:40Z"
-    (r,) = randuri
+    radar = vd.radar_din_shadow("2026-09-06")
+    assert radar.calculat_la == "2026-09-06T09:40Z"
+    assert radar.total_meciuri == 1 and radar.pagina == 0 and radar.pagini == 1
+    (r,) = radar.randuri
     assert r.home_team == "Arsenal" and r.away_team == "Chelsea"
     assert r.selection == "Home Win"
     assert r.bk_odds == 1.71
@@ -355,9 +357,9 @@ def test_echipele_vin_din_match_history_nu_din_despicarea_etichetei(shadow):
     """`match_label` nu se poate sparge: „Beveren - Oud-Heverlee Leuven" e un
     caz real din date, cu liniuță în numele echipei."""
     shadow([_rand_shadow(fixture_id="fx2")])
-    randuri, _ = vd.radar_din_shadow("2026-09-06")
-    assert randuri[0].home_team == "Beveren"
-    assert randuri[0].away_team == "Oud-Heverlee Leuven"
+    radar = vd.radar_din_shadow("2026-09-06")
+    assert radar.randuri[0].home_team == "Beveren"
+    assert radar.randuri[0].away_team == "Oud-Heverlee Leuven"
 
 
 def test_se_serveste_rularea_cea_mai_recenta(shadow):
@@ -365,48 +367,50 @@ def test_se_serveste_rularea_cea_mai_recenta(shadow):
         _rand_shadow(run_id="2026-09-05T15:52Z", bk_odds=9.99, rank_in_day=1),
         _rand_shadow(run_id="2026-09-06T09:40Z", bk_odds=1.71, rank_in_day=1),
     ])
-    randuri, calculat_la = vd.radar_din_shadow("2026-09-06")
-    assert calculat_la == "2026-09-06T09:40Z"
-    assert len(randuri) == 1 and randuri[0].bk_odds == 1.71
+    radar = vd.radar_din_shadow("2026-09-06")
+    assert radar.calculat_la == "2026-09-06T09:40Z"
+    assert len(radar.randuri) == 1 and radar.randuri[0].bk_odds == 1.71
 
 
-def test_ordinea_e_dupa_rank_in_day(shadow):
+def test_ordinea_reproduce_sortarea_selectorului(shadow):
+    """Scor descrescator, apoi valoare absoluta, apoi identitate stabila —
+    identic cu `value_selector._sort_key`. De aia pagina 2 inseamna cu adevarat
+    „locurile 6-10", nu un alt set arbitrar."""
     shadow([
-        _rand_shadow(fixture_id="fx2", rank_in_day=2),
-        _rand_shadow(fixture_id="fx1", rank_in_day=1),
+        _rand_shadow(fixture_id="fx2", actionability_score=0.10),
+        _rand_shadow(fixture_id="fx1", actionability_score=0.90),
     ])
-    randuri, _ = vd.radar_din_shadow("2026-09-06")
-    assert [r.fixture_id for r in randuri] == ["fx1", "fx2"]
+    radar = vd.radar_din_shadow("2026-09-06")
+    assert [r.fixture_id for r in radar.randuri] == ["fx1", "fx2"]
 
 
 def test_filtreaza_pe_politica_activa_si_pe_selectiile_de_top(shadow):
     client = shadow([_rand_shadow()])
     vd.radar_din_shadow("2026-09-06")
     assert ("eq", "policy_id", RADAR.policy_id) in client.jurnal
-    assert ("eq", "selected_top", True) in client.jurnal
 
 
 def test_alta_zi_nu_intoarce_nimic(shadow):
     shadow([_rand_shadow()])
-    assert vd.radar_din_shadow("2026-09-07") == (None, None)
+    assert vd.radar_din_shadow("2026-09-07") is None
 
 
 def test_radar_inactiv_nu_citeste_nimic(shadow):
     client = shadow([_rand_shadow()], radar=False)
-    assert vd.radar_din_shadow("2026-09-06") == (None, None)
+    assert vd.radar_din_shadow("2026-09-06") is None
     assert client.jurnal == []
 
 
 def test_fara_randuri_cade_pe_calculul_live(shadow):
     shadow([])
-    assert vd.radar_din_shadow("2026-09-06") == (None, None)
+    assert vd.radar_din_shadow("2026-09-06") is None
 
 
 def test_fara_client_supabase_cade_pe_calculul_live(monkeypatch):
     import database.queries as dq
     monkeypatch.setattr(dq, "get_client", lambda: None)
     monkeypatch.setattr(vd, "_radar_activ", lambda: True)
-    assert vd.radar_din_shadow("2026-09-06") == (None, None)
+    assert vd.radar_din_shadow("2026-09-06") is None
 
 
 def test_o_eroare_de_citire_nu_arunca_ci_cade_pe_calculul_live(monkeypatch):
@@ -418,14 +422,14 @@ def test_o_eroare_de_citire_nu_arunca_ci_cade_pe_calculul_live(monkeypatch):
 
     monkeypatch.setattr(dq, "get_client", explodeaza)
     monkeypatch.setattr(vd, "_radar_activ", lambda: True)
-    assert vd.radar_din_shadow("2026-09-06") == (None, None)
+    assert vd.radar_din_shadow("2026-09-06") is None
 
 
 def test_meciul_fara_rand_in_match_history_ramane_fara_echipe_nu_arunca(shadow):
     shadow([_rand_shadow(fixture_id="necunoscut")], meciuri=[])
-    randuri, _ = vd.radar_din_shadow("2026-09-06")
-    assert len(randuri) == 1
-    assert randuri[0].home_team == "" and randuri[0].away_team == ""
+    radar = vd.radar_din_shadow("2026-09-06")
+    assert len(radar.randuri) == 1
+    assert radar.randuri[0].home_team == "" and radar.randuri[0].away_team == ""
 
 
 def test_radar_din_shadow_nu_scrie_nimic():
@@ -517,3 +521,112 @@ def test_marcaj_lung_dar_invalid_ramane_TBA(intrare):
     """Ramura `except ValueError` — pe care testele anterioare nu o atingeau
     deloc, pentru că intrările lor scurte erau respinse mai devreme."""
     assert vd.ora_locala(intrare) == "TBA"
+
+
+# ── Paginarea: „Încă 5 sugestii" ─────────────────────────────────────────────
+
+def _pool(n: int, *, top: int = 5):
+    """`n` meciuri calificate: primele `top` marcate `selected_top`, restul
+    tăiate DOAR de plafon (`outranked_top_n`) — exact ce produce selectorul."""
+    randuri = []
+    for i in range(n):
+        randuri.append(_rand_shadow(
+            fixture_id=f"fx{i:02d}",
+            actionability_score=1.0 - i * 0.01,
+            selected_top=i < top,
+            rejection_reasons=[] if i < top else ["outranked_top_n"],
+        ))
+    return randuri
+
+
+def _echipe(n: int):
+    return [{"fixture_id": f"fx{i:02d}", "home_team": f"H{i}", "away_team": f"A{i}"}
+            for i in range(n)]
+
+
+def test_pagina_0_da_primele_cinci(shadow):
+    shadow(_pool(24), meciuri=_echipe(24))
+    radar = vd.radar_din_shadow("2026-09-06", pagina=0)
+    assert [r.fixture_id for r in radar.randuri] == ["fx00", "fx01", "fx02", "fx03", "fx04"]
+    assert radar.total_meciuri == 24 and radar.pagini == 5 and radar.pagina == 0
+
+
+def test_pagina_1_da_exact_locurile_6_10(shadow):
+    shadow(_pool(24), meciuri=_echipe(24))
+    radar = vd.radar_din_shadow("2026-09-06", pagina=1)
+    assert [r.fixture_id for r in radar.randuri] == ["fx05", "fx06", "fx07", "fx08", "fx09"]
+    assert radar.pagina == 1
+
+
+def test_ultima_pagina_poate_fi_incompleta_nu_se_umple_artificial(shadow):
+    shadow(_pool(24), meciuri=_echipe(24))
+    radar = vd.radar_din_shadow("2026-09-06", pagina=4)
+    assert len(radar.randuri) == 4          # 24 = 5+5+5+5+4
+    assert [r.fixture_id for r in radar.randuri] == ["fx20", "fx21", "fx22", "fx23"]
+
+
+def test_dupa_ultima_pagina_se_reia_de_la_capat(shadow):
+    """Butonul nu se blochează: apăsat la nesfârșit, ciclează."""
+    shadow(_pool(24), meciuri=_echipe(24))
+    prima = vd.radar_din_shadow("2026-09-06", pagina=0)
+    reluata = vd.radar_din_shadow("2026-09-06", pagina=5)
+    assert reluata.pagina == 0
+    assert [r.fixture_id for r in reluata.randuri] == [r.fixture_id for r in prima.randuri]
+
+
+def test_paginarea_NU_coboara_stacheta(shadow):
+    """Invariantul care contează. Meciurile respinse de porți NU apar pe
+    nicio pagină, oricât ai apăsa — doar cele care au trecut tot și au fost
+    tăiate de plafon."""
+    calificate = _pool(7)
+    respins = _rand_shadow(fixture_id="respins", actionability_score=99.0,
+                           selected_top=False,
+                           rejection_reasons=["not_model_leader", "market_implausible"])
+    shadow(calificate + [respins],
+           meciuri=_echipe(7) + [{"fixture_id": "respins", "home_team": "R",
+                                  "away_team": "R2"}])
+    vazute = set()
+    for pagina in range(6):                      # mai multe cicluri complete
+        radar = vd.radar_din_shadow("2026-09-06", pagina=pagina)
+        vazute |= {r.fixture_id for r in radar.randuri}
+    assert "respins" not in vazute
+    assert radar.total_meciuri == 7
+
+
+def test_un_meci_apare_o_singura_data_chiar_cu_doua_selectii_calificate(shadow):
+    """Invariantul „o selecție per meci" (ADR-071 §9) se păstrează și la
+    paginare: un meci cu două selecții calificate nu ocupă două locuri."""
+    randuri = [
+        _rand_shadow(fixture_id="fx00", selection_code="1", actionability_score=0.9,
+                     selected_top=True, rejection_reasons=[]),
+        _rand_shadow(fixture_id="fx00", selection_code="X", actionability_score=0.8,
+                     selected_top=False, rejection_reasons=["outranked_top_n"]),
+        _rand_shadow(fixture_id="fx01", selection_code="1", actionability_score=0.7,
+                     selected_top=True, rejection_reasons=[]),
+    ]
+    shadow(randuri, meciuri=_echipe(2))
+    radar = vd.radar_din_shadow("2026-09-06", pagina=0)
+    assert radar.total_meciuri == 2
+    assert [r.fixture_id for r in radar.randuri] == ["fx00", "fx01"]
+
+
+def test_o_singura_pagina_cand_sunt_cel_mult_cinci_calificate(shadow):
+    shadow(_pool(3, top=3), meciuri=_echipe(3))
+    radar = vd.radar_din_shadow("2026-09-06", pagina=0)
+    assert radar.pagini == 1 and radar.total_meciuri == 3
+    assert vd.radar_din_shadow("2026-09-06", pagina=7).pagina == 0
+
+
+def test_zi_fara_niciun_meci_calificat_cade_pe_calculul_live(shadow):
+    """Rânduri există, dar toate respinse de porți: nu e nimic de semnalat,
+    deci se cade pe calea veche în loc să se afișeze un tabel gol."""
+    shadow([_rand_shadow(fixture_id="fx00", selected_top=False,
+                         rejection_reasons=["not_model_leader"])])
+    assert vd.radar_din_shadow("2026-09-06") is None
+
+
+def test_marimea_paginii_e_parametru_nu_constanta(shadow):
+    shadow(_pool(24), meciuri=_echipe(24))
+    radar = vd.radar_din_shadow("2026-09-06", pagina=1, marime=3)
+    assert len(radar.randuri) == 3
+    assert [r.fixture_id for r in radar.randuri] == ["fx03", "fx04", "fx05"]

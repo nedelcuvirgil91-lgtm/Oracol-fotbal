@@ -169,3 +169,21 @@ Colectarea zilnică e **ACTIVĂ din 2026-09-06** — `value_selector_shadow_logg
 Consecință acceptată conștient: valorile sunt partajate, nu copiate. Predicțiile sunt tratate ca imuabile peste tot în UI, deci e sigur — dar e o proprietate de respectat, nu un accident.
 
 **Excepție explicită la scope lock-ul F2**: `app.py` era declarat FROZEN. Bucla trăiește acolo, deci nimic din `value_dashboard.py` nu o putea ocoli. Excepția a fost cerută și aprobată explicit de proprietarul produsului, limitată la blocul `elif nav == "value_bets":` și la helper-ele de cache. Celelalte 10 fișiere upstream rămân UNCHANGED, verificate individual. Corpul buclei de predicții e neatins — doar indentat sub o gardă; `git diff -w` arată exact schimbările semantice.
+
+---
+
+## §19 — „Încă 5 sugestii": paginare care nu coboară ștacheta (2026-09-06)
+
+**Cererea proprietarului produsului**: un buton care, la fiecare apăsare, dă alt set de 5 meciuri.
+
+**De ce se poate face curat**: mulțimea „următoarelor 5" există deja, explicit, în date. Un candidat care trece TOATE porțile dar e tăiat de plafonul de 5 primește `RejectionReason.OUTRANKED_TOP_N` — se distinge mecanic de unul respins de o poartă. Măsurat pe 6 septembrie, profilul `shrunk_050`: 5 în Top, **19 tăiate doar de plafon**, 16 longshot, 92 respinse de porți. Deci 24 de meciuri calificate din 46, adică 5 pagini.
+
+**Invariantul, singurul care contează aici**: paginarea **revelează mai mult din setul calificat, niciodată nu coboară pragul**. Pe nicio pagină, oricât s-ar apăsa, nu apare un candidat respins de o poartă. Verificat prin test (`test_paginarea_NU_coboara_stacheta`) și prin mutație — dacă cineva înlocuiește filtrul cu „toate rândurile", două teste cad.
+
+**Ordinea reproduce fidel `value_selector._sort_key`** (scor desc., valoare absolută desc., identitate stabilă), de aceea pagina 2 înseamnă cu adevărat „locurile 6-10", nu un alt set arbitrar. **Explicit respinsă**: varianta „amestecă aleator de fiecare dată" — ar goli de sens ordonarea și ar face lista neverificabilă retroactiv.
+
+**Se reia de la capăt când setul calificat se termină**, ca butonul să nu se blocheze; ecranul spune „pagina 3/5" și „locurile 11-15 din 24", deci reluarea e vizibilă, nu tăcută. Ultima pagină rămâne incompletă dacă atât e — nu se umple artificial (§9).
+
+**Tensiunea de produs, acceptată conștient**: radarul a fost construit ca să reducă 48 de sugestii la 5, iar un buton care dă mereu mai multe redeschide parțial acea ușă. Diferența e că acum fiecare pagină conține exclusiv meciuri care au trecut toate porțile — a patra pagină nu e „a patra tranșă de gunoi", ci locurile 16-20 dintr-un set deja filtrat. Plafonul rămâne pragul de atenție implicit; butonul e o alegere explicită a utilizatorului de a se uita mai adânc.
+
+**„Recalculează tot" resetează paginarea la prima pagină** — altfel un refresh ar lăsa utilizatorul la mijlocul listei fără să înțeleagă de ce.

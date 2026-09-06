@@ -958,9 +958,20 @@ elif nav == "value_bets":
     if not today_matches:
         st.info("Niciun meci azi în competițiile urmărite.")
     else:
-        force_refresh = st.button("🔄 Recalculează tot (ignoră cache-ul)")
+        col_reia, col_alte = st.columns([3, 2])
+        with col_reia:
+            force_refresh = st.button("🔄 Recalculează tot (ignoră cache-ul)",
+                                      use_container_width=True)
+        with col_alte:
+            alte_cinci = st.button("↻ Încă 5 sugestii", use_container_width=True,
+                                   help="Următoarele meciuri care au trecut "
+                                        "aceleași porți, doar cu scor mai mic. "
+                                        "Ștacheta nu coboară.")
         if force_refresh:
             prediction_cache.goleste(_depozit_predictii())
+            st.session_state["radar_pagina"] = 0
+        if alte_cinci:
+            st.session_state["radar_pagina"] = st.session_state.get("radar_pagina", 0) + 1
 
         # [ADR-071 §18] Calea rapidă a radarului: rândurile au fost deja
         # calculate de colectorul de noapte și persistate în
@@ -968,10 +979,9 @@ elif nav == "value_bets":
         # însemna zeci de evaluări complete pentru zero informație în plus.
         # `None` = radar inactiv, fără date pentru ziua asta, sau eroare de
         # citire — se cade pe calculul live de mai jos, NESCHIMBAT.
-        randuri_radar, radar_calculat_la = (
-            (None, None) if force_refresh else radar_din_shadow(today_iso)
-        )
-        de_analizat = [] if randuri_radar is not None else today_matches
+        radar = None if force_refresh else radar_din_shadow(
+            today_iso, pagina=st.session_state.get("radar_pagina", 0))
+        de_analizat = [] if radar is not None else today_matches
 
         predictions: list = []
         n_reused = n_computed = 0
@@ -1014,14 +1024,19 @@ elif nav == "value_bets":
             "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
 
-        if randuri_radar is not None:
-            st.caption(f"Radar · {len(randuri_radar)} meciuri semnalate din "
-                       f"{len(today_matches)} · calculat la {radar_calculat_la}")
+        if radar is not None:
+            de_la = radar.pagina * 5 + 1
+            st.caption(
+                f"Radar · locurile {de_la}-{de_la + len(radar.randuri) - 1} din "
+                f"{radar.total_meciuri} meciuri calificate "
+                f"(pagina {radar.pagina + 1}/{radar.pagini}) · "
+                f"din {len(today_matches)} meciuri azi · "
+                f"calculat la {radar.calculat_la}")
         else:
             st.caption(f"{n_reused} din cache · {n_computed} recalculate acum · "
                        f"TTL cache: {PREDICTION_CACHE_TTL_SECONDS // 60} min")
 
-        rows = randuri_radar if randuri_radar is not None else collect_value_bets(predictions)
+        rows = radar.randuri if radar is not None else collect_value_bets(predictions)
 
         if not rows:
             threshold = engine.config.get("value_bet_threshold_pct", 5.0)
