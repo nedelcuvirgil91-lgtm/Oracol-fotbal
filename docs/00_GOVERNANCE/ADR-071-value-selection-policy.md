@@ -1,7 +1,7 @@
 # ADR-071 — Value Selection Policy (Candidate vs Actionable)
 
-**Status**: PROPUS — cod F1 scris și testat, NEACTIVAT în producție, UI neatins
-**Data**: 2026-09-04
+**Status**: PROPUS — F1+F2 scrise, testate și pe `main`. Colectarea shadow e ACTIVĂ în producție din 2026-09-06; selectorul NU servește nimic live, UI neatins (`value_selector_v1_enabled` absent).
+**Data**: 2026-09-04 · **Actualizat**: 2026-09-06 (decizia §16 + stadiul F2)
 **Înlocuiește**: nimic. **Amendează**: nimic. ADR-043 (cascada de cote) și ADR-056 (shadow batch) rămân neschimbate — F2 le va folosi, nu le va modifica.
 
 ---
@@ -74,6 +74,19 @@ Măsurat: rangul în meci elimină 10 din cele 14 selecții pe care regula actua
 
 **15. Nimic nu se șterge.** Fiecare candidat respins rămâne vizibil, cu motivul, în categoria Respinse/Diagnostic.
 
+**16. Identitatea unei selecții în F3 = PRIMA apariție** (decizie proprietar produs, 2026-09-06, varianta (a) din trei prezentate).
+
+Cu `days_ahead=1`, colectarea zilnică vede același meci în două rulări consecutive, cu `run_id` diferit și decizii posibil diferite — cotele se mișcă între cele două momente. Fără o regulă, „150 de selecții" e o mărime ambiguă și rezultatul F3 devine neauditabil retroactiv.
+
+**Regula**: pentru fiecare pereche `(policy_id, fixture_id)`, selecția care contează la numărătoare și la evaluare e cea din **cel mai mic `run_id`** în care acel meci apare. Aparițiile ulterioare rămân persistate — nimic nu se șterge (§15) — dar nu se numără de două ori.
+
+Motivul alegerii, nu doar alegerea:
+- e singura variantă care **nu poate fi contaminată de mișcarea pieței**: cu cât selecția e mai aproape de fluier, cu atât cota încorporează mai multă informație, iar un radar care „câștigă" pentru că a așteptat piața nu demonstrează nimic despre model;
+- e **consecventă cu lanțul deja construit**: `_load_predictions()` alege deja cea mai VECHE predicție de control per fixture, din același motiv;
+- varianta (c) — fiecare rulare ca observație independentă — a fost respinsă pentru că observațiile *nu sunt* independente (același meci, aceeași predicție de bază), deci ar umfla artificial eșantionul și ar face statistica înșelătoare.
+
+Regula e **de evaluare, nu de colectare**: colectorul continuă să scrie toate aparițiile. Deduplicarea se aplică în evaluatorul de rezultate, care nu e încă implementat (vezi „Implementare — stadiu").
+
 ---
 
 ## Ce NU decide acest ADR
@@ -106,8 +119,15 @@ Măsurat: rangul în meci elimină 10 din cele 14 selecții pe care regula actua
 
 **F1, făcut**: `value_selector.py` (nucleu pur), `value_selector_adapter.py` (mapare 1X2), `value_selector_config.py` (flaguri inerte + profile F2), `tests/test_value_selector.py`, `tests/test_value_selector_purity.py`. 78 de teste noi, 9 mutații verificate, `pytest tests/` verde (3013 passed, 2 skipped).
 
-**F2, NEÎNCEPUT**: logare shadow a deciziilor, fără nicio schimbare vizibilă pentru utilizator.
+**F2, FĂCUT — infrastructură + prima rulare reală**: `value_selector_shadow.py` (colector read-only), migrarea 055, `value_selector_shadow.yml` (cron zilnic 09:40 UTC), 55 de teste de colector. Prima rulare reală: `run_id 2026-09-05T15:52Z`, 74 de meciuri × 3 selecții × 13 profile = **2886 de rânduri**, audit post-scriere complet trecut (0 duplicate, 0 leakage, H/X/A complet pe toate cele 962 de perechi, edge-uri recalculate independent în SQL cu 0 abateri, amprente artefact↔DB identice pe 74/74 fixture-uri).
 
-**F3, NEÎNCEPUT**: minimum 8 săptămâni ȘI minimum 150 de selecții, politică înghețată, zero scurgere temporală, fără ajustarea pragurilor pe parcurs.
+Colectarea zilnică e **ACTIVĂ din 2026-09-06** — `value_selector_shadow_logging_enabled = true` în `model_config` (aprobare explicită proprietar produs). `value_selector_v1_enabled` rămâne **absent**, deci UI-ul e neatins și lista Top Value Bets arată exact ce arăta înainte.
+
+**F2 rămâne NEÎNCHISĂ.** Infrastructura funcționează și datele sunt corecte semantic, dar asta nu înseamnă „experiment valid". Două goluri, ambele blocante pentru F3:
+
+1. **Putere experimentală insuficientă, măsurată** (2026-09-06): cele 13 profile produc, pe setul Top, doar **7 seturi distincte de selecții**. `market_floor_020/025/030/035` și `shrunk_050` dau **exact aceleași 10 selecții, în aceeași ordine**; `market_floor_040` ≡ `shrunk_025` și `ranker_prob_value` ≡ `shrunk_100` (același set, altă ordonare). Cauza e structurală: o selecție care e deja lider de model și trece pragul de 3 pp edge absolut are tipic `fair_p` ∈ [0,40 · 0,60], deci un prag de plauzibilitate de 0,20-0,35 nu are ce tăia — abia 0,40 începe să muște. Pragul **nu e inert în general**: pe granița Longshot/Rejected discriminează clar (30/34/42/50/57). Măsurat pe o singură zi, deci nu e o condamnare — dar F3 nu poate porni până nu se măsoară pe mai multe zile și se colapsează brațele dovedit identice.
+2. **Evaluatorul de rezultate nu există**: nimic nu leagă `value_selector_shadow` de `match_history.actual_result` ca să producă rată de reușită / ROI / Brier per politică. Fără el, colectarea adună rânduri pe care nimeni nu le poate scora.
+
+**F3, NEÎNCEPUT și NEAUTORIZAT**: minimum 8 săptămâni ȘI minimum 150 de selecții (numărate conform §16 — prima apariție), politică înghețată, zero scurgere temporală, fără ajustarea pragurilor pe parcurs. Nu poate începe înainte de închiderea celor două goluri de mai sus.
 
 **F4, NEÎNCEPUT**: activare, doar dacă trec simultan toate criteriile GO/NO-GO stabilite de proprietarul produsului — incluzând „ROI > controlul de piață corespunzător + 3 pp", nu „ROI > 0".
