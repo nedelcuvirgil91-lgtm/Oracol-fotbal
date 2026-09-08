@@ -181,6 +181,28 @@ Pașii 1 și 2 sunt comutativi ca siguranță (A1 le face pe amândouă inofensi
 3. O rulare cu flagul oprit care demonstrează comportament **identic** cu cel de azi.
 4. Migrarea coloanelor `baseline_source` arătată în SQL exact și confirmată explicit înainte de rulare (North Star #6, `supabase-safety`).
 
+## Stare de execuție și pașii următori (actualizat 2026-09-08)
+
+| Pas | Stare | Cine decide |
+|---|---|---|
+| 1. Cod în producție, flag oprit | ✅ făcut (`f7d04d6`) — 23 de teste, 15 mutații prinse | — |
+| 2. Migrarea `baseline_source` | ✅ aplicată și verificată (`056`, `e1f5a57`) — 62+5 rânduri, 0 modificate | proprietarul produsului (confirmat) |
+| 3. Verificare că `n_matches_evaluated` a crescut (A2) | ⏳ **în așteptare** — pauză internațională | verificabil automat |
+| 4. Activarea flagului | ⏳ **în așteptare**, strict după pasul 3 | proprietarul produsului |
+
+**Amânarea pasului 3-4 e o decizie explicită** a proprietarului produsului (2026-09-08), la recomandarea mea: activarea într-o zi în care `n` a stagnat ar face ca primul verdict pe baseline-ul nou să fie aruncat tăcut (A2). Declanșatorul e reluarea campionatelor, weekend-ul 12-14 septembrie 2026.
+
+**Cât timp flagul e oprit, costul așteptării e zero**: evaluările continuă exact ca până acum, pe baseline-ul înghețat. Nu se pierde nimic; doar nu se câștigă încă nimic.
+
+**Reminder-ul trăiește în `CLAUDE.md`, secțiunea „⏳ DECIZII ÎN AȘTEPTARE" (D-1)** — cu interogarea de verificare și SQL-ul de activare, gata de rulat. Plasat acolo deliberat: `CLAUDE.md` e citit la începutul fiecărei sesiuni, iar un ADR care nu e citat de nicăieri a costat deja 14 zile (ADR-057). Un ADR nu se auto-reamintește.
+
+### Ce urmează după activare
+
+- **D-2** — persistarea intrărilor de la servire (varianta B). Rezolvă și gaura de acoperire din D2 de mai sus, dacă scrierea rândului `control` se decuplează de existența unui Challenger.
+- **D-3** — decizia asupra celorlalți consumatori ai coloanelor înghețate (`champion_guardian.py`, `prediction_evaluation.py`), semnalați aici ca Discovery Rule.
+
+Ambele sunt înregistrate în `CLAUDE.md`, aceeași secțiune.
+
 ## Referințe
 
 - `shadow_testing.py:425-510` — `evaluate_experiment()`, locul comparației.

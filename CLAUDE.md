@@ -22,6 +22,57 @@ Not Implemented
 - Auto-promovare/auto-rollback fără om în buclă (contrazice ADR-002; cere ADR dedicat de risc)
 - Activarea ADR-037 în producție (R4 — separată deliberat de merge, vezi planul de deployment)
 
+## ⏳ DECIZII ÎN AȘTEPTARE — de adus în discuție ACTIV, nu de așteptat să fie întrebate
+
+**Secțiunea asta există pentru că absența ei a costat deja.** ADR-057 nu era citat de niciun document și de niciun cod; condiția lui s-a împlinit pe 23 august, iar starea a fost descoperită abia pe 6 septembrie — **14 zile fără nicio antrenare**, și doar dintr-o întrebare întâmplătoare a proprietarului produsului. Orice decizie amânată se scrie AICI, cu declanșatorul verificabil, nu doar în ADR-ul ei.
+
+### D-1. Activarea ADR-072 (baseline proaspăt la promovare) — amânată deliberat, 2026-09-08
+
+**Stare**: cod în producție, migrarea 056 aplicată și verificată, flagul `challenger_baseline_from_control_enabled` **ABSENT din `model_config` (= False)**. Nimic nu s-a schimbat încă în comportament.
+
+**De ce așteptăm** (decizie explicită a proprietarului produsului, la recomandarea mea): amendamentul A2 din ADR-072 — comutarea sursei nu schimbă `n_matches_evaluated`, iar `challenger_evaluations` scrie cu `UNIQUE (training_run_id, n_matches_evaluated)` + `ignore_duplicates`. Dacă `n` a stagnat, primul verdict pe baseline-ul nou e **aruncat tăcut**. La 8 septembrie eram în pauză internațională, deci `n` putea stagna.
+
+**Declanșator**: reluarea campionatelor (weekend 12-14 septembrie 2026) — verificabil, nu calendaristic:
+
+```sql
+-- n a crescut fata de ultima evaluare inregistrata?
+SELECT training_run_id, max(n_matches_evaluated) AS ultimul_n_inregistrat,
+       max(evaluated_at) AS ultima_evaluare
+FROM challenger_evaluations GROUP BY 1 ORDER BY 3 DESC LIMIT 5;
+```
+
+Se compară cu `n_matches_evaluated` din `experiment_registry` (actualizat la fiecare rulare, prin `upsert`, deci mereu curent). **Dacă registrul arată un `n` mai mare decât maximul înregistrat pentru acel `training_run_id`, condiția e îndeplinită.**
+
+**SQL de activare** (de arătat și confirmat explicit înainte de rulare, North Star #6):
+
+```sql
+UPDATE model_config
+SET data = data || '{"challenger_baseline_from_control_enabled": true}'::jsonb
+WHERE id = 1;
+```
+
+**De verificat după activare**: primul verdict trebuie să aibă `baseline_source = 'shadow_control'` pentru `xgboost_v1`/`blend_v1` (acoperire `control` 100%, verificat) și `'match_history_frozen'` pentru `flashscore_team_dna` (0 rânduri `control` — fallback corect, D2). Deltele scad — **e corectarea unei erori, nu o regresie**.
+
+### D-2. Persistarea intrărilor de la servire (varianta B) — ADR nescris încă
+
+**Golul**: intrările pe care Oracle le folosește la servire (ratinguri ofensive/defensive, `form_score`, ELO, H2H) **nu sunt persistate nicăieri**. `_build_ml_features()` le construiește deja corect, iar `_cache_prediction()` le scrie în `predictions/*.json` — folder `.gitignore`-uit, pe un runner GitHub care se distruge la final. Se calculează corect și dispar.
+
+Verificat pe ambii candidați de stocare: `match_history` ține doar IEȘIRILE, iar `shadow_predictions.feature_metadata` e `{}` pentru `xgboost_v1` și `blend_v1`. **Nicio predicție Oracle nu poate fi auditată azi până la intrările ei** (North Star #9).
+
+**Varianta aleasă: B** — `feature_metadata` pe rândul `control`, care se împrospătează prin `upsert`. Opțiunea C (coloană `jsonb` pe `match_history`) a fost **analizată și respinsă**: RPC-ul canonic folosește `COALESCE(m.existent, p->nou)`, deci coloana ar îngheța la prima scriere, cu 7 zile înainte de meci, aruncând tăcut fiecare îmbunătățire ulterioară.
+
+**Ar rezolva și gaura de acoperire din ADR-072 D2**, dacă scrierea rândului `control` se decuplează de existența unui Challenger.
+
+**Stare**: neînceput, deliberat. De reluat după D-1.
+
+### D-3. Consumatorii coloanelor înghețate — decizie nesolicitată încă (Discovery Rule, ADR-072)
+
+`learning_core/champion_guardian.py` (liniile 253, 302, 318) și `prediction_evaluation.py` citesc **aceleași `match_history.prob_*_pred` înghețate** ca poarta de promovare, deci sunt afectate de aceeași vechime de până la 7 zile.
+
+**NEtratate în ADR-072, deliberat** — consumatori distincți, cu semantici proprii neanalizate. Pentru `prediction_evaluation.py` s-ar putea chiar argumenta că predicția „așa cum a văzut-o utilizatorul" e cea corectă de raportat.
+
+**Decizia proprietarului produsului**: în afara scopului / amendament la ADR-072 / ADR nou. **Încă necerută.**
+
 ## Filosofia proiectului
 
 **„Verificat, nu presupus."** Orice pretenție de îmbunătățire (feature nou, algoritm nou, ipoteză nouă) se demonstrează cu test de ablație pe date reale, nu se acceptă din intuiție — vezi `docs/03_ENGINE/REST_DAYS_VALIDATION.md` ca exemplu de rigoare: un feature cu fundament teoretic solid, respins explicit după ce testul măsurat n-a arătat câștig.
@@ -138,6 +189,7 @@ Cheile API sunt tratate ca infrastructură critică — nu ca detalii de configu
 - Promovarea automată (concept `auto_promotion_enabled`, propus DOAR ca design în `docs/04_LEARNING_CORE/LEARNING_CORE_ARCHITECTURE.md` §3.4 — corectat 2026-08-03, EPIC ML Activation Pasul 5: nu există azi ca flag citit de niciun cod, confirmat prin grep exhaustiv, `docs/00_GOVERNANCE/ML_ENGINE_AUDIT.md` §11/§13) contrazice azi ADR-002 și necesită un ADR nou dedicat înainte de orice implementare — niciodată implicit pornită.
 - Champion Manager mutabil exclusiv de Promotion Engine și Rollback Engine.
 - Niciun Challenger nu servește predicții live.
+- **Baseline-ul Oracle din poarta de promovare e ÎNGHEȚAT azi, nu cel servit — ADR-072 (ACCEPTED 2026-09-08), implementat, flag OPRIT.** `evaluate_experiment()` citește `match_history.prob_*_pred`, scrise prin RPC-ul canonic cu `COALESCE(m.existent, p->nou)` (first-writer-wins, migrarea 053); batch-ul ADR-056 evaluează cu 7 zile înainte, deci ele rămân predicția făcută atunci. Challenger-ul, în schimb, se împrospătează în fiecare noapte. **Măsurat pe 468 de meciuri: Oracle înghețat 0,4679 acuratețe vs. 0,5107 real** — un handicap de 4,3pp exact în comparația care decide promovările. Consecință verificată pe verdicte reale: `blend_v1/4e17c737` pare că bate Oracle cu +3,2pp, dar contra Oracle-ului real **pierde cu 1,1pp**; `xgboost_v1/e638c1dc` pare mai bun la log-loss, real e mai slab. **Până la activarea flagului (`CLAUDE.md` §DECIZII ÎN AȘTEPTARE, D-1), orice cifră de promovare afișată e optimistă** — înainte de a aproba o promovare, verdictul se recalculează contra rândurilor `control`, read-only.
 - **Un Challenger blocat în `monitoring` oprește ANTRENAREA întregii familii, la nesfârșit** — `continuous_learning._process_pair()` rulează Faza B (antrenare nouă) exclusiv când nu există Challenger activ, iar `monitoring` nu e stare terminală și nu expiră. Nu e defect, e absența unei reguli de ieșire: `ADR-057-challenger-monitoring-expiry-policy.md` (**ACCEPTED 2026-09-06**, Opțiunea B — implementată, flag `challenger_expiry_proposals_enabled` **oprit în producție**; activarea e o decizie separată) o descrie și propune Opțiunea B (propunere T3a + aprobare umană, prag n ≥ 300). Mecanica există deja — `expired` e motiv valid în `challenger_manager.VALID_REJECTION_REASONS` ȘI în constrângerea `CHECK` din Postgres; lipsește doar declanșatorul. **Trimiterea asta există pentru că absența ei a costat**: ADR-057 nu era citat de niciun document și de niciun cod (`grep -rn "ADR-057"` → un singur fișier, el însuși), condiția lui s-a împlinit pe 23 august, iar starea a fost descoperită abia pe 6 septembrie, după 14 zile fără nicio antrenare, dintr-o întrebare a proprietarului produsului. §8 al ADR-ului avertiza exact asta: „nu există azi nicio alertă care să semnaleze acea stare". Stare curentă și decizia cerută: `BACKLOG_2026-09-06.md` §0.0.
 
 ## Regulile pentru Learning Core
