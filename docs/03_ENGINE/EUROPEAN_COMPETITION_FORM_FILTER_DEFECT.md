@@ -1,15 +1,23 @@
 # European Competition Form-History Filtering Defect
 
-**Status**: DIAGNOSTIC — defect confirmat, NEREPARAT, deliberat
-**Data**: 2026-09-04 · **extins 2026-09-08** cu a doua manifestare (§2b)
+**Status**: DIAGNOSTIC — NEREPARAT, deliberat. **Titlul („Defect") e prea absolut** — vezi §2c: filtrul pe competiție codifică semnal real și trebuie PĂSTRAT; ce lipsește e legarea de sezon și o cale de rezervă onestă.
+**Data**: 2026-09-04 · **extins 2026-09-08** cu a doua manifestare (§2b) și cu contra-argumentul testat (§2c)
 **Descoperit în**: auditul Top Value Bets (ADR-071), la investigarea celor 25 de meciuri în care egalul apărea ca rezultat cel mai probabil
 **Decizie proprietar produs**: se documentează acum, se repară într-un task separat de arhitectură de date. Nu se aplică niciun fix local.
 
-> **Citește §2b înainte de §3.** Documentul descria inițial O SINGURĂ manifestare
-> — echipa fără niciun meci în competiție, care ajunge la valori neutre. Pe
-> 2026-09-08 s-a confirmat o a DOUA, produsă de aceeași linie de cod, cu simptom
-> opus și **fără nicio protecție în aval**. Concluziile din §3-§5 acoperă doar
-> prima; secțiunile respective sunt marcate acolo unde nu se mai aplică integral.
+> **Citește §2b și §2c înainte de §3.** Documentul descria inițial O SINGURĂ
+> manifestare — echipa fără niciun meci în competiție, care ajunge la valori
+> neutre. Pe 2026-09-08 s-au adăugat două lucruri care schimbă concluzia:
+>
+> - **§2b** — o a DOUA manifestare, din aceeași linie de cod, cu simptom opus
+>   (istoric prezent dar din alt sezon) și **fără nicio protecție în aval**.
+> - **§2c** — un contra-argument al proprietarului produsului, **testat pe date
+>   și confirmat**: filtrul pe competiție codifică semnal real (dispersie de 2,0
+>   ppm între echipe, campionat vs. UCL) și e singura ajustare la forța
+>   adversarului pe care motorul o are azi. **Nu se șterge.**
+>
+> Concluziile din §3-§5 acoperă doar prima manifestare; secțiunile sunt marcate
+> acolo unde nu se mai aplică integral. §6.1 a fost ÎNCHISĂ cu date.
 
 ---
 
@@ -180,6 +188,106 @@ Napoli/PSV (223 de zile) e deja la ~4 luni de acea graniță. Defectul nu dispar
 
 ---
 
+## 2c. Contra-argument testat: filtrul pe competiție NU e un simplu bug (2026-09-08)
+
+**Ridicat de proprietarul produsului**, imediat după §2b: *„ținând cont că UCL e
+o competiție nouă, poate ceea ce pare un defect acum, după 3 meciuri în UCL o să
+fie adevărata formă. Câteodată unele echipe joacă diferit în competițiile
+europene față de campionatele lor — fie mai bine, fie mai rău."*
+
+Ipoteza a fost testată, nu acceptată. **Datele o confirmă**, iar asta schimbă
+diagnosticul: titlul acestui document („Defect") era prea absolut.
+
+### 2c.1 Măsurătoarea
+
+Puncte pe meci, sezonul 2025-07-01 → 2026-06-30, aceleași echipe, campionat
+intern vs. Champions League (doar echipe cu ≥10 meciuri domestice și ≥6 UCL):
+
+| Echipă | Campionat | UCL | Δ ppm | GD/meci dom. | GD/meci UCL |
+|---|---:|---:|---:|---:|---:|
+| Villarreal | 1,89 | **0,13** | **−1,77** | +0,68 | −1,63 |
+| PSV | 2,47 | 1,00 | −1,47 | +1,65 | 0,00 |
+| Napoli | 2,00 | 1,00 | −1,00 | +0,58 | −0,75 |
+| Inter Milan | 2,29 | 1,50 | −0,79 | +1,42 | +0,50 |
+| Borussia Dortmund | 2,15 | 1,40 | −0,75 | +1,06 | +0,10 |
+| Sporting CP | 2,41 | 1,67 | −0,75 | +1,91 | +0,58 |
+| FC Barcelona | 2,47 | 1,92 | −0,56 | +1,55 | +1,00 |
+| Manchester City | 2,05 | 1,60 | −0,45 | +1,11 | +0,20 |
+| Real Madrid | 2,26 | 1,93 | −0,33 | +1,11 | +0,93 |
+| Atletico Madrid | 1,82 | 1,50 | −0,32 | +0,47 | +0,44 |
+| Bayern Munich | 2,62 | 2,43 | −0,19 | +2,53 | +1,64 |
+| Paris Saint-Germain | 2,24 | 2,06 | −0,18 | +1,32 | +1,29 |
+| **Liverpool** | 1,58 | **1,75** | **+0,17** | +0,26 | +0,92 |
+| **Arsenal** | 2,24 | **2,47** | **+0,23** | +1,16 | +1,53 |
+
+### 2c.2 Ce arată
+
+**Media Δ = −0,58 ppm.** Ăsta e efectul banal, așteptat: adversarii din UCL sunt
+mai buni decât media unui campionat, deci toată lumea coboară.
+
+**Dispersia e argumentul: de la −1,77 la +0,23, adică 2,0 puncte pe meci.** Dacă
+diferența ar fi doar „adversari mai tari", Δ ar fi aproximativ constant. Nu e —
+variază de zece ori între extreme.
+
+Contrastul decisiv: **PSV arată mai bine decât Liverpool în campionat (2,47 vs
+1,58) și e substanțial mai slab în Europa (1,00 vs 1,75).** O formă calculată
+exclusiv pe campionat ar fi inversat complet ordinea acestor două echipe pentru
+un meci de Champions League.
+
+### 2c.3 Confuzia care trebuie numită, nu ascunsă
+
+O parte din dispersie **nu** e „echipa joacă diferit" — e „campionatul intern are
+altă tărie". 2,47 ppm în Eredivisie (PSV) nu valorează cât 2,24 în Premier League
+(Arsenal). Cele două cauze nu se pot separa cu datele de aici.
+
+**Dar asta întărește concluzia, nu o slăbește**: ambele efecte sunt informație
+reală despre nivelul echipei într-un meci european, iar filtrul pe competiție le
+captează pe amândouă gratuit. Motorul nu are nicio altă ajustare la forța
+adversarului (gol deja documentat, audit Top Value Bets §3/C3) — deci filtrul
+face azi o muncă pe care nimic altceva n-o face.
+
+### 2c.4 Consecința pentru diagnostic
+
+**`.eq("league", league)` nu e o eroare de concept. E o implementare care nu-și
+duce conceptul până la capăt.**
+
+Recomandarea din §6 („ultimele 5 meciuri indiferent de competiție" ca variantă
+posibilă) e, în lumina acestor cifre, **greșită** — ar face PSV să pară un rulou
+compresor în Champions League. Vezi §6.1 rescris.
+
+### 2c.5 Ce NU rezolvă contra-argumentul
+
+Trei lucruri rămân probleme reale, independent de faptul că filtrul e conceptual
+corect:
+
+1. **Fereastra de 365 de zile n-are noțiunea de sezon.** Formularea proprietarului
+   produsului o arată singură: „după 3 meciuri o să avem adevărata formă" — adică
+   forma europeană **din campania curentă**. Codul ia ultimele 5 meciuri de UCL
+   din ultimul an, indiferent de sezon. Forma lui Real de azi e din
+   februarie-aprilie, cu alt lot, după o fereastră de transferuri.
+2. **Nu există semnal de vechime** (§2b.2). Un profil de 146 de zile e etichetat
+   `live` și afișat ca „✅ Date reale".
+3. **Cele 45 de echipe fără istoric european rămân pe constantă** (§1-§2). Acolo
+   filtrul nu ajustează nimic — nu întoarce nimic. Forma domestică penalizată,
+   marcată explicit ca substitut, ar fi strict mai bună decât o constantă
+   identică pentru orice meci.
+
+### 2c.6 Un punct în care contra-argumentul agravează, nu ameliorează
+
+„După 3 meciuri" înseamnă două lucruri, ambele problematice:
+
+- **Ca durată**: din propriile noastre date, etapa 2 e pe 2026-10-13, la 33 de
+  zile după prima (8-10 septembrie). Dacă etapa 3 păstrează ritmul, ajunge pe la
+  începutul lui noiembrie — **~2 luni** în care cele 16 echipe merg pe date din
+  sezonul trecut, iar cele 45 pe constantă. (Descoperirea noastră are doar
+  parțial calendarul viitor; data exactă a etapei 3 nu e confirmabilă din bază.)
+- **Ca statistică**: la etapa 3 avem **n=3**, iar motorul cere `last_n = 5` și
+  pornește de la `MIN_DB_MATCHES = 3`. Trei meciuri e un eșantion subțire pentru
+  rating-uri ofensive/defensive — profilul va fi dominat de un singur rezultat
+  extrem. Nu e „adevărata formă", e primul semnal al ei.
+
+---
+
 ## 3. Impactul măsurat
 
 > **Domeniu de aplicare (precizat 2026-09-08)**: cifrele de mai jos măsoară
@@ -253,11 +361,34 @@ Aceasta e o **plasă de siguranță în aval**, nu o reparație. Predicțiile co
 
 **Nu se repară printr-un hack local.** Ștergerea filtrului `.eq("league", league)` din `get_team_recent_results()` ar schimba forma pentru **toți** consumatorii, inclusiv ligile domestice unde funcționează corect azi — o schimbare de contract, deci ADR propriu (regula #5).
 
+> **[REVIZUIT 2026-09-08, după §2c]** Fraza de mai sus rămâne valabilă, dar
+> motivul ei s-a schimbat radical. Documentul original respingea ștergerea
+> filtrului pentru că *ar afecta și ligile domestice*. Măsurătoarea din §2c arată
+> ceva mai important: **ștergerea filtrului ar fi greșită și pentru cupe** — e
+> singurul mecanism prin care motorul ajustează azi la forța adversarului și la
+> tăria campionatului intern. Nu e un rău necesar de tolerat, e o funcție de
+> păstrat.
+
 Întrebarea reală de arhitectură, de decis explicit, nu implicit:
 
-1. **Ce înseamnă „forma" unei echipe într-o competiție de cupă?** Ultimele 5 meciuri din acea cupă (azi, și e greșit), ultimele 5 meciuri indiferent de competiție, sau ultimele 5 din liga domestică plus cupele?
-   - **[EXTINS 2026-09-08, după §2b]** Întrebarea era pusă prea îngust: presupunea că problema e ABSENȚA datelor. Trebuie să acopere și cazul în care datele EXISTĂ, dar din alt sezon. Formularea corectă: *ce combinație de competiție ȘI recență definește forma?* Un răspuns care rezolvă doar prima jumătate (ex. „ultimele 5 indiferent de competiție") **rezolvă și a doua din întâmplare**, dar unul care rezolvă doar a doua (ex. „păstrăm filtrul pe competiție, dar reducem fereastra la 120 de zile") ar transforma toate cele 16 echipe din §2b în cazuri `neutral` — adică ar înrăutăți lucrurile, mutându-le din „date vechi" în „fără date". Cele două jumătăți nu sunt independente.
-   - **Fereastra de 365 de zile e ea însăși un parametru nedecis niciodată explicit** (`lookback_days=365`, valoare implicită în semnătura funcției). Ea e cea care face diferența între §1 și §2b — nu filtrul de competiție singur.
+1. ~~**Ce înseamnă „forma" unei echipe într-o competiție de cupă?**~~ — **ÎNCHISĂ 2026-09-08, cu date (§2c).**
+
+   Variantele listate inițial erau: (a) ultimele 5 din acea cupă — „azi, și e greșit"; (b) ultimele 5 indiferent de competiție; (c) ultimele 5 din liga domestică plus cupele.
+
+   **Varianta (b) e infirmată empiric.** Pe sezonul trecut, dispersia Δppm campionat→UCL e de 2,0 puncte pe meci (−1,77 Villarreal … +0,23 Arsenal), iar PSV — mai bun decât Liverpool în campionat — e substanțial mai slab în Europa. O formă indiferentă la competiție ar fi inversat ordinea acestor echipe pentru un meci de UCL. Varianta (c) moștenește aceeași problemă, diluată.
+
+   **Varianta (a) e conceptul corect** — dar nu în implementarea de azi. Răspunsul complet, în trei părți care trebuie decise împreună:
+
+   | Parte | Ce trebuie | De ce |
+   |---|---|---|
+   | **Competiție** | se PĂSTREAZĂ filtrul | singurul mecanism de ajustare la forța adversarului (§2c.2-2c.3) |
+   | **Sezon** | fereastra trebuie legată de **campania curentă**, nu de 365 de zile | altfel forma lui Real e din aprilie, cu alt lot (§2c.5 pct. 1) |
+   | **Rezervă** | echipa fără istoric în competiție primește **formă domestică penalizată, marcată explicit ca substitut** — niciodată constantă | §1-§2: 45 din 72 de echipe azi (§2c.5 pct. 3) |
+
+   **Capcana de evitat, explicit**: un fix care atinge doar partea de sezon (ex. „păstrăm filtrul, reducem fereastra la 120 de zile") **fără** partea de rezervă ar muta toate cele 16 echipe din §2b din „date vechi" în „fără date" — adică din forma nesemnalată în constanta semnalată. Ar înrăutăți predicțiile, chiar dacă ar îmbunătăți onestitatea etichetei. Cele trei părți nu sunt independente.
+
+   - **Fereastra de 365 de zile e un parametru nedecis niciodată explicit** (`lookback_days=365`, valoare implicită în semnătura funcției). Ea e cea care face diferența între §1 și §2b — nu filtrul de competiție singur.
+   - **Costul tranziției, cuantificat (§2c.6)**: chiar cu conceptul corect, o competiție nouă începe cu zero meciuri. Etapa 3 din UCL ajunge pe la începutul lui noiembrie, deci ~2 luni de profile pe rezervă; iar la n=3 eșantionul e prea subțire pentru rating-uri stabile (`last_n = 5`). Orice soluție trebuie să spună explicit ce se servește în acele două luni — nu e un caz marginal, e starea normală la începutul fiecărui sezon european.
 2. **Cum se tratează diferența de nivel între competiții?** Forma din liga domestică nu e direct comparabilă cu cea din Champions League — aceeași problemă ca lipsa ajustării la forța adversarului, deja documentată în auditul Top Value Bets §3/C3.
 3. **Există un `Level` intermediar deja construit care ar trebui să prindă cazul?** `get_team_recent_form_context()` (`oracle_engine.py:1288`) NU e filtrat pe ligă și a fost adăugat pe 2026-08-10 exact pentru „cupele europene fără clasament". În cele 25 de cazuri nu a produs nimic — de investigat separat de ce.
 
@@ -278,8 +409,8 @@ Punctul 3 e cel mai promițător ca punct de plecare: există deja un nivel proi
 
 `supabase_client.py` · `oracle_engine.py` · `feature_engine.py` · ELO · ML · `match_history` (nicio predicție rescrisă) · niciun flag de producție. Documentul acesta e strict diagnostic.
 
-**Valabil și pentru extinderea din 2026-09-08**: §2b e rezultatul a șase
-interogări `SELECT` pe `Prediction` și al citirii codului. Zero scriere, zero
+**Valabil și pentru extinderile din 2026-09-08**: §2b și §2c sunt rezultatul a
+opt interogări `SELECT` pe `Prediction` și al citirii codului. Zero scriere, zero
 cod de producție atins, niciun flag schimbat.
 
 ---
