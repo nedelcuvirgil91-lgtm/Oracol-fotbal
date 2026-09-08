@@ -110,4 +110,8 @@ def _persist_immutable_verdict(
         delta_brier_informed=result.get("delta_brier_informed"),
         delta_logloss_informed=result.get("delta_logloss_informed"),
         delta_accuracy_informed=result.get("delta_accuracy_informed"),
+        # [ADR-072] Contra carui Oracle a fost calculat verdictul. Absent din
+        # `result` cat timp flagul e oprit — deci None, si atunci cheia nici nu
+        # ajunge in payload-ul de scriere.
+        baseline_source=result.get("baseline_source"),
     )

@@ -416,6 +416,105 @@ def _read_match_history_for_fixtures(client, fixture_ids: list[str]) -> dict[str
     return gasite
 
 
+"""[ADR-072] Baseline-ul de promovare — sursele posibile.
+
+`match_history_frozen` e sursa istorică: coloanele `prob_*_pred`, scrise prin
+RPC-ul canonic cu `COALESCE(m.existent, p->nou)` (first-writer-wins, migrarea
+053). Batch-ul ADR-056 evaluează cu 7 zile înainte, deci ele rămân predicția
+făcută atunci — vechi de până la o săptămână.
+
+`shadow_control` e rândul `control` din `shadow_predictions`, rescris în
+fiecare noapte prin `upsert ... on_conflict`, deci mereu cel mai recent.
+
+Măsurat 2026-09-08: pe 468 de meciuri terminate, cel înghețat dă Oracle
+0,4679 acuratețe, cel proaspăt 0,5107 — un handicap de 4,3pp împotriva
+Oracle, în comparația care decide promovările.
+"""
+BASELINE_SHADOW_CONTROL = "shadow_control"
+BASELINE_MATCH_HISTORY = "match_history_frozen"
+
+
+def _read_control_baselines(client, fixture_ids: list[str], experiment_name: str,
+                            experiment_version: str) -> dict[str, dict]:
+    """[ADR-072] Rândurile `control` — predicția Oracle ÎMPROSPĂTATĂ.
+
+    Aceeași disciplină de citire ca `_read_match_history_for_fixtures()`:
+    bucăți de `_IN_CHUNK_SIZE` peste `.in_()`, fiecare paginată keyset. Un
+    singur `.in_()` nepaginat ar fi a patra instanță a plafonului PostgREST
+    de 1000 din acest proiect (`get_training_data`, `get_shadow_predictions`,
+    `_read_match_history_for_fixtures` — toate trei au trebuit reparate).
+
+    Ridică excepția mai departe, ca apelantul să trateze eșecul drept „nu se
+    evaluează", niciodată drept „set complet mai mic" — un baseline parțial ar
+    produce un verdict fals, nu unul incomplet.
+    """
+    gasite: dict[str, dict] = {}
+    coloane = "fixture_id,prob_home,prob_draw,prob_away"
+    for start in range(0, len(fixture_ids), _IN_CHUNK_SIZE):
+        bucata = fixture_ids[start:start + _IN_CHUNK_SIZE]
+        cursor: str | None = None
+        while True:
+            q = (client.table("shadow_predictions").select(coloane)
+                 .in_("fixture_id", bucata)
+                 .eq("experiment_name", experiment_name)
+                 .eq("experiment_version", experiment_version)
+                 .eq("experiment_group", "control")
+                 .eq("processing_stage", "final")
+                 .is_("invalidated_at", "null"))
+            if cursor is not None:
+                q = q.gt("fixture_id", cursor)
+            page = (q.order("fixture_id").limit(_PAGE_SIZE).execute()).data or []
+            for r in page:
+                if all(r.get(k) is not None for k in ("prob_home", "prob_draw", "prob_away")):
+                    gasite[r["fixture_id"]] = r
+            if len(page) < _PAGE_SIZE:
+                break
+            cursor = page[-1]["fixture_id"]
+    return gasite
+
+
+def rezolva_sursa_baseline(fixture_ids_eligibile: list[str],
+                           control_by_fixture: dict[str, dict]) -> str:
+    """[ADR-072, D2] Sursa se decide PER EXPERIMENT, niciodată amestecată.
+
+    Un verdict calculat pe baseline-uri mixte — unele proaspete, altele vechi
+    de o săptămână — nu e nici cel vechi, nici cel nou: e neinterpretabil, iar
+    North Star #2 cere o dovadă, nu o medie între două populații.
+
+    Deci: acoperire COMPLETĂ → `shadow_control`; orice lipsă → se cade înapoi
+    pe `match_history_frozen` pentru TOATE meciurile.
+
+    Nu e o precauție teoretică. `flashscore_team_dna/v1` are azi 711 rânduri
+    `treatment` și ZERO `control` (verificat 2026-09-08); o comutare
+    necondiționată i-ar șterge complet evaluarea. Experimentele de Challenger
+    au azi acoperire 100% (682/682, 439/439, 393/393, 167/167), deci pentru ele
+    comutarea nu pierde niciun meci.
+    """
+    if not fixture_ids_eligibile:
+        return BASELINE_MATCH_HISTORY
+    if all(fid in control_by_fixture for fid in fixture_ids_eligibile):
+        return BASELINE_SHADOW_CONTROL
+    return BASELINE_MATCH_HISTORY
+
+
+def is_baseline_from_control_enabled() -> bool:
+    """Flag DEDICAT, implicit oprit (North Star #3).
+
+    Cât e oprit, `evaluate_experiment()` se comportă IDENTIC cu azi — nu doar
+    „aproape identic": nu citește rândurile `control`, nu adaugă
+    `baseline_source` în rezultat, deci nu atinge nici scrierea în
+    `experiment_registry`. Asta contează la ordinea de deployment: coloana
+    `baseline_source` trebuie să existe ÎNAINTE de pornirea flagului, iar
+    `_update_registry()` ar eșua pe un câmp necunoscut (vezi comentariul lui
+    de la apel). Cu flagul oprit, ordinea nu poate fi greșită.
+    """
+    try:
+        return bool(sb.load_config({}).get("challenger_baseline_from_control_enabled", False))
+    except Exception as exc:
+        logger.warning("[ShadowTesting] citirea flagului de baseline a eșuat: %s", exc)
+        return False
+
+
 def evaluate_experiment(
     experiment_name: str,
     experiment_version: str,
@@ -466,6 +565,30 @@ def evaluate_experiment(
     eligible = [(r, mh_by_fixture[r["fixture_id"]]) for r in shadow_rows if r["fixture_id"] in mh_by_fixture]
     n = len(eligible)
 
+    # [ADR-072] Sursa baseline-ului. Se rezolvă ÎNAINTE de pragul de mai jos ca
+    # decizia să depindă strict de acoperire, nu de câte meciuri s-au adunat.
+    baseline_source = BASELINE_MATCH_HISTORY
+    control_by_fixture: dict[str, dict] = {}
+    baseline_din_control_pornit = is_baseline_from_control_enabled()
+    if baseline_din_control_pornit and eligible:
+        ids_eligibile = [r["fixture_id"] for r, _ in eligible]
+        try:
+            control_by_fixture = _read_control_baselines(
+                client, ids_eligibile, experiment_name, experiment_version)
+        except Exception as exc:
+            # Fail-safe către comportamentul de AZI, nu către un baseline parțial.
+            logger.warning("[ShadowTesting] citirea rândurilor control a eșuat, "
+                            "se rămâne pe baseline-ul din match_history: %s", exc)
+            control_by_fixture = {}
+        baseline_source = rezolva_sursa_baseline(ids_eligibile, control_by_fixture)
+        if baseline_source == BASELINE_MATCH_HISTORY:
+            lipsa = sum(1 for fid in ids_eligibile if fid not in control_by_fixture)
+            logger.warning(
+                "[ShadowTesting] %s/%s: %d din %d meciuri fără rând `control` — "
+                "verdictul se calculează pe baseline-ul ÎNGHEȚAT (ADR-072, D2). "
+                "Nu se amestecă surse.",
+                experiment_name, experiment_version, lipsa, len(ids_eligibile))
+
     if n < min_matches:
         _update_registry(experiment_name, experiment_version, league_scope,
                           status="insufficient_data", n_matches_evaluated=n,
@@ -482,7 +605,14 @@ def evaluate_experiment(
 
     for shadow, mh in eligible:
         outcome = mh["actual_result"]
-        bp = (mh["prob_home_pred"], mh["prob_draw_pred"], mh["prob_away_pred"])
+        # [ADR-072] `bp` = Oracle. Din rândul `control` (împrospătat) când sursa
+        # e `shadow_control`, altfel din coloanele înghețate — niciodată amestecat
+        # în aceeași buclă: `baseline_source` e decis o singură dată, mai sus.
+        if baseline_source == BASELINE_SHADOW_CONTROL:
+            ctrl = control_by_fixture[shadow["fixture_id"]]
+            bp = (ctrl["prob_home"], ctrl["prob_draw"], ctrl["prob_away"])
+        else:
+            bp = (mh["prob_home_pred"], mh["prob_draw_pred"], mh["prob_away_pred"])
         ep = (shadow["prob_home"], shadow["prob_draw"], shadow["prob_away"])
 
         baseline_brier.append(_brier(*bp, outcome))
@@ -540,6 +670,16 @@ def evaluate_experiment(
         "delta_accuracy": accuracy_result.delta, "accuracy_significant": accuracy_result.significant,
         "statistical_method": statistical_method,
     }
+    # [ADR-072, D3] Fără asta, D1 ar repara cifrele dar ar lăsa exact golul de
+    # trasabilitate care a permis problema: un rând de verdict nu spune contra
+    # cărui Oracle a fost calculat (North Star #9).
+    #
+    # Se adaugă DOAR când flagul e pornit, deliberat: `_update_registry()`
+    # primeste `**result` și ar eșua pe o coloană inexistentă (vezi comentariul
+    # de sub el). Cu flagul oprit, câmpul lipsește, deci codul e sigur de
+    # deployat ÎNAINTE de migrare — ordinea nu poate fi greșită din neatenție.
+    if baseline_din_control_pornit:
+        result["baseline_source"] = baseline_source
     # Registry-ul primeste DOAR campurile de verdict, INAINTE de imbogatire:
     # `experiment_registry` nu are coloanele de diagnostic ADR-065, iar o
     # scriere cu campuri necunoscute ar esua. Diagnosticul apartine tabelei

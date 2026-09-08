@@ -905,6 +905,7 @@ def record_challenger_evaluation(
     delta_brier_informed: float | None = None,
     delta_logloss_informed: float | None = None,
     delta_accuracy_informed: float | None = None,
+    baseline_source: str | None = None,
 ) -> bool:
     """Persistă un verdict de Shadow Evaluation ca fapt istoric IMUABIL —
     ADR-018. `INSERT ... ignore_duplicates=True` => ON CONFLICT DO NOTHING
@@ -917,7 +918,7 @@ def record_challenger_evaluation(
     if client is None:
         return False
     try:
-        client.table("challenger_evaluations").upsert({
+        payload = {
             "training_run_id": training_run_id,
             "algorithm_family": algorithm_family, "league_scope": league_scope,
             "n_matches_evaluated": n_matches_evaluated,
@@ -936,7 +937,24 @@ def record_challenger_evaluation(
             "delta_brier_informed": delta_brier_informed,
             "delta_logloss_informed": delta_logloss_informed,
             "delta_accuracy_informed": delta_accuracy_informed,
-        }, on_conflict="training_run_id,n_matches_evaluated", ignore_duplicates=True).execute()
+        }
+        # [ADR-072] Contra cărui Oracle a fost calculat verdictul:
+        # `shadow_control` (împrospătat) sau `match_history_frozen` (înghețat la
+        # prima scriere, până la 7 zile înainte de meci).
+        #
+        # Cheia se adaugă DOAR când e cunoscută. Un `None` trimis explicit ar
+        # fi respins de PostgREST cât timp coloana încă nu există, iar eșecul ar
+        # doborî TOT insert-ul: verdictele ar înceta să se mai înregistreze,
+        # tăcut (funcția prinde excepția și doar loghează). Aici, codul e sigur
+        # de deployat înaintea migrării.
+        #
+        # NULL pe rândurile istorice înseamnă, prin construcție,
+        # `match_history_frozen` — nu se completează retroactiv (D5).
+        if baseline_source is not None:
+            payload["baseline_source"] = baseline_source
+        client.table("challenger_evaluations").upsert(
+            payload, on_conflict="training_run_id,n_matches_evaluated",
+            ignore_duplicates=True).execute()
         return True
     except Exception as exc:
         logger.warning("[Supabase] record_challenger_evaluation failed pentru %s (n=%s): %s",

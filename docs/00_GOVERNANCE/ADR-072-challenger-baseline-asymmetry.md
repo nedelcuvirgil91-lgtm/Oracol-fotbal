@@ -2,7 +2,9 @@
 
 ## Status
 
-**PROPOSED** — 2026-09-08. Cere aprobarea explicită a proprietarului produsului înainte de orice implementare.
+**ACCEPTED** — 2026-09-08, aprobat explicit de proprietarul produsului.
+
+Implementat în cod, cu flagul `challenger_baseline_from_control_enabled` **OPRIT în producție**. Activarea e o decizie separată, care cere migrarea aplicată întâi (vezi „Ordinea de deployment").
 
 Descoperit în timpul analizei critice a opțiunilor de persistare a intrărilor de la servire (discuție 2026-09-08). **Nu a fost căutat** — a ieșit la iveală verificând de ce o coloană `jsonb` nouă pe `match_history` ar îngheța.
 
@@ -140,6 +142,37 @@ Consecință acceptată conștient: seria `n_matches_evaluated` va avea o discon
 `learning_core/champion_guardian.py` (liniile 253, 302, 318) și `prediction_evaluation.py` citesc **aceleași coloane înghețate** pentru a evalua sănătatea campionului activ și pentru raportarea de acuratețe a Oracle. Sunt afectate de aceeași staleness.
 
 **Nu se extind în acest ADR.** Sunt consumatori distincți, cu semantici proprii neanalizate — pentru `prediction_evaluation.py` s-ar putea chiar argumenta că predicția „așa cum a fost văzută de utilizator" e cea corectă de raportat. Prezentate explicit proprietarului produsului ca descoperire, pentru decizie separată: în afara scopului, amendament, sau ADR nou.
+
+## Amendamente descoperite la implementare (Discovery Rule)
+
+Două contracte pe care ADR-ul aprobat nu le identificase. Ambele sunt **restrângeri de siguranță**, nu extinderi de scop — nu adaugă funcționalitate, doar împiedică decizii deja luate să producă pagubă.
+
+### A1 — `baseline_source` intră în rezultat DOAR cu flagul pornit
+
+`evaluate_experiment()` apelează `_update_registry(..., **result)`, iar un câmp necunoscut face scrierea să eșueze — comportament deja documentat în comentariul de la acel apel („o scriere cu campuri necunoscute ar esua"). Dacă `baseline_source` ar intra necondiționat în `result`, codul deployat înaintea migrării ar opri actualizarea `experiment_registry`, **tăcut** (`_update_registry` prinde excepția și doar loghează).
+
+Același raționament, a doua oară, în `record_challenger_evaluation()`: cheia se adaugă în payload doar când e ne-`None`, nu se trimite `None` explicit.
+
+**Efect**: ordinea de deployment nu poate fi greșită din neatenție. Cu flagul oprit, codul e sigur de pus în producție înaintea migrării.
+
+### A2 — D5 se lovește de `UNIQUE (training_run_id, n_matches_evaluated)`
+
+`challenger_evaluations` scrie cu `ignore_duplicates=True`. Comutarea sursei **nu schimbă `n_matches_evaluated`** (aceeași populație de meciuri) — doar deltele. Deci, dacă prima evaluare de după activare cade pe un `n` deja înregistrat, rândul nou e **aruncat tăcut**, exact tiparul care a făcut să lipsească 3 și 4 septembrie din tabelă.
+
+Riscul e mic dar real: `n` crește de obicei zilnic, însă poate stagna în pauzele internaționale (cazul ferestrei 8-14 septembrie 2026).
+
+**Decizie: se acceptă, NU se schimbă constrângerea.** Motive: (a) `experiment_registry` se scrie prin `upsert` obișnuit, deci **statusul curent e mereu corect**, indiferent; se poate pierde cel mult un rând din istoricul imuabil, nu verdictul activ. (b) Modificarea unei constrângeri `UNIQUE` pe o tabelă declarată imuabilă (ADR-018) e o schimbare de contract proprie, disproporționată față de un rând.
+
+**Consecință practică**: dacă se dorește rândul de tranziție în istoric, flagul se activează într-o zi în care `n` a crescut față de ultima evaluare. Verificabil dintr-o singură interogare înainte de activare.
+
+## Ordinea de deployment (obligatorie)
+
+1. Cod în producție, cu flagul **oprit** — comportament identic cu cel de azi, garantat prin test.
+2. Migrarea `baseline_source` aplicată, cu SQL-ul arătat și confirmat explicit.
+3. Verificare că `n_matches_evaluated` a crescut față de ultima evaluare (A2).
+4. Abia apoi activarea flagului, ca decizie separată.
+
+Pașii 1 și 2 sunt comutativi ca siguranță (A1 le face pe amândouă inofensive în orice ordine), dar 4 vine strict după 2.
 
 ## Verificare cerută înainte de activare
 
