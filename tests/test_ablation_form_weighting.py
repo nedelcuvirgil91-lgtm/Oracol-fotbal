@@ -23,7 +23,8 @@ import pytest
 # producția. O toleranță mai strânsă ar testa aritmetica float, nu formula.
 from feature_engine import compute_form_score
 from scripts.ablation_form_weighting import (
-    construieste_variante, consistenta, egal, exponential, liniar,
+    agrega, construieste_variante, consistenta, egal, exponential, liniar,
+    mcnemar, scor_per_meci, t_pereche, victorie_dupa_infrangeri,
 )
 
 SCRIPT = pathlib.Path(__file__).resolve().parent.parent / "scripts" / "ablation_form_weighting.py"
@@ -77,6 +78,22 @@ def test_referinta_e_identica_cu_compute_form_score(rezultate):
     """GARDA CENTRALĂ. Dacă referința ar diverge de funcția de producție, toate
     deltele raportate ar fi față de o formulă care nu rulează nicăieri."""
     assert exponential(rezultate, 5) == pytest.approx(compute_form_score(rezultate), abs=1e-9)
+
+
+@pytest.mark.parametrize("rezultate", [
+    ["W"], ["L", "L", "L", "W"], ["W", "L", "D", "W", "L"], ["D", "D", "D"],
+    ["L", "L", "L", "L", "L"], ["W", "W", "W", "W", "W"],
+])
+def test_bratul_de_REFERINTA_din_dictionar_e_compute_form_score(rezultate):
+    """Distinct de garda de mai sus, și necesar: aceea testează funcția
+    `exponential` izolat, pe când raportul folosește lambda-ul din dicționar.
+    Dacă acel lambda ar primi altă fereastră, toate deltele ar fi față de o
+    formulă care nu rulează nicăieri — iar garda de mai sus ar trece liniștită.
+    Gaura a fost găsită prin mutație (fereastra 5 → 3 în brațul de referință),
+    nu prin citire."""
+    variante = construieste_variante(0.5)
+    ref = next(fn for nume, fn in variante.items() if nume.startswith("REFERINȚĂ"))
+    assert ref(rezultate) == pytest.approx(compute_form_score(rezultate), abs=1e-9)
 
 
 def test_referinta_pe_mai_mult_de_5_taie_la_ultimele_5():
@@ -166,5 +183,114 @@ def test_exista_si_referinta_si_alternative_pe_3():
     """Contrapondere: un set de variante fără referință, sau fără fereastra de 3
     cerută explicit, n-ar putea răspunde la întrebarea pusă."""
     nume = list(construieste_variante(0.5))
-    assert any(n.startswith("REFERINȚĂ") for n in nume)
-    assert sum(1 for n in nume if ", 3" in n or "ultimele 3" in n) >= 3
+    assert sum(1 for n in nume if n.startswith("REFERINȚĂ")) == 1
+    assert sum(1 for n in nume if "3" in n) >= 3
+
+
+def test_setul_acopera_ambele_ferestre_pentru_fiecare_familie():
+    """Nu numără doar variantele — verifică prezența FIECĂREI familii pe ambele
+    ferestre. O simplă numărătoare ar trece și dacă o familie ar fi ștearsă iar
+    alta dublată; concluzia raportului ar avea atunci o gaură invizibilă."""
+    nume = list(construieste_variante(0.5))
+    for familie in ("exponențial", "egal", "liniar", "consistență"):
+        pe_3 = [n for n in nume if n.startswith(familie) and "3" in n]
+        assert pe_3, f"lipsește {familie} pe fereastra de 3"
+    for k in ("0.25", "0.5", "1.00"):
+        assert any(f"k={k}" in n and n.startswith("consistență 3") for n in nume), \
+            f"lipsește consistență 3 cu k={k}"
+        assert any(f"k={k}" in n and n.startswith("consistență 5") for n in nume), \
+            f"lipsește consistență 5 cu k={k}"
+
+
+def test_k_care_coincide_cu_o_valoare_fixa_nu_pierde_brate():
+    """`k` intră în numele variantelor. Dacă apelantul dă exact 0.25 sau 1.0,
+    dict-ul ar putea colapsa tăcut peste variantele fixe — un braț ar dispărea
+    din raport fără niciun semnal. Referința contra unui `k` neutru."""
+    asteptat = len(construieste_variante(0.5))
+    for k in (0.25, 1.0):
+        assert len(construieste_variante(k)) == asteptat, \
+            f"k={k} a redus setul de la {asteptat} de variante"
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 5. Subgrupul ipotezei
+# ════════════════════════════════════════════════════════════════════════
+
+def test_subgrupul_prinde_exact_cazul_descris():
+    assert victorie_dupa_infrangeri(["L", "L", "L", "W"])
+    assert victorie_dupa_infrangeri(["W", "L", "L", "D", "W"])   # 2 din ultimele 3 dinainte
+    assert victorie_dupa_infrangeri(list("DLLLW"))
+
+
+def test_subgrupul_respinge_ce_nu_e_cazul():
+    """Contrapondere — fără ea, un detector care întoarce mereu True ar trece."""
+    assert not victorie_dupa_infrangeri(["W", "W", "W", "W"])
+    assert not victorie_dupa_infrangeri(["L", "L", "L", "L"])    # ultimul nu e W
+    assert not victorie_dupa_infrangeri(["W", "L", "L"])         # prea scurt
+    assert not victorie_dupa_infrangeri(["L", "D", "D", "W"])    # o singură înfrângere
+    assert not victorie_dupa_infrangeri(["D", "W", "L", "W"])    # tot o singură înfrângere
+    assert not victorie_dupa_infrangeri([])
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 6. Metrici și semnificație
+# ════════════════════════════════════════════════════════════════════════
+
+def test_scor_per_meci_pe_predictie_perfecta_si_pe_una_gresita():
+    br, ll, ok = scor_per_meci((1.0, 0.0, 0.0), "H")
+    assert br == pytest.approx(0.0) and ll == pytest.approx(0.0) and ok == 1.0
+    br, ll, ok = scor_per_meci((1.0, 0.0, 0.0), "A")
+    assert br == pytest.approx(2.0) and ll > 20 and ok == 0.0
+
+
+def test_agrega_intoarce_acuratete_logloss_brier_in_ordinea_afisata():
+    """Ordinea contează: un swap ar afișa Brier sub eticheta «Log-loss» și ar
+    inversa tăcut concluzia."""
+    acc, ll, br = agrega([(0.2, 1.0, 1.0), (0.4, 2.0, 0.0)])
+    assert acc == pytest.approx(0.5)
+    assert ll == pytest.approx(1.5)
+    assert br == pytest.approx(0.3)
+
+
+def test_t_pereche_e_zero_cand_bratele_sunt_identice():
+    v = [(0.5, 1.0, 1.0), (0.6, 1.1, 0.0)]
+    assert t_pereche(v, v, 0) == (0.0, 0.0)
+
+
+def test_t_pereche_foloseste_dispersia_DIFERENTELOR_nu_a_valorilor():
+    """GARDA anti-nepereche, singura care contează aici.
+
+    Brațele diferă cu EXACT +0,02 la fiecare meci, dar meciurile între ele
+    variază enorm (0 → 1,9). Cu dispersia diferențelor (≈0) `t` e uriaș; cu
+    dispersia valorilor (≈0,55) ar fi ~0,7 — nesemnificativ. Un test care doar
+    verifică creșterea cu √n NU distinge cele două formule, fiindcă ambele
+    cresc la fel: prima versiune a acestei gărzi a lăsat mutația să treacă."""
+    ref = [(0.1 * (k % 20), 0.0, 0.0) for k in range(400)]
+    var = [(x[0] + 0.02, 0.0, 0.0) for x in ref]
+    medie, t = t_pereche(var, ref, 0)
+    assert medie == pytest.approx(0.02, abs=1e-9)
+    assert abs(t) > 50, f"|t|={abs(t):.2f} — pare calculat din dispersia valorilor"
+
+
+def test_t_pereche_creste_cu_esantionul_la_aceeasi_diferenta():
+    def brate(n):
+        ref = [(0.1 * (k % 7), 0.0, 0.0) for k in range(n)]
+        var = [(x[0] + 0.02 * (1 if k % 2 else -1) + 0.005, 0.0, 0.0)
+               for k, x in enumerate(ref)]
+        return var, ref
+    _, t_mic = t_pereche(*brate(20), 0)
+    _, t_mare = t_pereche(*brate(2000), 0)
+    assert abs(t_mare) > abs(t_mic) * 5
+
+
+def test_mcnemar_numara_doar_dezacordurile():
+    ref = [(0, 0, 1.0), (0, 0, 1.0), (0, 0, 0.0), (0, 0, 1.0)]
+    var = [(0, 0, 0.0), (0, 0, 1.0), (0, 0, 1.0), (0, 0, 0.0)]
+    b, c, chi = mcnemar(var, ref)
+    assert (b, c) == (2, 1)          # acordurile (poz. 1) nu se numără
+    assert chi == pytest.approx(0.0)  # cu corecție de continuitate: (|2-1|-1)²/3
+
+
+def test_mcnemar_fara_dezacorduri_nu_imparte_la_zero():
+    v = [(0, 0, 1.0), (0, 0, 0.0)]
+    assert mcnemar(v, v) == (0, 0, 0.0)

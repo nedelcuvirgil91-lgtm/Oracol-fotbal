@@ -20,18 +20,40 @@ exponențial (`2**i`), deci pe 5 meciuri ponderile sunt 1, 2, 4, 8, 16 din 31:
 Exemplul dat se verifică: o echipă cu `L, L, L, W` (victoria cea mai recentă)
 primește form_score = 8/15 = **0,533** — peste medie, deși a pierdut 3 din 4.
 
-── CE MĂSOARĂ, EXACT ─────────────────────────────────────────────────────
-Se schimbă O SINGURĂ variabilă: funcția care transformă șirul W/D/L în
-`form_score`. Tot restul e ținut FIX la valorile pe care Oracle chiar le-a
-folosit — `home/away_offensive_rating`, `home/away_defensive_rating`,
-`h2h_modifier`, `h2h_meetings`, ponderile, baseline-ul ligii — citite din
-`match_history`, nu recalculate.
+── LIMITA FUNDAMENTALĂ, DESCOPERITĂ LA PRIMA RULARE (2026-09-08) ─────────
+Prima versiune a acestui script pretindea că ține fix „exact ce a folosit
+Oracle", citind `home/away_offensive_rating`, `home/away_defensive_rating` și
+`home/away_form_score` din `match_history`. **Premisa era falsă**, iar ancora de
+fidelitate a demascat-o: reconstrucția reproducea xG-ul servit în **2 din 460**
+de meciuri (0,4%).
 
-Asta izolează curat întrebarea pusă. Ce NU acoperă (limită onestă, §4 din
-raport): ratingurile ofensive/defensive sunt derivate din ACEEAȘI fereastră de
-5 meciuri (`oracle_engine.py:1481-1490`), deci un experiment care ar schimba și
-fereastra ratingurilor ar măsura altceva. Aici se măsoară strict multiplicatorul
-de formă.
+Cauza nu e un bug — e ADR-036 (Canonical Feature Ownership): acele coloane sunt
+**feature-uri ML**, al căror unic scriitor e `sync/backfill_features.py`, nu
+intrările pe care motorul le-a folosit la servire. Ele se calculează prin alt
+lanț (`FormTracker` fără filtru de competiție, formă implicită 0,5 în loc de
+0,0, ratinguri din ELO×medii pe fereastra proprie), deci diferă structural de
+`oracle_engine._build_profile()`.
+
+**Consecință de trasabilitate, notată explicit (North Star #9)**: intrările de
+la servire ale Oracle NU SUNT PERSISTATE NICĂIERI. Verificat pe ambii candidați
+— `match_history` stochează doar IEȘIRILE (`home/away_xg_pred`,
+`prob_*_pred`), iar `shadow_predictions.feature_metadata` e `{}` pentru
+`xgboost_v1` și `blend_v1` (populat doar pentru `flashscore_team_dna`, cu alte
+câmpuri). Nicio analiză offline nu poate, azi, reproduce sau audita o predicție
+Oracle până la intrările ei.
+
+── CE MĂSOARĂ, ATUNCI ────────────────────────────────────────────────────
+O ablație cu validitate INTERNĂ, nu o reproducere a producției. Toate brațele
+— referința ȘI variantele — pornesc din ACELAȘI substrat de ratinguri, h2h,
+ponderi și baseline (citite din `match_history`), iar singura variabilă care
+diferă între ele e funcția care transformă șirul W/D/L în `form_score`.
+
+Asta răspunde curat la întrebarea pusă („o fereastră de 3, cu constanța
+premiată, e mai bună decât exponențialul pe 5?"), fiindcă comparația e între
+brațe identice în tot restul. Ce NU poate răspunde: „ar fi bătut numărul pe
+care Oracle chiar l-a servit" — pentru asta ar fi nevoie de intrările de la
+servire, care nu există. Predicțiile reale stocate se raportează separat, ca
+BENCHMARK EXTERN, exact ca să nu se confunde cele două lucruri.
 
 ── ZERO SCURGERE TEMPORALĂ ───────────────────────────────────────────────
 Fiecare variantă recalculează `form_score` exclusiv din meciuri cu
@@ -39,11 +61,12 @@ Fiecare variantă recalculează `form_score` exclusiv din meciuri cu
 competiție și aceeași fereastră de 365 de zile ca
 `supabase_client.get_team_recent_results()` — funcția reală de producție.
 
-── ANCORA DE FIDELITATE (fără ea, nimic din raport nu e credibil) ─────────
-Înainte de orice comparație, varianta „referință" recalculează predicția
-folosind `form_score`-ul STOCAT și verifică dacă reproduce `home_xg_pred` și
-`prob_home_pred` din bază. Dacă rata de reproducere nu e ~100%, lanțul e
-infidel, iar raportul o spune în clar și NU pretinde concluzii.
+── SEMNIFICAȚIE, NU DOAR MEDII ───────────────────────────────────────────
+Brațele prezic ACELEAȘI meciuri, deci diferențele sunt PERECHE: McNemar pentru
+acuratețe, t pereche pentru log-loss și Brier. O eroare standard nepereche ar
+supraestima grosolan incertitudinea. Se raportează în plus subgrupul exact al
+ipotezei — meciurile cu «victorie recentă după ≥2 înfrângeri» — fiindcă o medie
+pe tot sezonul diluează un tipar care apare rar.
 
 Utilizare:
     python scripts/ablation_form_weighting.py
@@ -134,15 +157,39 @@ def consistenta(rezultate: list[str], fereastra: int, k: float) -> float:
 
 
 def construieste_variante(k: float) -> dict:
+    """`k` e valoarea „principală" de penalizare a dispersiei, dar se testează
+    și 0,25 / 1,00 în jurul ei — altfel o concluzie ar depinde de un `k` ales
+    de mine, iar un rezultat slab n-ar putea fi distins de un `k` prost ales.
+
+    Sufixul „, ales" pe brațele lui `k` NU e decorativ: fără el, un `k` egal cu
+    0.25 sau 1.00 ar produce chei identice cu brațele fixe, iar dict-ul ar
+    colapsa TĂCUT de la 13 la 11 brațe — două variante ar dispărea din raport
+    fără niciun semnal. Găsit prin test, nu prin citire."""
     return {
-        "REFERINȚĂ — exponențial, 5 (producție)": lambda r: exponential(r, 5),
-        "exponențial, ultimele 3":                lambda r: exponential(r, 3),
-        "egal, ultimele 3":                       lambda r: egal(r, 3),
-        "egal, ultimele 5":                       lambda r: egal(r, 5),
-        "liniar, ultimele 5":                     lambda r: liniar(r, 5),
-        f"consistență, 3 (k={k})":                lambda r: consistenta(r, 3, k),
-        f"consistență, 5 (k={k})":                lambda r: consistenta(r, 5, k),
+        "REFERINȚĂ — exponențial 5 (producție)": lambda r: exponential(r, 5),
+        "exponențial 3":                         lambda r: exponential(r, 3),
+        "egal 3":                                lambda r: egal(r, 3),
+        "egal 4":                                lambda r: egal(r, 4),
+        "egal 5":                                lambda r: egal(r, 5),
+        "liniar 3":                              lambda r: liniar(r, 3),
+        "liniar 5":                              lambda r: liniar(r, 5),
+        "consistență 3 (k=0.25)":                lambda r: consistenta(r, 3, 0.25),
+        f"consistență 3 (k={k}, ales)":          lambda r: consistenta(r, 3, k),
+        "consistență 3 (k=1.00)":                lambda r: consistenta(r, 3, 1.00),
+        "consistență 5 (k=0.25)":                lambda r: consistenta(r, 5, 0.25),
+        f"consistență 5 (k={k}, ales)":          lambda r: consistenta(r, 5, k),
+        "consistență 5 (k=1.00)":                lambda r: consistenta(r, 5, 1.00),
     }
+
+
+def victorie_dupa_infrangeri(sir: list[str]) -> bool:
+    """Subgrupul EXACT al ipotezei: «poate o echipă câștigă un meci norocos și
+    apoi pierde 3 meciuri consecutive» — aici în forma observabilă înainte de
+    meci: ultimul rezultat e W, dar cel puțin 2 din cele 3 dinainte sunt L.
+
+    Există fiindcă o medie pe tot sezonul diluează un tipar rar: dacă
+    exponențialul chiar greșește, greșește AICI, nu peste tot."""
+    return len(sir) >= 4 and sir[-1] == "W" and sum(1 for x in sir[-4:-1] if x == "L") >= 2
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -164,6 +211,49 @@ def _rezultat_pentru(rand: dict, echipa: str) -> str | None:
     if r == "H":
         return "W" if acasa else "L"
     return "L" if acasa else "W"
+
+
+def scor_per_meci(p: tuple[float, float, float], real: str) -> tuple[float, float, float]:
+    """(Brier, log-loss, corect) pentru UN meci. Per meci, nu agregat, fiindcă
+    testele de semnificație de mai jos sunt PERECHE și au nevoie de diferența
+    meci cu meci, nu de două medii."""
+    i = ETICHETE[real]
+    brier = sum((p[k] - (1.0 if k == i else 0.0)) ** 2 for k in range(3))
+    logloss = -math.log(max(p[i], 1e-10))
+    corect = 1.0 if max(range(3), key=lambda k: p[k]) == i else 0.0
+    return brier, logloss, corect
+
+
+def agrega(v: list[tuple[float, float, float]]) -> tuple[float, float, float]:
+    """(acuratețe, log-loss, Brier) — ordinea în care se și afișează."""
+    n = len(v) or 1
+    return (sum(x[2] for x in v) / n, sum(x[1] for x in v) / n, sum(x[0] for x in v) / n)
+
+
+def t_pereche(varianta: list, referinta: list, idx: int) -> tuple[float, float]:
+    """t pe diferențele PERECHE (variantă − referință) per meci.
+
+    Perechea contează: ambele brațe prezic exact aceleași meciuri, deci o eroare
+    standard nepereche ar include varianța dintre meciuri — care se anulează —
+    și ar supraestima grosolan incertitudinea."""
+    d = [varianta[k][idx] - referinta[k][idx] for k in range(len(varianta))]
+    if not d:
+        return 0.0, 0.0
+    medie = sum(d) / len(d)
+    sd = statistics.stdev(d) if len(d) > 1 else 0.0
+    if not sd:
+        return medie, 0.0
+    return medie, medie / (sd / math.sqrt(len(d)))
+
+
+def mcnemar(varianta: list, referinta: list) -> tuple[int, int, float]:
+    """Pentru acuratețe, unde diferența e binară. `b` = referința a nimerit și
+    varianta nu; `c` = invers. Doar meciurile pe care brațele NU sunt de acord
+    poartă informație — restul se anulează."""
+    b = sum(1 for k in range(len(varianta)) if referinta[k][2] == 1 and varianta[k][2] == 0)
+    c = sum(1 for k in range(len(varianta)) if referinta[k][2] == 0 and varianta[k][2] == 1)
+    chi = ((abs(b - c) - 1) ** 2 / (b + c)) if (b + c) > 0 else 0.0
+    return b, c, chi
 
 
 def _metrici(perechi: list[tuple[tuple[float, float, float], str]]) -> dict:
@@ -290,9 +380,14 @@ def main() -> int:
         ph, pd, pa, _ = poisson_model(hxg, axg, max_goals)
         return ph, pd, pa, hxg, axg
 
-    # ── Ancora de fidelitate ──────────────────────────────────────────────
+    # ── Bază de reconstrucție: cât de departe e de ce a servit Oracle ────
+    # NU e o „ancoră de fidelitate" care poate trece: intrările de la servire nu
+    # sunt persistate nicăieri (vezi docstring). Rata de mai jos se măsoară și se
+    # afișează oricum, ca nimeni să nu creadă vreodată că studiul reproduce
+    # producția — și ca o eventuală persistare viitoare a intrărilor să se vadă
+    # imediat aici, prin salt la ~100%.
     print(BAR)
-    print("  ANCORĂ DE FIDELITATE — reconstrucția reproduce ce a servit Oracle?")
+    print("  BAZA DE RECONSTRUCȚIE — cât reproduce din ce a servit Oracle?")
     print(BAR)
     xg_ok = prob_ok = 0
     for r in evaluabile:
@@ -302,19 +397,22 @@ def main() -> int:
         if abs(ph - float(r["prob_home_pred"])) < 0.005 and abs(pa - float(r["prob_away_pred"])) < 0.005:
             prob_ok += 1
     n = len(evaluabile)
-    print(f"  xG reprodus:           {xg_ok}/{n}  ({100.0*xg_ok/n:.1f}%)")
+    print(f"  xG reprodus:             {xg_ok}/{n}  ({100.0*xg_ok/n:.1f}%)")
     print(f"  Probabilități reproduse: {prob_ok}/{n}  ({100.0*prob_ok/n:.1f}%)")
     if prob_ok < 0.95 * n:
-        print("\n  ⚠️  RECONSTRUCȚIA NU E FIDELĂ (<95%). Rezultatele de mai jos NU susțin")
-        print("      nicio concluzie — lanțul reprodus diferă de cel servit în producție.")
-        print("      Cauza trebuie găsită înainte de a interpreta orice deltă.")
+        print("\n  Rată mică — AȘTEPTATĂ, nu un defect. Coloanele de ratinguri și formă")
+        print("  din `match_history` sunt feature-uri ML scrise de `backfill_features.py`")
+        print("  (ADR-036), nu intrările folosite de `oracle_engine._build_profile()`.")
+        print("  Studiul de mai jos are validitate INTERNĂ (brațe identice în tot")
+        print("  restul), NU e o reproducere a producției. Vezi benchmark-ul extern.")
     else:
-        print("\n  Reconstrucție fidelă — deltele de mai jos sunt atribuibile EXCLUSIV")
-        print("  schimbării de ponderare a formei.")
+        print("\n  Reconstrucție fidelă — intrările de la servire par acum persistate.")
 
     # ── Comparația variantelor ───────────────────────────────────────────
     variante = construieste_variante(args.k_consistenta)
-    rezultate: dict[str, list] = {nume: [] for nume in variante}
+    per_meci: dict[str, list] = {nume: [] for nume in variante}
+    oracle_real: list = []          # benchmark extern: ce a prezis Oracle EFECTIV
+    subgrup: list[int] = []         # indici ai meciurilor din subgrupul ipotezei
     fara_istoric = 0
 
     for r in evaluabile:
@@ -324,49 +422,90 @@ def main() -> int:
         if not ist_h or not ist_a:
             fara_istoric += 1
             continue
+        real = r["actual_result"]
+        p_h = float(r["prob_home_pred"])
+        p_a = float(r["prob_away_pred"])
+        oracle_real.append(scor_per_meci((p_h, max(0.0, 1.0 - p_h - p_a), p_a), real))
+        if victorie_dupa_infrangeri(ist_h) or victorie_dupa_infrangeri(ist_a):
+            subgrup.append(len(oracle_real) - 1)
         for nume, fn in variante.items():
             ph, pd, pa, _, _ = prezice(r, fn(ist_h), fn(ist_a))
-            rezultate[nume].append(((ph, pd, pa), r["actual_result"]))
+            per_meci[nume].append(scor_per_meci((ph, pd, pa), real))
+
+    m = len(oracle_real)
+    if m == 0:
+        print("\nEROARE: niciun meci cu istoric anterior pentru ambele echipe.")
+        return 1
 
     print("\n" + BAR)
-    print(f"  REZULTATE — {len(evaluabile) - fara_istoric} meciuri "
-          f"({fara_istoric} sărite: fără istoric anterior pentru ambele echipe)")
+    print(f"  BENCHMARK EXTERN — ce a prezis Oracle EFECTIV (prob_*_pred stocate), n={m}")
     print(BAR)
-    print(f"  {'Variantă':<34s} {'Acuratețe':>10s} {'Log-loss':>10s} {'Brier':>10s}")
+    a_ext = agrega(oracle_real)
+    print(f"  acuratețe {a_ext[0]:.4f}   log-loss {a_ext[1]:.4f}   Brier {a_ext[2]:.4f}")
+    print("  Singura cifră din raport care descrie producția reală. NU e comparabilă")
+    print("  direct cu tabelul de mai jos — alt substrat de intrări, nu alt braț.")
 
-    referinta = None
-    rand_final: list[tuple[str, dict]] = []
+    print("\n" + BAR)
+    print(f"  ABLAȚIE INTERNĂ — {m} meciuri ({fara_istoric} sărite: fără istoric anterior)")
+    print("  Toate brațele: aceleași ratinguri, h2h, ponderi, baseline. Diferă DOAR")
+    print("  funcția care transformă W/D/L în form_score.")
+    print(BAR)
+    print(f"  {'Variantă':<40s} {'Acuratețe':>10s} {'Log-loss':>10s} {'Brier':>10s}")
+    agr = {nume: agrega(per_meci[nume]) for nume in variante}
     for nume in variante:
-        m = _metrici(rezultate[nume])
-        if not m.get("n"):
-            continue
-        rand_final.append((nume, m))
-        if nume.startswith("REFERINȚĂ"):
-            referinta = m
-        print(f"  {nume:<34s} {m['acuratete']:>10.4f} {m['log_loss']:>10.4f} {m['brier']:>10.4f}")
+        a = agr[nume]
+        print(f"  {nume:<40s} {a[0]:>10.4f} {a[1]:>10.4f} {a[2]:>10.4f}")
 
-    if referinta:
+    ref_nume = next((n_ for n_ in variante if n_.startswith("REFERINȚĂ")), None)
+    if ref_nume:
+        ref = per_meci[ref_nume]
         print("\n" + BAR)
-        print("  DELTE față de formula actuală")
+        print("  DELTE față de formula actuală, cu semnificație PERECHE")
         print("  acuratețe: + e mai bine · log-loss și Brier: − e mai bine")
+        print("  |t| > 1,96 ≈ semnificativ la 5% · McNemar: b = referința a nimerit și")
+        print("  varianta nu, c = invers; χ² > 3,84 ≈ semnificativ")
         print(BAR)
-        for nume, m in rand_final:
-            if nume.startswith("REFERINȚĂ"):
+        castigatoare = []
+        for nume in variante:
+            if nume == ref_nume:
                 continue
-            toate_trei = (m["acuratete"] > referinta["acuratete"]
-                          and m["log_loss"] < referinta["log_loss"]
-                          and m["brier"] < referinta["brier"])
-            marcaj = "  ← toate trei mai bune" if toate_trei else ""
-            print(f"  {nume:<34s} "
-                  f"acc {m['acuratete'] - referinta['acuratete']:+.4f}   "
-                  f"ll {m['log_loss'] - referinta['log_loss']:+.4f}   "
-                  f"brier {m['brier'] - referinta['brier']:+.4f}{marcaj}")
+            v = per_meci[nume]
+            d_br, t_br = t_pereche(v, ref, 0)
+            d_ll, t_ll = t_pereche(v, ref, 1)
+            b, c, chi = mcnemar(v, ref)
+            d_acc = agr[nume][0] - agr[ref_nume][0]
+            toate_trei = d_acc > 0 and d_ll < 0 and d_br < 0
+            if toate_trei:
+                castigatoare.append(nume)
+            print(f"  {nume:<40s} acc {d_acc:+.4f} (b={b}, c={c}, χ²={chi:.2f})")
+            print(f"  {'':<40s} ll  {d_ll:+.4f} (|t|={abs(t_ll):.2f})   "
+                  f"brier {d_br:+.4f} (|t|={abs(t_br):.2f})"
+                  + ("   ← TOATE TREI mai bune" if toate_trei else ""))
+
+        # ── Subgrupul exact al ipotezei ──────────────────────────────────
+        print("\n" + BAR)
+        print(f"  SUBGRUP — «victorie recentă după ≥2 înfrângeri»: {len(subgrup)} din {m} meciuri")
+        print("  Dacă ponderarea exponențială chiar greșește, greșește AICI. O medie pe")
+        print("  tot sezonul ar dilua un tipar rar până la invizibilitate.")
+        print(BAR)
+        if subgrup:
+            print(f"  {'Variantă':<40s} {'Acuratețe':>10s} {'Log-loss':>10s} {'Brier':>10s}")
+            for nume in variante:
+                a = agrega([per_meci[nume][k] for k in subgrup])
+                print(f"  {nume:<40s} {a[0]:>10.4f} {a[1]:>10.4f} {a[2]:>10.4f}")
+            a = agrega([oracle_real[k] for k in subgrup])
+            print(f"  {'(Oracle real, stocat — benchmark extern)':<40s} "
+                  f"{a[0]:>10.4f} {a[1]:>10.4f} {a[2]:>10.4f}")
+        else:
+            print("  Niciun meci în subgrup — ipoteza nu e testabilă pe acest eșantion.")
 
     print("\n" + BAR)
     print("  Ablație încheiată. ZERO scriere efectuată.")
     print("  ATENȚIE la interpretare:")
-    print("   · 7 variante testate pe un singur sezon — cea mai bună poate fi")
-    print("     cea mai norocoasă. Se raportează TOATE, nu doar câștigătoarea.")
+    print(f"   · {len(variante) - 1} variante testate pe un singur sezon — cea mai bună")
+    print("     poate fi cea mai norocoasă. Se raportează TOATE, nu doar câștigătoarea.")
+    print("   · Validitate INTERNĂ, nu reproducere a producției (vezi baza de")
+    print("     reconstrucție de mai sus și docstring-ul modulului).")
     print("   · North Star #2: doar o variantă mai bună simultan pe toate trei")
     print("     metricile e candidată; oricare alta NU e.")
     print("   · Chiar și atunci: 'un backtest favorabil nu e, singur, suficient")
