@@ -145,9 +145,55 @@ Testul de ablație propriu-zis: măsoară dacă adăugarea acestor semnale ca
 feature-uri ML (sau ca ajustare Oracle) îmbunătățește predicțiile
 măsurabil — nu doar dacă formula „arată bine" pe eșantionul curent. Va
 fi propus separat, cu aprobare separată, când pragul de 300 **meciuri
-evaluabile** e atins (ADR-062). Estimare pe date, la ritmul curent de
-acumulare: **~5-6 săptămâni (finalul lui septembrie)**, nu „azi-mâine"
-cum sugera numărătoarea veche.
+evaluabile** e atins (ADR-062).
+
+**La atingerea pragului NU se întâmplă nimic automat** — singurul efect e
+că textul barei din UI trece din `insufficient_data` în „prag atins — test
+de ablație în așteptare" (`app.py`). E o etichetă, nu un declanșator.
+Feature-ul rămâne NEPROMOVAT până când ablația îl justifică.
+
+### Estimarea de timp — CORECTATĂ 2026-09-08, cu ritm măsurat
+
+> **Estimarea inițială (2026-08-23) era: „~5-6 săptămâni (finalul lui
+> septembrie)". E prea optimistă — realist e mijlocul spre finalul lui
+> OCTOMBRIE.** Nu era greșită ca metodă: a fost făcută când contorul era la
+> **15**, imediat după redefinirea lui prin ADR-062, deci fără nicio
+> observație despre ritmul real. Acum există patru săptămâni de măsurători.
+
+Ritmul real de acumulare a meciurilor evaluabile (măsurat live 2026-09-08;
+replicarea în SQL a `count_matches_with_sufficient_history` întoarce exact
+**82**, aceeași cifră ca UI-ul — deci metoda de proiecție e validată contra
+funcției de producție, nu presupusă):
+
+| Săptămâna | Evaluabile noi | Meciuri terminate | Cumulat |
+|---|---:|---:|---:|
+| S29–S33 (20 iul – 23 aug) | **0** | 221 | 0 |
+| S34 (24–30 aug) | 20 | 117 | 20 |
+| S35 (31 aug – 6 sep) | 27 | 128 | 47 |
+| S36 | 31 | 139 | 78 |
+| S37 (parțială) | 4 | 11 | **82** |
+
+Două lucruri se citesc de-aici, și amândouă explică de ce estimarea din
+august nu putea fi corectă:
+
+1. **Primele cinci săptămâni au dat ZERO**, deși s-au jucat 221 de meciuri
+   — nicio echipă nu avea încă 5 meciuri anterioare cu xG real. Acumularea
+   nu începe odată cu sezonul, ci după ce echipele traversează fereastra.
+   O estimare liniară făcută la contor=15 extrapola dintr-un punct aflat
+   chiar la începutul pantei.
+2. **Ritmul accelerează**: 20 → 27 → 31 pe săptămână, iar proporția
+   meciurilor terminate care devin evaluabile crește (17% → 21% → 22%).
+
+**Proiecție**: mai sunt 218 de acumulat. La 31/săptămână, chiar cu
+accelerarea, ies **5-7 săptămâni → mijlocul spre finalul lui octombrie**.
+Pentru finalul lui septembrie (3 săptămâni) ar fi nevoie de ~73/săptămână,
+mai mult decât dublu față de ritmul măsurat.
+
+**De ce e notată corectura, nu doar înlocuită cifra**: estimarea veche
+circula deja ca „e pentru finalul lui septembrie", iar la momentul acela
+întrebarea „de ce nu s-a atins pragul?" ar fi părut un defect, nu o
+estimare depășită. Ritmul de mai sus e verificabil oricând cu aceeași
+interogare.
 
 ### Precondiție deja rezolvată (2026-08-23)
 
