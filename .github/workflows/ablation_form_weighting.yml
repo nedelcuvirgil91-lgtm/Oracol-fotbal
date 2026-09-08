@@ -1,0 +1,80 @@
+name: Football Oracle — Ablație ponderare formă (read-only)
+
+# Răspunde la întrebarea proprietarului produsului (2026-09-08): „forma
+# ultimului meci nu ar trebui să fie așa mare; ar trebui ca forma ultimelor 3
+# meciuri să conteze, iar constanța să fie premiată."
+#
+# Compară 7 variante de ponderare a formei pe meciurile terminate ale sezonului,
+# schimbând O SINGURĂ variabilă (funcția care transformă W/D/L în form_score) și
+# ținând fix tot restul — ratinguri, H2H, ponderi, baseline — la valorile pe care
+# Oracle chiar le-a folosit, citite din `match_history`.
+#
+# STRICT READ-ONLY: nu scrie în nicio tabelă, nu atinge `weights.json` sau
+# `model_config`, nu rescrie nicio predicție. Impus prin teste
+# (`tests/test_ablation_form_weighting.py`), inclusiv o gardă care verifică
+# faptul că varianta de referință reproduce EXACT
+# `feature_engine.compute_form_score()`.
+#
+# DOAR `workflow_dispatch`, fără cron — instrument de decizie punctuală.
+#
+# Un rezultat favorabil aici NU autorizează schimbarea formulei Oracle:
+# „un backtest favorabil nu e, singur, suficient" (CLAUDE.md). Autorizează
+# cel mult PROPUNEREA unui experiment de calibrare separat.
+
+on:
+  workflow_dispatch:
+    inputs:
+      k_consistenta:
+        description: "Cât de tare penalizează dispersia varianta «consistență» (implicit 0.5)"
+        required: false
+        default: "0.5"
+      sezon_de_la:
+        description: "Începutul sezonului analizat (implicit 2026-07-01)"
+        required: false
+        default: "2026-07-01"
+
+concurrency:
+  group: ablation-form-weighting
+  cancel-in-progress: false
+
+jobs:
+  ablatie:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run ablation
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        # `set -o pipefail` obligatoriu: shell-ul implicit e `bash -e` FĂRĂ
+        # pipefail, deci într-un pipeline `python … | tee` codul de ieșire ar fi
+        # al lui `tee` — o rulare eșuată ar apărea verde.
+        run: |
+          set -o pipefail
+          mkdir -p logs
+          python scripts/ablation_form_weighting.py \
+            --k-consistenta "${{ github.event.inputs.k_consistenta || '0.5' }}" \
+            --sezon-de-la "${{ github.event.inputs.sezon_de_la || '2026-07-01' }}" \
+            2>&1 | tee "logs/ablation_form_weighting_$(date -u +%Y%m%dT%H%M%SZ).log"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ablation-form-weighting-${{ github.run_id }}
+          path: logs/
+          if-no-files-found: error
+          retention-days: 30
