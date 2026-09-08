@@ -415,7 +415,13 @@ cod de producție atins, niciun flag schimbat.
 
 ---
 
-## 8. Cum a ieșit la iveală §2b — merită reținut ca metodă (2026-09-08)
+## 8. Cum au ieșit la iveală §2b și §2c — merită reținut ca metodă (2026-09-08)
+
+Ambele au venit de la proprietarul produsului, în aceeași conversație, dar sunt
+**două tipuri diferite de contribuție**. Distincția contează mai mult decât
+descoperirile în sine.
+
+### 8.1 §2b — o observație pe ecran a bătut trei zile de audit
 
 Nu printr-o alertă, nici printr-un test. Proprietarul produsului s-a uitat la
 ecran, a comparat cu Flashscore și a întrebat: *„de ce Real are în aplicație 2
@@ -432,3 +438,44 @@ CHIAR erau variate — variate pe date vechi de cinci luni.
 „câte predicții identice avem?") poate ascunde o altă formă a **aceluiași**
 defect, tocmai pentru că a doua formă produce exact semnalul opus. Contrastul pe
 care-l foloseam ca dovadă de sănătate era el însuși simptomul.
+
+### 8.2 §2c — o intuiție de fotbal a răsturnat diagnosticul, nu o citire de cod
+
+Asta e categoria mai importantă, și merită numită explicit.
+
+§2b a fost o observație de tip „cifra asta nu se potrivește cu realitatea" —
+verificabilă de oricine compară două ecrane. **§2c a fost altceva: o obiecție la
+diagnosticul însuși**, formulată din cunoaștere de fotbal, nu din date:
+
+> *„ținând cont că UCL e o competiție nouă, poate ceea ce pare un defect acum,
+> după 3 meciuri în UCL o să fie adevărata formă. Câteodată unele echipe joacă
+> diferit în competițiile europene față de campionatele lor — fie mai bine, fie
+> mai rău."*
+
+**Nicio cantitate de citire de cod sau de SQL n-ar fi produs ipoteza asta.**
+Datele nu-ți spun singure dacă „forma pe competiție" e conceptul corect — îți
+spun doar ce valori are. Ca să pui întrebarea trebuie să știi că PSV domină
+Eredivisie și se prăbușește în Europa, iar Arsenal face invers. Ipoteza a fost a
+proprietarului produsului; măsurarea care a confirmat-o a fost a mea, și a venit
+**după**, nu înainte.
+
+Rezultatul: documentul își schimbase deja de două ori concluzia (4 sept: „defect
+de filtrare"; 8 sept dimineața: „defect cu două manifestări"), iar §2c a
+răsturnat-o pe amândouă — filtrul **nu se șterge**, e singura ajustare la forța
+adversarului pe care motorul o are. Și a închis o întrebare de arhitectură
+deschisă de patru zile (§6.1), pe care eu o lăsasem cu trei variante posibile,
+dintre care recomandam implicit una greșită.
+
+**Lecția, operațională, nu de curtoazie**: când un „defect" documentat se sprijină
+pe **diagnosticul meu**, nu pe o măsurătoare independentă, obiecția venită din
+cunoașterea domeniului e **dovadă de testat, nu zgomot de combătut**. Regula
+proiectului — „verificat, nu presupus" — se aplică în ambele direcții: și
+afirmației că ceva funcționează, și afirmației mele că ceva e stricat. Aici a
+doua era cea nedovedită.
+
+**Consecință practică pentru sesiunile viitoare**: înainte de a eticheta un
+comportament drept „defect" într-un document, verifică dacă nu cumva codifică o
+regulă de domeniu pe care n-o cunoști. `.eq("league", league)` n-avea niciun
+comentariu care să-i explice intenția — de aceea a fost citit patru zile ca
+greșeală. Un fix aplicat în acele patru zile ar fi șters, tăcut, singurul
+mecanism de ajustare la forța adversarului din motor.
