@@ -1,9 +1,15 @@
 # European Competition Form-History Filtering Defect
 
 **Status**: DIAGNOSTIC — defect confirmat, NEREPARAT, deliberat
-**Data**: 2026-09-04
+**Data**: 2026-09-04 · **extins 2026-09-08** cu a doua manifestare (§2b)
 **Descoperit în**: auditul Top Value Bets (ADR-071), la investigarea celor 25 de meciuri în care egalul apărea ca rezultat cel mai probabil
 **Decizie proprietar produs**: se documentează acum, se repară într-un task separat de arhitectură de date. Nu se aplică niciun fix local.
+
+> **Citește §2b înainte de §3.** Documentul descria inițial O SINGURĂ manifestare
+> — echipa fără niciun meci în competiție, care ajunge la valori neutre. Pe
+> 2026-09-08 s-a confirmat o a DOUA, produsă de aceeași linie de cod, cu simptom
+> opus și **fără nicio protecție în aval**. Concluziile din §3-§5 acoperă doar
+> prima; secțiunile respective sunt marcate acolo unde nu se mai aplică integral.
 
 ---
 
@@ -69,7 +75,120 @@ Ambele echipe primesc profile identice, construite din `league_baselines`, iar P
 
 ---
 
+## 2b. A doua manifestare — istoric PREZENT, dar din alt sezon (adăugat 2026-09-08)
+
+**Descoperit de proprietarul produsului**, dintr-o observație pe ecran: „de ce
+Real are în aplicație 2 înfrângeri consecutive?" — Flashscore arăta o singură
+înfrângere în ultimele 5 meciuri.
+
+### 2b.1 Cazul concret, reprodus rând cu rând
+
+Real Madrid – Inter, Champions League, 2026-09-08 (`flashscore_foBRjez1`).
+Aplicația afișa forma **`LLWWW`** pentru Real. Interogarea exactă pe care o face
+`get_team_recent_results("Real Madrid", "Champions League", 5)` întoarce:
+
+| Dată | Meci | Pentru Real |
+|---|---|---|
+| 2026-04-15 | Bayern Munich 4-3 Real Madrid | **L** |
+| 2026-04-07 | Real Madrid 1-2 Bayern Munich | **L** |
+| 2026-03-17 | Manchester City 1-2 Real Madrid | W |
+| 2026-03-11 | Real Madrid 3-0 Manchester City | W |
+| 2026-02-25 | Real Madrid 2-1 Benfica | W |
+
+Cele două „înfrângeri consecutive" sunt **sferturile de finală din aprilie**, de
+acum 146 de zile. Forma reală, pe toate competițiile, e `LWWWW` — o singură
+înfrângere (Betis, 4 septembrie). Același tipar la Inter: `LLWLL`, ultimul meci
+folosit din **24 februarie**.
+
+Profilul întreg vine de-acolo, nu doar șirul de formă: Real primește OFF 1,276
+(11 goluri în acele 5 meciuri, contra Bayern/City/Benfica), Inter 0,877 (5
+goluri în 5, cu 4 înfrângeri). Cifre reale — dintr-o altă perioadă și contra
+altui nivel de adversar.
+
+### 2b.2 De ce e mai periculoasă decât prima
+
+Diferența nu e de amploare, e de **vizibilitate**:
+
+| | §1-§2 (manifestarea documentată) | §2b (aceasta) |
+|---|---|---|
+| Meciuri în competiție, ultimele 365 zile | 0 | 3-5, dar din sezonul trecut |
+| Ce produce | constantă identică (34,1 / 37,0 / 28,9) | profil real, vechi de 4-7 luni |
+| Nivelul cascadei atins | Level 6 — `neutral-defaults` | **Level DB — `supabase-history`** |
+| `data_quality` scris în `match_history` | `neutral` | **`live`** (verificat pe `flashscore_foBRjez1`) |
+| Ce vede utilizatorul în UI | — | **„✅ Date reale — meciuri terminate"** |
+| Poarta de calitate ADR-071 | **respinge candidatul** | **NU se declanșează** |
+
+Prima manifestare se auto-semnalează: marchează starea ca `neutral`, iar Value
+Selector o aruncă (`tests/test_value_selector.py::test_T14_...`). A doua trece
+prin toate porțile ca dată bună, cu bifă verde în interfață. **Plasa de
+siguranță din §5 nu acoperă acest caz** — nu pentru că e prost construită, ci
+pentru că se uită la un semnal (`data_quality`) care aici e, tehnic, corect:
+datele CHIAR sunt reale. Doar că nu sunt recente.
+
+### 2b.3 Amploarea, măsurată (2026-09-08)
+
+Cele 72 de echipe cu meciuri în cupele europene în fereastra 8-22 septembrie:
+
+| | echipe |
+|---|---:|
+| Trec de Level DB (≥3 meciuri în competiție) | 27 |
+| — dintre care **exclusiv din sezonul TRECUT** (§2b) | **16** |
+| Cad pe cascadă (§1-§2) | 45 |
+
+### 2b.4 Constatarea care schimbă interpretarea defectului
+
+**Toate cele 16 sunt din Champions League, și sunt exact cluburile mari:**
+
+| Echipă | Meciuri CL în fereastră | Cel mai recent folosit | Vechime |
+|---|---:|---|---:|
+| Villarreal · Napoli · PSV | 8 | 2026-01-28 | **223 zile** |
+| Inter Milan · Club Brugge | 10 | 2026-02-24 | 196 zile |
+| Borussia Dortmund | 10 | 2026-02-25 | 195 zile |
+| Manchester City | 10 | 2026-03-17 | 175 zile |
+| Galatasaray | 12 | 2026-03-18 | 174 zile |
+| Liverpool · FC Barcelona | 12 | 2026-04-14 | 147 zile |
+| Real Madrid · Sporting CP | 12-14 | 2026-04-15 | 146 zile |
+| Atletico Madrid | 16 | 2026-05-05 | 126 zile |
+| Bayern Munich | 14 | 2026-05-06 | 125 zile |
+| Arsenal · Paris Saint-Germain | 15-17 | 2026-05-30 | **101 zile** |
+
+Zero echipe din Europa League sau Conference League.
+
+**Cele două manifestări împart terenul după forța clubului, nu aleatoriu.** Un
+club care a mers departe în competiția de anul trecut are ≥3 meciuri în
+fereastra de 365 de zile → nimerește §2b. Un club care nu s-a calificat, sau a
+ieșit devreme, are 0 → nimerește §1. Rezultatul: **defectul lovește sistematic
+cele mai cunoscute și cele mai pariate echipe din Europa**, iar pe acelea le
+lovește tocmai pe calea care NU e semnalată nicăieri.
+
+Corolar temporal, de reținut: cele 16 migrează singure către §1 pe măsură ce
+meciurile din sezonul trecut ies din fereastra de 365 de zile. Cazul Villarreal/
+Napoli/PSV (223 de zile) e deja la ~4 luni de acea graniță. Defectul nu dispare
+— își schimbă forma, din „date vechi nesemnalate" în „constantă semnalată".
+
+### 2b.5 Ce NU s-a verificat
+
+- Dacă predicția servită (60,6 / 21,6 / 17,8 pentru Real–Inter) ar fi
+  semnificativ diferită cu forma corectă. Ar cere re-rularea motorului cu un
+  profil alternativ — nu s-a făcut, nu se presupune.
+- Dacă cele 16 apar și în `shadow_predictions`, contaminând evaluarea
+  Challenger. §4 nota deja golul echivalent pentru prima manifestare, tot
+  neinvestigat.
+- Nivelul FS2 (`get_team_recent_form_context`, NEfiltrat pe ligă) nu e atins
+  aici, pentru că Level DB reușește înaintea lui — deci întrebarea din §6.3
+  („de ce tace FS2?") nu se aplică acestui caz: nu tace, nu ajunge la el.
+
+---
+
 ## 3. Impactul măsurat
+
+> **Domeniu de aplicare (precizat 2026-09-08)**: cifrele de mai jos măsoară
+> manifestarea din §1-§2 — predicțiile căzute pe `neutral`. Ele NU includ cazul
+> §2b, care produce predicții variate, cu `data_quality = live`, deci invizibile
+> pentru orice numărătoare bazată pe `neutral`. Coloana „valori distincte de
+> `prob_draw`" de mai jos e chiar dovada: cele 7 valori distincte din Champions
+> League vin de la echipele care trec de Level DB — adică de la cele 16 din §2b.
+> Le vedeam în tabel de la început; le citeam ca „semn de sănătate".
 
 ### 3.1 Per competiție (`match_history`, toate predicțiile cu rezultat cunoscut, n=431)
 
@@ -115,6 +234,19 @@ ADR-071 impune ca stratul de selecție să **respingă** orice candidat construi
 
 Aceasta e o **plasă de siguranță în aval**, nu o reparație. Predicțiile constante continuă să fie produse, stocate și servite în restul aplicației.
 
+> **Limita plasei, confirmată 2026-09-08**: acoperă EXCLUSIV manifestarea §1-§2.
+> Cazul §2b scrie `data_quality = live` — corect, în litera regulii: datele chiar
+> provin din meciuri terminate reale. Poarta nu se declanșează, iar UI-ul afișează
+> „✅ Date reale — meciuri terminate". Cele 16 echipe din §2b.4 (Real Madrid,
+> Barcelona, Bayern, PSG, Arsenal, Liverpool, Inter, Manchester City, …) pot intra
+> azi în Top Value Bets pe profile vechi de 101-223 de zile, fără niciun semnal.
+>
+> Nu e o breșă în implementarea porții — e o limită a semnalului pe care se
+> bazează. `data_quality` răspunde la „avem date reale?", nu la „sunt recente?".
+> Orice remediere trebuie să introducă al doilea semnal, nu să-l reinterpreteze
+> pe primul (a marca `live` ca `neutral` ar fi o minciună în cealaltă direcție —
+> Regula #8).
+
 ---
 
 ## 6. Recomandare de remediere (task separat, NEÎNCEPUT)
@@ -124,13 +256,48 @@ Aceasta e o **plasă de siguranță în aval**, nu o reparație. Predicțiile co
 Întrebarea reală de arhitectură, de decis explicit, nu implicit:
 
 1. **Ce înseamnă „forma" unei echipe într-o competiție de cupă?** Ultimele 5 meciuri din acea cupă (azi, și e greșit), ultimele 5 meciuri indiferent de competiție, sau ultimele 5 din liga domestică plus cupele?
+   - **[EXTINS 2026-09-08, după §2b]** Întrebarea era pusă prea îngust: presupunea că problema e ABSENȚA datelor. Trebuie să acopere și cazul în care datele EXISTĂ, dar din alt sezon. Formularea corectă: *ce combinație de competiție ȘI recență definește forma?* Un răspuns care rezolvă doar prima jumătate (ex. „ultimele 5 indiferent de competiție") **rezolvă și a doua din întâmplare**, dar unul care rezolvă doar a doua (ex. „păstrăm filtrul pe competiție, dar reducem fereastra la 120 de zile") ar transforma toate cele 16 echipe din §2b în cazuri `neutral` — adică ar înrăutăți lucrurile, mutându-le din „date vechi" în „fără date". Cele două jumătăți nu sunt independente.
+   - **Fereastra de 365 de zile e ea însăși un parametru nedecis niciodată explicit** (`lookback_days=365`, valoare implicită în semnătura funcției). Ea e cea care face diferența între §1 și §2b — nu filtrul de competiție singur.
 2. **Cum se tratează diferența de nivel între competiții?** Forma din liga domestică nu e direct comparabilă cu cea din Champions League — aceeași problemă ca lipsa ajustării la forța adversarului, deja documentată în auditul Top Value Bets §3/C3.
 3. **Există un `Level` intermediar deja construit care ar trebui să prindă cazul?** `get_team_recent_form_context()` (`oracle_engine.py:1288`) NU e filtrat pe ligă și a fost adăugat pe 2026-08-10 exact pentru „cupele europene fără clasament". În cele 25 de cazuri nu a produs nimic — de investigat separat de ce.
 
-Punctul 3 e cel mai promițător ca punct de plecare: există deja un nivel proiectat pentru acest scenariu, care nu se declanșează. Cauza acelei tăceri e necunoscută azi și **nu se presupune**.
+4. **[NOU 2026-09-08] Cum se semnalează „date reale, dar vechi"?** Azi nu există
+   niciun câmp pentru asta. `data_quality` distinge `live` / `partial` / `elo` /
+   `neutral` — toate despre PROVENIENȚA datelor, niciuna despre vârsta lor. Fără
+   un al doilea semnal, nici poarta ADR-071, nici UI-ul, nici evaluarea shadow nu
+   pot face diferența între un profil din meciul de acum 3 zile și unul din
+   sferturile de acum 7 luni. Decizia (câmp nou? prag? doar afișare?) e separată
+   de decizia despre filtrul de competiție și **poate fi luată independent** —
+   e singura parte care aduce valoare chiar dacă restul rămâne neschimbat.
+
+Punctul 3 e cel mai promițător ca punct de plecare: există deja un nivel proiectat pentru acest scenariu, care nu se declanșează. Cauza acelei tăceri e necunoscută azi și **nu se presupune**. — **Precizare 2026-09-08**: valabil pentru §1-§2. Pentru §2b, FS2 nici nu e consultat (Level DB reușește înaintea lui), deci acolo întrebarea e alta: nu „de ce tace?", ci „ar trebui Level DB să câștige, când tot ce are e vechi de 5 luni?"
 
 ---
 
 ## 7. Ce NU s-a atins
 
 `supabase_client.py` · `oracle_engine.py` · `feature_engine.py` · ELO · ML · `match_history` (nicio predicție rescrisă) · niciun flag de producție. Documentul acesta e strict diagnostic.
+
+**Valabil și pentru extinderea din 2026-09-08**: §2b e rezultatul a șase
+interogări `SELECT` pe `Prediction` și al citirii codului. Zero scriere, zero
+cod de producție atins, niciun flag schimbat.
+
+---
+
+## 8. Cum a ieșit la iveală §2b — merită reținut ca metodă (2026-09-08)
+
+Nu printr-o alertă, nici printr-un test. Proprietarul produsului s-a uitat la
+ecran, a comparat cu Flashscore și a întrebat: *„de ce Real are în aplicație 2
+înfrângeri consecutive?"*
+
+Defectul era **vizibil de la prima măsurătoare din 4 septembrie** — §3.1 arăta
+„Champions League: 24 de meciuri, 7 valori distincte". Cele 7 valori distincte
+erau exact echipele din §2b. Le-am citit atunci ca *semn de sănătate* (predicții
+variate = model care funcționează), în contrast cu ligile domestice unde numărul
+de valori distincte ≈ numărul de meciuri. Era jumătate de adevăr: predicțiile
+CHIAR erau variate — variate pe date vechi de cinci luni.
+
+**Lecția**: un indicator construit ca să detecteze o formă a unui defect (aici:
+„câte predicții identice avem?") poate ascunde o altă formă a **aceluiași**
+defect, tocmai pentru că a doua formă produce exact semnalul opus. Contrastul pe
+care-l foloseam ca dovadă de sănătate era el însuși simptomul.
