@@ -28,11 +28,18 @@ Not Implemented
 
 ### D-1. Activarea ADR-072 (baseline proaspăt la promovare) — amânată deliberat, 2026-09-08
 
-**Stare** — **[CORECTAT 2026-10-13, intrarea de aici era FALSĂ]**. Spunea „cod în producție". **Nu era.** Cele 4 commit-uri ADR-072 stau pe `claude/continua-faza-1-adr5-o52jat`, iar `main` n-a mai avansat de la `09cf0be` (8 septembrie) — verificat: `git show origin/main:shadow_testing.py | grep -c BASELINE_SHADOW_CONTROL` → **0**. Am confundat „împins pe branch" cu „în producție". Aceeași clasă de eroare ca POC-ul API-Football, pe care `CHANGELOG.md` îl declara șters 34 de zile înainte de a fi șters efectiv.
+**Stare** — **[ACTUALIZAT 2026-10-13, după merge]**. Intrarea anterioară spunea „cod în producție" înainte să fie adevărat (eroare de-a mea, corectată în aceeași zi: confundasem „împins pe branch" cu „în producție" — aceeași clasă de eroare ca POC-ul API-Football declarat șters 34 de zile înainte de ștergerea efectivă).
 
-Stare reală: **cod pe branch, NEmerge-uit pe `main`, deci NU rulează** · migrarea 056 **aplicată în producție** (coloanele există, 0 rânduri cu valoare) · flagul `challenger_baseline_from_control_enabled` **ABSENT din `model_config` (= False)**.
+Stare reală acum, fiecare element verificat:
 
-Starea asimetrică (coloană da, cod nu) e inofensivă prin construcție — exact ce garantează amendamentul A1 — dar înseamnă că **activarea flagului acum n-ar face absolut nimic**, și ar fi un no-op tăcut.
+| Element | Stare | Verificare |
+|---|---|---|
+| Cod ADR-072 pe `main` | ✅ **DA** (de la `3566541`, 13 oct) | `git show origin/main:shadow_testing.py \| grep -c BASELINE_SHADOW_CONTROL` → **7** (era 0) |
+| Migrarea 056 în producție | ✅ aplicată | coloanele există, 0 rânduri cu valoare |
+| Flag `challenger_baseline_from_control_enabled` | ⛔ **ABSENT din `model_config` (= False)** | implicit `False` în cod, confirmat pe `main` |
+| Comportament curent | **neschimbat** | evaluările rulează pe baseline-ul înghețat, ca până acum |
+
+**Pasul care urmează**: o rulare de noapte (`night_sync`, cron `0 2 * * *` UTC) cu flagul ÎNCĂ oprit, care confirmă comportament identic — cerința 3 de activare din ADR-072. Abia după ea, `UPDATE model_config`, cu confirmare explicită.
 
 **De ce așteptăm** (decizie explicită a proprietarului produsului, la recomandarea mea): amendamentul A2 din ADR-072 — comutarea sursei nu schimbă `n_matches_evaluated`, iar `challenger_evaluations` scrie cu `UNIQUE (training_run_id, n_matches_evaluated)` + `ignore_duplicates`. Dacă `n` a stagnat, primul verdict pe baseline-ul nou e **aruncat tăcut**. La 8 septembrie eram în pauză internațională, deci `n` putea stagna.
 
@@ -63,7 +70,7 @@ WHERE id = 1;
 - **Capcană de citire, aproape m-a păcălit**: interogarea „`n_curent_registry` > `max_n_înregistrat`?" întoarce **`false`** pentru exact cei doi Challengeri activi. Nu înseamnă stagnare — înseamnă că rularea de azi a fost **deja înregistrată**, adică starea sănătoasă. Comparația corectă e pe **seria zilnică**, nu pe un singur instantaneu. Un `false` acolo e de așteptat, nu un semnal de alarmă.
 - **Acoperire `control` reverificată, 100% pe toți cei 5 Challengeri**, inclusiv versiunea nouă `174e7e17` (142/142): `e638c1dc` 676/676, `4e17c737` 596/596, `6e7265c5` 459/459, `8ac89c70` 382/382. `flashscore_team_dna/v1` are **0/989** → cade corect pe `match_history_frozen` (D2 funcționează).
 - **Tiparul din septembrie se CONFIRMĂ pe o lună mai mult de date**, iar semnul se inversează acum în **2 din 5** cazuri: `xgboost_v1/e638c1dc` +1,18pp înghețat → **−1,04pp** proaspăt; `blend_v1/4e17c737` +1,17pp → **−0,34pp**. Baseline-ul înghețat flatează Challenger-ul în 4 din 5 (al cincilea, `174e7e17`, e identic). Singurul `candidate_for_promotion` verificabil, `blend_v1/8ac89c70`, **rezistă**: +3,66pp acuratețe și −0,0194 log-loss contra Oracle-ului real.
-- **BLOCAJUL REAL: codul nu e pe `main`.** Pașii 3-4 nu mai sunt limitați de `n`, ci de merge. Ordinea corectă redevine: merge pe `main` (cere aprobare explicită) → o rulare de noapte cu flagul oprit, care confirmă comportament neschimbat → abia apoi activarea.
+- **BLOCAJUL REAL: codul nu e pe `main`.** Pașii 3-4 nu mai sunt limitați de `n`, ci de merge. Ordinea corectă redevine: merge pe `main` (cere aprobare explicită) → o rulare de noapte cu flagul oprit, care confirmă comportament neschimbat → abia apoi activarea. **[REZOLVAT 2026-10-13 — merge aprobat explicit și executat, `09cf0be` → `3566541`, fast-forward curat, `pytest tests/` verde pe `main` ÎNAINTE de push: 3347 passed, 2 skipped. Calea de predicție neatinsă, verificat: `git diff` pe `oracle_engine.py`/`feature_engine.py`/`ml_predictor.py`/`recalibration.py`/`app.py`/`oracle_api.py` e GOL.]**
 
 ### D-2. Persistarea intrărilor de la servire (varianta B) — ADR nescris încă
 
