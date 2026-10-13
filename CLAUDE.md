@@ -26,6 +26,8 @@ Not Implemented
 
 **Secțiunea asta există pentru că absența ei a costat deja.** ADR-057 nu era citat de niciun document și de niciun cod; condiția lui s-a împlinit pe 23 august, iar starea a fost descoperită abia pe 6 septembrie — **14 zile fără nicio antrenare**, și doar dintr-o întrebare întâmplătoare a proprietarului produsului. Orice decizie amânată se scrie AICI, cu declanșatorul verificabil, nu doar în ADR-ul ei.
 
+> **Starea completă, la zi: `docs/00_GOVERNANCE/BACKLOG_2026-10-13.md`** — tot ce rămâne de făcut după sesiunea din 13 octombrie, ordonat după **cost real măsurat**, nu după cronologie. Intrările D-1…D-8 de mai jos sunt rezumatul; backlog-ul are cifrele, dovezile și planurile. Conține în plus: planul ADR-073 (D-2 reîncadrat — reparația e **un parametru**, nu un proiect), ce se verifică imediat ce se termină rularea `night_sync` curentă, prioritizarea pe precizie (accidentările rămân #1), și §5 — patru lecții de metodă din erorile comise chiar în acea sesiune.
+
 ### D-1. Activarea ADR-072 (baseline proaspăt la promovare) — amânată deliberat, 2026-09-08
 
 **Stare** — **[ACTUALIZAT 2026-10-13, după merge]**. Intrarea anterioară spunea „cod în producție" înainte să fie adevărat (eroare de-a mea, corectată în aceeași zi: confundasem „împins pe branch" cu „în producție" — aceeași clasă de eroare ca POC-ul API-Football declarat șters 34 de zile înainte de ștergerea efectivă).
@@ -79,6 +81,10 @@ WHERE id = 1;
 Verificat pe ambii candidați de stocare: `match_history` ține doar IEȘIRILE, iar `shadow_predictions.feature_metadata` e `{}` pentru `xgboost_v1` și `blend_v1`. **Nicio predicție Oracle nu poate fi auditată azi până la intrările ei** (North Star #9).
 
 **Varianta aleasă: B** — `feature_metadata` pe rândul `control`, care se împrospătează prin `upsert`. Opțiunea C (coloană `jsonb` pe `match_history`) a fost **analizată și respinsă**: RPC-ul canonic folosește `COALESCE(m.existent, p->nou)`, deci coloana ar îngheța la prima scriere, cu 7 zile înainte de meci, aruncând tăcut fiecare îmbunătățire ulterioară.
+
+**[REÎNCADRAT 2026-10-13 — e mult mai mic decât l-am descris]** Descrisesem D-2 ca „a construi persistarea intrărilor". **Fals.** Datele nu trebuie construite — se aruncă la ultima linie: `_log_challenger_shadow()` calculează `ml_features`, `log_shadow_for_active_challenger()` le primește ca `features` și le folosește pentru predicția Challenger-ului, dar la cele două apeluri `log_shadow_prediction()` **nu le mai pasează**. Reparația de bază e **un parametru**.
+
+**Plan complet (ADR-073, P1-P6), inclusiv descoperirea că `ml_features` NU e suficient** (lipsesc `baseline`-ul ligii și cele 5 ponderi, deci reproducerea ar eșua dacă ponderile se schimbă): `BACKLOG_2026-10-13.md` §2.
 
 **Ar rezolva și gaura de acoperire din ADR-072 D2**, dacă scrierea rândului `control` se decuplează de existența unui Challenger.
 
@@ -134,6 +140,28 @@ Contorul de meciuri evaluabile a trecut pragul: **301/300**, afișat de aplicaț
 **Nu se întâmplă nimic automat** — eticheta barei s-a schimbat, atât. Feature-ul rămâne NEPROMOVAT până când ablația îl justifică.
 
 **Legătură cu ADR-072, de reținut înainte de orice promovare**: `flashscore_team_dna/v1` e singurul `candidate_for_promotion` cu **0 rânduri `control`** (0 din 989), deci singurul pe care ADR-072 **nu îl poate verifica**. Cade corect pe `match_history_frozen` (D2 funcționează), dar cifra lui rămâne produsă de baseline-ul care, în 4 din 5 cazuri măsurate, flatează challenger-ul.
+
+**[ÎNCHIS 2026-10-13 — ablația a rulat, rezultat NEGATIV]** Nicio variantă nu e mai bună simultan pe toate trei metricile, iar degradarea e **monotonă în doză** (log-loss +0,0543 la aplicarea brută, |t|=3,58). Feature-ul rămâne NEPROMOVAT. **Declanșatorul de reluare NU e un prag de meciuri** — mărirea 300→600 n-ar ajuta, fiindcă zgomotul metricii depinde de xG-ul acumulat *per echipă*, nu de mărimea setului de test; iar fereastra nu poate fi mărită azi (nicio echipă n-are 10 meciuri cu xG, median 5). Reluare justificată la ~16 meciuri cu xG per echipă, estimativ februarie-martie 2027. Detalii: `BACKLOG_2026-10-13.md` §1.2.
+
+### D-8. `consensus_validation` nu are fază de execuție — decizii orfane structural (descoperit 2026-10-13)
+
+`learning_core/consensus_validation.py` are `_propose_surfacing_decision()`, dar **nicio fază de execuție**. `commit_decision()` e apelat exclusiv din `continuous_learning.py`.
+
+Deci decizia **#6** (`surface_worthy`, `agreement_score`, `study_run_id: 1072`), aprobată de proprietarul produsului pe **14 septembrie**, **nu poate fi comisă de niciun cod existent**. Va rămâne `approved` la infinit.
+
+**Diferit de D-5**: acolo lipsește detecția (sweep-ul nu rulează), aici lipsește execuția. **Nu afectează expirările** — acelea merg prin `continuous_learning`, calea dovedită de deciziile #4, #5.
+
+**Decizia cerută**: se implementează faza de execuție, sau se oprește producerea de decizii pe care nimeni nu le poate comite.
+
+### D-9. TheSportsDB — ~28 min/zi, cauză instrumentată 2026-10-13, încă neconfirmată
+
+**96 de apeluri pe săptămână se termină între 120.160 și 122.699 ms** (abatere standard 577 ms — plafon determinist, nu lentoare de rețea) și **toate reușesc**. Aceleași endpoint-uri răspund normal în 343-508 ms. Consumă 11.618 s/săptămână din 2,2% dintre apeluri.
+
+Dar `timeout=12` × 4 încercări + backoff ≈ 51,5 s, nu 120 — deci **nu se știe din ce e compus plafonul**, iar cele două explicații posibile cer remedii OPUSE (vezi `BACKLOG_2026-10-13.md` §3.1).
+
+**Instrumentarea e deja pe `main`** (`4417a8e`, zero schimbare de comportament): `_RetryCuJurnal` loghează fiecare reîncercare, `_raporteaza_daca_lenta()` raportează cererile peste 10 s cu bugetul teoretic alături. **Niciun timeout nu se schimbă** până nu se citesc liniile `[HTTP-retry]`/`[HTTP-lent]` din prima rulare de după instrumentare.
+
+Același tipar ca la `sync_pre_match_odds` în august: instrumentare întâi, reparație după, cu date.
 
 ## Filosofia proiectului
 
