@@ -94,11 +94,66 @@ USER_AGENTS = [
 def _ua() -> str: return random.choice(USER_AGENTS)
 
 # ── Session HTTP ──────────────────────────────────────────────────────────────
+
+# Prag peste care o cerere e raportată ca LENTĂ, cu defalcare. Ales ca să NU
+# inunde log-ul: din 4.426 de apeluri TheSportsDB pe 7 zile, 4.322 (97,7%)
+# s-au încheiat sub 5 s, deci un prag de 10 s raportează ~100 de linii pe
+# săptămână, nu mii.
+_PRAG_CERERE_LENTA_S = 10.0
+
+
+class _RetryCuJurnal(Retry):
+    """[INSTRUMENTARE 2026-10-13] `Retry` care LOGHEAZĂ fiecare reîncercare.
+
+    Comportament de reîncercare IDENTIC — singura diferență e o linie de log.
+    Nu schimbă numărul de încercări, plafoanele, backoff-ul sau codurile
+    reîncercate.
+
+    DE CE EXISTĂ. Măsurat pe `provider_call_log`, 7 zile: 96 de apeluri
+    TheSportsDB se termină între 120.160 și 122.699 ms — abatere standard 577
+    ms, deci un plafon DETERMINIST, nu lentoare de rețea. Aceleași endpoint-uri
+    răspund normal în 343-508 ms, iar toate cele 96 **reușesc** (`success=true`).
+    Consumă 11.618 s pe săptămână (~28 min/zi) din 2,2% dintre apeluri.
+
+    Dar `timeout=12` × 4 încercări + backoff ≈ 100 s, nu 120. Deci nu se știe
+    din ce e compus plafonul, iar cele două explicații posibile cer remedii
+    OPUSE:
+      (a) buget de reîncercări consumat, ultima reușește → un timeout mai mic
+          scurtează totul, fără pierdere de date (reîncercările aduc datele);
+      (b) o singură cerere care primește octeți prea rar ca să declanșeze
+          timeout-ul `requests` (care măsoară timpul ÎNTRE octeți, nu totalul)
+          → un timeout mai mic n-ar ajuta deloc și ar tăia cereri bune.
+
+    Fiecare reîncercare logată aici distinge între ele: dacă apar 3 linii
+    înaintea unui apel de 120 s, e (a); dacă nu apare niciuna, e (b).
+
+    NU se schimbă niciun timeout până nu se știe care. Același tipar ca la
+    `sync_pre_match_odds` (august): instrumentare întâi, reparație după."""
+
+    def increment(self, method=None, url=None, response=None, error=None,
+                  _pool=None, _stacktrace=None):
+        urmatorul = super().increment(method, url, response, error,
+                                      _pool, _stacktrace)
+        try:
+            motiv = error if error is not None else (
+                f"HTTP {getattr(response, 'status', '?')}" if response is not None
+                else "necunoscut")
+            logger.warning(
+                "[HTTP-retry] %s %s — mai rămân %s încercări, motiv: %s",
+                method or "?", str(url or "?")[:90],
+                getattr(urmatorul, "total", "?"), str(motiv)[:120],
+            )
+        except Exception:
+            # Instrumentarea nu are voie să rupă o cerere reală.
+            pass
+        return urmatorul
+
+
 def _build_session() -> Session:
     s = Session()
-    r = Retry(total=3, backoff_factor=0.5,
-              status_forcelist=(429, 500, 502, 503, 504),
-              allowed_methods=["GET"], raise_on_status=False)
+    r = _RetryCuJurnal(total=3, backoff_factor=0.5,
+                       status_forcelist=(429, 500, 502, 503, 504),
+                       allowed_methods=["GET"], raise_on_status=False)
     a = HTTPAdapter(max_retries=r)
     s.mount("https://", a); s.mount("http://", a)
     return s
@@ -333,6 +388,7 @@ class FootballOracleAPI:
         try:
             r = self._s.get(url, headers=headers or {}, params=params or {}, timeout=timeout)
             latency_ms = (time.monotonic() - start) * 1000
+            self._raporteaza_daca_lenta(url, provider, latency_ms, timeout, True)
             if request_manager is not None and provider != "unknown":
                 request_manager.record_response_headers(provider, getattr(r, "headers", None))
             if r.status_code == 404:
@@ -352,8 +408,38 @@ class FootballOracleAPI:
             return _ret(r.json(), r)
         except Exception as exc:
             latency_ms = (time.monotonic() - start) * 1000
+            self._raporteaza_daca_lenta(url, provider, latency_ms, timeout, False)
             self._record_metric(url, False, latency_ms, exc=exc)
             logger.error("[HTTP] %s → %s", url[:80], exc); return _ret(None, None)
+
+    def _raporteaza_daca_lenta(self, url: str, provider: str, latency_ms: float,
+                               timeout: int, a_reusit: bool) -> None:
+        """[INSTRUMENTARE 2026-10-13] Raportează cererile peste
+        `_PRAG_CERERE_LENTA_S`, cu bugetul configurat alături de durata reală.
+
+        Bugetul e tipărit DELIBERAT în aceeași linie: fără el, „120 s" nu se
+        poate interpreta. Cu el, se vede imediat dacă durata depășește ce ar
+        putea explica timeout-ul × încercări — iar dacă o depășește FĂRĂ nicio
+        linie `[HTTP-retry]` înainte, atunci cererea a fost una singură care a
+        primit octeți prea rar ca să declanșeze timeout-ul (cazul (b) din
+        `_RetryCuJurnal`), nu bugetul de reîncercări.
+
+        Pur observațional: nu schimbă nimic, nu ridică nimic, iar orice eroare
+        din interior e înghițită — o cerere reală nu are voie să cadă din cauza
+        instrumentării."""
+        try:
+            if latency_ms < _PRAG_CERERE_LENTA_S * 1000:
+                return
+            buget_s = timeout * 4 + 3.5   # 1 încercare + 3 reîncercări + backoff
+            logger.warning(
+                "[HTTP-lent] %s %s — %.1fs (%s), timeout=%ss, buget teoretic ≈%.1fs%s",
+                provider, url[:90], latency_ms / 1000.0,
+                "reușit" if a_reusit else "eșuat", timeout, buget_s,
+                "  ⚠ PESTE buget — o singură cerere lentă, nu reîncercări"
+                if latency_ms / 1000.0 > buget_s else "",
+            )
+        except Exception:
+            pass
 
     def _free_lf_get(self, path: str, params=None):
         """Wrapper pentru Free Live Football API (RapidAPI).
