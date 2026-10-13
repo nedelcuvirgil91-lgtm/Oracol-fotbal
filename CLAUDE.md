@@ -28,7 +28,11 @@ Not Implemented
 
 ### D-1. Activarea ADR-072 (baseline proaspăt la promovare) — amânată deliberat, 2026-09-08
 
-**Stare**: cod în producție, migrarea 056 aplicată și verificată, flagul `challenger_baseline_from_control_enabled` **ABSENT din `model_config` (= False)**. Nimic nu s-a schimbat încă în comportament.
+**Stare** — **[CORECTAT 2026-10-13, intrarea de aici era FALSĂ]**. Spunea „cod în producție". **Nu era.** Cele 4 commit-uri ADR-072 stau pe `claude/continua-faza-1-adr5-o52jat`, iar `main` n-a mai avansat de la `09cf0be` (8 septembrie) — verificat: `git show origin/main:shadow_testing.py | grep -c BASELINE_SHADOW_CONTROL` → **0**. Am confundat „împins pe branch" cu „în producție". Aceeași clasă de eroare ca POC-ul API-Football, pe care `CHANGELOG.md` îl declara șters 34 de zile înainte de a fi șters efectiv.
+
+Stare reală: **cod pe branch, NEmerge-uit pe `main`, deci NU rulează** · migrarea 056 **aplicată în producție** (coloanele există, 0 rânduri cu valoare) · flagul `challenger_baseline_from_control_enabled` **ABSENT din `model_config` (= False)**.
+
+Starea asimetrică (coloană da, cod nu) e inofensivă prin construcție — exact ce garantează amendamentul A1 — dar înseamnă că **activarea flagului acum n-ar face absolut nimic**, și ar fi un no-op tăcut.
 
 **De ce așteptăm** (decizie explicită a proprietarului produsului, la recomandarea mea): amendamentul A2 din ADR-072 — comutarea sursei nu schimbă `n_matches_evaluated`, iar `challenger_evaluations` scrie cu `UNIQUE (training_run_id, n_matches_evaluated)` + `ignore_duplicates`. Dacă `n` a stagnat, primul verdict pe baseline-ul nou e **aruncat tăcut**. La 8 septembrie eram în pauză internațională, deci `n` putea stagna.
 
@@ -52,6 +56,14 @@ WHERE id = 1;
 ```
 
 **De verificat după activare**: primul verdict trebuie să aibă `baseline_source = 'shadow_control'` pentru `xgboost_v1`/`blend_v1` (acoperire `control` 100%, verificat) și `'match_history_frozen'` pentru `flashscore_team_dna` (0 rânduri `control` — fallback corect, D2). Deltele scad — **e corectarea unei erori, nu o regresie**.
+
+**[VERIFICAT 2026-10-13 — condiția A2 e ÎNDEPLINITĂ, dar blocajul real e altul]**
+
+- **`n` crește în FIECARE zi**, pentru ambii Challengeri activi: `xgboost_v1/6e7265c5` 334→335→336→337→338→348→408→449→**458**; `blend_v1/174e7e17` 17→18→19→20→21→31→91→132→**141**. Strict monoton. Condiția A2 e satisfăcută.
+- **Capcană de citire, aproape m-a păcălit**: interogarea „`n_curent_registry` > `max_n_înregistrat`?" întoarce **`false`** pentru exact cei doi Challengeri activi. Nu înseamnă stagnare — înseamnă că rularea de azi a fost **deja înregistrată**, adică starea sănătoasă. Comparația corectă e pe **seria zilnică**, nu pe un singur instantaneu. Un `false` acolo e de așteptat, nu un semnal de alarmă.
+- **Acoperire `control` reverificată, 100% pe toți cei 5 Challengeri**, inclusiv versiunea nouă `174e7e17` (142/142): `e638c1dc` 676/676, `4e17c737` 596/596, `6e7265c5` 459/459, `8ac89c70` 382/382. `flashscore_team_dna/v1` are **0/989** → cade corect pe `match_history_frozen` (D2 funcționează).
+- **Tiparul din septembrie se CONFIRMĂ pe o lună mai mult de date**, iar semnul se inversează acum în **2 din 5** cazuri: `xgboost_v1/e638c1dc` +1,18pp înghețat → **−1,04pp** proaspăt; `blend_v1/4e17c737` +1,17pp → **−0,34pp**. Baseline-ul înghețat flatează Challenger-ul în 4 din 5 (al cincilea, `174e7e17`, e identic). Singurul `candidate_for_promotion` verificabil, `blend_v1/8ac89c70`, **rezistă**: +3,66pp acuratețe și −0,0194 log-loss contra Oracle-ului real.
+- **BLOCAJUL REAL: codul nu e pe `main`.** Pașii 3-4 nu mai sunt limitați de `n`, ci de merge. Ordinea corectă redevine: merge pe `main` (cere aprobare explicită) → o rulare de noapte cu flagul oprit, care confirmă comportament neschimbat → abia apoi activarea.
 
 ### D-2. Persistarea intrărilor de la servire (varianta B) — ADR nescris încă
 
