@@ -146,33 +146,55 @@ def fetch_all_matches(league: str | None = None) -> list[dict]:
     if client is None:
         return []
     try:
-        q = (
-            client.table("match_history")
-            .select("id,fixture_id,home_team,away_team,league,kickoff_date,"
-                    "actual_home_goals,actual_away_goals,actual_result,"
-                    "backfill_done,home_shots_on_target,away_shots_on_target,"
-                    "home_shots,away_shots,"
-                    "home_corners,away_corners,home_yellow_cards,away_yellow_cards,"
-                    "home_fouls,away_fouls,"
-                    + ",".join(BACKFILL_COLUMNS))
-            .not_.is_("actual_result", "null")
-            # [ADAUGAT] Exclude rândurile superseded (ADR-025) — fără asta,
-            # ELOTracker/FormTracker/H2HTracker procesau același meci real de
-            # două ori (rândul canonic + duplicatul istoric Kaggle), pentru
-            # ~3.500 meciuri (2023-2025, 5 ligi majore) — confirmat live.
-            .is_("superseded_by", "null")
-            .order("kickoff_date", desc=False)
-            .order("id", desc=False)
-        )
-        if league:
-            q = q.eq("league", league)
+        def _constructor():
+            """Constructor NOU la fiecare pagină — NU se reutilizează.
+
+            [REPARAT 2026-10-13] Înainte, `q` se construia o singură dată
+            ÎNAINTEA buclei, iar `q.range(...)` se apela repetat pe același
+            obiect. `postgrest.BaseRPCRequestBuilder.range()` face
+            `params.add("offset", ...)` — **adaugă**, nu înlocuiește — și mută
+            `self`. Deci parametrii se acumulau, verificat live în log-ul
+            rulării din 13 octombrie:
+
+                offset=0&limit=1000
+                offset=0&offset=1000&limit=1000&limit=1000
+                offset=0&offset=1000&offset=2000&limit=1000&limit=1000&limit=1000
+                … (24 de perechi la offset=23000)
+
+            Funcționa doar fiindcă PostgREST ia ULTIMUL parametru duplicat.
+            Dacă l-ar fi luat pe primul, bucla ar fi recitit la nesfârșit
+            pagina 0 — buclă infinită. Plus URL-ul creștea nelimitat (peste
+            2,5 KB la 23.000 de rânduri, cu `select`-ul deja lung).
+
+            Toate celelalte paginări din proiect construiau deja cererea în
+            interiorul buclei; asta era singura excepție (verificat prin
+            detector AST — vezi `tests/test_pagination_builder_reuse.py`)."""
+            b = (
+                client.table("match_history")
+                .select("id,fixture_id,home_team,away_team,league,kickoff_date,"
+                        "actual_home_goals,actual_away_goals,actual_result,"
+                        "backfill_done,home_shots_on_target,away_shots_on_target,"
+                        "home_shots,away_shots,"
+                        "home_corners,away_corners,home_yellow_cards,away_yellow_cards,"
+                        "home_fouls,away_fouls,"
+                        + ",".join(BACKFILL_COLUMNS))
+                .not_.is_("actual_result", "null")
+                # [ADAUGAT] Exclude rândurile superseded (ADR-025) — fără asta,
+                # ELOTracker/FormTracker/H2HTracker procesau același meci real
+                # de două ori (rândul canonic + duplicatul istoric Kaggle),
+                # pentru ~3.500 meciuri (2023-2025, 5 ligi majore) — live.
+                .is_("superseded_by", "null")
+                .order("kickoff_date", desc=False)
+                .order("id", desc=False)
+            )
+            return b.eq("league", league) if league else b
 
         # Paginare — Supabase returnează max 1000 rânduri per cerere
         all_rows = []
         offset = 0
         page_size = 1000
         while True:
-            res = q.range(offset, offset + page_size - 1).execute()
+            res = _constructor().range(offset, offset + page_size - 1).execute()
             rows = res.data or []
             all_rows.extend(rows)
             if len(rows) < page_size:
