@@ -193,16 +193,35 @@ def main() -> int:
     per_meci: dict[str, list] = {n: [] for n in variante}
     multiplicatori: list[tuple[float, float]] = []
     evaluabile = 0
+    pierdute_filtre = 0
 
+    # Procesare ZI CU ZI, nu meci cu meci — semantica „anterior" e STRICT pe zi
+    # calendaristică, identică cu `count_matches_with_sufficient_history()` și
+    # cu `as_of_date` din `get_team_recent_advanced_stats()`.
+    #
+    # Prima versiune adăuga fiecare meci în istoric imediat după evaluarea lui,
+    # deci un meci de dimineață intra în istoricul unuia de seara din ACEEAȘI
+    # zi. Două consecințe, ambele rele: o scurgere pe care producția o
+    # interzice explicit, și o dependență tăcută de ordinea din interiorul
+    # zilei — ordine pe care `kickoff_date` singur nici n-o determină.
+    pe_zi: dict[date, list[dict]] = defaultdict(list)
     for r in randuri:
-        sh = eficienta_finalizare(istoric[r["gazda"]])
-        sa = eficienta_finalizare(istoric[r["oaspete"]])
+        pe_zi[r["zi"]].append(r)
 
-        # Evaluabil = AMBELE echipe au deja fereastra completă. Identic cu
-        # `count_matches_with_sufficient_history()`; verificarea se face ÎNAINTE
-        # de a adăuga meciul curent în istoric — altfel ar fi scurgere.
-        if sh and sa and r["h_off"] is not None and r["a_off"] is not None \
-                and r["dq_h"] != "neutral" and r["dq_a"] != "neutral":
+    for zi in sorted(pe_zi):
+        meciurile_zilei = pe_zi[zi]
+
+        # ÎNTÂI se evaluează toate meciurile zilei, contra istoricului STRICT
+        # anterior zilei.
+        for r in meciurile_zilei:
+            sh = eficienta_finalizare(istoric[r["gazda"]])
+            sa = eficienta_finalizare(istoric[r["oaspete"]])
+            if not (sh and sa):
+                continue
+            if r["h_off"] is None or r["a_off"] is None \
+                    or r["dq_h"] == "neutral" or r["dq_a"] == "neutral":
+                pierdute_filtre += 1
+                continue
             evaluabile += 1
             baseline = BASELINES.get(r["liga"], BASELINES["default"])
             for nume, fn in variante.items():
@@ -219,13 +238,20 @@ def main() -> int:
                 if nume.startswith("goals_per_xg, k=1.00"):
                     multiplicatori.append((mh, ma))
 
-        # abia ACUM intră meciul curent în istoricul ambelor echipe
-        for echipa, g, xg, sot in ((r["gazda"], r["g_h"], r["xg_h"], r["sot_h"]),
-                                    (r["oaspete"], r["g_a"], r["xg_a"], r["sot_a"])):
-            if xg is not None:
-                istoric[echipa].append({"goluri": g, "xg": xg, "sot": sot})
+        # ABIA ACUM intră meciurile zilei în istoric, pentru zilele următoare.
+        for r in meciurile_zilei:
+            for echipa, g, xg, sot in ((r["gazda"], r["g_h"], r["xg_h"], r["sot_h"]),
+                                        (r["oaspete"], r["g_a"], r["xg_a"], r["sot_a"])):
+                if xg is not None:
+                    istoric[echipa].append({"goluri": g, "xg": xg, "sot": sot})
 
     print(f"  Evaluabile (ambele echipe cu ≥{FEREASTRA} meciuri anterioare cu xG): {evaluabile}")
+    if pierdute_filtre:
+        print(f"  Sărite suplimentar ({pierdute_filtre}): fără ratinguri stocate sau cu")
+        print(f"    `data_quality = neutral` — Oracle emite acolo o constantă (ADR-065),")
+        print(f"    deci un multiplicator peste ea n-ar măsura finalizarea, ci constanta.")
+        print(f"  Contorul din aplicație ({evaluabile + pierdute_filtre}) NU aplică aceste")
+        print(f"    două filtre — de aceea diferă de cifra pe care rulează testul.")
     if evaluabile < 30:
         print("\nEROARE: prea puține meciuri evaluabile pentru orice concluzie.")
         return 1

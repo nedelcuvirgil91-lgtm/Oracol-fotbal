@@ -84,6 +84,46 @@ def test_fereastra_e_cea_din_productie():
     assert FEREASTRA == TEAM_PROFILE_WINDOW == 5
 
 
+def test_evaluarea_se_face_ZI_CU_ZI_nu_meci_cu_meci():
+    """`count_matches_with_sufficient_history()` definește „anterior" STRICT pe
+    zi calendaristică: meciurile din aceeași zi nu se numără unele pentru
+    altele. Ablația trebuie să respecte aceeași semantică, altfel ar măsura
+    altă populație decât cea pe care o raportează contorul din aplicație.
+
+    ONESTITATE despre impact: în datele de azi fixul nu schimbă niciun rezultat
+    — o echipă nu joacă de două ori în aceeași zi, deci scurgerea nu se poate
+    manifesta. Garda apără o corectitudine de principiu și determinismul
+    ordinii în interiorul unei zile, pe care `kickoff_date` singur nu o
+    stabilește. Nu e un bug reparat; e o diferență de semantică închisă.
+
+    Se verifică STRUCTURA — două bucle separate peste meciurile zilei — nu
+    valorile, fiindcă valorile nu pot distinge cele două variante azi."""
+    cod = _doar_cod(SCRIPT)
+    assert "pe_zi" in cod, "lipsește gruparea pe zile"
+    assert "for zi in sorted(pe_zi):" in cod
+    corp = cod.split("for zi in sorted(pe_zi):")[1]
+    poz_evaluare = corp.index("per_meci[nume].append(")
+    poz_adaugare = corp.index("istoric[echipa].append(")
+    assert poz_evaluare < poz_adaugare, \
+        "istoricul zilei se actualizează înainte de a evalua toată ziua"
+    assert corp.count("for r in meciurile_zilei:") == 2, \
+        "evaluarea și actualizarea istoricului trebuie să fie bucle SEPARATE"
+
+
+def test_contorul_aplicatiei_si_al_ablatiei_se_reconciliaza():
+    """Ablația raportează mai puține meciuri decât bara din aplicație, și
+    diferența trebuie să fie EXPLICITĂ, nu tăcută: aplicația numără doar
+    „ambele echipe au ≥5 meciuri anterioare cu xG", ablația cere în plus
+    ratinguri stocate și `data_quality != neutral`.
+
+    Garda cere ca scriptul să tipărească ambele cifre și suma lor — altfel o
+    diferență viitoare (301 vs 250, să zicem) ar trece drept normală."""
+    cod = _doar_cod(SCRIPT)
+    assert "pierdute_filtre" in cod
+    assert "evaluabile + pierdute_filtre" in cod, \
+        "scriptul trebuie să arate cifra pe care o raportează aplicația"
+
+
 # ════════════════════════════════════════════════════════════════════════
 # 3. Semnalul — sume aliniate, ca în producție
 # ════════════════════════════════════════════════════════════════════════
