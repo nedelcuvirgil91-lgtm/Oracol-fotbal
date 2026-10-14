@@ -151,7 +151,7 @@ Ambele `insufficient_data`. Feed-ul gol e **consecința așteptată** a aprobăr
 | **D-5** | `sweep_stale_decisions()` nu e apelată de nicio linie de producție | ambele variante schimbă contractul ADR-026 ⇒ cer ADR |
 | **D-6** | două backup-uri cu revizuire restantă (9,77 MB + 72 kB) | nu se șterge nimic fără aprobare explicită |
 | **D-8** | `consensus_validation` fără fază de execuție ⇒ #6 orfană pe veci | vezi §4(b) — acum are și o capcană latentă în plus |
-| **D-10** | evaluarea generică vede 2 experimente din 6 (plafon PostgREST) | **schimbă cifre pe care se iau decizii**; nu se repară înainte de a decide ce se face cu D-7 |
+| ~~**D-10**~~ | ~~evaluarea generică vede 2 experimente din 6~~ | ✅ **REPARAT 2026-10-14, `6be6ecd`, pe `main`** — vezi §6 |
 | **D-11** | Decision Feed nu numește acțiunea aprobată | atinge calea de aprobare umană (ADR-002) |
 
 **Niciuna nu schimbă o predicție.** D-10 și D-11 sunt cele cu cea mai mare valoare per efort: D-10 fiindcă azi sistemul afirmă simultan că `blend_v1/8ac89c70` e `candidate_for_promotion` ȘI `PROMOTED` ȘI campion activ; D-11 fiindcă același ecran va servi și propuneri de promovare și de rollback, iar §4 arată că confuzia s-a produs deja o dată.
@@ -161,3 +161,29 @@ Ambele `insufficient_data`. Feed-ul gol e **consecința așteptată** a aprobăr
 Reperul extern (`CLAUDE.md` §„Reperul extern") arată Oracle la **−1,98pp de piață pe 97,5% din meciuri, statistic nesemnificativ** (z=1,35). Calibrarea e închisă ca pârghie (erori sub ~1,3σ pe șase găleți). Accidentările au coborât în prioritate: ar afecta exact meciurile unde nu se vede headroom. Cascada de formă e închisă în mare parte (FS2 acoperă 57/57 meciuri de cupă viitoare).
 
 **Nu există azi o pârghie de precizie identificată și dovedită.** Asta e o concluzie măsurată, nu o lipsă de idei — și e de reținut înainte de a porni un proiect mare pe intuiție.
+
+---
+
+## 6. D-10 — REPARAT 2026-10-14 (`6be6ecd`, pe `main`)
+
+`get_distinct_experiments()` paginează acum keyset pe `id`, cu `ORDER BY` explicit. Detalii complete în intrarea D-10 din `CLAUDE.md`.
+
+**ATENȚIE la ce rulare măsoară „după"**: rularea `38620259384` (pornită 19:02 UTC) e pe `9a8c0f6`, adică pe codul **de dinainte** de reparație. Ea produce încă un punct „înainte", util, nu problematic. **Efectul D-10 se vede abia la prima rulare cu `6be6ecd`** — adică cron-ul de la 02:00 UTC, 15 octombrie.
+
+### Interogarea „după", de rulat atunci
+
+```sql
+SELECT experiment_name, left(experiment_version, 8) AS versiune,
+       status, n_matches_evaluated,
+       round(delta_accuracy::numeric, 4) AS d_acuratete,
+       last_evaluated_at::date AS ultima_evaluare,
+       (current_date - last_evaluated_at::date) AS zile_vechime
+FROM experiment_registry
+ORDER BY last_evaluated_at;
+```
+
+**Criteriul**: `zile_vechime` trebuie să devină **0 pentru toate cele 7 rândurile**. Azi trei sunt la 32-34 de zile.
+
+**Schimbarea de cifre de așteptat, ca să nu fie citită ca regresie**: `blend_v1/8ac89c70` (azi `candidate_for_promotion`, +5,29pp, înghețat din 12 septembrie) ar trebui să **nu mai fie candidat**. Cifra lui a fost produsă pe baseline-ul înghețat, iar ADR-072 e activ. Contradicția „campionul activ e candidat de promovat" dispare **pentru că numărul se corectează în jos**, nu pentru că s-a stricat ceva. Campionul rămâne campion — nu există cale automată de rollback, iar `promote_challenger`/`model_champions` nu sunt atinse de evaluarea generică (verificat prin `grep`: zero apeluri în `shadow_testing.py`).
+
+Al doilea de urmărit: `flashscore_team_dna/v1`, singurul `candidate_for_promotion` real, cu verdictul înghețat de 34 de zile. Reevaluarea lui e exact ce lipsea ca să se poată compara cu ablația negativă din 13 octombrie — până acum se compara o măsurătoare de ieri cu una de acum o lună. **Feature-ul rămâne NEPROMOVAT indiferent de rezultat** (D-7 e închisă pe baza ablației, nu a registrului).
