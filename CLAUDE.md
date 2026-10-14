@@ -161,6 +161,8 @@ Contorul de meciuri evaluabile a trecut pragul: **301/300**, afișat de aplicaț
 
 **Nu se întâmplă nimic automat** — eticheta barei s-a schimbat, atât. Feature-ul rămâne NEPROMOVAT până când ablația îl justifică.
 
+**[ADĂUGAT 2026-10-14 — a doua problemă a cifrei lui, independentă de prima]** Verdictul `+2,90pp` din `experiment_registry` e **înghețat din 10 septembrie, vechi de 34 de zile** — experimentul a căzut din primele 1000 de rânduri pe care `get_distinct_experiments()` le vede (vezi **D-10**), deci evaluarea generică nu-l mai atinge. Tensiunea cu ablația negativă de pe 13 oct nu e deci neapărat o contradicție de construcție: **se compară o măsurătoare de ieri cu una de acum o lună.** Se reevaluează întâi (D-10 sau manual, read-only), se compară după.
+
 **Legătură cu ADR-072, de reținut înainte de orice promovare**: `flashscore_team_dna/v1` e singurul `candidate_for_promotion` cu **0 rânduri `control`** (0 din 989), deci singurul pe care ADR-072 **nu îl poate verifica**. Cade corect pe `match_history_frozen` (D2 funcționează), dar cifra lui rămâne produsă de baseline-ul care, în 4 din 5 cazuri măsurate, flatează challenger-ul.
 
 **[ÎNCHIS 2026-10-13 — ablația a rulat, rezultat NEGATIV]** Nicio variantă nu e mai bună simultan pe toate trei metricile, iar degradarea e **monotonă în doză** (log-loss +0,0543 la aplicarea brută, |t|=3,58). Feature-ul rămâne NEPROMOVAT. **Declanșatorul de reluare NU e un prag de meciuri** — mărirea 300→600 n-ar ajuta, fiindcă zgomotul metricii depinde de xG-ul acumulat *per echipă*, nu de mărimea setului de test; iar fereastra nu poate fi mărită azi (nicio echipă n-are 10 meciuri cu xG, median 5). Reluare justificată la ~16 meciuri cu xG per echipă, estimativ februarie-martie 2027. Detalii: `BACKLOG_2026-10-13.md` §1.2.
@@ -184,6 +186,32 @@ Dar `timeout=12` × 4 încercări + backoff ≈ 51,5 s, nu 120 — deci **nu se 
 **Instrumentarea e deja pe `main`** (`4417a8e`, zero schimbare de comportament): `_RetryCuJurnal` loghează fiecare reîncercare, `_raporteaza_daca_lenta()` raportează cererile peste 10 s cu bugetul teoretic alături. **Niciun timeout nu se schimbă** până nu se citesc liniile `[HTTP-retry]`/`[HTTP-lent]` din prima rulare de după instrumentare.
 
 Același tipar ca la `sync_pre_match_odds` în august: instrumentare întâi, reparație după, cu date.
+
+### D-10. Evaluarea generică acoperă 2 experimente din 6 — a PATRA instanță a plafonului PostgREST, și prima care NU e benignă (găsit 2026-10-14)
+
+`sync/run_daily.py:537` apelează `evaluate_all_active_experiments()`, care iterează peste `get_distinct_experiments()` — iar aceea face un singur `select(...).execute()` **fără paginare și fără `ORDER BY`** (`shadow_testing.py:779`). PostgREST taie la 1000.
+
+**Măsurat**: `shadow_predictions` are **6377 rânduri** și **6 experimente**; în primele 1000 sunt vizibile **2** (`blend_v1/174e7e17`, `blend_v1/4e17c737`).
+
+**Confirmare cauzală, nu corelație** — cele 3 rânduri învechite din `experiment_registry` sunt exact cele care nu sunt nici vizibile, nici Challengeri activi: `8ac89c70` (12 sept), `e638c1dc` (10 sept), `flashscore_team_dna/v1` (10 sept). Au fost evaluate atunci fiindcă tabela era încă aproape de 1000; au ieșit din fereastră pe măsură ce a crescut. **Datele nu s-au oprit, vizibilitatea lor s-a oprit.**
+
+**Consecința care leagă D-7**: `flashscore_team_dna/v1`, singurul `candidate_for_promotion` real (+2,90pp), are verdictul **înghețat de 34 de zile**. Deci tensiunea cu ablația negativă de pe 13 oct nu e neapărat o contradicție de construcție — una din cele două cifre e pur și simplu veche. **Se reevaluează ÎNTÂI, se compară DUPĂ.**
+
+**Agravant**: fără `ORDER BY`, ce experimente sunt vizibile se poate schimba singur de la o zi la alta — exact tiparul deja documentat la `get_shadow_predictions()`.
+
+**Simptomul prin care a ieșit la iveală**: pentru ACELAȘI `blend_v1/8ac89c70`, `experiment_registry` spune `candidate_for_promotion` (12 sept), `challengers` spune `PROMOTED` (23 aug), `model_champions` spune ACTIV. Sistemul afirmă că **campionul activ e un candidat de promovat**.
+
+**Decizie cerută**: reparația pare mică (paginare keyset, ca la instanța 2), dar **schimbă cifre pe care se iau decizii** — la prima rulare de după, cele 3 verdicte învechite se recalculează, inclusiv cel pe care D-7 se sprijină. **NU se repară înainte de a decide ce se face cu D-7**, și nu se bundle-uiește cu altceva. Măsurătoarea „înainte/după" se înregistrează.
+
+### D-11. Decision Feed nu numește acțiunea pe care o aprobi — atinge ADR-002 (găsit 2026-10-14)
+
+`app.py:1531`: titlul expander-ului e `f"[{d.get('tier')}] decizie #{d['id']} · run_id={d.get('run_id')}"` — **nu numește niciodată acțiunea**. Omul vede `[T3a] decizie #7 · run_id=786`, un `st.json(ev)` brut, și un buton **verde** „✅ Aprobă". `decision_kind` apare doar îngropat în JSON.
+
+**Cum a ieșit la iveală**: proprietarul produsului a raportat „ieri am promovat noul candidat din Streamlit". Verificat — **nu s-a promovat nimic** (`model_champions` neschimbat din 23 aug; `app.py` nu are niciun buton de promovare). Ce aprobase era decizia #7, `decision_kind: "expiry"`. Impresia era **produsă de interfață**, nu de memorie.
+
+**De ce e guvernanță, nu cosmetică**: ADR-002 face aprobarea umană singura cale de promovare/rollback. Un titlu mut + buton verde transformă consimțământul informat în consimțământ prezumat. Aici consecința a fost benignă (expirarea era justificată independent: `6e7265c5` era sub Oracle pe AMBELE baseline-uri), dar același ecran va servi și propuneri de **promovare** și de **rollback**.
+
+**Decizie cerută**: se adaugă `decision_kind` + ținta în titlu (strict prezentare, probabil fără ADR per Change Policy), sau se lasă. **Nereparat deliberat** — atinge calea de aprobare umană.
 
 ## Filosofia proiectului
 

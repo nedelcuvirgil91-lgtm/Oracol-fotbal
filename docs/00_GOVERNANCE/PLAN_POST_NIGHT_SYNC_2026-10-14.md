@@ -227,6 +227,135 @@ paginare a scurtat ceva măsurabil (nu e garantat — câștigul e în lungimea 
 
 ---
 
+## 4bis. DOUĂ DESCOPERIRI NOI, 2026-10-14 — amândouă ieșite dintr-o obiecție a proprietarului produsului
+
+Proprietarul produsului a contestat concluzia de la §3 cu: *„Ieri am promovat noul
+candidat din Streamlit. Ieri aveai altă concluzie."* Reverificarea a confirmat că
+**nu s-a promovat nimic** — dar a scos la iveală două defecte reale, care explică
+exact de ce impresia era rezonabilă. **Niciunul nu era căutat.**
+
+Precedentul se repetă: la fel ca pe 8 septembrie (filtrul de formă pe competiție),
+obiecția venită din observarea ecranului a fost dovadă de testat, nu zgomot de
+combătut.
+
+### 4bis.1 Decision Feed nu numește acțiunea pe care o aprobi — gol de interfață, atinge ADR-002
+
+**Ce s-a verificat că NU s-a întâmplat**: `model_champions` are 5 rânduri, cel mai
+recent `blend_v1/8ac89c70` promovat **2026-08-23 09:36:27**, `superseded_at` NULL.
+Niciun rând nou. Și `app.py` **nu are niciun buton de promovare** — singurele acțiuni
+din Decision Feed sunt „✅ Aprobă" / „❌ Respinge" (liniile 1540, 1543); linia 412
+(„🏆 Blend v1 (Campion promovat)") e doar o etichetă de afișare.
+
+**Ce s-a aprobat de fapt**: decizia **#7**, producător `challenger_expiry_candidate`,
+`decision_kind: "expiry"`, țintă `xgboost_v1/6e7265c5`, rezolvată 2026-10-13 20:22:43
+de `owner`. O **expirare**, nu o promovare.
+
+**Cauza confuziei e în cod, nu în memoria omului.** `app.py:1531`:
+
+```python
+with st.expander(f"[{d.get('tier')}] decizie #{d['id']} · run_id={d.get('run_id')}", expanded=True):
+```
+
+Titlul **nu numește niciodată acțiunea**. Omul vede `[T3a] decizie #7 · run_id=786`,
+un `st.json(ev)` brut, și un buton **verde** „✅ Aprobă". Cuvântul `expiry` apare doar
+îngropat în dump-ul JSON, ca `decision_kind`.
+
+**De ce e o problemă de guvernanță, nu cosmetică**: ADR-002 face aprobarea umană
+singura cale de promovare/rollback. O aprobare informată presupune ca omul să vadă
+**ce** aprobă fără să parseze JSON. Un titlu mut plus un buton verde transformă
+consimțământul informat în consimțământ prezumat. Aici consecința a fost benignă
+(expirarea era oricum justificată independent — `6e7265c5` era sub Oracle la
+acuratețe pe AMBELE baseline-uri, −1,97pp înghețat și −1,74pp proaspăt), dar același
+ecran va servi și propuneri de **promovare** și de **rollback**.
+
+**Decizie cerută, NEluată**: se adaugă `decision_kind` + ținta în titlul expander-ului
+(schimbare mică, strict de prezentare, fără contract atins — deci probabil fără ADR,
+per `FROZEN_REGISTRY.md` Change Policy), sau se lasă așa. **Nereparat deliberat** —
+atinge calea de aprobare umană, deci nu se schimbă „din mers".
+
+### 4bis.2 Evaluarea generică acoperă 2 experimente din 6 — a PATRA instanță a plafonului PostgREST, și prima care NU e benignă
+
+**Simptomul raportat** — trei tabele spun trei lucruri despre ACELAȘI model
+`blend_v1/8ac89c70`:
+
+| Sursă | Spune | Când |
+|---|---|---|
+| `experiment_registry` | **`candidate_for_promotion`** | 12 sept |
+| `challengers` | `PROMOTED` | 23 aug |
+| `model_champions` | **ACTIV** (campion) | 23 aug |
+
+Adică sistemul afirmă azi că **campionul activ e un candidat de promovat** — exact
+afirmația care face un om (sau pe mine) să creadă că există ceva de promovat.
+
+**Cauza rădăcină, găsită și confirmată cauzal.** `sync/run_daily.py:537` apelează
+`shadow_testing.evaluate_all_active_experiments()`, care iterează peste
+`get_distinct_experiments()` — iar aceea face (`shadow_testing.py:779`):
+
+```python
+res = client.table("shadow_predictions").select("experiment_name,experiment_version").execute()
+```
+
+**Un singur `execute()`, fără paginare și fără `ORDER BY`** → PostgREST taie la 1000
+de rânduri. Măsurat acum:
+
+| | |
+|---|---:|
+| Rânduri în `shadow_predictions` | **6377** |
+| Experimente reale | **6** |
+| Experimente vizibile în primele 1000 | **2** |
+
+Cele 2 vizibile, măsurate: `blend_v1/174e7e17` (612 rânduri) și `blend_v1/4e17c737`
+(388). **Confirmare cauzală, nu corelație** — se potrivesc exact cu prospețimea
+rândurilor din registru:
+
+| Experiment | Ultima evaluare | Cum a fost atins |
+|---|---|---|
+| `xgboost_v1/6e7265c5` | 13 oct | calea **Challenger activ** (`_phase_a_monitor_existing`), nu cea generică |
+| `blend_v1/174e7e17` | 13 oct | ambele căi |
+| `blend_v1/4e17c737` | 13 oct | calea generică — e în primele 1000 |
+| `blend_v1/8ac89c70` | **12 sept** | **niciuna** — a căzut din primele 1000 |
+| `xgboost_v1/e638c1dc` | **10 sept** | **niciuna** |
+| `flashscore_team_dna/v1` | **10 sept** | **niciuna** |
+
+Cele trei rânduri învechite sunt **exact** cele care nu sunt nici printre cele 2
+vizibile, nici Challengeri activi. Au fost evaluate pe 10-12 septembrie fiindcă pe
+atunci tabela era aproape de 1000 de rânduri; pe măsură ce a crescut, au ieșit unul
+câte unul din fereastră. **Datele nu s-au oprit; vizibilitatea lor s-a oprit.**
+
+**Consecința cea mai gravă, și ea leagă §8**: `flashscore_team_dna/v1` — singurul
+`candidate_for_promotion` real, cu +2,90pp acuratețe, pe care D-7 îl cântărea — are
+un verdict **înghețat din 10 septembrie**, pe 551 de meciuri, **vechi de 34 de zile**.
+Nu e doar neverificabil prin ADR-072 (0 rânduri `control`); e și **nereevaluat de o
+lună**. Tensiunea din §8 are deci o explicație suplimentară față de „poate măsoară
+lucruri diferite": una dintre cele două cifre comparate e pur și simplu veche.
+
+**Agravant: e nedeterminist.** Fără `ORDER BY`, Postgres poate întoarce ALTE 1000 de
+rânduri de la o zi la alta — deci ce experimente sunt evaluate se poate schimba
+singur, fără nicio modificare de cod. Exact tiparul deja documentat la
+`get_shadow_predictions()` (`n_matches_evaluated` sărea 344→392→402→394→…).
+
+**A patra instanță a aceleiași capcane în proiect**, iar instanțele anterioare arată
+că nu e o scăpare izolată:
+
+| # | Loc | Impact | Stare |
+|---|---|---|---|
+| 1 | `supabase_client.get_training_data()` | ML antrenat pe 1000 din 50.000+ meciuri | reparat |
+| 2 | `shadow_testing.get_shadow_predictions()` | verdict pe subeșantion nedeterminist | reparat 6 sept |
+| 3 | `continuous_learning._count_finished_matches()` | cifra din mesajul logat devine falsă peste 1000 | **nereparat**, inofensiv contra pragului 30 |
+| 4 | **`shadow_testing.get_distinct_experiments()`** | **4 din 6 experimente nu se mai evaluează deloc** | **nereparat, GĂSIT AZI** |
+
+**Decizie cerută, NEluată.** Reparația pare mică (paginare keyset, ca la instanța 2),
+dar are o consecință de cântărit: odată reparată, cele 3 experimente învechite vor fi
+reevaluate la prima rulare, iar verdictele lor se vor schimba — inclusiv cel al
+`flashscore_team_dna/v1`, pe care se sprijină D-7. Deci nu e doar un fix de
+observabilitate; **schimbă cifre pe care se iau decizii**. De tratat ca atare, cu
+măsurătoarea „înainte/după" înregistrată, nu aplicat tacit.
+
+**NU se repară în aceeași mișcare cu altceva.** Și nu se repară înainte de a decide
+ce se face cu D-7.
+
+---
+
 ## 5. Ce devine posibil după — și ce rămâne blocat
 
 ### 5.1 ADR-073 / D-2 — reparația e un parametru
@@ -326,6 +455,17 @@ NEGATIVĂ**: nicio variantă mai bună simultan pe toate trei metricile, cu degr
 loghează o predicție produsă de feature-ul Team DNA, iar ablația a simulat aplicarea
 unui multiplicator de contracție peste xG-ul Oracle. Construcțiile diferă.
 
+**[ADĂUGAT 2026-10-14] Și mai există o explicație, independentă de construcție: cifra
+de +2,90pp e VECHE DE 34 DE ZILE.** Conform §4bis.2, `flashscore_team_dna/v1` nu mai
+e atins de evaluarea generică din 10 septembrie — a căzut din primele 1000 de rânduri
+pe care `get_distinct_experiments()` le vede. Deci comparația „registry vs. ablație"
+nu e între două măsurători contemporane: una e de ieri, cealaltă de acum o lună, pe
+551 de meciuri care între timp au devenit mai multe.
+
+**Ordinea corectă devine deci**: întâi se repară §4bis.2 (sau se reevaluează manual
+experimentul, read-only), apoi se compară cu ablația. Compararea de acum ar fi între
+mere și pere, cu riscul de a „explica" o diferență care e doar vechime.
+
 **Dar diferența trebuie lămurită explicit înainte de orice promovare**, nu rezolvată
 prin alegerea cifrei convenabile. Agravant: `flashscore_team_dna` e singurul
 `candidate_for_promotion` cu **0 rânduri `control` din 989**, deci singurul pe care
@@ -347,6 +487,10 @@ măsurate, flatează challenger-ul.
 - **Nu se aprobă nicio decizie din Decision Feed prin SQL.** Aprobarea e actul omului
   (ADR-002); se face din interfață, niciodată în numele lui.
 - **Nu se rescriu retroactiv** cele 113 rânduri de evaluare vechi.
+- **Nu se repară §4bis.2 (paginarea lui `get_distinct_experiments()`) înainte de a
+  decide ce se face cu D-7** — reparația schimbă verdictul pe care D-7 se sprijină.
+- **Nu se schimbă titlul din Decision Feed „din mers"** (§4bis.1) — atinge calea de
+  aprobare umană, ADR-002.
 - **Niciun commit sau push fără cerere.** Branch de lucru:
   `claude/continua-faza-1-adr5-o52jat`; `main` are deploy automat pe Streamlit Cloud.
 
@@ -368,3 +512,21 @@ greșită — și ăsta e exact beneficiul.
 
 Declanșatorul de check-in (`trig_01MR7GTvmRESD9iPJQuag8Um`) a fost corectat la 04:24,
 înainte să pornească.
+
+### A doua lecție, din obiecția proprietarului produsului
+
+Cele două defecte din §4bis **nu erau căutate**. Au ieșit dintr-o obiecție care, la
+prima citire, părea o confuzie de-a omului: *„Ieri am promovat noul candidat din
+Streamlit."* Reverificarea a confirmat că nu s-a promovat nimic — dar a arătat că
+impresia era **produsă de cod**, nu de memorie: un titlu de Decision Feed care nu
+numește acțiunea, plus un registru care afirmă că campionul activ e candidat de
+promovat.
+
+Dacă aș fi răspuns doar „nu, verificat, nu s-a promovat nimic", amândouă defectele ar
+fi rămas ascunse — iar al doilea blochează azi reevaluarea a 4 din 6 experimente.
+
+**Regula**: când cineva descrie o stare care contrazice datele, întrebarea utilă nu e
+„cine are dreptate", ci **„ce i-a arătat sistemul ca să creadă asta?"**. E a treia
+dată în acest proiect când obiecția venită din observarea ecranului s-a dovedit mai
+informativă decât diagnosticul meu — după filtrul de formă pe competiție (8 sept) și
+după acoperirea SuperLigii (29 aug).
