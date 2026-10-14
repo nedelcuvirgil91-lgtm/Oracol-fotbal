@@ -100,7 +100,15 @@ Verificat pe ambii candidați de stocare: `match_history` ține doar IEȘIRILE, 
 
 **Ar rezolva și gaura de acoperire din ADR-072 D2**, dacă scrierea rândului `control` se decuplează de existența unui Challenger.
 
-**Stare**: neînceput, deliberat. De reluat după D-1.
+**[REVERIFICAT 2026-10-14 — diagnosticul se confirmă exact, în cod și în date]**
+
+- `learning_core/challenger_shadow.py`: linia **111** folosește `features` pentru predicția Challenger-ului; liniile **118** și **126** (ambele apeluri `log_shadow_prediction()`) **nu pasează `feature_metadata`**. Identic în `blend_challenger_shadow.py`, liniile **131** și **139**.
+- Locul exact unde se nasc golurile: `shadow_testing.log_shadow_prediction()`, `"feature_metadata": feature_metadata or {}`.
+- Măsurat: `blend_v1` **1298+1298** rânduri, `xgboost_v1` **1307+1307** — toate cu `feature_metadata` gol.
+- **Fapt nou, care întărește încadrarea „un parametru"**: `flashscore_team_dna` are **1167 din 1167** rânduri CU `feature_metadata` populat (scris de `oracle_engine.py:2009`). Canalul e **dovedit în producție**, nu o cale netestată — se cablează unde lipsește, nu se construiește.
+- **De ce acum e momentul** (motiv corectat — vezi `BACKLOG` §2, formularea anterioară era greșită): activarea ADR-072 **nu** împrospătează rândul `control` (el a fost mereu proaspăt, prin `upsert`), ci îl **promovează la sursă de decizie**. Intrările pe rândul care decide promovări = înregistrare completă într-un singur loc (#9).
+
+**Stare**: neînceput. D-1 e ÎNCHISĂ (flag activ din 14 oct), deci blocajul declarat a dispărut — următoarea poartă e confirmarea că poarta de promovare citește efectiv rândul `control` (`baseline_source = 'shadow_control'` la prima evaluare de după activare). Abia după ea are sens ADR-073, altfel am scrie intrări pe un rând despre care încă nu știm sigur că decide.
 
 ### D-3. Consumatorii coloanelor înghețate — decizie nesolicitată încă (Discovery Rule, ADR-072)
 
