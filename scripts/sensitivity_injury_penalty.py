@@ -26,10 +26,7 @@ schimbă imediat xG-ul servit, pentru toate meciurile. Colectarea datelor *este*
 schimbarea predicției. Un flag implicit oprit e precondiție tehnică, nu
 formalitate de proces (North Star #1 și #3).
 
-DE CE MĂSURĂTOAREA ASTA E EXACTĂ, NU APROXIMATIVĂ
-Spre deosebire de `ablation_form_weighting.py` și `ablation_team_profile.py`,
-care au putut pretinde doar validitate internă (intrările de la servire nu sunt
-persistate — vezi D-2), aici lanțul e complet reproductibil din date stocate:
+LANȚUL E REPRODUCTIBIL — DAR NU CONTRA PREDICȚIEI SERVITE
 
     oracle_engine.py:1869   ph, pd, pa, _ = self._poisson_model(home_xg, away_xg)
     oracle_engine.py:1946   prob_home_win=round(ph, 4), prob_draw=round(pd, 4), ...
@@ -37,18 +34,46 @@ persistate — vezi D-2), aici lanțul e complet reproductibil din date stocate:
 Oracle NU blendează: comentariul din cod o spune explicit — „rb_ph/rb_pd/rb_pa
 sunt identice cu ph/pd/pa finale", iar ML și Blend sunt motoare SEPARATE
 (ADR-051/052), afișate, nu amestecate în probabilitățile Oracle. Monte Carlo e
-ieșire proprie; de-vig servește doar calculul de edge.
+ieșire proprie; de-vig servește doar calculul de edge. Deci xG -> Poisson ->
+probabilitate e tot lanțul.
 
-Deci: xG penalizat -> Poisson -> probabilitatea servită. Tot lanțul.
-`match_history.home_xg_pred`/`away_xg_pred` sunt exact intrările acelui pas, iar
-rândul `control` din `shadow_predictions` e exact ieșirea.
+**[CORECTAT 2026-10-14, de ancora acestui script]** Prima versiune ancora contra
+rândului `control` din `shadow_predictions` (= predicția SERVITĂ) și a eșuat:
+**26,98% potrivire, eroare maximă 0,710.** Scriptul s-a oprit, exact cum
+trebuia, fără să producă nicio cifră.
 
-ANCORA DE FIDELITATE E OBLIGATORIE, NU OPȚIONALĂ
-Pasul 1 recalculează `poisson_model(home_xg_pred, away_xg_pred)` și îl compară
-cu probabilitățile stocate. Dacă nu se reproduc, premisa de mai sus e falsă și
-scriptul SE OPREȘTE — nu raportează cifre construite pe un lanț nedovedit.
+Cauza, găsită după: `home_xg_pred`/`away_xg_pred` sunt înghețate prin
+`COALESCE(m.existent, p->nou)` (migrarea 008, linii 71-72, reconfirmat în 026 și
+036) — **exact ca `prob_*_pred`**. Deci xG-ul și probabilitățile din
+`match_history` formează o pereche ÎNGHEȚATĂ CONSISTENTĂ, scrisă la prima
+atingere a meciului (batch-ul ADR-056, până la 7 zile înainte). Rândul `control`,
+în schimb, se împrospătează în fiecare noapte prin `upsert`.
+
+Dovada numerică a identificării: **268** de meciuri au `control` identic cu
+`match_history.prob_home_pred`, iar **269** reproduc prin Poisson. Aceeași
+populație — cele la care nimic nu s-a schimbat între prima și ultima scriere.
+
+E ACEEAȘI CLASĂ CA ADR-072, într-un loc nou. Acolo era `prob_*_pred` înghețat
+contra Challenger-ului proaspăt; aici e perechea (xG, probabilitate) înghețată
+contra predicției servite. Și e a doua confirmare, independentă, a lui D-2:
+fără intrări persistate SINCRON cu ieșirile, nici măcar măsurarea nu se poate
+face contra a ce vede utilizatorul.
+
+CE SE MĂSOARĂ DECI, ȘI CE SE PIERDE
+Ancora țintește perechea înghețată: `poisson_model(home_xg_pred, away_xg_pred)`
+contra `match_history.prob_*_pred`. Internă, exactă, pe toate meciurile.
+
+Se pierde: nivelul ABSOLUT al acurateței de referință e cel înghețat (~0,4679
+măsurat în ADR-072), nu cel servit (~0,5107) — deci cu ~4,3pp pesimist.
+NU se pierde: **deltele**, care sunt singurul lucru ce contează aici.
+Sensibilitatea unei distribuții Poisson la un tăiat de 30% din xG nu depinde de
+instantaneul din care provine xG-ul, iar rezultatele meciurilor sunt reale.
+
+ANCORA E OBLIGATORIE ȘI OPREȘTE SCRIPTUL
 Lecția vine din ablația formei (2/460 potriviri), unde premisa echivalentă s-a
-dovedit falsă DUPĂ ce rezultatele fuseseră deja interpretate.
+dovedit falsă DUPĂ ce rezultatele fuseseră deja interpretate. Azi a prins o
+premisă greșită a mea ÎNAINTE de orice cifră — a doua oară în aceeași zi când
+o verificare scrisă înainte de măsurătoare a prevenit un raport fals.
 
 CE SE MĂSOARĂ
   A. SENSIBILITATE (fără nicio scurgere temporală, mecanică pură)
@@ -142,23 +167,29 @@ def _incarca(sb) -> list[dict]:
 
     istoric = _citeste_paginat(
         client, "match_history",
-        "id,fixture_id,home_xg_pred,away_xg_pred,actual_result,"
+        "id,fixture_id,home_xg_pred,away_xg_pred,"
+        "prob_home_pred,prob_draw_pred,prob_away_pred,actual_result,"
         "actual_home_goals,actual_away_goals,league,kickoff_date",
         lambda q: q.not_.is_("actual_result", "null")
                    .not_.is_("home_xg_pred", "null")
-                   .not_.is_("away_xg_pred", "null"),
+                   .not_.is_("away_xg_pred", "null")
+                   .not_.is_("prob_home_pred", "null"),
     )
 
     out = []
     for m in istoric:
+        if m.get("actual_result") not in ("H", "D", "A"):
+            continue
         c = pe_fixture.get(m["fixture_id"])
-        if not c or not m.get("actual_result"):
-            continue
-        if m["actual_result"] not in ("H", "D", "A"):
-            continue
         out.append({
             "fixture_id": m["fixture_id"],
-            "servit": (float(c["prob_home"]), float(c["prob_draw"]), float(c["prob_away"])),
+            # Reperul ANCORAT: perechea ÎNGHEȚATĂ, consistenta cu xG-ul stocat.
+            "inghetat": (float(m["prob_home_pred"]), float(m["prob_draw_pred"]),
+                         float(m["prob_away_pred"])),
+            # Predictia SERVITA, doar ca sa putem raporta cat de mult divergeaza.
+            # Lipsa ei nu invalideaza nimic — nu e reperul.
+            "servit": ((float(c["prob_home"]), float(c["prob_draw"]), float(c["prob_away"]))
+                       if c else None),
             "home_xg": float(m["home_xg_pred"]),
             "away_xg": float(m["away_xg_pred"]),
             "real": m["actual_result"],
@@ -204,18 +235,26 @@ def _argmax(p: tuple[float, float, float]) -> str:
 # Pasul 1 — ANCORA DE FIDELITATE
 # ════════════════════════════════════════════════════════════════════════
 
-def ancora_fidelitate(date: list[dict], poisson) -> tuple[float, float, int]:
-    """Reproduce probabilitatea SERVITA din xG-ul stocat. Intoarce
-    (fractiune_potrivita, eroare_maxima, n)."""
+def ancora_fidelitate(date: list[dict], poisson, cheie: str) -> tuple[float, float, int]:
+    """Reproduce probabilitatea stocata sub `cheie` din xG-ul stocat. Intoarce
+    (fractiune_potrivita, eroare_maxima, n_comparabile).
+
+    `cheie='inghetat'` e reperul real (pereche consistenta cu xG-ul).
+    `cheie='servit'` se raporteaza doar ca diagnostic al divergentei."""
     potriviri = 0
     err_max = 0.0
+    n = 0
     for d in date:
+        ref = d.get(cheie)
+        if ref is None:
+            continue
+        n += 1
         ph, pd, pa, _ = poisson(d["home_xg"], d["away_xg"])
-        e = max(abs(ph - d["servit"][0]), abs(pd - d["servit"][1]), abs(pa - d["servit"][2]))
+        e = max(abs(ph - ref[0]), abs(pd - ref[1]), abs(pa - ref[2]))
         err_max = max(err_max, e)
         if e <= _TOLERANTA_FIDELITATE:
             potriviri += 1
-    return potriviri / max(len(date), 1), err_max, len(date)
+    return potriviri / max(n, 1), err_max, n
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -253,21 +292,36 @@ def main() -> int:
     print("\n" + "-" * 78)
     print("  PASUL 1 — ancora de fidelitate (OBLIGATORIE)")
     print("-" * 78)
-    frac, err_max, n = ancora_fidelitate(date, poisson)
-    print(f"  Probabilitatea servita reprodusa din xG stocat: {frac*100:.2f}% din {n}")
-    print(f"  Eroare maxima absoluta: {err_max:.2e}  (toleranta {_TOLERANTA_FIDELITATE:.0e})")
-    if frac < _PRAG_POTRIVIRE:
-        print(f"\n  ⛔ OPRIRE. Sub {_PRAG_POTRIVIRE*100:.0f}% potrivire, premisa")
-        print("     „probabilitatea servita = Poisson pur pe xG-ul stocat\" e FALSA.")
-        print("     Orice cifra de mai jos ar fi construita pe un lant nedovedit.")
-        print("     De investigat ce ALTCEVA intra in probabilitatea servita.")
-        return 1
-    print("  ✅ Lantul e reproductibil. Masuratorile de mai jos sunt EXACTE,")
-    print("     nu doar valide intern.")
+    frac_i, err_i, n_i = ancora_fidelitate(date, poisson, "inghetat")
+    frac_s, err_s, n_s = ancora_fidelitate(date, poisson, "servit")
+    print(f"  Reper ANCORAT — `match_history.prob_*_pred` (pereche inghetata, "
+          f"consistenta cu xG-ul stocat):")
+    print(f"    reprodus din xG: {frac_i*100:6.2f}% din {n_i}   "
+          f"eroare max {err_i:.2e}  (toleranta {_TOLERANTA_FIDELITATE:.0e})")
+    print(f"  Diagnostic — randul `control` (predictia SERVITA, improspatata nocturn):")
+    print(f"    reprodus din xG: {frac_s*100:6.2f}% din {n_s}   eroare max {err_s:.2e}")
+    print(f"\n  Divergenta dintre cele doua e ADR-072 intr-un loc nou: xG-ul si")
+    print(f"  probabilitatile din match_history sunt inghetate IMPREUNA")
+    print(f"  (COALESCE, migrarea 008), iar predictia servita se improspateaza.")
 
-    referinta = [scor_per_meci(d["servit"], d["real"]) for d in date]
+    if frac_i < _PRAG_POTRIVIRE:
+        print(f"\n  ⛔ OPRIRE. Sub {_PRAG_POTRIVIRE*100:.0f}% potrivire pe reperul")
+        print("     INGHETAT, premisa „probabilitate = Poisson pur pe xG-ul stocat\"")
+        print("     e falsa chiar si pentru perechea consistenta. Orice cifra de mai")
+        print("     jos ar fi construita pe un lant nedovedit. De investigat ce")
+        print("     ALTCEVA intra in probabilitate.")
+        return 1
+    print("\n  ✅ Lantul e reproductibil pe reperul inghetat. Sensibilitatea si")
+    print("     plafoanele de mai jos sunt EXACTE pe acel instantaneu.")
+    print("     LIMITA, de citit odata cu cifrele: nivelul ABSOLUT al acuratetei")
+    print("     de referinta e cel inghetat (~0,4679 masurat in ADR-072), cu ~4,3pp")
+    print("     mai pesimist decat cel servit (~0,5107). DELTELE se transfera —")
+    print("     sensibilitatea unei Poisson la un taiat de xG nu depinde de")
+    print("     instantaneul din care vine xG-ul, iar rezultatele sunt reale.")
+
+    referinta = [scor_per_meci(d["inghetat"], d["real"]) for d in date]
     acc_ref, ll_ref, br_ref = agrega(referinta)
-    print(f"\n  Referinta (Oracle servit): acuratete {acc_ref:.4f} · "
+    print(f"\n  Referinta (Oracle INGHETAT): acuratete {acc_ref:.4f} · "
           f"log-loss {ll_ref:.4f} · Brier {br_ref:.4f}")
 
     # ── PASUL 2: SENSIBILITATE ─────────────────────────────────────────
