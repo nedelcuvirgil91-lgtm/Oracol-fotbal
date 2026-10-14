@@ -54,6 +54,24 @@ CE SE TESTEAZĂ, în ordinea utilității pentru backtest
   C. Dacă istoricul numește COMPETIȚIILE/meciurile ratate — atunci un meci
      anume se poate verifica direct, fără aritmetică pe intervale.
 
+  [EXTINS 2026-10-14, runda 2 — cele două necunoscute care blochează ADR-ul]
+  D. VALOAREA DE PIAȚĂ. Formula din producție
+     (`injury_manager.build_injury_report_from_raw_lineup`) calculează impactul
+     fiecărui absent din `market_value`, cu pragul
+     `MARKET_VALUE_KEY_PLAYER = 20M€`. Pagina de istoric NU o conține. Se
+     testează profilul (`/profil/spieler/<id>`, valoarea de AZI) și istoricul
+     de valoare (`/marktwertverlauf/spieler/<id>`, valoarea de ATUNCI).
+     Fără cea din urmă, backtestul folosește valoarea curentă ca aproximare —
+     apărabilă pe o fereastră de 2-3 luni, fiindcă formula doar ÎNCADREAZĂ
+     jucătorul (peste/sub 20M), iar traversarea pragului în acel interval e
+     rară. Dar e aproximare, și se etichetează ca atare.
+  E. O LIGĂ MICĂ, nu doar Arsenal și Real Madrid. Runda 1 a testat două
+     cluburi uriașe — exact cele pentru care Transfermarkt are cea mai bogată
+     acoperire. Dacă structura nu ține pe Romania SuperLiga, acoperirea reală
+     a backtestului e mult mai mică decât sugerează runda 1. Se pornește de la
+     pagina competiției (`/wettbewerb/RO1`), ca să se verifice și lanțul de
+     descoperire, nu doar o pagină ghicită.
+
 CAPCANA DE SCURGERE TEMPORALĂ, semnalată ÎNAINTE de a avea datele
 Un istoric citit AZI despre un meci din august spune cine era accidentat atunci
 — dar informația în forma asta completă NU era disponibilă înainte de meci, iar
@@ -210,6 +228,101 @@ def main() -> int:
                 raport["A_istoric_jucatori"].append(intrare)
                 _delay()
 
+            # ── D. VALOAREA DE PIATA: profil + istoric de valoare ────────
+            raport["D_valoare_piata"] = []
+            if not raport["oprit_de_captcha_interactiv"]:
+                for slug, pid, nume in JUCATORI[:2]:
+                    intrare = {"jucator": nume}
+                    for eticheta, cale in (("profil", "profil"),
+                                           ("istoric_valoare", "marktwertverlauf")):
+                        url = f"{BAZA}/{slug}/{cale}/spieler/{pid}"
+                        sub: dict = {"url": url}
+                        try:
+                            resp = page.goto(url, wait_until="domcontentloaded",
+                                             timeout=NAV_TIMEOUT_MS)
+                            sub["status"] = resp.status if resp else None
+                            page.wait_for_timeout(POST_LOAD_WAIT_MS)
+                            html = page.content()
+                            if _captcha_prezent(html):
+                                sub["captcha"] = True
+                                raport["oprit_de_captcha_interactiv"] = True
+                            else:
+                                # Sume in euro: "€80.00m", "20,00 mil. €", "€500k"
+                                sume = re.findall(
+                                    r"€\s?\d[\d.,]*\s?(?:m|k|bn)?|\d[\d.,]*\s?(?:mil|Mio)\.?\s?€",
+                                    html)
+                                sub["sume_euro_gasite"] = len(sume)
+                                sub["exemple_sume"] = sume[:6]
+                                if eticheta == "istoric_valoare":
+                                    # Graficul Highcharts tine punctele datate
+                                    # intr-un bloc JS; daca exista, valoarea
+                                    # DE ATUNCI e recuperabila.
+                                    puncte = re.findall(r"'y':\s*(\d+)", html)
+                                    datate = re.findall(r"'datum_mw':\s*'([^']+)'", html)
+                                    sub["puncte_grafic"] = len(puncte)
+                                    sub["etichete_datate"] = len(datate)
+                                    sub["exemple_datate"] = datate[:5]
+                        except Exception as exc:
+                            sub["eroare"] = f"{type(exc).__name__}: {exc}"
+                        intrare[eticheta] = sub
+                        _delay()
+                    raport["D_valoare_piata"].append(intrare)
+
+            # ── E. O LIGA MICA: Romania SuperLiga, de la competitie la lot ─
+            raport["E_liga_mica"] = {}
+            if not raport["oprit_de_captcha_interactiv"]:
+                url = f"{BAZA}/superliga/startseite/wettbewerb/RO1"
+                e: dict = {"url": url}
+                try:
+                    resp = page.goto(url, wait_until="domcontentloaded",
+                                     timeout=NAV_TIMEOUT_MS)
+                    e["status"] = resp.status if resp else None
+                    page.wait_for_timeout(POST_LOAD_WAIT_MS)
+                    html = page.content()
+                    e["titlu"] = (page.title() or "")[:120]
+                    if _captcha_prezent(html):
+                        e["captcha"] = True
+                        raport["oprit_de_captcha_interactiv"] = True
+                    else:
+                        cluburi = re.findall(r"/([a-z0-9-]+)/startseite/verein/(\d+)", html)
+                        unice = sorted(set(cluburi))
+                        e["cluburi_descoperite"] = len(unice)
+                        e["exemple_cluburi"] = unice[:5]
+                        # Un club real din liga -> lotul lui -> un jucator.
+                        if unice:
+                            cslug, cid = unice[0]
+                            _delay()
+                            u2 = f"{BAZA}/{cslug}/startseite/verein/{cid}"
+                            r2 = page.goto(u2, wait_until="domcontentloaded",
+                                           timeout=NAV_TIMEOUT_MS)
+                            page.wait_for_timeout(POST_LOAD_WAIT_MS)
+                            h2 = page.content()
+                            ids = sorted(set(re.findall(r"/profil/spieler/(\d+)", h2)))
+                            e["club_testat"] = {"slug": cslug, "id": cid,
+                                                "status": r2.status if r2 else None,
+                                                "jucatori_cu_id": len(ids)}
+                            # Si istoricul unui jucator din liga mica.
+                            if ids:
+                                _delay()
+                                u3 = f"{BAZA}/x/verletzungen/spieler/{ids[0]}"
+                                r3 = page.goto(u3, wait_until="domcontentloaded",
+                                               timeout=NAV_TIMEOUT_MS)
+                                page.wait_for_timeout(POST_LOAD_WAIT_MS)
+                                h3 = page.content()
+                                t3 = _tabel_cu_antete(h3, ("injury", "from", "until"))
+                                e["istoric_jucator_liga_mica"] = {
+                                    "url": u3,
+                                    "status": r3.status if r3 else None,
+                                    "titlu": (page.title() or "")[:100],
+                                    "tabel_gasit": bool(t3.get("gasit")),
+                                    "randuri": t3.get("randuri_total"),
+                                    "exemple": t3.get("exemple", [])[:2],
+                                }
+                except Exception as exc:
+                    e["eroare"] = f"{type(exc).__name__}: {exc}"
+                raport["E_liga_mica"] = e
+                _delay()
+
             # ── B. LOTUL CLUBULUI ───────────────────────────────────────
             if not raport["oprit_de_captcha_interactiv"]:
                 for slug, cid, nume in CLUBURI:
@@ -260,11 +373,48 @@ def main() -> int:
     if raport["oprit_de_captcha_interactiv"]:
         print("\n  ⛔ Oprit de captcha interactiv — Calea 2 e INCHISA, nu se forteaza.")
         return 1
+    # D + E — cele doua necunoscute care blocau ADR-ul
+    d = raport.get("D_valoare_piata") or []
+    cu_valoare = [x for x in d
+                  if (x.get("profil") or {}).get("sume_euro_gasite", 0) > 0]
+    cu_istoric_valoare = [x for x in d
+                          if (x.get("istoric_valoare") or {}).get("etichete_datate", 0) > 0]
+    e = raport.get("E_liga_mica") or {}
+    liga_mica_ok = (e.get("cluburi_descoperite", 0) >= 8
+                    and (e.get("club_testat") or {}).get("jucatori_cu_id", 0) >= 10)
+    istoric_mic = (e.get("istoric_jucator_liga_mica") or {}).get("tabel_gasit")
+
+    print(f"  Valoare de piata (profil): {len(cu_valoare)}/{len(d)} jucatori")
+    print(f"  ISTORIC de valoare, datat: {len(cu_istoric_valoare)}/{len(d)} jucatori")
+    print(f"  Liga mica (Romania SuperLiga) — lant complet: "
+          f"{'DA' if liga_mica_ok else 'NU'} "
+          f"({e.get('cluburi_descoperite', 0)} cluburi, "
+          f"{(e.get('club_testat') or {}).get('jucatori_cu_id', 0)} jucatori la clubul testat)")
+    print(f"  Istoric accidentari pe liga mica: {'DA' if istoric_mic else 'NU'}")
+
+    if raport["oprit_de_captcha_interactiv"]:
+        print("\n  ⛔ Oprit de captcha interactiv — Calea 2 e INCHISA, nu se forteaza.")
+        return 1
     if cu_date and loturi_ok:
         print("\n  ✅ Calea 2 e POSIBILA tehnic. NU inseamna ca e valida:")
         print("     scurgerea temporala rămâne de tratat (doar absente al caror")
         print("     interval incepuse STRICT inainte de meci), iar rezultatul")
         print("     oricarui backtest se marcheaza OPTIMIST, nu curat.")
+        if cu_istoric_valoare:
+            print("     + Valoarea DE ATUNCI e recuperabila -> fara aproximare pe")
+            print("       market_value. Un obstacol mai putin in ADR.")
+        elif cu_valoare:
+            print("     + Doar valoarea de AZI e recuperabila -> backtestul o")
+            print("       foloseste ca APROXIMARE, etichetata ca atare. Apararea:")
+            print("       formula doar incadreaza (prag 20M€), iar traversarea")
+            print("       pragului in 2-3 luni e rara. NU se ascunde.")
+        else:
+            print("     ⚠ Valoarea de piata NU e recuperabila din paginile testate.")
+            print("       Formula de penalizare o CERE — fara ea, Calea 2 nu poate")
+            print("       reproduce productia, doar un surogat. Decizie separata.")
+        if not liga_mica_ok:
+            print("     ⚠ Lantul NU tine pe o liga mica. Acoperirea reala a")
+            print("       backtestului e mult sub ce sugereaza Arsenal/Real Madrid.")
     else:
         print("\n  ⛔ Datele nu sunt in forma necesara. Calea 2 pica; rămâne Calea 1")
         print("     (shadow, ~6-8 saptamani), si o stim azi, nu peste o luna.")
