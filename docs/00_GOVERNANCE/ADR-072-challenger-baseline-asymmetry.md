@@ -4,7 +4,9 @@
 
 **ACCEPTED** — 2026-09-08, aprobat explicit de proprietarul produsului.
 
-Implementat în cod, cu flagul `challenger_baseline_from_control_enabled` **OPRIT în producție**. Activarea e o decizie separată, care cere migrarea aplicată întâi (vezi „Ordinea de deployment").
+Implementat în cod, **ACTIV în producție de la 2026-10-14** — flagul `challenger_baseline_from_control_enabled` = `true` în `model_config`, activat cu confirmare explicită, după migrarea 056 și după o rulare de validare cu flagul oprit. Detalii și dovezile verificării: secțiunea „Stare de execuție".
+
+(Până pe 2026-10-14 flagul era **OPRIT**, deliberat — activarea a fost tratată ca decizie separată de implementare, conform North Star #3.)
 
 Descoperit în timpul analizei critice a opțiunilor de persistare a intrărilor de la servire (discuție 2026-09-08). **Nu a fost căutat** — a ieșit la iveală verificând de ce o coloană `jsonb` nouă pe `match_history` ar îngheța.
 
@@ -187,8 +189,15 @@ Pașii 1 și 2 sunt comutativi ca siguranță (A1 le face pe amândouă inofensi
 |---|---|---|
 | 1. Cod în producție, flag oprit | ✅ făcut (`f7d04d6`) — 23 de teste, 15 mutații prinse | — |
 | 2. Migrarea `baseline_source` | ✅ aplicată și verificată (`056`, `e1f5a57`) — 62+5 rânduri, 0 modificate | proprietarul produsului (confirmat) |
-| 3. Verificare că `n_matches_evaluated` a crescut (A2) | ⏳ **în așteptare** — pauză internațională | verificabil automat |
-| 4. Activarea flagului | ⏳ **în așteptare**, strict după pasul 3 | proprietarul produsului |
+| 3. Verificare că `n_matches_evaluated` a crescut (A2) | ✅ **făcut** (2026-10-13) — `6e7265c5`: 334→…→**461**, `174e7e17`: 17→…→**144**, strict monoton | verificabil automat |
+| 3b. O rulare cu flagul oprit, comportament identic (cerința 3) | ✅ **făcut** — `night_sync` `38455004177`, 13 oct, 102 min, `success`: 2 evaluări noi, `baseline_source` NULL pe toate rândurile, verdicte neschimbate | verificabil automat |
+| 4. Activarea flagului | ✅ **FĂCUT 2026-10-14**, cu confirmare explicită | proprietarul produsului (confirmat) |
+
+**[ACTIVAT 2026-10-14]** `UPDATE model_config SET data = data \|\| '{"challenger_baseline_from_control_enabled": true}'::jsonb WHERE id = 1;` — arătat și confirmat explicit înainte de rulare (North Star #6).
+
+Scrierea verificată prin amprentă, nu prin inspecție vizuală: **35 → 36 chei**, iar `md5((data - 'challenger_baseline_from_control_enabled')::text)` e **identică** înainte și după (`0a169486d0bc26105443f6a0ab640d5c`) — exact o cheie adăugată, zero chei existente modificate. Valoarea e boolean `true`, nu șirul `"true"`.
+
+**Momentul a fost ales, nu întâmplător.** Decizia de expirare #7 (ADR-057) fusese comisă câteva ore înainte — `xgboost_v1/6e7265c5` → `REJECTED`/`expired` la 13 oct 21:09:10 — dar Faza B **nu apucase** să antreneze înlocuitorul în aceeași trecere (`_process_pair()` citește `active_count` la intrare, când ținta era încă activă; confirmat de `automation_runs` id=1084, `expiry_decision_awaiting_execution: true`). Consecința: Challenger-ul `xgboost_v1` nou se naște la prima rulare de DUPĂ activare, cu `training_run_id` nou și zero rânduri în `challenger_evaluations` — deci riscul A2 e **structural imposibil** pentru el, nu doar mic. Pornirea flagului după acea rulare i-ar fi schimbat reperul la mijlocul vieții, exact ce recomandarea din `CLAUDE.md` D-4 cerea să se evite.
 
 **Amânarea pasului 3-4 e o decizie explicită** a proprietarului produsului (2026-09-08), la recomandarea mea: activarea într-o zi în care `n` a stagnat ar face ca primul verdict pe baseline-ul nou să fie aruncat tăcut (A2). Declanșatorul e reluarea campionatelor, weekend-ul 12-14 septembrie 2026.
 
