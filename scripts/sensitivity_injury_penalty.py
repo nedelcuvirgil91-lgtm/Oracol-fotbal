@@ -103,13 +103,18 @@ from __future__ import annotations
 
 import argparse
 import math
+import random
 import statistics
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.ablation_form_weighting import agrega, mcnemar, scor_per_meci, t_pereche  # noqa: E402
+# `mcnemar` si `t_pereche` NU se importa deliberat: niciun test de semnificatie
+# nu se aplica unui oracol care, prin construcție, nu poate pierde un meci pe
+# care il cistiga (vezi explicatia tiparita la Pasul 4). Un import nefolosit ar
+# sugera ca testul exista si doar nu s-a afisat.
+from scripts.ablation_form_weighting import agrega, scor_per_meci  # noqa: E402
 
 # Pragul de fidelitate: probabilitatile stocate sunt round(x, 4), deci eroarea
 # de reproducere trebuie sa fie sub jumatatea ultimei zecimale.
@@ -265,6 +270,8 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--rata-realista", type=float, default=0.35,
                     help="fractiunea de meciuri care ar primi penalizare (plafon C)")
+    ap.add_argument("--permutari", type=int, default=20,
+                    help="cate permutari pentru oracolul nul (Pasul 5)")
     args = ap.parse_args()
 
     import supabase_client as sb
@@ -379,8 +386,13 @@ def main() -> int:
     print("-" * 78)
     print("  Se aleg meciurile cu cel mai mare castig potential — tot plafon,")
     print("  dar mai apropiat de o lume in care doar unele echipe au absente.")
-    print(f"\n  {'penaliz.':>9} {'acuratete':>10} {'delta':>8} {'log-loss':>9} {'delta':>9} "
-          f"{'McNemar b/c':>14} {'chi2':>7}")
+    print("\n  NICIUN test de semnificatie nu se aplica aici, si merita spus de ce:")
+    print("  oracolul alege doar variante cel puțin la fel de bune ca referinta,")
+    print("  deci NU poate pierde un meci pe care il cistiga. In McNemar, `b`")
+    print("  (referinta a nimerit si varianta nu) iese mereu 0 prin CONSTRUCTIE,")
+    print("  iar chi2 devine o cifra mare care nu testeaza nimic. Prima versiune")
+    print("  a acestui script o tiparea — era inselatoare, a fost scoasa.")
+    print(f"\n  {'penaliz.':>9} {'acuratete':>10} {'delta':>8} {'log-loss':>9} {'delta':>9}")
 
     for procent in (0.10, 0.20, 0.30):
         castiguri = []
@@ -395,9 +407,65 @@ def main() -> int:
         varianta = [scor_prin_index[i] if i in alese else referinta[i]
                     for i in range(len(date))]
         acc, ll, br = agrega(varianta)
-        b, c, chi = mcnemar(varianta, referinta)
         print(f"  {procent*100:>7.0f}% {acc:>10.4f} {acc-acc_ref:>+8.4f} "
-              f"{ll:>9.4f} {ll-ll_ref:>+9.4f} {b:>6}/{c:<7} {chi:>7.2f}")
+              f"{ll:>9.4f} {ll-ll_ref:>+9.4f}")
+
+    # ── PASUL 5: ORACOLUL NUL ──────────────────────────────────────────
+    print("\n" + "-" * 78)
+    print("  PASUL 5 — ORACOLUL NUL: cat din plafon e PUR ZGOMOT exploatat?")
+    print("-" * 78)
+    print("  Acelasi oracol, pe rezultate PERMUTATE aleator. Relatia xG<->rezultat")
+    print("  e rupta, deci orice castig ramas e strict capacitatea de")
+    print("  supraInvatare a unei alegeri 4-ale cu informatie din viitor.")
+    print("  Plafonul CORECTAT = plafonul real − castigul pe zgomot.")
+    print()
+    print("  Fara aceasta masuratoare, plafonul de la Pasii 3-4 e necitibil:")
+    print("  nu s-ar sti cat din el e semnal si cat e artefact de potrivire.")
+
+    rng = random.Random(20261014)   # sămânță fixă — reproductibil (regula ML)
+    n_perm = args.permutari
+
+    # Probabilitatile NU depind de rezultat, deci se precalculeaza o data si
+    # se refolosesc la toate permutarile. Fara asta, pasul ar fi de n_perm ori
+    # mai scump degeaba.
+    print(f"\n  Precalculez variantele pentru {len(date)} meciuri...")
+    cache: dict[float, list[list[tuple]]] = {}
+    for procent in (0.05, 0.10, 0.20, 0.30):
+        cache[procent] = [list(_variante(d["home_xg"], d["away_xg"], procent, poisson).values())
+                          for d in date]
+
+    reale = [d["real"] for d in date]
+    print(f"  Rulez {n_perm} permutari...\n")
+    print(f"  {'penaliz.':>9} {'plafon real':>12} {'zgomot mediu':>13} {'±sd':>7} "
+          f"{'PLAFON CORECTAT':>16}")
+
+    for procent in (0.05, 0.10, 0.20, 0.30):
+        variante_meci = cache[procent]
+        # Plafonul real, recalculat din cache — trebuie sa iasa IDENTIC cu
+        # Pasul 3; daca nu, cache-ul e greșit si s-ar vedea imediat.
+        best_real = [min(variante_meci[i], key=lambda p: scor_per_meci(p, reale[i])[1])
+                     for i in range(len(date))]
+        real_acc = agrega([scor_per_meci(best_real[i], reale[i])
+                           for i in range(len(date))])[0]
+
+        nule = []
+        for _ in range(n_perm):
+            amestecate = reale[:]
+            rng.shuffle(amestecate)
+            ref_nul = [scor_per_meci(date[i]["inghetat"], amestecate[i])
+                       for i in range(len(date))]
+            acc_ref_nul = agrega(ref_nul)[0]
+            best_nul = []
+            for i in range(len(date)):
+                b = min(variante_meci[i], key=lambda p: scor_per_meci(p, amestecate[i])[1])
+                best_nul.append(scor_per_meci(b, amestecate[i]))
+            nule.append(agrega(best_nul)[0] - acc_ref_nul)
+
+        zgomot = sum(nule) / len(nule)
+        sd = statistics.stdev(nule) if len(nule) > 1 else 0.0
+        delta_real = real_acc - acc_ref
+        print(f"  {procent*100:>7.0f}% {delta_real:>+12.4f} {zgomot:>+13.4f} {sd:>7.4f} "
+              f"{delta_real - zgomot:>+16.4f}")
 
     # ── CONCLUZIE ──────────────────────────────────────────────────────
     acc_plafon_30, ll_plafon_30, _ = agrega(plafoane[0.30])
