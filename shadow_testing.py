@@ -771,15 +771,65 @@ def get_experiment_registry(experiment_name: str | None = None) -> list[dict]:
 def get_distinct_experiments() -> list[tuple[str, str]]:
     """Toate perechile (experiment_name, experiment_version) care au cel
     puțin o predicție shadow logată — indiferent de feature, indiferent
-    câte experimente vor exista în viitor (injuries, coaches, SofaScore etc.)."""
+    câte experimente vor exista în viitor (injuries, coaches, SofaScore etc.).
+
+    [REPARAT — D-10, 2026-10-14] A PATRA instanță a plafonului PostgREST de
+    1000 din acest proiect, și prima care NU era benignă. Varianta veche
+    făcea un singur `select(...).execute()`, **fără paginare și fără
+    `ORDER BY`**. PostgREST taie tăcut la `_PAGE_SIZE`.
+
+    AMPLOAREA, măsurată înainte de reparație: `shadow_predictions` avea
+    **6679 de rânduri și 7 experimente**, dintre care în primele 1000 erau
+    vizibile **2** (`blend_v1/174e7e17`, `blend_v1/4e17c737`). Celelalte 5
+    nu mai erau atinse NICIODATĂ de evaluarea generică.
+
+    DE CE NU ERA BENIGNĂ, spre deosebire de celelalte trei instanțe: aici
+    nu se pierdeau rânduri dintr-un calcul, se pierdeau EXPERIMENTE întregi
+    dintr-o reevaluare. Trei rânduri din `experiment_registry` erau
+    înghețate de 32-34 de zile — printre ele `blend_v1/8ac89c70`, marcat
+    `candidate_for_promotion` pe 12 septembrie, deși `model_champions` îl
+    arată ACTIV din 23 august. Sistemul afirma simultan că **campionul
+    activ e un candidat de promovat**. Datele nu se opriseră; vizibilitatea
+    lor se oprise.
+
+    Confirmare cauzală, nu corelație: rândurile proaspete erau exact
+    reuniunea {cele 2 vizibile} ∪ {Challengerii activi, evaluați separat
+    prin `continuous_learning._process_pair()`}. Cele învechite nu erau
+    niciuna.
+
+    AGRAVANT, acum eliminat: fără `ORDER BY`, Postgres putea întoarce ALTE
+    1000 de rânduri de la o zi la alta, deci ce experimente erau vizibile
+    se putea schimba singur — același tipar deja documentat la
+    `get_shadow_predictions()`. `.order("id")` face rezultatul și complet,
+    și **determinist**.
+
+    Costul: o cerere la fiecare `_PAGE_SIZE` rânduri (7 azi), într-un job
+    nocturn. Se citesc doar cele trei coloane necesare, nu `*`.
+    """
     client = sb.get_client()
     if client is None:
         return []
     try:
-        res = client.table("shadow_predictions").select("experiment_name,experiment_version").execute()
-        rows = res.data or []
-        return sorted({(r["experiment_name"], r["experiment_version"]) for r in rows})
+        perechi: set[tuple[str, str]] = set()
+        cursor = None
+        while True:
+            q = client.table("shadow_predictions").select(
+                "id,experiment_name,experiment_version")
+            if cursor is not None:
+                q = q.gt("id", cursor)
+            res = q.order("id").limit(_PAGE_SIZE).execute()
+            page = res.data or []
+            for r in page:
+                perechi.add((r["experiment_name"], r["experiment_version"]))
+            if len(page) < _PAGE_SIZE:
+                break
+            cursor = page[-1]["id"]
+        return sorted(perechi)
     except Exception as exc:
+        # DELIBERAT `[]`, nu setul parțial adunat până la eroare — aceeași
+        # disciplină ca `get_shadow_predictions()`. Un set parțial ar arăta
+        # identic cu defectul tocmai reparat: câteva experimente evaluate,
+        # restul tăcut neatinse, fără niciun semnal.
         logger.warning("[ShadowTesting] get_distinct_experiments failed: %s", exc)
         return []
 

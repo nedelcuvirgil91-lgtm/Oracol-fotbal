@@ -34,6 +34,12 @@ import shadow_testing as st
 # Niciun test de-aici nu are nevoie de mai mult de 3-4 cereri pe tabelă.
 _MAX_CERERI = 40
 
+# „Max Rows" al PostgREST: plafonul pe care serverul îl aplică SINGUR, fără
+# ca apelantul să ceară ceva. Legat de `_PAGE_SIZE` din cod, nu scris de mână
+# — dacă unul se schimbă vreodată fără celălalt, testele trebuie să cadă, nu
+# să continue pe o presupunere.
+_PLAFON_IMPLICIT = st._PAGE_SIZE
+
 
 class _FakeQuery:
     def __init__(self, rows: list[dict], jurnal: list[dict], esec_la: int | None,
@@ -107,8 +113,19 @@ class _FakeQuery:
             randuri = [r for r in randuri if r.get(col) in permise]
         if self._order is not None:
             randuri.sort(key=lambda r: r[self._order])
-        if self._limit is not None:
-            randuri = randuri[:self._limit]
+        # PLAFONUL IMPLICIT, nu doar cel cerut. PostgREST taie la „Max Rows"
+        # CHIAR DACĂ apelantul nu cere niciun `.limit()` — exact proprietatea
+        # care defineste toata clasa asta de defect.
+        #
+        # [REPARAT 2026-10-14, prin mutatie] Varianta anterioara aplica
+        # `limit` DOAR cand era cerut explicit. Consecinta, descoperita
+        # reintroducand defectul original in `get_distinct_experiments()`:
+        # codul rupt primea toate cele 2500 de randuri si garda centrala
+        # TRECEA. Era prins doar colateral, de testele care numara cererile.
+        # Docstring-ul fisierului promitea tocmai ca un fals permisiv ar face
+        # testele sa nu dovedeasca nimic — si fix aici nu se tinea de cuvant.
+        taiere = _PLAFON_IMPLICIT if self._limit is None else min(self._limit, _PLAFON_IMPLICIT)
+        randuri = randuri[:taiere]
 
         self._jurnal.append({
             "select": self._select, "eq": list(self._eq), "is_": list(self._is),
@@ -386,3 +403,167 @@ def test_evaluarea_ramane_insufficient_data_daca_citirea_esueaza(monkeypatch):
     rezultat = st.evaluate_experiment("xgboost_v1", "run-1", min_matches=200)
 
     assert rezultat == {"status": "insufficient_data", "n_matches_evaluated": 0}
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# D-10 — a PATRA instanță a aceluiași plafon, în `get_distinct_experiments()`
+#
+# Prima care NU era benignă. Celelalte trei pierdeau RÂNDURI dintr-un calcul;
+# aceasta pierdea EXPERIMENTE ÎNTREGI dintr-o reevaluare — cele invizibile nu
+# mai erau atinse niciodată, iar verdictele lor rămâneau înghețate.
+#
+# Măsurat pe producție ÎNAINTE de reparație (2026-10-14): `shadow_predictions`
+# avea 6679 de rânduri și 7 experimente, dintre care în primele 1000 erau
+# vizibile 2. Trei rânduri din `experiment_registry` erau înghețate de 32-34
+# de zile — printre ele `blend_v1/8ac89c70`, marcat `candidate_for_promotion`
+# deși e campionul ACTIV din 23 august. Sistemul afirma simultan că campionul
+# activ e un candidat de promovat.
+# ════════════════════════════════════════════════════════════════════════════
+
+
+def _pred(i: int, nume: str, versiune: str) -> dict:
+    return {"id": i, "experiment_name": nume, "experiment_version": versiune}
+
+
+def _set_mare() -> list[dict]:
+    """2500 de rânduri, 4 experimente — al patrulea apare DUPĂ plafon.
+
+    Distribuția reproduce tiparul real: experimentele vechi au cele mai mici
+    `id`-uri, cele noi cele mai mari. Experimentul `tarziu` începe la rândul
+    2200, deci e invizibil pentru orice citire de o singură pagină.
+    """
+    randuri = []
+    for i in range(1, 2501):
+        if i <= 900:
+            nume, ver = "blend_v1", "vechi"
+        elif i <= 1500:
+            nume, ver = "xgboost_v1", "mijloc"
+        elif i <= 2199:
+            nume, ver = "flashscore_team_dna", "v1"
+        else:
+            nume, ver = "xgboost_v1", "tarziu"
+        randuri.append(_pred(i, nume, ver))
+    return randuri
+
+
+def test_vede_toate_experimentele_peste_plafonul_de_1000(monkeypatch):
+    """GARDA CENTRALĂ D-10. Fără paginare s-ar vedea doar primele două."""
+    client = _FakeClient({"shadow_predictions": _set_mare()})
+    monkeypatch.setattr(st.sb, "get_client", lambda: client)
+
+    assert st.get_distinct_experiments() == [
+        ("blend_v1", "vechi"),
+        ("flashscore_team_dna", "v1"),
+        ("xgboost_v1", "mijloc"),
+        ("xgboost_v1", "tarziu"),
+    ]
+
+
+def test_experimentul_de_dupa_plafon_chiar_lipsea_fara_paginare(monkeypatch):
+    """CONTRAPONDERE — dovedește că setul de test EXPUNE defectul.
+
+    Fără ea, garda de mai sus ar putea trece pe un set în care toate
+    experimentele încap oricum în prima pagină, adică fără să testeze nimic.
+    Se reproduce aici citirea de o singură pagină, exact varianta veche."""
+    randuri = _set_mare()
+    o_pagina = sorted(randuri, key=lambda r: r["id"])[:st._PAGE_SIZE]
+    vizibile = {(r["experiment_name"], r["experiment_version"]) for r in o_pagina}
+
+    assert ("xgboost_v1", "tarziu") not in vizibile, (
+        "setul de test nu expune defectul — experimentul tardiv e deja vizibil "
+        "în prima pagină, deci garda ar trece și cu codul vechi")
+    assert ("flashscore_team_dna", "v1") not in vizibile
+    assert len(vizibile) == 2, f"ar trebui 2 vizibile fără paginare, sunt {len(vizibile)}"
+
+
+def test_ordonarea_e_pe_id_explicit_altfel_rezultatul_e_nedeterminist(monkeypatch):
+    """AGRAVANTUL din D-10, separat de trunchiere: fără `ORDER BY`, Postgres
+    putea întoarce ALTE 1000 de rânduri de la o zi la alta, deci ce
+    experimente erau vizibile se schimba singur."""
+    client = _FakeClient({"shadow_predictions": _set_mare()})
+    monkeypatch.setattr(st.sb, "get_client", lambda: client)
+    st.get_distinct_experiments()
+
+    jurnal = client.jurnale["shadow_predictions"]
+    assert jurnal, "nicio cerere făcută"
+    for cerere in jurnal:
+        assert cerere["order"] == "id", f"cerere fără ordonare pe id: {cerere}"
+        assert cerere["limit"] == st._PAGE_SIZE
+
+
+def test_cursorul_avanseaza_si_nu_repeta(monkeypatch):
+    client = _FakeClient({"shadow_predictions": _set_mare()})
+    monkeypatch.setattr(st.sb, "get_client", lambda: client)
+    st.get_distinct_experiments()
+
+    jurnal = client.jurnale["shadow_predictions"]
+    assert len(jurnal) == 3, f"2500 randuri / 1000 => 3 cereri, nu {len(jurnal)}"
+    assert jurnal[0]["gt"] == []
+    assert jurnal[1]["gt"] == [("id", 1000)]
+    assert jurnal[2]["gt"] == [("id", 2000)]
+
+
+def test_experimente_o_singura_pagina_nu_cere_a_doua_degeaba(monkeypatch):
+    client = _FakeClient({"shadow_predictions": [_pred(i, "a", "v1") for i in range(1, 51)]})
+    monkeypatch.setattr(st.sb, "get_client", lambda: client)
+
+    assert st.get_distinct_experiments() == [("a", "v1")]
+    assert len(client.jurnale["shadow_predictions"]) == 1
+
+
+def test_numar_exact_pe_plafon_nu_pierde_experimentul_urmator(monkeypatch):
+    """Graniță: exact `_PAGE_SIZE` rânduri pentru primul experiment, iar al
+    doilea începe fix la rândul următor. O pagină plină înseamnă „mai sunt",
+    deci se cere încă una."""
+    randuri = ([_pred(i, "a", "v1") for i in range(1, st._PAGE_SIZE + 1)]
+               + [_pred(st._PAGE_SIZE + 1, "b", "v1")])
+    client = _FakeClient({"shadow_predictions": randuri})
+    monkeypatch.setattr(st.sb, "get_client", lambda: client)
+
+    assert st.get_distinct_experiments() == [("a", "v1"), ("b", "v1")]
+
+
+def test_esecul_intoarce_lista_goala_nu_experimentele_adunate_pana_atunci(monkeypatch):
+    """Un set PARȚIAL ar arăta identic cu defectul tocmai reparat: câteva
+    experimente evaluate, restul tăcut neatinse, fără niciun semnal."""
+    client = _FakeClient({"shadow_predictions": _set_mare()}, esec_la=2)
+    monkeypatch.setattr(st.sb, "get_client", lambda: client)
+
+    assert st.get_distinct_experiments() == []
+
+
+def test_experimente_supabase_indisponibil_intoarce_lista_goala(monkeypatch):
+    monkeypatch.setattr(st.sb, "get_client", lambda: None)
+    assert st.get_distinct_experiments() == []
+
+
+def test_se_citesc_doar_coloanele_necesare_nu_tot_randul(monkeypatch):
+    """`select("*")` ar aduce `feature_metadata` pentru fiecare rând — de la
+    ADR-073 acela poate avea ~1 KB. Pe 6679 de rânduri, degeaba."""
+    client = _FakeClient({"shadow_predictions": _set_mare()})
+    monkeypatch.setattr(st.sb, "get_client", lambda: client)
+    st.get_distinct_experiments()
+
+    for cerere in client.jurnale["shadow_predictions"]:
+        assert cerere["select"] == "id,experiment_name,experiment_version", cerere
+        assert "*" not in cerere["select"]
+
+
+def test_evaluate_all_chiar_itereaza_peste_toate_experimentele_gasite(monkeypatch):
+    """Legătura până la capăt: `evaluate_all_active_experiments()` trebuie să
+    evalueze fiecare experiment descoperit, nu doar pe cele din prima pagină.
+    Fără acest test, paginarea ar putea fi corectă iar apelantul tot rupt."""
+    client = _FakeClient({"shadow_predictions": _set_mare()})
+    monkeypatch.setattr(st.sb, "get_client", lambda: client)
+
+    evaluate = []
+    monkeypatch.setattr(st, "evaluate_experiment",
+                        lambda n, v, **k: evaluate.append((n, v)) or {"status": "monitoring"})
+
+    rezultate = st.evaluate_all_active_experiments()
+
+    assert sorted(evaluate) == [
+        ("blend_v1", "vechi"), ("flashscore_team_dna", "v1"),
+        ("xgboost_v1", "mijloc"), ("xgboost_v1", "tarziu"),
+    ]
+    assert len(rezultate) == 4

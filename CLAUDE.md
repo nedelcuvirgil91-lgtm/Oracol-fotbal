@@ -230,7 +230,38 @@ Dar `timeout=12` × 4 încercări + backoff ≈ 51,5 s, nu 120 — deci **nu se 
 
 Același tipar ca la `sync_pre_match_odds` în august: instrumentare întâi, reparație după, cu date.
 
-### D-10. Evaluarea generică acoperă 2 experimente din 6 — a PATRA instanță a plafonului PostgREST, și prima care NU e benignă (găsit 2026-10-14)
+### D-10. Evaluarea generică acoperea 2 experimente din 7 — ✅ **REPARAT 2026-10-14**
+
+> **[REPARAT — 2026-10-14]** `get_distinct_experiments()` pagineză acum keyset pe `id`, cu `ORDER BY` explicit (`shadow_testing.py`), refolosind `_PAGE_SIZE` și tiparul deja aplicat la celelalte trei instanțe. Se citesc doar `id,experiment_name,experiment_version`, nu `*`. La eroare se întoarce **lista goală**, nu setul parțial — un parțial ar arăta identic cu defectul tocmai reparat.
+>
+> **Precondiția din textul vechi era îndeplinită**: „NU se repară înainte de a decide ce se face cu D-7". D-7 e ÎNCHISĂ din 13 oct (ablație negativă, feature NEPROMOVAT indiferent de registru), deci reparația nu mai poate declanșa o promovare nedorită — doar împrospătează o cifră învechită.
+>
+> **Verificat că reparația nu poate promova nimic**: `shadow_testing.py` nu conține niciun apel la `propose_decision`, `promote_challenger`, `model_champions` sau `write_run` (`grep` → zero potriviri). Evaluarea scrie exclusiv în `experiment_registry`.
+>
+> **MĂSURĂTOAREA „ÎNAINTE", cerută explicit** (2026-10-14, ~19:30 UTC, înainte de reparație): `shadow_predictions` avea **6679 rânduri și 7 experimente**, dintre care vizibile în primele 1000: **2** (`blend_v1/174e7e17`, `blend_v1/4e17c737`). Deci 5 din 7 invizibile — mai rău decât 4 din 6 la documentare. Starea registrului:
+>
+> | experiment | status | n | Δ acuratețe | vechime |
+> |---|---|---:|---:|---:|
+> | `flashscore_team_dna/v1` | **candidate_for_promotion** | 551 | +2,90pp | **34 zile** |
+> | `xgboost_v1/e638c1dc` | monitoring | 550 | −0,18pp | **34 zile** |
+> | `blend_v1/8ac89c70` | **candidate_for_promotion** | 378 | +5,29pp | **32 zile** |
+> | `xgboost_v1/6e7265c5` | monitoring | 461 | −1,74pp | 1 zi |
+> | `blend_v1/4e17c737` | monitoring | 596 | −0,34pp | 0 zile |
+> | `blend_v1/174e7e17` | insufficient_data | 151 | — | 0 zile |
+> | `xgboost_v1/dda4f7f3` | insufficient_data | 0 | — | 0 zile |
+>
+> **Cauzalitate confirmată, nu corelație**: rândurile proaspete sunt exact reuniunea {cele 2 vizibile} ∪ {Challengerii activi, evaluați separat prin `continuous_learning._process_pair()`}. Cele învechite nu sunt niciuna.
+>
+> **„DUPĂ" se măsoară la prima rulare de noapte cu reparația** — cele 3 verdicte învechite se recalculează. **De așteptat ca `blend_v1/8ac89c70` să NU mai fie `candidate_for_promotion`**: cifra lui (+5,29pp) a fost produsă pe baseline-ul înghețat, iar ADR-072 e activ acum.
+>
+> **DOUĂ DEFECTE GĂSITE ÎN PROPRIILE GĂRZI, ambele prin verificare, nu prin noroc:**
+>
+> 1. **Clientul fals nu emula plafonul IMPLICIT.** Reintroducând defectul original (M1), garda centrală **a trecut** — fiindcă falsul tăia la `limit` doar când `.limit()` era apelat explicit, iar codul rupt nu-l apela. PostgREST real taie la 1000 **indiferent**, exact proprietatea care definește clasa. Docstring-ul fișierului promitea tocmai opusul („un fals care ignoră `limit()` ar face testele să treacă fără să dovedească nimic"). Reparat: `_PLAFON_IMPLICIT = st._PAGE_SIZE`, aplicat mereu. După reparație, M1 doboară **7 teste**, iar cele 18 existente trec în continuare — deci celelalte trei reparații erau genuin corecte, nu treceau din întâmplare.
+> 2. **Am șters tăcut două gărzi existente**, reutilizându-le numele (`test_o_singura_pagina_nu_cere_a_doua_degeaba`, `test_supabase_indisponibil_intoarce_lista_goala`). Python păstrează doar ultima definiție; **suita a rămas VERDE** în timp ce două verificări dispăruseră. Ieșit la iveală din **aritmetică**, nu dintr-un eșec: fișierul crescuse cu 10 teste, totalul suitei doar cu 8. Gardă permanentă nouă: `tests/test_no_shadowed_tests.py` (AST, pe tot `tests/`, cu contrapondere + mutație verificată).
+>
+> **5 mutații pe reparație, toate prinse**: defectul original · `ORDER BY` scos · cursor din primul rând în loc de ultimul · parțial în loc de `[]` la eroare · `select("*")`. `pytest tests/`: **3440 passed, 2 skipped** (3427 + 13, aritmetica se închide exact).
+
+**Textul de mai jos descrie defectul ÎNAINTE de reparație**, păstrat ca istoric.
 
 `sync/run_daily.py:537` apelează `evaluate_all_active_experiments()`, care iterează peste `get_distinct_experiments()` — iar aceea face un singur `select(...).execute()` **fără paginare și fără `ORDER BY`** (`shadow_testing.py:779`). PostgREST taie la 1000.
 
