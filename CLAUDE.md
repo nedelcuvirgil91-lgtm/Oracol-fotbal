@@ -36,7 +36,7 @@ Stare reală acum, fiecare element verificat:
 
 | Element | Stare | Verificare |
 |---|---|---|
-| Cod ADR-072 pe `main` | ✅ **DA** (de la `3566541`, 13 oct) | `git show origin/main:shadow_testing.py \| grep -c BASELINE_SHADOW_CONTROL` → **7** (era 0) |
+| Cod ADR-072 pe `main` | ✅ **DA** (de la `3566541`, 13 oct) | `git show origin/main:shadow_testing.py \| grep -c BASELINE_SHADOW_CONTROL` → **3** (era 0) · `\| grep -c baseline_source` → **8**. **[CORECTAT 2026-10-14]** scrisesem „→ 7", cifră pe care nicio comandă n-o întoarce; reverificat, sunt 3 linii. Concluzia („codul e pe `main`") era și rămâne corectă, dar o comandă de verificare cu ieșire greșită e mai rea decât niciuna — cine o rulează găsește 3 și caută o regresie inexistentă. |
 | Migrarea 056 în producție | ✅ aplicată | coloanele există, 0 rânduri cu valoare |
 | Flag `challenger_baseline_from_control_enabled` | ⛔ **ABSENT din `model_config` (= False)** | implicit `False` în cod, confirmat pe `main` |
 | Comportament curent | **neschimbat** | evaluările rulează pe baseline-ul înghețat, ca până acum |
