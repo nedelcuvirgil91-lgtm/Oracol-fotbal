@@ -26,6 +26,8 @@ Not Implemented
 
 **Secțiunea asta există pentru că absența ei a costat deja.** ADR-057 nu era citat de niciun document și de niciun cod; condiția lui s-a împlinit pe 23 august, iar starea a fost descoperită abia pe 6 septembrie — **14 zile fără nicio antrenare**, și doar dintr-o întrebare întâmplătoare a proprietarului produsului. Orice decizie amânată se scrie AICI, cu declanșatorul verificabil, nu doar în ADR-ul ei.
 
+> **🔴 PUNCT DE RELUARE, citit PRIMUL: `docs/00_GOVERNANCE/PLAN_POST_NIGHT_SYNC_2026-10-14.md`** — ce se verifică după rularea `night_sync` **38509946577** (pornită manual 14 oct 04:09 UTC, prima cu ADR-072 ACTIV + instrumentarea HTTP + fixul de paginare), cu starea de referință măsurată ÎNAINTE, arborele de decizie pe fiecare rezultat, și calendarul proiectat. **Conține o corecție critică de așteptare**: rularea aceea NU produce `baseline_source` (verdict sub pragul de 200 → câmpul nici nu se atașează, `shadow_testing.py` linia 682 vs. return-ul de la ~592); primul `'shadow_control'` e proiectat pentru **17 octombrie**. Un `NULL` acolo e corect, nu defect.
+>
 > **Starea completă, la zi: `docs/00_GOVERNANCE/BACKLOG_2026-10-13.md`** — tot ce rămâne de făcut după sesiunea din 13 octombrie, ordonat după **cost real măsurat**, nu după cronologie. Intrările D-1…D-8 de mai jos sunt rezumatul; backlog-ul are cifrele, dovezile și planurile. Conține în plus: planul ADR-073 (D-2 reîncadrat — reparația e **un parametru**, nu un proiect), ce se verifică imediat ce se termină rularea `night_sync` curentă, prioritizarea pe precizie (accidentările rămân #1), și §5 — patru lecții de metodă din erorile comise chiar în acea sesiune.
 
 ### D-1. Activarea ADR-072 (baseline proaspăt la promovare) — ✅ **ACTIVATĂ 2026-10-14, 04:1x UTC**
