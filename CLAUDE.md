@@ -90,7 +90,11 @@ WHERE id = 1;
 
 ### D-2. Persistarea intrărilor de la servire (varianta B) — ✅ **ADR-073 SCRIS ȘI IMPLEMENTAT 2026-10-14, flag NEACTIVAT**
 
-> **[IMPLEMENTAT — 2026-10-14]** `docs/00_GOVERNANCE/ADR-073-serving-inputs-persistence.md`, aprobat explicit de proprietarul produsului. Flagul `serving_inputs_persistence_enabled` e **ABSENT din `model_config` (= `False`)**, deci comportamentul în producție e **neschimbat** — activarea e o decizie separată (North Star #3).
+> **[IMPLEMENTAT ȘI PE `main` — 2026-10-14, `15f7c38`]** `docs/00_GOVERNANCE/ADR-073-serving-inputs-persistence.md`, aprobat explicit de proprietarul produsului. Merge aprobat explicit, fast-forward curat (`4114d66` → `15f7c38`), `pytest tests/` verde pe `main` ÎNAINTE de push: **3427 passed, 2 skipped**. Verificat după push: flagul apare în exact **2** locuri în `oracle_engine.py` pe `main` — linia 179 (declarația `False`) și linia 1871 (poarta).
+>
+> Flagul `serving_inputs_persistence_enabled` e **ABSENT din `model_config` ȘI din `config.json`** — verificat read-only (`flag_prezent = false`, `total_chei = 36`, exact amprenta de la activarea ADR-072, deci nimic altceva nu s-a strecurat între timp). Comportamentul în producție e **neschimbat**; activarea e o decizie separată (North Star #3).
+>
+> **Precizare care contează**: `challenger_shadow_logging_enabled` și `blend_challenger_shadow_logging_enabled` sunt AMBELE `true` în producție, deci codul modificat **rulează** la fiecare rulare de noapte — inert exclusiv prin poarta flagului. De aici importanța reală a mutației M4 de mai jos.
 >
 > **Ce s-a construit**: `_resolve_xg_params()` (punct unic de rezolvare, folosit de `_calibrate_xg` ȘI de înregistrare), `_build_serving_record()` (pur), `_serving_record_if_enabled()` (poarta flagului, în Oracle Engine, nu în adaptoare), plus cablarea pe rândul `control` în ambele adaptoare de shadow. `pytest tests/`: **3427 passed, 2 skipped**, 35 de teste noi.
 >

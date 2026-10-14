@@ -4,7 +4,9 @@
 
 **PROPOSED** — 2026-10-14, aprobat explicit de proprietarul produsului pentru implementare („Atunci aprob", după o explicație completă a scopului).
 
-Implementat în cod pe branch-ul `claude/continua-faza-1-adr5-o52jat`. Flagul `serving_inputs_persistence_enabled` e **ABSENT din `model_config`** (= `False`), deci comportamentul în producție e **neschimbat** până la o activare separată, cu confirmare explicită (North Star #3).
+**Cod pe `main` de la `15f7c38`** (2026-10-14, merge aprobat explicit, fast-forward curat, `pytest tests/` verde pe `main` ÎNAINTE de push: 3427 passed, 2 skipped). Flagul `serving_inputs_persistence_enabled` e **ABSENT din `model_config` ȘI din `config.json`** (verificat prin interogare read-only: `flag_prezent = false`, `total_chei = 36` — exact amprenta de la activarea ADR-072, deci nimic altceva nu s-a adăugat între timp), deci `config.get(..., False)` = `False` și comportamentul în producție e **neschimbat** până la o activare separată, cu confirmare explicită (North Star #3).
+
+**Precizare care contează, verificată**: `challenger_shadow_logging_enabled` și `blend_challenger_shadow_logging_enabled` sunt AMBELE `true` în producție. Deci codul modificat de acest ADR **rulează** la fiecare rulare de noapte — singurul lucru care-l ține inert e poarta flagului. De aceea mutația M4 (poarta ștearsă, netrecută la prima rulare a gărzilor) nu era un detaliu de testare: fără întărirea ei, acest merge ar fi putut începe să scrie înregistrări la prima rulare, nedetectat.
 
 Derivat din decizia în așteptare **D-2** (CLAUDE.md), deschisă pe 2026-09-08, reîncadrată pe 2026-10-13 și reverificată pe 2026-10-14.
 
