@@ -1,0 +1,88 @@
+name: Football Oracle — Calea 0: plafonul penalizării de accidentări (read-only)
+
+# Răspunde la întrebarea proprietarului produsului (2026-10-14): „dacă începi cu
+# accidentările, putem măsura înainte impactul asupra predicțiilor? Că nu vreau
+# să stricăm predicțiile actuale."
+#
+# Răspunsul e da, și acesta e instrumentul. Măsoară, pe meciurile deja jucate,
+# CÂT POATE conta penalizarea de accidentări — înainte de a investi un ADR, un
+# POC Transfermarkt, mapare de identitate și cadență.
+#
+# DE CE E URGENT SĂ EXISTE ÎNAINTEA COLECTĂRII (verificat în cod, 2026-10-14)
+# Penalizarea NU e gatată de niciun flag: `oracle_engine.py:1808` cere doar
+# `if self.injury_manager and DB_QUERIES_MODULE_AVAILABLE`, ambele `True` în
+# producție. Singurul motiv pentru care nu se aplică e că
+# `freelf_lineup_snapshot` are 0 rânduri. Deci PRIMUL rând scris acolo schimbă
+# imediat xG-ul servit, pe toate meciurile — colectarea datelor *este*
+# schimbarea predicției. Un flag implicit oprit e precondiție tehnică.
+#
+# CE MĂSOARĂ, ÎN ORDINE
+#   1. ancora de fidelitate — reproduce probabilitatea SERVITĂ din xG stocat;
+#      dacă nu se reproduce, se OPREȘTE (premisa ar fi falsă);
+#   2. sensibilitate — câte verdicte se schimbă la 5/10/20/30%, mecanică pură;
+#   3. plafonul teoretic — oracol perfect de absențe (folosește deliberat
+#      informația viitoare); un plafon MIC închide subiectul definitiv;
+#   4. plafon la rată realistă — doar o fracțiune din meciuri primesc penalizare.
+#
+# STRICT READ-ONLY: nu scrie în nicio tabelă, nu atinge `weights.json`,
+# `model_config` sau vreo predicție. Nu populează `freelf_lineup_snapshot`.
+#
+# DOAR `workflow_dispatch`, fără cron — instrument de decizie punctuală.
+#
+# Un plafon mare NU autorizează nimic: nu dovedește că e atins, iar schimbarea
+# unui parametru matematic al Oracle rămâne experiment de calibrare separat, cu
+# aprobare proprie (CLAUDE.md, §Filosofia proiectului).
+
+on:
+  workflow_dispatch:
+    inputs:
+      rata_realista:
+        description: "Fracțiunea de meciuri care ar primi penalizare, pentru plafonul C (implicit 0.35)"
+        required: false
+        default: "0.35"
+
+concurrency:
+  group: sensitivity-injury-penalty
+  cancel-in-progress: false
+
+jobs:
+  sensibilitate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sensitivity analysis
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        # `set -o pipefail` obligatoriu: shell-ul implicit e `bash -e` FĂRĂ
+        # pipefail, deci într-un pipeline `python … | tee` codul de ieșire ar fi
+        # al lui `tee` — o rulare eșuată (inclusiv oprirea pe ancora de
+        # fidelitate) ar apărea verde.
+        run: |
+          set -o pipefail
+          mkdir -p logs
+          python scripts/sensitivity_injury_penalty.py \
+            --rata-realista "${{ github.event.inputs.rata_realista || '0.35' }}" \
+            2>&1 | tee "logs/sensitivity_injury_penalty_$(date -u +%Y%m%dT%H%M%SZ).log"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sensitivity-injury-penalty-${{ github.run_id }}
+          path: logs/
+          if-no-files-found: error
+          retention-days: 30
