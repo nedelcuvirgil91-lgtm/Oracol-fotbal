@@ -88,6 +88,7 @@ def log_shadow_for_active_challenger(
     fixture_id: str, home_xg: float, away_xg: float,
     control_prob_home: float, control_prob_draw: float, control_prob_away: float,
     league: str, home_team: str, away_team: str, kickoff_date: str,
+    control_feature_metadata: dict | None = None,
 ) -> bool:
     """Punctul de intrare PUBLIC folosit de oracle_engine.py — singurul.
     Nu face nimic (False) dacă nu există Challenger activ pentru
@@ -98,6 +99,14 @@ def log_shadow_for_active_challenger(
     primită ca parametri control_prob_* (experiment_group="control") —
     pereche necesară pentru comparația paired din
     shadow_testing.evaluate_experiment().
+
+    `control_feature_metadata` [ADR-073]: intrările de la servire, construite
+    de `oracle_engine._serving_record_if_enabled()` (None când flagul
+    `serving_inputs_persistence_enabled` e oprit — implicit). Se pasează
+    EXCLUSIV apelului `control`, niciodată celui `treatment`: rândul
+    `treatment` descrie Challenger-ul, iar intrările Oracle pe el ar fi o
+    afirmație falsă despre cine a produs ce. Acest modul NU citește niciun
+    flag — poarta trăiește în Oracle Engine, care deține configurația.
 
     Best-effort: orice excepție e prinsă aici, niciodată propagată către
     Oracle Engine (Regula #8, degradare grațioasă)."""
@@ -128,6 +137,7 @@ def log_shadow_for_active_challenger(
             experiment_name=algorithm_family, experiment_version=active["training_run_id"],
             home_xg=home_xg, away_xg=away_xg,
             prob_home=control_prob_home, prob_draw=control_prob_draw, prob_away=control_prob_away,
+            feature_metadata=control_feature_metadata,
             experiment_group="control", processing_stage="final",
             league=league, home_team=home_team, away_team=away_team, kickoff_date=kickoff_date,
         )

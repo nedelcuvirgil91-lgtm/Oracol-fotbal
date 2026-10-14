@@ -71,6 +71,9 @@ class _FakeEngine:
     _FakeEngine din tests/test_challenger_shadow_logging.py."""
     _build_ml_features = oracle_engine.FootballOracleEngine._build_ml_features
     _log_blend_challenger_shadow = oracle_engine.FootballOracleEngine._log_blend_challenger_shadow
+    # [ADR-073] Colaborator nou — vezi nota identică din
+    # tests/test_challenger_shadow_logging.py.
+    _serving_record_if_enabled = oracle_engine.FootballOracleEngine._serving_record_if_enabled
 
     def __init__(self, config: dict):
         self.config = config
@@ -233,7 +236,15 @@ def test_challenger_shadow_public_signatures_unchanged():
     """learning_core/challenger_shadow.py (Challenger-ul xgboost_v1) nu e
     modificat de Pasul 13 — semnăturile funcțiilor publice rămân exact cele
     dinainte de introducerea Blend-ului (ADR-050 §4: comportament
-    neschimbat)."""
+    neschimbat).
+
+    [EXTINS — ADR-073, 2026-10-14] Lista a crescut cu UN parametru,
+    `control_feature_metadata`, OPȚIONAL (implicit None). Garda a căzut
+    corect la introducerea lui — exact rolul ei — și se extinde deliberat,
+    cu ADR, nu se slăbește: scopul ei rămâne neschimbat, adică „Pasul 13 /
+    blend_v1 nu are voie să atingă această semnătură". Ordinea e
+    semnificativă: parametrul nou e ULTIMUL, deci niciun apel pozițional
+    existent nu se schimbă de sens."""
     sigs = _public_function_signatures(_CHALLENGER_SHADOW_PATH)
     assert sigs["predict_with_challenger"] == ["features", "training_run_id"]
     assert sigs["log_shadow_for_active_challenger"] == [
@@ -241,6 +252,7 @@ def test_challenger_shadow_public_signatures_unchanged():
         "fixture_id", "home_xg", "away_xg",
         "control_prob_home", "control_prob_draw", "control_prob_away",
         "league", "home_team", "away_team", "kickoff_date",
+        "control_feature_metadata",
     ]
 
 

@@ -69,6 +69,11 @@ class _FakeEngine:
     FakeEngine din tests/test_oracle_engine_compat.py."""
     _build_ml_features = oracle_engine.FootballOracleEngine._build_ml_features
     _log_challenger_shadow = oracle_engine.FootballOracleEngine._log_challenger_shadow
+    # [ADR-073] Colaborator nou al lui _log_challenger_shadow. Fixtura e o
+    # clasă minimală care împrumută explicit metodele reale, deci trebuie să
+    # împrumute și pe asta — altfel AttributeError e înghițit de `except`-ul
+    # best-effort și logarea shadow raportează False fără motiv aparent.
+    _serving_record_if_enabled = oracle_engine.FootballOracleEngine._serving_record_if_enabled
 
     def __init__(self, config: dict):
         self.config = config

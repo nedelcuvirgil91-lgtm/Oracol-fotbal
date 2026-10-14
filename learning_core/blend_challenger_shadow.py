@@ -98,6 +98,7 @@ def log_shadow_for_active_blend_challenger(
     league_scope: str, oracle_probs: tuple[float, float, float], features: dict,
     fixture_id: str, home_xg: float, away_xg: float,
     league: str, home_team: str, away_team: str, kickoff_date: str,
+    control_feature_metadata: dict | None = None,
 ) -> bool:
     """Punctul de intrare public, simetric cu
     challenger_shadow.log_shadow_for_active_challenger(), dar hardcodat pe
@@ -111,6 +112,11 @@ def log_shadow_for_active_blend_challenger(
     predicția Oracle deja servită, primită ca oracle_probs
     (experiment_group="control") — pereche necesară pentru comparația
     paired din shadow_testing.evaluate_experiment().
+
+    `control_feature_metadata` [ADR-073]: identic cu
+    `challenger_shadow.log_shadow_for_active_challenger()` — intrările de la
+    servire, pasate EXCLUSIV apelului `control`, niciodată celui `treatment`.
+    None când flagul e oprit (implicit). Acest modul nu citește niciun flag.
 
     Best-effort: orice excepție e prinsă aici, niciodată propagată către
     Oracle Engine (Regula #8, degradare grațioasă)."""
@@ -141,6 +147,7 @@ def log_shadow_for_active_blend_challenger(
             experiment_name=_BLEND_ALGORITHM_FAMILY, experiment_version=active["training_run_id"],
             home_xg=home_xg, away_xg=away_xg,
             prob_home=oracle_probs[0], prob_draw=oracle_probs[1], prob_away=oracle_probs[2],
+            feature_metadata=control_feature_metadata,
             experiment_group="control", processing_stage="final",
             league=league, home_team=home_team, away_team=away_team, kickoff_date=kickoff_date,
         )

@@ -88,7 +88,30 @@ WHERE id = 1;
 - **Tiparul din septembrie se CONFIRMĂ pe o lună mai mult de date**, iar semnul se inversează acum în **2 din 5** cazuri: `xgboost_v1/e638c1dc` +1,18pp înghețat → **−1,04pp** proaspăt; `blend_v1/4e17c737` +1,17pp → **−0,34pp**. Baseline-ul înghețat flatează Challenger-ul în 4 din 5 (al cincilea, `174e7e17`, e identic). Singurul `candidate_for_promotion` verificabil, `blend_v1/8ac89c70`, **rezistă**: +3,66pp acuratețe și −0,0194 log-loss contra Oracle-ului real.
 - **BLOCAJUL REAL: codul nu e pe `main`.** Pașii 3-4 nu mai sunt limitați de `n`, ci de merge. Ordinea corectă redevine: merge pe `main` (cere aprobare explicită) → o rulare de noapte cu flagul oprit, care confirmă comportament neschimbat → abia apoi activarea. **[REZOLVAT 2026-10-13 — merge aprobat explicit și executat, `09cf0be` → `3566541`, fast-forward curat, `pytest tests/` verde pe `main` ÎNAINTE de push: 3347 passed, 2 skipped. Calea de predicție neatinsă, verificat: `git diff` pe `oracle_engine.py`/`feature_engine.py`/`ml_predictor.py`/`recalibration.py`/`app.py`/`oracle_api.py` e GOL.]**
 
-### D-2. Persistarea intrărilor de la servire (varianta B) — ADR nescris încă
+### D-2. Persistarea intrărilor de la servire (varianta B) — ✅ **ADR-073 SCRIS ȘI IMPLEMENTAT 2026-10-14, flag NEACTIVAT**
+
+> **[IMPLEMENTAT — 2026-10-14]** `docs/00_GOVERNANCE/ADR-073-serving-inputs-persistence.md`, aprobat explicit de proprietarul produsului. Flagul `serving_inputs_persistence_enabled` e **ABSENT din `model_config` (= `False`)**, deci comportamentul în producție e **neschimbat** — activarea e o decizie separată (North Star #3).
+>
+> **Ce s-a construit**: `_resolve_xg_params()` (punct unic de rezolvare, folosit de `_calibrate_xg` ȘI de înregistrare), `_build_serving_record()` (pur), `_serving_record_if_enabled()` (poarta flagului, în Oracle Engine, nu în adaptoare), plus cablarea pe rândul `control` în ambele adaptoare de shadow. `pytest tests/`: **3427 passed, 2 skipped**, 35 de teste noi.
+>
+> **Calea de predicție e dovedită neutră, nu presupusă**: refactorizarea lui `_calibrate_xg` a fost verificată rulând codul de dinainte (`git show HEAD:oracle_engine.py`, încărcat ca modul separat) în paralel cu cel nou, pe ponderile REALE din `weights.json`, peste **729.000 de combinații** — **zero divergențe, xG servit identic bit cu bit**.
+>
+> **Două descoperiri care au corectat planul** (Discovery Rule, ambele în ADR §„Două descoperiri"):
+> 1. **„Cele 5 ponderi" era numărat greșit.** `defensive_cap` NU e pondere per ligă — vine din ponderile GLOBALE (`oracle_engine.py:1540`), nu prin `resolve_league_weights()`. Setul real cerut de `calibrate_xg()` are **nouă** valori, din **trei** surse.
+> 2. **`ml_features["home_xg_pred"]` înseamnă două lucruri diferite**, după apelant: `_cache_prediction` pasează xG-ul **pre**-accidentări (linia 2100), `_log_challenger_shadow` pe cel **post** (linia 2213). Penalizarea stă între `calibrate_xg` și Poisson. Azi coincid (tabela de aliniamente e goală) — **de aceea n-a observat nimeni**. O gardă de reproducere care ar presupune egalitatea ar trece azi și ar cădea exact în ziua în care accidentările se cablează, iar partea greșită ar fi garda. Înregistrarea stochează ambele xG explicit.
+>
+> **Volumul din plan era greșit, corectat prin măsurare**: `BACKLOG` §2 estima „~1,8 MB"; un rând serializat ca `jsonb` are **1065 de octeți** măsurat, deci **2,65 MB** pentru rândurile `control` existente și **~5,5 MB/lună** în continuare — de trei ori estimarea, și fără nicio politică de retenție pe `shadow_predictions`.
+>
+> **9 mutații rulate, toate prinse — dar două au arătat gărzi defecte, nu cod defect:**
+> - **M4 (poarta flagului ștearsă complet) NU a fost prinsă la prima rulare**: garda folosea un `AssertionError`, pe care `except Exception` din `_serving_record_if_enabled` îl înghițea, întorcând exact `None`-ul așteptat. **Plasa de siguranță a codului anula garda testului.** Reparată prin contor.
+> - Garda „adaptoarele nu citesc flagul" căuta numele ca text și a căzut pe **propriul meu docstring** care explica tocmai că nu-l citește. **A treia instanță** a acestei clase, după `pipefail` (27 aug) și numele de secrete (14 oct). Reparată prin AST.
+> - Colateral, un test care **trecea** nu dovedea nimic: patcha `FootballOracleEngine` în loc de fixtura `_Engine`, care copiază metodele la definirea clasei — deci `_boom` nu era niciodată pe calea de execuție.
+>
+> **Ce NU face**: nicio predicție schimbată, nicio formulă atinsă, nicio sursă nouă de date, zero rescriere retroactivă a celor ~2600 de rânduri cu `feature_metadata` gol.
+>
+> **Rămâne de făcut**: activarea flagului (`UPDATE model_config`, arătat + confirmat explicit), după o rulare de noapte cu flagul oprit care confirmă comportament identic.
+
+**Textul de mai jos descrie golul ÎNAINTE de ADR-073**, păstrat ca istoric al diagnosticului.
 
 **Golul**: intrările pe care Oracle le folosește la servire (ratinguri ofensive/defensive, `form_score`, ELO, H2H) **nu sunt persistate nicăieri**. `_build_ml_features()` le construiește deja corect, iar `_cache_prediction()` le scrie în `predictions/*.json` — folder `.gitignore`-uit, pe un runner GitHub care se distruge la final. Se calculează corect și dispar.
 

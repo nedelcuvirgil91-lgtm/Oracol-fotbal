@@ -171,6 +171,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Shadow logging pt Challenger-ul Blend (ADR-050/Pasul 13) — flag
     # dedicat, separat de challenger_shadow_logging_enabled. Implicit OPRIT.
     "blend_challenger_shadow_logging_enabled": False,
+    # [ADAUGAT — ADR-073] Persistarea intrarilor de la servire in
+    # `feature_metadata`, pe randul `control` din shadow_predictions. Flag
+    # DEDICAT, separat de cele doua de mai sus: logarea shadow si
+    # inregistrarea intrarilor sunt doua decizii distincte. Implicit OPRIT
+    # (North Star #3). Flag oprit = dict-ul nici nu se construieste.
+    "serving_inputs_persistence_enabled": False,
     # Afișare UI a predicției Blend Engine (ADR-051/ADR-052) — flag dedicat,
     # neînrudit cu cel de mai sus (acela ramane strict shadow logging pt
     # Challenger-ul blend_v1). Populeaza doar pred.blend_engine_prediction.
@@ -1525,6 +1531,45 @@ class FootballOracleEngine:
         return resolve_league_weights(self.weights, league)
 
     # ── xG calibration ────────────────────────────────────────────────────
+    def _resolve_xg_params(
+        self, league: str, weather_penalty: float = 0.0, h2h: H2HRecord | None = None,
+    ) -> dict:
+        """[ADR-073 D1] Cele NOUĂ valori ne-profil pe care `calibrate_xg()` le
+        primește, **rezolvate**, adunate din TREI surse distincte:
+
+            baseline                              weights["league_baselines"][league]
+            form/base_weight, home_adv, away_pen  resolve_league_weights(...)
+            defensive_cap                         ponderile GLOBALE — NU per ligă
+            h2h_modifier, h2h_meetings            obiectul H2HRecord
+            weather_penalty                       calculat în evaluate_match
+
+        PUNCT UNIC, deliberat: `_calibrate_xg()` (care servește predicția) și
+        `_build_serving_record()` (care o înregistrează pentru audit) citesc
+        de AICI, nu fiecare pe cont propriu. Dacă rezolvarea s-ar duplica,
+        înregistrarea ar putea raporta alte valori decât cele folosite — adică
+        exact opusul scopului ei (North Star #9). Aceeași disciplină ca
+        `_h2h_record_from_history_rows()`.
+
+        Extras prin refactorizare pură din `_calibrate_xg()` — aritmetica din
+        `feature_engine.calibrate_xg()` e NEATINSĂ. `defensive_cap` a stat
+        patru luni în mijlocul acestei funcții fără să fie o pondere per ligă,
+        iar planul preliminar al ADR-073 îl numărase greșit ca atare.
+        """
+        w         = self.weights
+        baselines = w.get("league_baselines", {})
+        lw        = self._get_league_weights(league)
+        return {
+            "baseline":        float(baselines.get(league, baselines.get("default", 1.25))),
+            "form_weight":     lw["form_weight"],
+            "base_weight":     lw["base_weight"],
+            "home_advantage":  lw["home_advantage"],
+            "away_penalty":    lw["away_penalty"],
+            "defensive_cap":   float(w.get("defensive_cap", 2.5)),
+            "h2h_modifier":    (h2h.h2h_modifier if h2h else 0.0),
+            "h2h_meetings":    (h2h.meetings if h2h else 0),
+            "weather_penalty": weather_penalty,
+        }
+
     def _calibrate_xg(
         self,
         home_p: TeamProfile,
@@ -1533,12 +1578,6 @@ class FootballOracleEngine:
         weather_penalty: float = 0.0,
         h2h: H2HRecord | None = None,
     ) -> tuple[float, float]:
-        w         = self.weights
-        baselines = w.get("league_baselines", {})
-        baseline  = float(baselines.get(league, baselines.get("default", 1.25)))
-        lw        = self._get_league_weights(league)
-        d_cap     = float(w.get("defensive_cap", 2.5))
-
         home_xg, away_xg = calibrate_xg(
             home_offensive_rating=home_p.offensive_rating,
             home_defensive_rating=home_p.defensive_rating,
@@ -1546,15 +1585,7 @@ class FootballOracleEngine:
             away_defensive_rating=away_p.defensive_rating,
             home_form_score=home_p.form_score,
             away_form_score=away_p.form_score,
-            baseline=baseline,
-            form_weight=lw["form_weight"],
-            base_weight=lw["base_weight"],
-            home_advantage=lw["home_advantage"],
-            away_penalty=lw["away_penalty"],
-            defensive_cap=d_cap,
-            h2h_modifier=(h2h.h2h_modifier if h2h else 0.0),
-            h2h_meetings=(h2h.meetings if h2h else 0),
-            weather_penalty=weather_penalty,
+            **self._resolve_xg_params(league, weather_penalty, h2h),
         )
         logger.info("[xG] home=%.3f  away=%.3f  (weather=%.3f)", home_xg, away_xg, weather_penalty)
         return home_xg, away_xg
@@ -1743,6 +1774,113 @@ class FootballOracleEngine:
             "mc_prob_draw":            mc["mc_prob_draw"],
             "mc_prob_away":            mc["mc_prob_away"],
         }
+
+    # ── ADR-073: înregistrarea intrărilor de la servire ───────────────────
+    SERVING_RECORD_SCHEMA_VERSION = 1
+
+    def _build_serving_record(
+        self, home_p: TeamProfile, away_p: TeamProfile, h2h: H2HRecord | None,
+        league: str, weather_penalty: float, ml_features: dict,
+        home_xg_pre_injury: float, away_xg_pre_injury: float,
+        home_xg: float, away_xg: float,
+    ) -> dict:
+        """[ADR-073] Intrările pe baza cărora Oracle a produs predicția
+        SERVITĂ, într-o formă din care predicția se poate reconstrui.
+
+        Funcție PURĂ — zero I/O, zero citire de configurație dincolo de
+        `self.weights` (prin `_resolve_xg_params`), nu atinge `pred`.
+
+        DE CE EXISTĂ: intrările se calculează corect azi și se aruncă.
+        `_cache_prediction()` le scrie în `predictions/*.json`, folder
+        `.gitignore`-uit, pe un runner care se distruge la finalul
+        workflow-ului. `match_history` ține doar ieșiri. Deci nicio predicție
+        Oracle nu putea fi auditată până la intrările ei (North Star #9).
+
+        DE CE `oracle_inputs` REPETĂ valori din `ml_features`, deliberat:
+        `calibrate_xg()` are propria ei vedere asupra ratingurilor și
+        `form_score`. O gardă de reproducere trebuie să citească dintr-un
+        singur loc, fără să presupună că cele două vederi coincid — exact
+        presupunerea care, făcută în altă parte, a produs D2 de mai jos.
+
+        DE CE AMBELE xG, și nu doar cel servit [ADR-073 D2]: penalizarea de
+        accidentări se aplică ÎNTRE `calibrate_xg()` și Poisson. Deci
+        reproducerea din `oracle_inputs` dă xG-ul **pre**-accidentări, iar
+        coloana `home_xg` a rândului `shadow_predictions` e **post**. Azi
+        coincid (`freelf_lineup_snapshot` are 0 rânduri, penalizarea nu se
+        aplică niciodată) — de aceea ambiguitatea a trecut neobservată. O
+        gardă care ar presupune egalitatea ar trece azi și ar cădea exact în
+        ziua în care accidentările se cablează, iar partea greșită ar fi
+        garda. Se stochează ambele, iar etapa se raportează explicit.
+
+        `xg_changed_after_injury_step` spune STRICT că pre != post. NU
+        pretinde că a existat un aliniament sau că n-a existat — informația
+        aceea nu ajunge până aici, și n-o aproximăm (Regula #8).
+
+        `data_quality` e inclus pentru un motiv plătit pe 2026-10-14: o
+        partiție făcută pe `match_history.home_data_quality` (ÎNGHEȚAT prin
+        COALESCE) contra predicției SERVITE (împrospătată nocturn) a produs
+        „59-76% din decalaj", când cifra corectă e 34%. Un `data_quality`
+        proaspăt, pe același rând cu predicția, face acea clasă de eroare
+        imposibilă.
+        """
+        return {
+            "schema_version": self.SERVING_RECORD_SCHEMA_VERSION,
+            "ml_features": dict(ml_features),
+            "oracle_inputs": {
+                "home_offensive_rating": home_p.offensive_rating,
+                "home_defensive_rating": home_p.defensive_rating,
+                "away_offensive_rating": away_p.offensive_rating,
+                "away_defensive_rating": away_p.defensive_rating,
+                "home_form_score":       home_p.form_score,
+                "away_form_score":       away_p.form_score,
+                **self._resolve_xg_params(league, weather_penalty, h2h),
+            },
+            "oracle_outputs": {
+                "home_xg_pre_injury": home_xg_pre_injury,
+                "away_xg_pre_injury": away_xg_pre_injury,
+                "home_xg":            home_xg,
+                "away_xg":            away_xg,
+                "xg_changed_after_injury_step":
+                    home_xg != home_xg_pre_injury or away_xg != away_xg_pre_injury,
+            },
+            "data_quality": {"home": home_p.data_quality, "away": away_p.data_quality},
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+    def _serving_record_if_enabled(
+        self, home_p: TeamProfile, away_p: TeamProfile, h2h: H2HRecord | None,
+        pred: MatchPrediction, home_xg: float, away_xg: float,
+        weather_penalty: float, ml_features: dict,
+    ) -> dict | None:
+        """[ADR-073] Poarta flagului, într-un singur loc.
+
+        Flagul e citit AICI, în Oracle Engine, nu în adaptoarele de shadow —
+        ca adaptoarele să rămână fără cunoaștere de configurație, și ca flagul
+        oprit să însemne zero cost real: dict-ul nici nu se construiește.
+        Nu reutilizează `challenger_shadow_logging_enabled` (North Star #3:
+        fiecare decizie are flagul ei).
+
+        Întoarce None la ORICE eșec, niciodată excepție. Motivul nu e
+        cosmetic: apelul se face din interiorul construcției argumentelor
+        pentru `log_shadow_for_active_challenger()`, deci o excepție de aici
+        ar fi prinsă de `except` de mai sus și ar anula întreaga logare
+        shadow — o îmbunătățire de trasabilitate care distruge un flux care
+        funcționează. Înregistrarea e observațională; absența ei nu
+        degradează nimic.
+        """
+        if not self.config.get("serving_inputs_persistence_enabled", False):
+            return None
+        try:
+            return self._build_serving_record(
+                home_p=home_p, away_p=away_p, h2h=h2h, league=pred.league,
+                weather_penalty=weather_penalty, ml_features=ml_features,
+                home_xg_pre_injury=pred.home_xg_pre_injury,
+                away_xg_pre_injury=pred.away_xg_pre_injury,
+                home_xg=home_xg, away_xg=away_xg,
+            )
+        except Exception as exc:
+            logger.debug("[ADR-073] _build_serving_record eșuat: %s", exc)
+            return None
 
     # ── evaluate_match ────────────────────────────────────────────────────
     def evaluate_match(self, match: dict) -> MatchPrediction | None:
@@ -2215,6 +2353,9 @@ class FootballOracleEngine:
             return log_shadow_for_active_challenger(
                 algorithm_family=_ALGORITHM_FAMILY, league_scope=_LEAGUE_SCOPE,
                 features=ml_features,
+                control_feature_metadata=self._serving_record_if_enabled(
+                    home_p, away_p, h2h, pred, home_xg, away_xg, weather_penalty, ml_features,
+                ),
                 fixture_id=pred.fixture_id, home_xg=home_xg, away_xg=away_xg,
                 control_prob_home=pred.prob_home_win, control_prob_draw=pred.prob_draw,
                 control_prob_away=pred.prob_away_win,
@@ -2248,6 +2389,9 @@ class FootballOracleEngine:
                 league_scope=_LEAGUE_SCOPE,
                 oracle_probs=(pred.prob_home_win, pred.prob_draw, pred.prob_away_win),
                 features=ml_features,
+                control_feature_metadata=self._serving_record_if_enabled(
+                    home_p, away_p, h2h, pred, home_xg, away_xg, weather_penalty, ml_features,
+                ),
                 fixture_id=pred.fixture_id, home_xg=home_xg, away_xg=away_xg,
                 league=pred.league, home_team=pred.home_team, away_team=pred.away_team,
                 kickoff_date=pred.kickoff_date,
