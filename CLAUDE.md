@@ -26,7 +26,9 @@ Not Implemented
 
 **Secțiunea asta există pentru că absența ei a costat deja.** ADR-057 nu era citat de niciun document și de niciun cod; condiția lui s-a împlinit pe 23 august, iar starea a fost descoperită abia pe 6 septembrie — **14 zile fără nicio antrenare**, și doar dintr-o întrebare întâmplătoare a proprietarului produsului. Orice decizie amânată se scrie AICI, cu declanșatorul verificabil, nu doar în ADR-ul ei.
 
-> **📌 CE E DE URMĂRIT, ACUM: `docs/00_GOVERNANCE/DE_URMARIT.md`** — listă vie, un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Conține și răspunsul verificat la întrebarea care revine: **promovarea unui campion e în continuare exclusiv manuală, nimic nu e automat** — nu ai ce aproba azi doar fiindcă niciun Challenger nu e eligibil (n = 0 și n = 151, prag 200).
+> **📌 CE E DE URMĂRIT, ACUM: `docs/00_GOVERNANCE/DE_URMARIT.md`** — include §2ter, **semnalul deschis `n = 1000` fix** la `flashscore_team_dna` (eligibile reale 1022; plafon de cod EXCLUS prin verificare, explicație probabilă = meciuri care au căpătat rezultat după pasul de evaluare; **test binar la următoarea rulare**), și §3 cu proiecția ADR-072 corectată **a treia oară** (16-18 oct, nu 19-20) plus cauza erorii repetate.
+>
+> **(descrierea generală a documentului)** — listă vie, un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Conține și răspunsul verificat la întrebarea care revine: **promovarea unui campion e în continuare exclusiv manuală, nimic nu e automat** — nu ai ce aproba azi doar fiindcă niciun Challenger nu e eligibil (n = 0 și n = 151, prag 200).
 >
 > **🔴 PUNCT DE RELUARE, citit PRIMUL: `docs/00_GOVERNANCE/STARE_2026-10-14_SEARA.md`** — ce s-a lucrat pe 14 oct după-amiază (ADR-073, complet, flag oprit), ce se verifică la terminarea rulării `night_sync` **38620259384** (pornită manual 19:02 UTC, prima cu codul ADR-073 pe `main`), **o corecție de proiecție** (primul `baseline_source = 'shadow_control'` e pe **19-20 oct, NU 17** — seria măsurată 132→141→144→151 dă ~9,5/zi), lanțul verificat al Decision Feed-ului gol, și ce rămâne de făcut, ordonat.
 >

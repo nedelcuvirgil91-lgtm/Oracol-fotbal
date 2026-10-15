@@ -2,7 +2,7 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-10-15, 09:00 UTC** (după rularea 38697307312 — ADR-073 verificat end-to-end, D-10 măsurat).
+Ultima actualizare: **2026-10-15, 09:30 UTC**.
 
 ---
 
@@ -159,15 +159,61 @@ Al doilea de urmărit: `flashscore_team_dna/v1`, verdict înghețat de 34 de zil
 
 ---
 
-## 3. ~19-20 octombrie — primul verdict real pe baseline-ul corect
+## 2ter. 🔴 `n = 1000` FIX la `flashscore_team_dna` — DE VERIFICAT LA URMĂTOAREA RULARE
 
-`blend_v1/174e7e17` trece pragul de 200 și produce primul `baseline_source = 'shadow_control'`.
+**Starea**: `experiment_registry` arată `n_matches_evaluated = 1000` **exact**, iar rândurile eligibile numărate independent sunt **1022**. Diferență: **22**.
 
-Abia atunci ADR-072 e confirmat end-to-end, pe date reale.
+**De ce merită urmărit și nu ignorat**: 1000 e exact plafonul implicit PostgREST („Max Rows"), iar acest proiect are deja **patru** instanțe reparate ale aceleiași capcane (`get_training_data`, `get_shadow_predictions`, `_read_match_history_for_fixtures`, `get_distinct_experiments`). O cifră rotundă fix la plafon nu se trece cu vederea.
+
+**Ce am verificat deja (15 oct), și exclude un plafon de cod:**
+
+| Verificare | Rezultat |
+|---|---|
+| `get_shadow_predictions()` paginat keyset pe `id` | ✅ corect, `ORDER BY` + `_PAGE_SIZE` |
+| `_read_match_history_for_fixtures()` | ✅ bucăți de **500** → nicio cerere nu poate întoarce 1000 |
+| `evaluate_experiment()` are vreun `limit`/slice? | ✅ **nu**, `n = len(eligible)`, fără plafon |
+| Numitorul e corect? | ✅ **1022 distincte**, 0 invalidate, 0 șiruri goale, 0 baseline-uri lipsă, toate `v1` |
+
+**Explicația probabilă, dar NEconfirmată**: **24 de meciuri** din 13-15 octombrie sunt eligibile acum — ~exact decalajul de 22. Pasul de evaluare rulează devreme în `night_sync` (în `run_daily`), iar rândurile shadow și rezultatele care sosesc mai târziu în aceeași rulare n-ar fi fost văzute. `flashscore_team_dna` e cel mai expus la asta, fiindcă loghează pe **fiecare** meci evaluat, nu doar pe fereastra unui Challenger.
+
+### Testul decisiv, la următoarea rulare — binar, fără interpretare
+
+```sql
+SELECT experiment_name, left(experiment_version,8) AS versiune, n_matches_evaluated
+FROM experiment_registry WHERE experiment_name = 'flashscore_team_dna';
+```
+
+| Rezultat | Verdict |
+|---|---|
+| `n` ≈ **1030+** | **Creștere naturală.** Subiectul se închide, nu era plafon. |
+| `n` = **exact 1000** din nou | **A cincea instanță a plafonului.** Se investighează, cu prioritate — ar însemna o cale de citire pe care n-am găsit-o. |
+| `n` între 1000 și 1030 | Neconcludent; se repetă măsurătoarea cu numitorul recalculat în același moment. |
+
+**Important de reținut la interpretare**: numitorul (1022) trebuie **recalculat în momentul citirii**, nu refolosit — el însuși crește de la o zi la alta. Comparația corectă e `n` de azi contra eligibilelor de azi, nu contra celor de ieri.
+
+**Nu e urgent**: chiar dacă ar fi un plafon, ar afecta un experiment care **nu e un motor** (`flashscore_team_dna` **ESTE** Oracle — diferență maximă 0,000050) și care e `monitoring`, nu candidat. Dar e un semnal de integritate, iar clasa asta a costat deja de patru ori.
+
+---
+
+## 3. **16-18 octombrie** — primul verdict real pe baseline-ul corect
+
+`blend_v1/174e7e17` trece pragul de 200 și produce primul `baseline_source = 'shadow_control'`. Abia atunci ADR-072 e confirmat end-to-end, pe date reale.
 
 **Până atunci, `baseline_source` NULL e CORECT, nu defect** — sub prag, verdictul iese pe return-ul devreme și câmpul nici nu se atașează.
 
-**Proiecția „17 octombrie" din documentele anterioare e GREȘITĂ**, corectată aici: seria măsurată e 132 (12 oct) → 141 → 144 (13 oct) → **151** (14 oct), adică ~9,5/zi. De la 151 la 200 ies ~5 zile. Pauza internațională poate încetini.
+### A TREIA corectare a aceleiași proiecții — și de ce greșesc repetat
+
+| Când am spus-o | Proiecția | Pe ce se baza |
+|---|---|---|
+| 14 oct, dimineață | 17 octombrie | o extrapolare fără serie măsurată |
+| 14 oct, seară | 19-20 octombrie | seria 132→141→144→151, ~9,5/zi |
+| **15 oct** | **16-18 octombrie** | seria completă: 144 → 151 → 153 → **175** |
+
+Seria reală a lui `blend_v1/174e7e17`: **144** (13 oct 21:08) → **151** (14 oct 05:30) → **153** (14 oct 20:29) → **175** (15 oct 08:50). Ultima rulare singură a adus **+22**, iar media pe 36 de ore e ~21/zi — de două ori ritmul pe care îl proiectasem cu o zi înainte.
+
+**Cauza erorii mele, de reținut**: ritmul **nu e constant** și nu poate fi. Depinde de câte meciuri se joacă efectiv în fereastră — iar asta variază puternic între zile de weekend, zile de săptămână și pauze internaționale. Am tratat de două ori un proces neomogen ca pe unul liniar, și l-am extrapolat dintr-un segment nereprezentativ.
+
+**Deci forma corectă a răspunsului nu e o dată, ci un interval cu driverul numit**: de la 175, mai sunt 25 de meciuri; la ritmul observat (9-22/zi, după volumul de meciuri) ies **1-3 zile**. Dacă nu apare până pe 18 octombrie, atunci merită verificat — nu înainte.
 
 ---
 
