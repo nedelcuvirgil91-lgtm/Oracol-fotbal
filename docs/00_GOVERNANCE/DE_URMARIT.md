@@ -2,7 +2,7 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-10-15, 16:35 UTC**.
+Ultima actualizare: **2026-10-15, 16:55 UTC**.
 
 ---
 
@@ -405,7 +405,31 @@ Două regimuri, și dictează momente diferite:
 
 **Aranjat așa, F3 nu se strică niciodată** — fiindcă nu începe decât după ce universul s-a așezat.
 
-**Precondiție, nenegociabilă**: fiecare ligă intră cu slug Flashscore **verificat live, niciodată ghicit** (precedentul e chiar Conference League, 5 august). Și fiecare intră în `LEAGUE_PROVIDERS`, deci automat în `TRACKED_COMPETITIONS` — nu mai există calea prin care o ligă e adăugată pe jumătate.
+**Precondiție, nenegociabilă**: fiecare ligă intră cu slug Flashscore **verificat, niciodată ghicit** (precedentul e chiar Conference League, 5 august). Și fiecare intră în `LEAGUE_PROVIDERS`, deci automat în `TRACKED_COMPETITIONS` — nu mai există calea prin care o ligă e adăugată pe jumătate.
+
+### ✅ Slug-uri Flashscore — VERIFICATE 2026-10-15, gata de folosit
+
+Nivel B (titlul REAL generat de Flashscore, indexat — aceeași metodă cu care s-au adăugat ultimele 11 competiții). **Niciunul nu e ghicit din convenție.**
+
+| Ligă | Slug | Titlul care îl confirmă |
+|---|---|---|
+| Austria | `("austria", "bundesliga")` | „Bundesliga **2026/2027** live scores, results, Football **Austria** – Flashscore" |
+| Elveția | `("switzerland", "super-league")` | „**Swiss Super League** live scores, results, Football **Switzerland** – Flashscore" |
+| Danemarca | `("denmark", "superliga")` | „Superliga **2026/2027** live scores, results, Football **Denmark** – Flashscore" |
+
+**🔴 Capcană găsită la DOUĂ din trei, de reținut la implementare**: există și `austria/bundesliga-women`, și `switzerland/super-league-women` — competiții **diferite**, sub nume aproape identic. Plus `austria/admiral-bundesliga` (numele sponsorizat, arhivă 2021/22). Un slug ales „logic" putea nimeri campionatul feminin sau o arhivă moartă. Exact tiparul pentru care World Cup 2026 a fost EXCLUS (patru URL-uri conflictuale, Regula #8).
+
+**Confirmare din conținut, nu doar din URL** — paginile listează meciuri reale din fereastra curentă: *Salzburg – Altach*, *LASK – Salzburg* (16-25 oct) · *Zurich – Luzern*, *Basel – Grasshoppers* (24-25 oct) · *Horsens – Randers*, *FC Copenhagen – Aarhus* (16-18 oct).
+
+**Încrucișare independentă**: *FC Copenhagen*, *Aarhus*, *LASK*, *Salzburg* sunt exact cluburile pe care analiza cupelor din aceeași zi le identificase ca jucând în Europa fără campionat domestic urmărit. Două măsurători separate, același set.
+
+**Risc rezidual, declarat**: nivelul B e mai slab decât A (navigare Playwright reală, imposibilă din sandbox). Riscul e strict la nivel de slug, nu de parser — acela e generic și dovedit pe 17 competiții. Se face o rulare `--dry-run` per ligă înainte de prima rulare live.
+
+### ⛔ Ce rămâne NEverificat: cheile Odds API
+
+Pentru niciuna dintre cele trei nu știm dacă The Odds API le acoperă. Nu se poate afla din sesiunea de dezvoltare: cheia nu e în container, iar răspunsul `/sports` **nu e în `api_cache`** (verificat, 0 rânduri). Cere un apel live `/sports?all=true` dintr-un workflow, cu cheia din secrete.
+
+**Nu e blocant pentru predicții** — cotele ajung oricum prin `odds_fallback_flashscore`, care are 5,53 case/meci față de 1,57 la Odds API. Contează doar pentru a ști dacă liga apare și în `odds_history`.
 
 ---
 
