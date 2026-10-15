@@ -2,7 +2,7 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-10-15, 09:30 UTC**.
+Ultima actualizare: **2026-10-15, 13:50 UTC**.
 
 ---
 
@@ -264,6 +264,39 @@ Concluzia rămâne cea din D-10 §D-9: **micșorarea timeout-ului NU ajută** (`
 Pe scurt, de ce: ML e la platou măsurat (acuratețe de validare 0,4834 → 0,4854 → 0,4853 în 5 săptămâni), fiindcă fiecare reantrenare adaugă **+1,0%** date noi. Iar distribuția pe care învață a derivat monoton din 2021.
 
 Patru ipoteze, niciuna nu atinge Oracle: **H1** feature-uri de diferență · **H2** fereastră de istoric scurtată · **H3** ponderare după recență · **H4** eliminarea celor 4 feature-uri rare.
+
+---
+
+## 4ter. Slotul `value_selector_shadow` întârzie sistematic 5-10 ore (măsurat 15 oct)
+
+**Context**: ecranul Top Value Bets a trecut pe **3 zile** (tab-uri Azi / Mâine / Poimâine, paginare per zi, `79a3604` pe `main`), iar colectorul de noapte pe `--days-ahead 3`. Verificând că zilele +1 și +2 chiar primesc rânduri, a ieșit la iveală altceva.
+
+**Ora declarată e 09:40 UTC. Ora la care rularea chiar pornește, pe 6 zile consecutive:**
+
+| Zi | Livrat | Întârziere |
+|---|---|---:|
+| 9 oct | 16:30 | 6h50m |
+| 10 oct | 15:32 | 5h52m |
+| 11 oct | 15:55 | 6h15m |
+| 12 oct | 19:16 | **9h36m** |
+| 13 oct | 17:06 | 7h26m |
+| 14 oct | 14:38 | 4h58m |
+
+**Vine în fiecare zi. Nu e abandonată niciodată.** E coada FIFO GitHub, fenomenul documentat în `CLAUDE.md` din august — dar până acum nu fusese măsurat pe acest workflow.
+
+**Ce înseamnă practic, și de ce nu e urgent**: fereastra de `--days-ahead 3` acoperă de fapt **patru** zile calendaristice (azi..+3, fiindcă limita e `moment + timedelta(days=N)` cu filtru `<=`). A patra zi e exact marja care absoarbe întârzierea: ecranul are rânduri pentru toate cele trei zile afișate chiar și când rularea de azi n-a sosit încă. Alegerea s-a dovedit bună din alt motiv decât cel pentru care a fost făcută.
+
+**Ce se degradează totuși**: prospețimea cotelor. Motivul de programare scris în antetul workflow-ului („09:40, DUPĂ `sync_pre_match_odds` de la 08:00, ca să fie cotele deja persistate") e corect ca intenție și fals în practică — rularea aterizează după-amiaza. **Nereparat deliberat**: mutarea orei declarate nu scurtează coada, iar fără măsurători pe mai multe săptămâni n-avem cum ști dacă ar ajuta. Aceeași disciplină ca la `live_sync` și `sync_pre_match_odds` în august — se măsoară întâi, se mută după.
+
+**De urmărit**: dacă întârzierea depășește ~12 ore (adică rularea ajunge să nu mai prindă ziua pentru care colectează) sau dacă apare o zi cu **zero** livrare. Prima ar începe să conteze; a doua ar schimba diagnosticul din „întârziere" în „abandon".
+
+### Lecția de metodă, plătită în aceeași zi
+
+Afirmasem, și **apucasem să scriu într-un commit**, că slotul de azi „a fost ABANDONAT". Nefondat: verificasem la 13:33 UTC, adică **înainte de cea mai devreme oră la care rularea a sosit vreodată** (14:38). Din absența la un singur moment am dedus o stare terminală.
+
+Proprietarul produsului a contestat („ba a rulat azi") și verificarea seriei i-a dat dreptate. **A treia instanță a aceleiași clase în trei zile** — un instantaneu citit ca o serie, exact eroarea din proiecția ADR-072, greșită de trei ori. Și a doua oară în aceeași zi când o concluzie a mea e răsturnată de observația proprietarului produsului asupra ecranului.
+
+Corectura e scrisă *în* comentariul din workflow, nu înlocuită tacit — afirmația greșită e în istoricul git, deci cine o citește trebuie să dea și de dezmințire.
 
 ---
 
