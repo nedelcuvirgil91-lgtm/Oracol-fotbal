@@ -2,7 +2,7 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-10-15, 18:10 UTC**.
+Ultima actualizare: **2026-10-15, 18:20 UTC**.
 
 ---
 
@@ -421,11 +421,36 @@ Nivel B (titlul REAL generat de Flashscore, indexat — aceeași metodă cu care
 
 **Cât de reală e capcana — măsurat pe pagina live (Austria, 15 oct)**: bara laterală listează `Bundesliga`, `2. Liga`, `Regionalliga East/West/South/North`, `Regionalliga Play Offs`, `Burgenland`, `Karnten`, `Niederosterreich` și încă **9** ascunse sub „Show more" — peste **17 competiții austriece**, dintre care una singură e cea căutată. Sigla paginii spune „**ADMIRAL** Bundesliga", ceea ce explică varianta sponsorizată: numele comercial diferă de slug.
 
-### ⛔ Ce NU confirmă încă nicio verificare: cotele 1X2 PER MECI
+### ✅ Cotele 1X2 PER MECI — ÎNCHIS pentru Austria (nivel A, 15 oct 21:09)
 
-Pagina de competiție arată „Winner Odds" cu trei case (Superbet, Betano, MrBit) — dar acelea sunt cote la **câștigarea campionatului**, piață outright. Sursa reală a lui `odds_fallback_flashscore` e `/odds/?mid=X`, adică tab-ul de cote al **fiecărui meci** (`providers/flashscore/normalizer.py:960`).
+Întâi lăsasem necunoscuta deschisă: pagina de competiție arăta „Winner Odds" cu trei case, dar acelea sunt cote la **câștigarea campionatului** — piață outright, nu ce folosim noi. Sursa reală a lui `odds_fallback_flashscore` e `/odds/?mid=X`, tab-ul de cote al **fiecărui meci** (`providers/flashscore/normalizer.py:960`).
 
-Deci prezența caselor pe pagina ligii e un semn bun, **nu o dovadă**. Confuzia dintre cele două piețe ar fi exact genul de presupunere care costă mai târziu. De verificat separat, pe un meci concret, înainte de adăugare.
+Verificat pe meciul *SK Rapid – Hartberg* (16.10.2026, Round 9), pagină live:
+
+| Casă | 1 | X | 2 |
+|---|---:|---:|---:|
+| Superbet | 1,27 | 5,90 | 8,10 |
+| Unibet | 1,27 | 6,00 | 9,00 |
+| Betano | 1,28 | 5,60 | 9,00 |
+| MrBit | 1,26 | 6,33 | 8,50 |
+| get's bet | 1,27 | 5,50 | 8,50 |
+| NetBet | 1,22 | 5,50 | 7,70 |
+
+**Șase case vizibile, plus „Show more".** Media măsurată a lui `odds_fallback_flashscore` peste toate ligile urmărite e **5,53 case/meci** — deci Austria e cel puțin la fel de bine acoperită ca ligile existente.
+
+**Consecință: Austria NU are nevoie de cheie Odds API.** Lanțul de cote e complet pe calea Flashscore.
+
+**Și structura întregului lanț e confirmată, nu doar cotele.** Tab-urile sunt `MATCH · ODDS · H2H · STANDINGS` — exact cele folosite la celelalte 17 competiții: `H2H` alimentează Level FS2 (forma echipelor fără campionat urmărit), `STANDINGS` alimentează `flashscore_standings_snapshot`, iar `ODDS` include `1X2 / OVER-UNDER / BTTS / DOUBLE CHANCE`. Breadcrumb `AUSTRIA > BUNDESLIGA · ROUND 9` confirmă legătura ligă↔meci folosită de Discovery.
+
+**Rămâne neverificat același lucru pentru Elveția și Danemarca** — probabil identic (aceeași platformă, aceeași structură), dar „probabil" nu e „verificat".
+
+### Observație colaterală, consemnată ca să nu fie redescoperită
+
+Pagina de meci are „PREDICTED LINEUPS" cu filele `AVG. RATING · MARKET VALUE · AGE · HEIGHT`, și textul *„Official lineups expected 1 hour before kick-off"*.
+
+A doua confirmă fereastra universală de ~1h documentată în august. Prima precizează un fapt din `CLAUDE.md`: acolo scrie că extracția noastră *„nu a colectat niciodată"* `market_value` — câmpul de care depinde formula de penalizare a accidentărilor. **Flashscore îl afișează**; lipsa e la noi, nu la sursă. Nu e o contradicție, e o precizare.
+
+**NU redeschide calea accidentărilor** — aceea e închisă pentru alt motiv (Flashscore nu publică lista structurată a absenților, testat live pe 9 meciuri, 30 aug).
 
 **Confirmare din conținut, nu doar din URL** — paginile listează meciuri reale din fereastra curentă: *Salzburg – Altach*, *LASK – Salzburg* (16-25 oct) · *Zurich – Luzern*, *Basel – Grasshoppers* (24-25 oct) · *Horsens – Randers*, *FC Copenhagen – Aarhus* (16-18 oct).
 
