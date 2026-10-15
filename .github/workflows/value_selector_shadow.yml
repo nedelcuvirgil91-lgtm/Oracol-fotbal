@@ -18,7 +18,14 @@ name: Football Oracle — Value Selector Shadow (ADR-071 F2)
 #     09:20 UTC) sau `flashscore_extra_leagues` (10:30 UTC), aceeași disciplină
 #     „fără suprapunere prin programare" aplicată în tot proiectul.
 #
-# Fereastră: 3 zile (azi + 2). Mărită de la 1 pe 2026-10-15, când ecranul Top
+# Fereastră: `--days-ahead 3` = azi + 3 zile calendaristice (azi..+3), NU azi+2.
+# Limita e `moment + timedelta(days=N)`, iar filtrul pe `kickoff_date` e `<=`,
+# deci ziua N intră întreagă. Verificat pe rularea 38743747073: a scris 15, 16,
+# 17 ȘI 18 octombrie. Ziua a patra e marjă utilă, nu risipă — dacă o rulare
+# programată e abandonată de coada GitHub (s-a întâmplat chiar pe 15 oct, la
+# slotul de 09:40), ecranul tot are rânduri pentru toate cele trei zile afișate.
+#
+# Mărită de la 1 pe 2026-10-15, când ecranul Top
 # Value Bets a trecut pe trei zile: fără ea, zilele +1 și +2 n-ar avea rânduri
 # în `value_selector_shadow`, iar ecranul ar cădea pe calculul live — zeci de
 # evaluări complete într-o sesiune Streamlit. Costul măsurat înainte: ~1053
@@ -37,7 +44,7 @@ on:
   workflow_dispatch:
     inputs:
       days_ahead:
-        description: "Câte zile înainte se evaluează (implicit 3 = azi + 2)"
+        description: "Câte zile înainte se evaluează (implicit 3 = azi..+3, patru zile)"
         required: false
         default: "3"
       dry_run:
