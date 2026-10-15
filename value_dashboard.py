@@ -349,6 +349,39 @@ def _echipe_pentru(client, fixture_ids: list[str]) -> dict[str, tuple[str, str]]
     return iesire
 
 
+# ── Fereastra de zile a radarului ────────────────────────────────────────────
+
+# Etichetele pe care le cere produsul pentru primele trei zile. Dincolo de ele
+# nu există nume în limbă („răspoimâine" e ambiguu și rar folosit), deci se cade
+# pe ziua calendaristică — mai bine o etichetă seacă decât una inventată.
+ETICHETE_ZILE = ("Azi", "Mâine", "Poimâine")
+
+
+def zile_radar(azi, *, zile: int = 3) -> list[tuple[str, str]]:
+    """`[(zi_iso, etichetă)]` pentru fereastra radarului, începând cu `azi`.
+
+    Funcție pură, fără I/O și fără `date.today()` înăuntru — ziua curentă se
+    injectează, altfel testul de graniță (schimbarea de lună, de an) ar depinde
+    de ceasul mașinii pe care rulează.
+
+    Fereastra e strict de PREZENTARE: nu schimbă nicio poartă, niciun prag și
+    nicio ordonare. Plafonul politicii rămâne, neatins, de 5 meciuri **pe zi**
+    (ADR-071 §9) — fiecare zi își păstrează propriul clasament și propria
+    paginare, exact ca înainte. Un clasament unic pe toată fereastra ar fi fost
+    altceva: ar fi cerut comparabilitatea `actionability_score` între zile, care
+    nu e demonstrată, deci ar fi fost amendament la ADR-071, nu prezentare."""
+    from datetime import timedelta
+
+    zile = max(1, int(zile))
+    iesire: list[tuple[str, str]] = []
+    for i in range(zile):
+        zi = azi + timedelta(days=i)
+        eticheta = (ETICHETE_ZILE[i] if i < len(ETICHETE_ZILE)
+                    else zi.strftime("%a %d/%m"))
+        iesire.append((zi.isoformat(), eticheta))
+    return iesire
+
+
 # ── Afișarea orei ────────────────────────────────────────────────────────────
 
 FUS_ORAR_AFISARE = "Europe/Bucharest"

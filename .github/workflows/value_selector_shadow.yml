@@ -18,6 +18,14 @@ name: Football Oracle — Value Selector Shadow (ADR-071 F2)
 #     09:20 UTC) sau `flashscore_extra_leagues` (10:30 UTC), aceeași disciplină
 #     „fără suprapunere prin programare" aplicată în tot proiectul.
 #
+# Fereastră: 3 zile (azi + 2). Mărită de la 1 pe 2026-10-15, când ecranul Top
+# Value Bets a trecut pe trei zile: fără ea, zilele +1 și +2 n-ar avea rânduri
+# în `value_selector_shadow`, iar ecranul ar cădea pe calculul live — zeci de
+# evaluări complete într-o sesiune Streamlit. Costul măsurat înainte: ~1053
+# rânduri/zi peste cele 13 profile, ~1,2 MB/zi în tabelă (36.816 rânduri /
+# 47 MB la 40 de zile). Tripleaz-o și devine ~3,5 MB/zi, pe o tabelă care NU
+# are azi nicio politică de retenție — gol cunoscut, consemnat, nu ascuns.
+#
 # Întârzierile cozii GitHub (documentate, până la 11-12h în perioade de
 # throttling) NU falsifică experimentul: `evaluated_at` e persistat per rând,
 # iar prospețimea predicției și `leakage_suspect` se calculează față de el.
@@ -29,9 +37,9 @@ on:
   workflow_dispatch:
     inputs:
       days_ahead:
-        description: "Câte zile înainte se evaluează (implicit 1 = ziua curentă)"
+        description: "Câte zile înainte se evaluează (implicit 3 = azi + 2)"
         required: false
-        default: "1"
+        default: "3"
       dry_run:
         description: "true = calculează și raportează, fără să scrie nimic"
         required: false
@@ -74,6 +82,6 @@ jobs:
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
         run: |
           python -m value_selector_shadow \
-            --days-ahead "${{ github.event.inputs.days_ahead || '1' }}" \
+            --days-ahead "${{ github.event.inputs.days_ahead || '3' }}" \
             ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }} \
             ${{ github.event.inputs.force == 'true' && '--force' || '' }}

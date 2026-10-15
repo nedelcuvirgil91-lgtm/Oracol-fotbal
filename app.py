@@ -926,19 +926,32 @@ if nav == "matches":
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# VIEW — VALUE BETS (Top Value Bets Today)
+# VIEW — VALUE BETS (Top Value Bets — Azi / Mâine / Poimâine)
 # ═════════════════════════════════════════════════════════════════════════════
-# [ADAUGAT] Agregă value bets peste toate meciurile de azi. Regulă explicită
+# [ADAUGAT] Agregă value bets peste meciurile ferestrei. Regulă explicită
 # a sprintului: NU dependent de apeluri live la fiecare refresh — folosește
 # întâi cache-ul de sesiune (all_matches + predicții deja calculate), și
 # recalculează DOAR meciurile neanalizate sau cu cache expirat (vezi
 # PREDICTION_CACHE_TTL_SECONDS). Implementare simplă, sincronă — fără
 # paralelizare, fără precomputare (optimizări lăsate pentru un sprint separat,
 # dacă timpul de încărcare chiar devine o problemă reală, nu presupusă).
+#
+# [EXTINS pe 3 zile] Schimbarea e strict de prezentare: `all_matches` conținea
+# deja 7 zile (`get_week_matches(days_ahead=7)`), iar filtrul pe ziua curentă
+# era singurul lucru care îngusta ecranul la una. Fiecare zi își păstrează
+# propriul radar, propriul clasament și propria paginare — plafonul politicii
+# rămâne de 5 meciuri PE ZI (ADR-071 §9), nu 5 pe toată fereastra.
+#
+# De ce calculul live rămâne automat DOAR pentru azi: `st.tabs` randează
+# conținutul TUTUROR tab-urilor, nu doar al celui vizibil. Un fallback
+# automat pe toate trei ar însemna, într-o zi în care colectorul de noapte n-a
+# rulat, zeci de evaluări complete pentru două tab-uri pe care utilizatorul
+# poate nici nu le deschide. Azi păstrează comportamentul de dinainte, bit cu
+# bit; celelalte două zile cer o apăsare explicită. Asimetria e deliberată.
 elif nav == "value_bets":
-    from value_dashboard import collect_value_bets, ora_locala, radar_din_shadow
+    from value_dashboard import collect_value_bets, ora_locala, radar_din_shadow, zile_radar
 
-    st.markdown('<div class="section-bar"><div class="section-bar-title">💰 Top Value Bets — Azi</div></div>',
+    st.markdown('<div class="section-bar"><div class="section-bar-title">💰 Top Value Bets — 3 zile</div></div>',
                 unsafe_allow_html=True)
 
     # Reutilizează lista deja încărcată de VIEW 1 (MECIURI), dacă există în
@@ -952,26 +965,36 @@ elif nav == "value_bets":
     else:
         all_matches = st.session_state["all_matches"]
 
-    today_iso     = date.today().isoformat()
-    today_matches = [m for m in all_matches if m.get("kickoff_date", "") == today_iso]
+    azi        = date.today()
+    zile       = zile_radar(azi)
+    azi_iso    = azi.isoformat()
 
-    if not today_matches:
-        st.info("Niciun meci azi în competițiile urmărite.")
-    else:
-        col_reia, col_alte = st.columns([3, 2])
-        with col_reia:
-            force_refresh = st.button("🔄 Recalculează tot (ignoră cache-ul)",
-                                      use_container_width=True)
-        with col_alte:
-            alte_cinci = st.button("↻ Încă 5 sugestii", use_container_width=True,
-                                   help="Următoarele meciuri care au trecut "
-                                        "aceleași porți, doar cu scor mai mic. "
-                                        "Ștacheta nu coboară.")
-        if force_refresh:
-            prediction_cache.goleste(_depozit_predictii())
-            st.session_state["radar_pagina"] = 0
-        if alte_cinci:
-            st.session_state["radar_pagina"] = st.session_state.get("radar_pagina", 0) + 1
+    force_refresh = st.button("🔄 Recalculează tot (ignoră cache-ul)",
+                              use_container_width=True)
+    if force_refresh:
+        prediction_cache.goleste(_depozit_predictii())
+        for _zi_iso, _ in zile:
+            st.session_state[f"radar_pagina_{_zi_iso}"] = 0
+            st.session_state.pop(f"calc_live_{_zi_iso}", None)
+
+    # Contoarele de performanță se adună peste zilele care chiar au calculat —
+    # ecranul e unul singur, deci și raportul din Diagnostics rămâne unul
+    # singur, cu aceleași chei ca înainte.
+    perf = {"matches": 0, "reused": 0, "computed": 0,
+            "cache_times": [], "live_times": [], "seconds": 0.0}
+
+    def _randeaza_ziua(zi_iso: str, eticheta: str, *, auto_live: bool) -> None:
+        meciuri_zi = [m for m in all_matches if m.get("kickoff_date", "") == zi_iso]
+        if not meciuri_zi:
+            st.info(f"Niciun meci {eticheta.lower()} în competițiile urmărite.")
+            return
+
+        cheie_pagina = f"radar_pagina_{zi_iso}"
+        if st.button("↻ Încă 5 sugestii", key=f"alte5_{zi_iso}",
+                     use_container_width=True,
+                     help="Următoarele meciuri care au trecut aceleași porți, "
+                          "doar cu scor mai mic. Ștacheta nu coboară."):
+            st.session_state[cheie_pagina] = st.session_state.get(cheie_pagina, 0) + 1
 
         # [ADR-071 §18] Calea rapidă a radarului: rândurile au fost deja
         # calculate de colectorul de noapte și persistate în
@@ -980,8 +1003,20 @@ elif nav == "value_bets":
         # `None` = radar inactiv, fără date pentru ziua asta, sau eroare de
         # citire — se cade pe calculul live de mai jos, NESCHIMBAT.
         radar = None if force_refresh else radar_din_shadow(
-            today_iso, pagina=st.session_state.get("radar_pagina", 0))
-        de_analizat = [] if radar is not None else today_matches
+            zi_iso, pagina=st.session_state.get(cheie_pagina, 0))
+
+        cheie_live = f"calc_live_{zi_iso}"
+        if radar is None and not auto_live and not st.session_state.get(cheie_live):
+            st.info(f"Radarul nu are încă rânduri pentru ziua asta "
+                    f"({len(meciuri_zi)} meciuri). Colectorul de noapte le "
+                    f"scrie de obicei cu o zi înainte.")
+            if st.button(f"Calculează acum ({len(meciuri_zi)} meciuri)",
+                         key=f"live_{zi_iso}", use_container_width=True):
+                st.session_state[cheie_live] = True
+                st.rerun()
+            return
+
+        de_analizat = [] if radar is not None else meciuri_zi
 
         predictions: list = []
         n_reused = n_computed = 0
@@ -989,7 +1024,7 @@ elif nav == "value_bets":
         live_compute_times: list[float] = []
         t_loop_start = time.perf_counter()
         if de_analizat:
-            with st.spinner(f"Analizez {len(de_analizat)} meciuri de azi..."):
+            with st.spinner(f"Analizez {len(de_analizat)} meciuri ({eticheta.lower()})..."):
                 for match in de_analizat:
                     fid  = match.get("fixture_id", "?")
                     t_match_start = time.perf_counter()
@@ -1006,23 +1041,12 @@ elif nav == "value_bets":
                     predictions.append(pred)
         total_elapsed = time.perf_counter() - t_loop_start
 
-        # [ADAUGAT] Mini audit de performanță — doar loguri + Diagnostics, nu
-        # afișat utilizatorului (cerință explicită). Nu duplică infrastructura
-        # existentă de provider_metrics (vezi tab Diagnostics — "Status
-        # provideri"), care acoperă deja numărul de apeluri per provider.
-        avg_cache_s = sum(cache_hit_times) / len(cache_hit_times) if cache_hit_times else 0.0
-        avg_live_s  = sum(live_compute_times) / len(live_compute_times) if live_compute_times else 0.0
-        logger.info(
-            "[Perf][ValueBets] meciuri=%d din_cache=%d recalculate=%d timp_total=%.2fs "
-            "timp_mediu_cache=%.3fs timp_mediu_live=%.2fs",
-            len(today_matches), n_reused, n_computed, total_elapsed, avg_cache_s, avg_live_s,
-        )
-        st.session_state["perf_value_bets"] = {
-            "matches": len(today_matches), "from_cache": n_reused, "recomputed": n_computed,
-            "total_seconds": round(total_elapsed, 2),
-            "avg_cache_seconds": round(avg_cache_s, 3), "avg_live_seconds": round(avg_live_s, 2),
-            "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        }
+        perf["matches"]  += len(meciuri_zi)
+        perf["reused"]   += n_reused
+        perf["computed"] += n_computed
+        perf["cache_times"].extend(cache_hit_times)
+        perf["live_times"].extend(live_compute_times)
+        perf["seconds"]  += total_elapsed
 
         if radar is not None:
             de_la = radar.pagina * 5 + 1
@@ -1030,7 +1054,7 @@ elif nav == "value_bets":
                 f"Radar · locurile {de_la}-{de_la + len(radar.randuri) - 1} din "
                 f"{radar.total_meciuri} meciuri calificate "
                 f"(pagina {radar.pagina + 1}/{radar.pagini}) · "
-                f"din {len(today_matches)} meciuri azi · "
+                f"din {len(meciuri_zi)} meciuri · "
                 f"calculat la {radar.calculat_la}")
         else:
             st.caption(f"{n_reused} din cache · {n_computed} recalculate acum · "
@@ -1040,23 +1064,53 @@ elif nav == "value_bets":
 
         if not rows:
             threshold = engine.config.get("value_bet_threshold_pct", 5.0)
-            st.info(f"Niciun value bet peste pragul configurat ({threshold}%) pentru meciurile de azi.")
-        else:
-            table = pd.DataFrame([{
-                "Meci":         f"{r.home_team} - {r.away_team}",
-                # Ora locală, nu UTC: un meci de la 15:30 ora României apărea
-                # ca 12:30 și se citea, corect, ca „oră greșită".
-                "Oră (RO)":     ora_locala(r.kickoff_utc),
-                "Ligă":         r.league,
-                "Piață":        r.market,
-                "Selecție":     r.selection,
-                "Edge %":       r.edge_pct,
-                "Prob. model":  f"{r.model_prob_pct:.1f}%",
-                "Cotă":         r.bk_odds,
-                "Kelly stake":  f"€{r.kelly_stake:.2f}" if r.kelly_stake is not None else "—",
-                "Rating":       r.rating,
-            } for r in rows])
-            st.dataframe(table, use_container_width=True, hide_index=True)
+            st.info(f"Niciun value bet peste pragul configurat ({threshold}%) "
+                    f"pentru meciurile din ziua asta.")
+            return
+
+        table = pd.DataFrame([{
+            "Meci":         f"{r.home_team} - {r.away_team}",
+            # Ora locală, nu UTC: un meci de la 15:30 ora României apărea
+            # ca 12:30 și se citea, corect, ca „oră greșită".
+            "Oră (RO)":     ora_locala(r.kickoff_utc),
+            "Ligă":         r.league,
+            "Piață":        r.market,
+            "Selecție":     r.selection,
+            "Edge %":       r.edge_pct,
+            "Prob. model":  f"{r.model_prob_pct:.1f}%",
+            "Cotă":         r.bk_odds,
+            "Kelly stake":  f"€{r.kelly_stake:.2f}" if r.kelly_stake is not None else "—",
+            "Rating":       r.rating,
+        } for r in rows])
+        st.dataframe(table, use_container_width=True, hide_index=True)
+
+    for (zi_iso, eticheta), tab in zip(zile, st.tabs([e for _, e in zile])):
+        with tab:
+            _randeaza_ziua(zi_iso, eticheta, auto_live=(zi_iso == azi_iso))
+
+    # [ADAUGAT] Mini audit de performanță — doar loguri + Diagnostics, nu
+    # afișat utilizatorului (cerință explicită). Nu duplică infrastructura
+    # existentă de provider_metrics (vezi tab Diagnostics — "Status
+    # provideri"), care acoperă deja numărul de apeluri per provider.
+    avg_cache_s = (sum(perf["cache_times"]) / len(perf["cache_times"])
+                   if perf["cache_times"] else 0.0)
+    avg_live_s  = (sum(perf["live_times"]) / len(perf["live_times"])
+                   if perf["live_times"] else 0.0)
+    logger.info(
+        "[Perf][ValueBets] zile=%d meciuri=%d din_cache=%d recalculate=%d "
+        "timp_total=%.2fs timp_mediu_cache=%.3fs timp_mediu_live=%.2fs",
+        len(zile), perf["matches"], perf["reused"], perf["computed"],
+        perf["seconds"], avg_cache_s, avg_live_s,
+    )
+    st.session_state["perf_value_bets"] = {
+        "matches": perf["matches"], "from_cache": perf["reused"],
+        "recomputed": perf["computed"],
+        "total_seconds": round(perf["seconds"], 2),
+        "avg_cache_seconds": round(avg_cache_s, 3),
+        "avg_live_seconds": round(avg_live_s, 2),
+        "days": len(zile),
+        "at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
 
 
 # ═════════════════════════════════════════════════════════════════════════════
