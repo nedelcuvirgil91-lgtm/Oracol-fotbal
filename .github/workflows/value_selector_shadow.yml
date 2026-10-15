@@ -45,10 +45,21 @@ name: Football Oracle — Value Selector Shadow (ADR-071 F2)
 # Mărită de la 1 pe 2026-10-15, când ecranul Top
 # Value Bets a trecut pe trei zile: fără ea, zilele +1 și +2 n-ar avea rânduri
 # în `value_selector_shadow`, iar ecranul ar cădea pe calculul live — zeci de
-# evaluări complete într-o sesiune Streamlit. Costul măsurat înainte: ~1053
-# rânduri/zi peste cele 13 profile, ~1,2 MB/zi în tabelă (36.816 rânduri /
-# 47 MB la 40 de zile). Tripleaz-o și devine ~3,5 MB/zi, pe o tabelă care NU
-# are azi nicio politică de retenție — gol cunoscut, consemnat, nu ascuns.
+# evaluări complete într-o sesiune Streamlit.
+#
+# COSTUL REAL, măsurat pe rulări adevărate (nu estimat): o rulare cu fereastra
+# nouă scrie **4446 de rânduri ≈ 6 MB**, față de ~1000 de rânduri ≈ 1,3 MB cu
+# fereastra veche. Tabela a crescut 47 → 59 MB într-o singură zi (două rulări).
+# O estimare anterioară a acestui comentariu spunea „~3,5 MB/zi" — prea mică,
+# fiindcă fereastra a crescut de la 2 la 4 zile calendaristice, nu de la 1 la 3.
+#
+# Dacă volumul devine vreodată o problemă, pârghia NU e îngustarea ferestrei
+# (−25%), ci cele **13 profile de politică** scrise la fiecare rulare, din care
+# producția folosește unul singur: ~342 de rânduri per profil, deci −92%. Nu se
+# atinge aici — acele rânduri SUNT experimentul ADR-071 F2, citit de
+# `value_selector_evaluation.py`, deci oprirea lor e o decizie de ADR. La fel și
+# retenția: tabela nu are azi nicio politică de ștergere (același gol ca la
+# `shadow_predictions`), iar o ștergere ar arunca tocmai dovada lui F2.
 #
 # Întârzierile cozii GitHub (documentate, până la 11-12h în perioade de
 # throttling) NU falsifică experimentul: `evaluated_at` e persistat per rând,
