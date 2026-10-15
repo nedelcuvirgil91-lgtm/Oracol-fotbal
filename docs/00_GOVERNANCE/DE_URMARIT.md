@@ -2,7 +2,7 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-10-15, 18:30 UTC**.
+Ultima actualizare: **2026-10-15, 18:45 UTC**.
 
 ---
 
@@ -376,6 +376,29 @@ Ceilalți 5 apelanți care folosesc implicitul (`odds_persistence`, `weather_for
 Întrebarea proprietarului produsului, 15 oct: *„și campionate noi când mai putem adăuga? Așa nu stricăm mereu F2?"*
 
 **Răspunsul scurt**: fereastra e deschisă **acum** și se închide când autorizăm F3. Nu peste luni.
+
+> ### 📌 CÂND EXACT — întrebare pusă de două ori, deci răspunsul trebuie să fie o dată, nu un principiu
+>
+> **Imediat după primul verdict `baseline_source = 'shadow_control'`. Cel mai probabil 16 octombrie, în cel mai rău caz 19 octombrie.**
+>
+> Verificat, 15 oct: doar **doi** Challengeri sunt `EVALUATING` — `blend_v1/174e7e17` (n=175) și `xgboost_v1/dda4f7f3` (n=24). Restul sunt `REJECTED`/`PROMOTED` și nu mai sunt evaluați. Deci primul verdict pe baseline-ul corectat **trebuie** să vină de la `174e7e17`.
+>
+> Seria lui: 91 (11 oct) → 132 → 141 → 144 → 151 → 153 → **175** (15 oct). Mai sunt **25**. Volumul care îi alimentează: azi 45 de meciuri, mâine 11, sâmbătă 47, duminică 43.
+>
+> #### Confuzia care a făcut întrebarea să pară fără ieșire — și era a mea
+>
+> Amestecasem două sisteme diferite:
+>
+> | | Ce e | Blocant? |
+> |---|---|---|
+> | **Evaluarea Challenger** (ADR-072) | `174e7e17` atinge 200 și dă primul verdict pe baseline corect | **DA** — singurul blocaj real |
+> | **F2 / F3** (ADR-071) | experimentul de politică al radarului | **NU** |
+>
+> **F2 nu blochează**: raportarea pe perioade (`detecteaza_cutoff()`) a fost construită azi exact ca să absoarbă lărgirea universului.
+>
+> **F3 nu e un termen care fugărește**: nu începe automat când „se termină F2". E o decizie, condiționată de o muncă neîncepută — colapsarea brațelor dovedit identice (13 profile → doar 7 seturi distincte de selecții). **Nicio tranziție automată, deci fereastra nu se poate închide din întâmplare.**
+>
+> Bucla „așteptăm F2 → începe F3 → deci niciodată" **nu există**. Singurul lucru care închide fereastra e decizia umană de a autoriza F3.
 
 Motivul e cel din corectura de la §3ter: F3 cere *politică înghețată, fără ajustarea pragurilor pe parcurs, numărătoare curată de 150*. O ligă adăugată **în timpul** F3 strică exact asta. O ligă adăugată **înainte** e absorbită gratuit — numărătoarea care contează nici n-a început.
 
