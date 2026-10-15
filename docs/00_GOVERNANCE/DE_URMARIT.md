@@ -2,7 +2,7 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-10-15, 18:20 UTC**.
+Ultima actualizare: **2026-10-15, 18:30 UTC**.
 
 ---
 
@@ -414,8 +414,8 @@ Nivel B (titlul REAL generat de Flashscore, indexat — aceeași metodă cu care
 | Ligă | Slug | Titlul care îl confirmă |
 |---|---|---|
 | **Austria** | `("austria", "bundesliga")` | **✅ NIVEL A** — navigare live pe telefonul proprietarului produsului, 15 oct 21:07: `FOOTBALL > AUSTRIA > Bundesliga`, sezon 2026/2027, 31.07 → 22.05, etapa 9 cu meciuri reale (*SK Rapid–Hartberg* 16.10, *Salzburg–Altach* 18.10) |
-| Elveția | `("switzerland", "super-league")` | „**Swiss Super League** live scores, results, Football **Switzerland** – Flashscore" |
-| Danemarca | `("denmark", "superliga")` | „Superliga **2026/2027** live scores, results, Football **Denmark** – Flashscore" |
+| **Elveția** | `("switzerland", "super-league")` | **✅ NIVEL A** — navigare live, 15 oct 21:13: `FOOTBALL > SWITZERLAND > Super League`, sezon 2026/2027, 25.07 → 04.06, Round 11 (*Servette–Vaduz* 24.10, *Basel–Grasshoppers* 25.10) |
+| **Danemarca** | `("denmark", "superliga")` | **✅ NIVEL A** — navigare live, 15 oct 21:12: `FOOTBALL > DENMARK > Superliga`, sezon 2026/2027, 24.07 → 03.06, Round 11 (*Horsens–Randers* 16.10, *FC Copenhagen–Aarhus* 18.10) |
 
 **🔴 Capcană găsită la DOUĂ din trei, de reținut la implementare**: există și `austria/bundesliga-women`, și `switzerland/super-league-women` — competiții **diferite**, sub nume aproape identic. Plus `austria/admiral-bundesliga` (numele sponsorizat, arhivă 2021/22). Un slug ales „logic" putea nimeri campionatul feminin sau o arhivă moartă. Exact tiparul pentru care World Cup 2026 a fost EXCLUS (patru URL-uri conflictuale, Regula #8).
 
@@ -442,7 +442,25 @@ Verificat pe meciul *SK Rapid – Hartberg* (16.10.2026, Round 9), pagină live:
 
 **Și structura întregului lanț e confirmată, nu doar cotele.** Tab-urile sunt `MATCH · ODDS · H2H · STANDINGS` — exact cele folosite la celelalte 17 competiții: `H2H` alimentează Level FS2 (forma echipelor fără campionat urmărit), `STANDINGS` alimentează `flashscore_standings_snapshot`, iar `ODDS` include `1X2 / OVER-UNDER / BTTS / DOUBLE CHANCE`. Breadcrumb `AUSTRIA > BUNDESLIGA · ROUND 9` confirmă legătura ligă↔meci folosită de Discovery.
 
-**Rămâne neverificat același lucru pentru Elveția și Danemarca** — probabil identic (aceeași platformă, aceeași structură), dar „probabil" nu e „verificat".
+**Danemarca, verificat identic** (*Horsens – Randers*, 16.10, Round 11): șase case cu 1X2 — Superbet 2,82/3,55/2,42 · Unibet 2,80/3,50/2,38 · Betano 2,80/3,60/2,40 · MrBit 2,75/3,60/2,36 · get's bet 2,77/3,40/2,38 · NetBet 2,75/3,51/2,32, plus „Show more".
+
+**Elveția, verificat cu o nuanță care contează** (*Servette – Vaduz*, 24.10 — adică peste 9 zile): doar **4 din 6** case au cotat. Unibet și MrBit au căsuțele goale.
+
+> **Nu e acoperire mai slabă, e alt moment al măsurării.** Tiparul e deja măsurat în propriile noastre date (15 oct): acoperirea cotelor crește spre fluier — **60,0% azi · 90,9% la +1 · 95,7% la +2**. O captură la 9 zile distanță arată mai puține case decât una la 1 zi, în orice ligă.
+>
+> Citită fără contextul ăsta, captura ar fi produs concluzia falsă „Elveția e mai slab acoperită". De aceea `sync_pre_match_odds` rulează 2×/zi — ca să prindă cotele când apar, nu o dată, devreme.
+
+### Capcana competițiilor s-a confirmat în TOATE cele trei țări
+
+| Țară | Competiții listate în bara laterală |
+|---|---|
+| Austria | `Bundesliga` · `2. Liga` · `Regionalliga East/West/South/North` · `Regionalliga Play Offs` · `Burgenland` · `Karnten` · `Niederosterreich` · **+9 ascunse** |
+| Danemarca | `Superliga` · `1st/2nd/3rd Division` · `Betano Pokalen` (cupă) · **`A-Liga Women`** · **`B-Liga Women`** · `Danish Cup Women` |
+| Elveția | `Super League` · `Challenge League` · `Promotion League` · `1.Liga Classic Group 1/2/3` · `1.Liga Classic Play Offs` · `Swiss Cup` · `1.Liga Classic Cup` · **`Super League Women`** · +1 |
+
+În fiecare caz, o alegere „logică" avea mai multe ținte greșite decât corecte. Regula „verificat, nu ghicit" și-a plătit costul de trei ori.
+
+**Detalii utile observate colateral** (pagina elvețiană de meci): secțiunea `MATCH INFORMATION` dă stadionul și capacitatea (*Stade de Genève*, 30.084), iar `FORM` dă poziția în clasament plus ultimele 5 rezultate (*Servette ?WLLWW, locul 6* · *Vaduz ?WLLWL, locul 10*) — exact ce alimentează cascada de formă.
 
 ### Observație colaterală, consemnată ca să nu fie redescoperită
 
