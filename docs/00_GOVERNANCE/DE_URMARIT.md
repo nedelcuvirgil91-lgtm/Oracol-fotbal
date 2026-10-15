@@ -2,7 +2,7 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-10-15, 16:55 UTC**.
+Ultima actualizare: **2026-10-15, 18:10 UTC**.
 
 ---
 
@@ -413,11 +413,19 @@ Nivel B (titlul REAL generat de Flashscore, indexat — aceeași metodă cu care
 
 | Ligă | Slug | Titlul care îl confirmă |
 |---|---|---|
-| Austria | `("austria", "bundesliga")` | „Bundesliga **2026/2027** live scores, results, Football **Austria** – Flashscore" |
+| **Austria** | `("austria", "bundesliga")` | **✅ NIVEL A** — navigare live pe telefonul proprietarului produsului, 15 oct 21:07: `FOOTBALL > AUSTRIA > Bundesliga`, sezon 2026/2027, 31.07 → 22.05, etapa 9 cu meciuri reale (*SK Rapid–Hartberg* 16.10, *Salzburg–Altach* 18.10) |
 | Elveția | `("switzerland", "super-league")` | „**Swiss Super League** live scores, results, Football **Switzerland** – Flashscore" |
 | Danemarca | `("denmark", "superliga")` | „Superliga **2026/2027** live scores, results, Football **Denmark** – Flashscore" |
 
 **🔴 Capcană găsită la DOUĂ din trei, de reținut la implementare**: există și `austria/bundesliga-women`, și `switzerland/super-league-women` — competiții **diferite**, sub nume aproape identic. Plus `austria/admiral-bundesliga` (numele sponsorizat, arhivă 2021/22). Un slug ales „logic" putea nimeri campionatul feminin sau o arhivă moartă. Exact tiparul pentru care World Cup 2026 a fost EXCLUS (patru URL-uri conflictuale, Regula #8).
+
+**Cât de reală e capcana — măsurat pe pagina live (Austria, 15 oct)**: bara laterală listează `Bundesliga`, `2. Liga`, `Regionalliga East/West/South/North`, `Regionalliga Play Offs`, `Burgenland`, `Karnten`, `Niederosterreich` și încă **9** ascunse sub „Show more" — peste **17 competiții austriece**, dintre care una singură e cea căutată. Sigla paginii spune „**ADMIRAL** Bundesliga", ceea ce explică varianta sponsorizată: numele comercial diferă de slug.
+
+### ⛔ Ce NU confirmă încă nicio verificare: cotele 1X2 PER MECI
+
+Pagina de competiție arată „Winner Odds" cu trei case (Superbet, Betano, MrBit) — dar acelea sunt cote la **câștigarea campionatului**, piață outright. Sursa reală a lui `odds_fallback_flashscore` e `/odds/?mid=X`, adică tab-ul de cote al **fiecărui meci** (`providers/flashscore/normalizer.py:960`).
+
+Deci prezența caselor pe pagina ligii e un semn bun, **nu o dovadă**. Confuzia dintre cele două piețe ar fi exact genul de presupunere care costă mai târziu. De verificat separat, pe un meci concret, înainte de adăugare.
 
 **Confirmare din conținut, nu doar din URL** — paginile listează meciuri reale din fereastra curentă: *Salzburg – Altach*, *LASK – Salzburg* (16-25 oct) · *Zurich – Luzern*, *Basel – Grasshoppers* (24-25 oct) · *Horsens – Randers*, *FC Copenhagen – Aarhus* (16-18 oct).
 
