@@ -2,7 +2,7 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-10-15, 16:10 UTC**.
+Ultima actualizare: **2026-10-15, 16:35 UTC**.
 
 ---
 
@@ -229,7 +229,7 @@ Seria reală a lui `blend_v1/174e7e17`: **144** (13 oct 21:08) → **151** (14 o
 | **D-3** — consumatorii coloanelor înghețate | nimic; decizie necerută | — |
 | **D-11** — Decision Feed nu numește acțiunea | nimic | Același ecran va servi și propuneri de promovare și de rollback. A produs deja o confuzie reală (13 oct). |
 | **ADR-074** — istoric de cote din Flashscore | aprobarea ta; apoi implementare **după** pragul F2 | PROPOSED, zero cod. Flashscore dă deja 5,53 case/meci vs. 1,57 la Odds API și acoperă UECL+HNL; singurul lucru care lipsește e mișcarea cotei, și aia e o limită de stocare (suprascriem, 7416 capturi din 7416), nu de provider. Fluxul colectează datele de 2×/zi și le aruncă. |
-| **Campionate noi** (Austria, Danemarca, Elveția, Norvegia, Suedia) | nimic până după §3quater | Analiza din 15 oct: 133 din 206 echipe de cupă n-au campionat urmărit. **Dar nu se adaugă nimic înainte de merge-ul din §3quater** — o ligă nouă neacoperită de Odds API ar cădea în exact aceeași capcană și ar fi adăugată pe jumătate, ca UECL în august. Nordicele au bonus de calendar (mar-nov, acoperă iulie). |
+| **Campionate noi** (Austria, Elveția, Danemarca → apoi Norvegia, Suedia) | calendar complet în **§3quinquies** | Fereastra e ACUM, până la autorizarea F3 — nu „după F2". Analiza din 15 oct: 133 din 206 echipe de cupă n-au campionat urmărit. Precondiție: merge-ul din §3quater, altfel o ligă nouă neacoperită de Odds API ar cădea în aceeași capcană și ar fi adăugată pe jumătate, ca UECL în august. |
 
 ---
 
@@ -259,13 +259,25 @@ Concluzia rămâne cea din D-10 §D-9: **micșorarea timeout-ului NU ajută** (`
 
 ---
 
-## 3ter. **26-29 octombrie** — primul verdict F2 cu eșantion suficient (ADR-071)
+## 3ter. **26-29 octombrie** — pragul de eșantion care deschide F3 (ADR-071)
 
 Citit prima dată pe 15 octombrie, la cererea proprietarului produsului („hai să vedem ce profil câștigă la F2").
 
-### Verdictul de azi: NU se poate declara un câștigător
+> ### ⚠️ CORECTURĂ DE ETICHETĂ — scrisă în aceeași zi, câteva ore mai târziu
+>
+> Titlul acestei secțiuni spunea inițial „**primul verdict F2** cu eșantion suficient". **Greșit, și greșeala era a mea.** Pragul de 150 de selecții nu produce un verdict F2 — e **condiția de intrare în F3**, iar ADR-071 spune explicit:
+>
+> > **F3, NEÎNCEPUT și NEAUTORIZAT**: minimum 8 săptămâni ȘI minimum 150 de selecții (numărate conform §16 — prima apariție), politică înghețată, zero scurgere temporală, fără ajustarea pragurilor pe parcurs.
+>
+> Și că F3 e blocat de o condiție care **nu e îndeplinită**: cele 13 profile produc doar **7 seturi distincte de selecții**, iar „F3 nu poate porni până nu se măsoară pe mai multe zile și se colapsează brațele dovedit identice". (Duplicatul `shrunk_050` ≡ `market_floor_025`, amprenta `32ccbf4a`, redescoperit independent pe 15 oct, e una dintre instanțe.)
+>
+> **Consecința practică e opusul celei pe care o scrisesem**: momentul potrivit pentru campionate noi nu e *după* pragul de 150, ci **înainte de autorizarea F3** — fiindcă F3 cere exact universul stabil pe care o ligă nouă l-ar tulbura. Vezi §3quinquies pentru calendar.
+>
+> Cifrele din tabelul de mai jos rămân valide — sunt date de colectare F2, corect măsurate. Doar eticheta „verdict" era greșită.
 
-ADR-071 cere **150 de selecții decise** per politică (`PRAG_ESANTION_MINIM`). Niciuna dintre politicile de radar nu a ajuns: maximul e **124**. Raportul oficial marchează `esantion_insuficient` pe toate.
+### Unde suntem: sub pragul de intrare, pe toate politicile
+
+ADR-071 cere **150 de selecții decise** per politică (`PRAG_ESANTION_MINIM`). Niciuna dintre politicile de radar nu a ajuns: maximul e **124**. Raportul marchează `esantion_insuficient` pe toate.
 
 | Profil | Decise | Reușită | Piața | ROI | ROI piață | Brier vs piață |
 |---|---:|---:|---:|---:|---:|---|
@@ -356,6 +368,60 @@ Reparația adaugă ~30 de meciuri pe săptămână în bazinul Challengerilor. D
 ### Ce NU s-a atins deliberat
 
 Ceilalți 5 apelanți care folosesc implicitul (`odds_persistence`, `weather_forecast`, `team_health`, `pre_match_odds`, unul intern). Reparația e chirurgicală, pe batch. Cotele ajungeau deja pentru ambele ligi pe calea Flashscore, care nu trece prin implicitul acela.
+
+---
+
+## 3quinquies. Calendarul campionatelor noi — fereastra e ACUM, nu „după F2"
+
+Întrebarea proprietarului produsului, 15 oct: *„și campionate noi când mai putem adăuga? Așa nu stricăm mereu F2?"*
+
+**Răspunsul scurt**: fereastra e deschisă **acum** și se închide când autorizăm F3. Nu peste luni.
+
+Motivul e cel din corectura de la §3ter: F3 cere *politică înghețată, fără ajustarea pragurilor pe parcurs, numărătoare curată de 150*. O ligă adăugată **în timpul** F3 strică exact asta. O ligă adăugată **înainte** e absorbită gratuit — numărătoarea care contează nici n-a început.
+
+### Calendarul, derivat din distribuția lunară REALĂ a propriului istoric
+
+| | Ian | Feb | Mar | Apr | Mai | Iun | Iul | Aug | Sep | Oct | Nov | Dec |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| **Suedia** | 30 | 26 | 34 | **103** | **96** | 31 | **115** | **123** | **112** | **105** | 48 | 29 |
+| **Norvegia** | 22 | 24 | 35 | **92** | **95** | 49 | **117** | **99** | 87 | **102** | 58 | 42 |
+| Austria | 11 | 54 | 54 | 73 | 64 | 21 | 51 | 82 | 70 | 75 | 52 | 37 |
+| Elveția | 49 | 55 | 46 | 66 | 75 | 26 | 70 | 47 | 54 | 75 | 44 | 48 |
+| Danemarca | 21 | 49 | 52 | 72 | 67 | 21 | 85 | 85 | 64 | 67 | 43 | 29 |
+
+Două regimuri, și dictează momente diferite:
+
+- **Austria, Elveția, Danemarca** — calendar european cu pauză de iarnă. Adăugate acum, aduc meciuri imediat.
+- **Suedia, Norvegia** — sezon aprilie–octombrie. Adăugate acum ar da ~3 săptămâni, apoi **cinci luni de tăcere**. Adăugate în **martie**, prind un sezon întreg din prima zi.
+
+### Ordinea, cu motivul fiecărui pas
+
+| Când | Ce | De ce atunci |
+|---|---|---|
+| 1-3 zile | merge-ul din **§3quater** | după primul verdict ADR-072, ca să nu confundăm cauzele |
+| imediat după | **Austria + Elveția + Danemarca**, ÎNTR-UN SINGUR LOT | fereastra pre-F3 e deschisă; un singur seam, nu trei |
+| **martie 2027** | **Norvegia + Suedia** | să prindă sezonul de la început |
+| după ambele | colapsarea brațelor identice (ADR-071 §F3) → **abia apoi** autorizarea F3 | F3 pornește pe univers stabil și pe politici genuin distincte |
+
+**Aranjat așa, F3 nu se strică niciodată** — fiindcă nu începe decât după ce universul s-a așezat.
+
+**Precondiție, nenegociabilă**: fiecare ligă intră cu slug Flashscore **verificat live, niciodată ghicit** (precedentul e chiar Conference League, 5 august). Și fiecare intră în `LEAGUE_PROVIDERS`, deci automat în `TRACKED_COMPETITIONS` — nu mai există calea prin care o ligă e adăugată pe jumătate.
+
+---
+
+## 3sexies. 🔴 O reparație declarată încheiată care NU și-a atins efectul — lecție de metodă
+
+**ADR-071 §20, 6 septembrie**, descrie exact simptomul găsit pe 15 octombrie: HNL cu 0% în `odds_history`, cotele existând în `odds_fallback_flashscore`, meciuri *„excluse tăcut din radar și din F3 ca «fără cote», deși aveam cotele lor. 17% din setul experimentului, inclusiv o ligă întreagă."*
+
+S-a reparat citirea cotelor (`_load_odds()` completează din fallback). S-a consemnat ca rezolvat.
+
+**HNL a rămas la 0 în radar până pe 15 octombrie.** Măsurat pe fereastra 5 sep – 20 oct, adică strict DUPĂ acea reparație: **24 de meciuri, 24 cu cote în fallback, 0 în radar.** Cauza: lipsea cealaltă jumătate — rândul `control`, adică predicția însăși. Reparația acoperea cotele, nu predicția.
+
+**Lecția, de aplicat la fiecare reparație de acum înainte**: o reparație se verifică prin **efectul observabil pe care îl promite**, nu prin faptul că modificarea a fost făcută. §20 promitea „HNL intră în radar". Nimeni n-a reverificat că intră. Defectul a rămas viu **39 de zile sub o etichetă de rezolvat** — mai greu de găsit decât dacă ar fi rămas nedocumentat, fiindcă documentul spunea că nu mai există.
+
+Aceeași clasă cu: POC-ul API-Football declarat șters 34 de zile înainte de ștergerea efectivă · ADR-072 declarat „în producție" când era doar pe branch · `grep -c baseline_source → 7`, cifră pe care nicio comandă n-o întoarce.
+
+**Verificarea cerută la merge-ul din §3quater** (punctele 1-3) e scrisă exact în forma asta: nu „am schimbat codul", ci „`prob_home_pred` e populat pentru UECL și HNL, azi 0 din 25 și 0 din 5".
 
 ---
 
