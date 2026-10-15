@@ -943,6 +943,27 @@ LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
 }
 
 # ── Dictionare derivate — generate, NU scrise manual (elimina desincronizarea) ──
+
+# TOATE competitiile pe care le urmarim, indiferent de provider.
+#
+# De ce exista separat, desi "e doar lista cheilor": pana pe 2026-10-15,
+# `log_challenger_shadow_for_week()` (batch-ul de noapte, ADR-056) nu primea
+# nicio lista de competitii, iar `oracle_api.get_matches_for_week()` cadea pe
+# `list(ODDS_SPORT_KEYS.keys())`. Acela e un dictionar DERIVAT, al carui inteles
+# e "ligile pe care le acopera The Odds API" — 16 din 18. Conference League si
+# HNL lipseau din el, deci batch-ul nu le evalua niciodata.
+#
+# Consecinta masurata, pe un sezon: ~198 de meciuri (147 Conference League +
+# 51 HNL) fara niciun rand `control`, deci invizibile pentru radarul de value
+# bets, absente din experimentul Challenger si neauditabile pana la sursa
+# (North Star #9). Interfata le arata corect, fiindca `app.py` pasa lista
+# completa explicit — de aici asimetria: pe ecran existau, in pipeline nu.
+#
+# Cele doua intelesuri nu trebuie sa mai fie legate printr-un accident de
+# denumire: "ce competitii urmarim" nu se deduce din "ce acopera un provider de
+# cote". Garda `tests/test_tracked_competitions.py` impune invariantul.
+TRACKED_COMPETITIONS: list[str] = list(LEAGUE_PROVIDERS.keys())
+
 ODDS_SPORT_KEYS: dict[str, str] = {
     lg: d.provider_ids["odds"] for lg, d in LEAGUE_PROVIDERS.items()
     if d.provider_ids.get("odds") is not None

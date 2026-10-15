@@ -36,7 +36,7 @@ except ModuleNotFoundError:
     print("[FATAL] oracle_api.py not found."); sys.exit(1)
 
 try:
-    from mappings import normalize_team_name, LEAGUE_BASELINES
+    from mappings import normalize_team_name, LEAGUE_BASELINES, TRACKED_COMPETITIONS
 except ModuleNotFoundError:
     print("[FATAL] mappings.py not found."); sys.exit(1)
 
@@ -2721,8 +2721,27 @@ class FootballOracleEngine:
         experiment_name/experiment_version/experiment_group/
         processing_stage) — sigur de rulat zilnic pentru aceleași meciuri
         încă nejucate, doar reîmprospătează predicția. Orice eșec per meci
-        e izolat, nu oprește restul batch-ului (Regula #8)."""
-        matches = self.api.get_matches_for_week(days_ahead=days_ahead)
+        e izolat, nu oprește restul batch-ului (Regula #8).
+
+        [CORECTAT 2026-10-15] Competițiile se pasează EXPLICIT, din lista
+        canonică. Înainte, apelul se făcea fără argument, iar
+        `get_matches_for_week()` cădea pe `list(ODDS_SPORT_KEYS.keys())` —
+        un dicționar derivat care înseamnă „ligile acoperite de The Odds API",
+        16 din 18. Deci docstring-ul de mai sus promitea „TOATE meciurile
+        descoperite" și codul acoperea 16 din 18 competiții: Conference League
+        și HNL nu erau evaluate NICIODATĂ.
+
+        Măsurat înainte de corecție, pe sezonul curent: ~198 de meciuri fără
+        niciun rând `control` (147 Conference League + 51 HNL), deci invizibile
+        pentru radarul de value bets, absente din experimentul Challenger și
+        neauditabile până la sursă (North Star #9). Singurele 14 excepții erau
+        meciuri deschise manual în aplicație — `app.py` pasa lista completă.
+
+        Nu e o extindere de scop: ambele ligi erau deja urmărite, afișate și
+        cu cote persistate. Se repară doar calea prin care batch-ul află CE
+        urmărim."""
+        matches = self.api.get_matches_for_week(
+            days_ahead=days_ahead, competitions=list(TRACKED_COMPETITIONS))
         evaluated = 0
         for m in matches:
             try:

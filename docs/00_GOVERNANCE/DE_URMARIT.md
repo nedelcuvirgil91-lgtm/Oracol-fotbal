@@ -2,7 +2,7 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-10-15, 15:00 UTC**.
+Ultima actualizare: **2026-10-15, 16:10 UTC**.
 
 ---
 
@@ -228,6 +228,8 @@ Seria reală a lui `blend_v1/174e7e17`: **144** (13 oct 21:08) → **151** (14 o
 | **D-6** — două backup-uri | nimic; revizuire restantă de ~3 săptămâni | Se păstrează sau se șterg; decizie, nu urgență. |
 | **D-3** — consumatorii coloanelor înghețate | nimic; decizie necerută | — |
 | **D-11** — Decision Feed nu numește acțiunea | nimic | Același ecran va servi și propuneri de promovare și de rollback. A produs deja o confuzie reală (13 oct). |
+| **ADR-074** — istoric de cote din Flashscore | aprobarea ta; apoi implementare **după** pragul F2 | PROPOSED, zero cod. Flashscore dă deja 5,53 case/meci vs. 1,57 la Odds API și acoperă UECL+HNL; singurul lucru care lipsește e mișcarea cotei, și aia e o limită de stocare (suprascriem, 7416 capturi din 7416), nu de provider. Fluxul colectează datele de 2×/zi și le aruncă. |
+| **Campionate noi** (Austria, Danemarca, Elveția, Norvegia, Suedia) | nimic până după §3quater | Analiza din 15 oct: 133 din 206 echipe de cupă n-au campionat urmărit. **Dar nu se adaugă nimic înainte de merge-ul din §3quater** — o ligă nouă neacoperită de Odds API ar cădea în exact aceeași capcană și ar fi adăugată pe jumătate, ca UECL în august. Nordicele au bonus de calendar (mar-nov, acoperă iulie). |
 
 ---
 
@@ -306,6 +308,54 @@ Dacă nu vine la termen: nu e defect, e calendar fotbalistic. Semnal real ar fi 
 ### Gol de proces, de reținut
 
 Evaluatorul (`value_selector_evaluation.yml`) e `workflow_dispatch`-only, deliberat („o citire nu produce date, deci nu are motiv să ruleze automat"). Consecința reală: **a rulat o singură dată, pe 6 septembrie, ziua în care a fost construit, și apoi deloc 39 de zile** — până la întrebarea proprietarului produsului. Același tipar ca ADR-057: un mecanism corect pe care nimeni nu-l citește. **Nereparat** — dar dacă F2 se apropie de verdict, merită o cadență, chiar rară.
+
+---
+
+## 3quater. 🔴 **MERGE ÎN AȘTEPTARE** — reparația competițiilor, scrisă dar NEmergeuită
+
+> **Codul e gata, testat, pe branch. NU e pe `main`. Nu e din uitare — e sincronizare deliberată.**
+
+### Ce s-a reparat
+
+`log_challenger_shadow_for_week()` (batch-ul de noapte, ADR-056) chema `get_matches_for_week()` **fără `competitions`**, iar acela cădea pe `list(ODDS_SPORT_KEYS.keys())` — dicționar derivat care înseamnă „ligile acoperite de The Odds API", **16 din 18**.
+
+Docstring-ul funcției promitea „evaluează **TOATE** meciurile descoperite". Codul acoperea 16 din 18.
+
+**Costul măsurat, pe sezonul curent**: 198 de meciuri (**147 Conference League + 51 HNL**) fără niciun rând `control` — invizibile pentru radarul de value bets, absente din experimentul Challenger, neauditabile până la sursă (#9). Singurele 14 excepții erau meciuri deschise manual în aplicație, fiindcă `app.py` pasa lista completă. **De-asta a stat un sezon nedescoperit: pe ecran existau, în pipeline nu.**
+
+Reparația: `mappings.TRACKED_COMPETITIONS` (derivat din `LEAGUE_PROVIDERS`, ADR-001), pasat explicit. Plus `value_selector_evaluation.py` raportează pe perioade, cu cutoff **dedus din date** (`detecteaza_cutoff()`), nu scris ca dată — exact ca să nu depindă de completarea unei constante la momentul potrivit.
+
+**20 de teste noi, 8 mutații, toate prinse.** `pytest tests/`: 3474 passed, 2 skipped (3454 + 20, aritmetica se închide exact).
+
+### DE CE nu e pe `main` — condiția de merge
+
+**`blend_v1/174e7e17` e la n = 175, pragul e 200.** E la 1-3 zile de **primul verdict pe baseline-ul corectat ADR-072** — lucrul așteptat din 14 octombrie.
+
+Reparația adaugă ~30 de meciuri pe săptămână în bazinul Challengerilor. Dacă intră acum, acel verdict se naște cu universul schimbat, și **nu se mai poate atribui**: baseline nou sau ligi noi? Două schimbări simultane, exact ce proiectul interzice.
+
+> ### ✅ CONDIȚIE DE MERGE, verificabilă
+>
+> ```sql
+> SELECT experiment_name, experiment_version, n_matches_evaluated, status
+> FROM experiment_registry
+> WHERE experiment_version LIKE '174e7e17%';
+> ```
+>
+> **Când `n_matches_evaluated >= 200` ȘI există un rând în `challenger_evaluations` cu `baseline_source = 'shadow_control'` pentru acel `training_run_id` → se face merge pe `main`.**
+>
+> Dacă la 20 octombrie încă nu s-a întâmplat, se reverifică seria (poate ritmul a scăzut), nu se forțează.
+
+### Ce se verifică la PRIMA rulare de noapte de după merge
+
+1. `match_history.prob_home_pred` populat pentru Conference League și HNL (azi: **0 din 25**, respectiv **0 din 5** în fereastra de 7 zile).
+2. Rânduri `control` în `shadow_predictions` pentru ambele ligi (azi: 0 și 2).
+3. `home_data_quality` scris — azi e NULL pe 25/25 UECL, ceea ce face poarta radarului să dea `UNKNOWN`, deci nu selectează. Se închide singur.
+4. Durata etapei „Challenger Shadow Batch": +19% așteptat (30 de meciuri peste 159). Marjă: ultima rulare 87 min din 180.
+5. `detecteaza_cutoff()` întoarce run_id-ul primei rulări cu UECL/HNL — și raportul F2 capătă secțiunea `perioade`.
+
+### Ce NU s-a atins deliberat
+
+Ceilalți 5 apelanți care folosesc implicitul (`odds_persistence`, `weather_forecast`, `team_health`, `pre_match_odds`, unul intern). Reparația e chirurgicală, pe batch. Cotele ajungeau deja pentru ambele ligi pe calea Flashscore, care nu trece prin implicitul acela.
 
 ---
 

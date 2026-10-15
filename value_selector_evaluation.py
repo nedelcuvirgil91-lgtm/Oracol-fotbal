@@ -323,8 +323,68 @@ def incarca_rezultate(fixture_ids: Sequence[str]) -> dict[str, Any]:
 
 # ── Orchestrare ──────────────────────────────────────────────────────────────
 
+# ── Perioade: universul de competitii s-a largit la mijlocul experimentului ──
+
+# Competitiile care au intrat in batch-ul de noapte pe 2026-10-15, cand s-a
+# reparat `log_challenger_shadow_for_week()` (vedea 16 din 18 competitii,
+# fiindca `get_matches_for_week()` cadea pe `ODDS_SPORT_KEYS`).
+#
+# E un FAPT ISTORIC, nu o configurare: multimea asta nu se schimba niciodata,
+# oricate ligi am mai adauga dupa. De aceea e scrisa explicit si NU derivata
+# din `TRACKED_COMPETITIONS - ODDS_SPORT_KEYS` — acea diferenta s-ar muta la
+# prima liga noua neacoperita de The Odds API, si cutoff-ul ar aluneca tacit.
+COMPETITII_INTRATE_2026_10_15: frozenset[str] = frozenset({"Conference League", "HNL"})
+
+
+def detecteaza_cutoff(randuri: Iterable[dict]) -> str | None:
+    """Primul `run_id` in care apare una dintre competitiile intrate pe
+    2026-10-15, sau `None` daca nu apare niciuna.
+
+    Cutoff-ul se DEDUCE din date, nu se configureaza. O constanta cu data
+    merge-ului ar fi trebuit completata manual exact in momentul in care
+    atentia e in alta parte — adica modul clasic in care o masuratoare ramane
+    tacut gresita. Asa, granita e un fapt observabil in tabela.
+
+    `None` inseamna "experimentul nu a traversat inca largirea", iar raportul
+    ramane atunci identic cu cel de dinainte — fara sectiune de perioade."""
+    candidate = [str(r.get("run_id") or "") for r in randuri
+                 if str(r.get("league") or "") in COMPETITII_INTRATE_2026_10_15]
+    return min(candidate) if candidate else None
+
+
+def imparte_pe_perioade(randuri: Sequence[dict],
+                        cutoff: str | None) -> dict[str, list[dict]]:
+    """`{"inainte": [...], "dupa": [...]}` dupa `run_id`, lexicografic.
+
+    Formatul `YYYY-MM-DDTHH:MMZ` face ordonarea de text identica cu cea
+    cronologica — aceeasi proprietate pe care se bazeaza regula §16, fixata
+    de testul ei dedicat. Fara cutoff, totul e "inainte": nimic nu se pierde
+    si nimic nu se inventeaza."""
+    if cutoff is None:
+        return {"inainte": list(randuri), "dupa": []}
+    inainte, dupa = [], []
+    for r in randuri:
+        (dupa if str(r.get("run_id") or "") >= cutoff else inainte).append(r)
+    return {"inainte": inainte, "dupa": dupa}
+
+
+def _bloc_politici(randuri: Sequence[dict], rezultate: dict[str, Any]) -> list[dict]:
+    return [
+        {"policy_id": p.policy_id, "policy_profile": p.policy_profile,
+         "policy_family": p.policy_family,
+         "categorii": {k: asdict(v) for k, v in p.categorii.items()}}
+        for p in evalueaza(randuri, rezultate)
+    ]
+
+
 def run(*, run_id: str | None = None) -> dict:
-    """Raportul complet. Nu scrie nimic — nici in shadow, nici altundeva."""
+    """Raportul complet. Nu scrie nimic — nici in shadow, nici altundeva.
+
+    [EXTINS 2026-10-15] Raporteaza si pe perioade, cand experimentul a
+    traversat largirea universului de competitii (vezi `detecteaza_cutoff`).
+    Cifrele cumulate raman primele si neschimbate — un ROI calculat peste doua
+    universuri diferite nu devine gresit, dar devine greu de interpretat, deci
+    cele doua jumatati se arata alaturi, nu in locul lui."""
     selectii = incarca_selectii(run_id=run_id)
     if not selectii:
         return {"selectii_citite": 0, "politici": [], "avertisment":
@@ -353,8 +413,22 @@ def run(*, run_id: str | None = None) -> dict:
             for p in politici
         ],
     }
-    logger.info("[ValueSelectorEval] %d selectii, %d meciuri, %d cu rezultat",
-                len(selectii), len(fixture_unice), cu_rezultat)
+
+    cutoff = detecteaza_cutoff(selectii)
+    raport["cutoff_extindere_competitii"] = cutoff
+    if cutoff is not None:
+        parti = imparte_pe_perioade(selectii, cutoff)
+        raport["perioade"] = {
+            nume: {
+                "selectii_citite": len(parti[nume]),
+                "rulari_distincte": len({str(r["run_id"]) for r in parti[nume]}),
+                "politici": _bloc_politici(parti[nume], rezultate),
+            }
+            for nume in ("inainte", "dupa")
+        }
+
+    logger.info("[ValueSelectorEval] %d selectii, %d meciuri, %d cu rezultat, cutoff=%s",
+                len(selectii), len(fixture_unice), cu_rezultat, cutoff)
     return raport
 
 

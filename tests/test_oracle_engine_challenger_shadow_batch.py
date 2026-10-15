@@ -8,12 +8,24 @@ import oracle_engine
 
 
 class _FakeAPI:
+    """Oglindește semnătura reală, inclusiv `competitions`.
+
+    [ACTUALIZAT 2026-10-15] Înainte, falsul accepta DOAR `days_ahead`, iar
+    batch-ul chema fără competiții. Semnătura incompletă nu era doar o
+    scăpare: făcea imposibil de testat exact defectul care a stat un sezon
+    în producție — batch-ul vedea 16 din 18 competiții, fiindcă
+    `get_matches_for_week()` cădea pe `ODDS_SPORT_KEYS`. Falsul înregistrează
+    acum și competițiile primite, ca garda să poată verifica CE s-a cerut,
+    nu doar că s-a cerut ceva."""
+
     def __init__(self, matches):
         self._matches = matches
         self.calls: list[int] = []
+        self.competitii_primite: list[list[str] | None] = []
 
-    def get_matches_for_week(self, days_ahead=7):
+    def get_matches_for_week(self, days_ahead=7, competitions=None):
         self.calls.append(days_ahead)
+        self.competitii_primite.append(competitions)
         return self._matches
 
 
