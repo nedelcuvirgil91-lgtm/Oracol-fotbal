@@ -92,7 +92,7 @@ WHERE id = 1;
 - **Tiparul din septembrie se CONFIRMĂ pe o lună mai mult de date**, iar semnul se inversează acum în **2 din 5** cazuri: `xgboost_v1/e638c1dc` +1,18pp înghețat → **−1,04pp** proaspăt; `blend_v1/4e17c737` +1,17pp → **−0,34pp**. Baseline-ul înghețat flatează Challenger-ul în 4 din 5 (al cincilea, `174e7e17`, e identic). Singurul `candidate_for_promotion` verificabil, `blend_v1/8ac89c70`, **rezistă**: +3,66pp acuratețe și −0,0194 log-loss contra Oracle-ului real.
 - **BLOCAJUL REAL: codul nu e pe `main`.** Pașii 3-4 nu mai sunt limitați de `n`, ci de merge. Ordinea corectă redevine: merge pe `main` (cere aprobare explicită) → o rulare de noapte cu flagul oprit, care confirmă comportament neschimbat → abia apoi activarea. **[REZOLVAT 2026-10-13 — merge aprobat explicit și executat, `09cf0be` → `3566541`, fast-forward curat, `pytest tests/` verde pe `main` ÎNAINTE de push: 3347 passed, 2 skipped. Calea de predicție neatinsă, verificat: `git diff` pe `oracle_engine.py`/`feature_engine.py`/`ml_predictor.py`/`recalibration.py`/`app.py`/`oracle_api.py` e GOL.]**
 
-### D-2. Persistarea intrărilor de la servire (varianta B) — ✅ **ADR-073 SCRIS ȘI IMPLEMENTAT 2026-10-14, flag NEACTIVAT**
+### D-2. Persistarea intrărilor de la servire (varianta B) — ✅ **ÎNCHISĂ. ADR-073 implementat 14 oct, flag ACTIV din 15 oct, 04:19 UTC**
 
 > **[IMPLEMENTAT ȘI PE `main` — 2026-10-14, `15f7c38`]** `docs/00_GOVERNANCE/ADR-073-serving-inputs-persistence.md`, aprobat explicit de proprietarul produsului. Merge aprobat explicit, fast-forward curat (`4114d66` → `15f7c38`), `pytest tests/` verde pe `main` ÎNAINTE de push: **3427 passed, 2 skipped**. Verificat după push: flagul apare în exact **2** locuri în `oracle_engine.py` pe `main` — linia 179 (declarația `False`) și linia 1871 (poarta).
 >
@@ -117,7 +117,13 @@ WHERE id = 1;
 >
 > **Ce NU face**: nicio predicție schimbată, nicio formulă atinsă, nicio sursă nouă de date, zero rescriere retroactivă a celor ~2600 de rânduri cu `feature_metadata` gol.
 >
-> **Rămâne de făcut**: activarea flagului (`UPDATE model_config`, arătat + confirmat explicit), după o rulare de noapte cu flagul oprit care confirmă comportament identic.
+> **[ACTIVAT — 2026-10-15, 04:19 UTC]** `serving_inputs_persistence_enabled` = **`true`** (boolean) în `model_config`, cu confirmare explicită a proprietarului produsului. Amprentă: 36 → **37 chei**, `md5(data − cheia_nouă)` **identică** (`d079d3f321f7100ea04c0a9f3082675a`) — exact o cheie adăugată, zero atinse.
+>
+> Precondiția „o rulare cu flagul oprit, comportament identic" a fost îndeplinită de `38620259384` (14 oct, 87m29s, `success`): **150 de rânduri atinse per grup, 750 de scrieri sub codul ADR-073, ZERO `schema_version`**.
+>
+> **Capcană de măsurare, consemnată**: contraponderea inițială („rândurile trebuie să crească") era greșită — scrierea e `upsert` pe cheie compusă, iar batch-ul reprocesează aceeași fereastră de 7 zile, deci rescrie. Totalurile au rămas identice; citit literal, ar fi însemnat „n-a scris nimic". Semnalul corect e `prediction_time` avansat.
+>
+> **Rămâne de verificat la prima rulare de după**: `schema_version = 1` pe `control`, `{}` pe `treatment`, și reproducerea predicției din înregistrare. Vezi ADR-073 §Activare.
 
 **Textul de mai jos descrie golul ÎNAINTE de ADR-073**, păstrat ca istoric al diagnosticului.
 

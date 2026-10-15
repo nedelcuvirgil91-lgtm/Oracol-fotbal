@@ -2,7 +2,7 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-10-14, 20:50 UTC** (după check-in-ul rulării 38620259384).
+Ultima actualizare: **2026-10-15, 04:25 UTC** (după activarea flagului ADR-073).
 
 ---
 
@@ -76,7 +76,32 @@ FROM shadow_predictions GROUP BY 1,2 ORDER BY 1,2;
 
 **Dacă pică**: nu se activează nimic; se repară poarta întâi.
 
-**Ce urmează, și cere confirmarea ta**: `UPDATE model_config` pentru activare — arătat exact înainte, niciodată rulat din proprie inițiativă (North Star #6).
+> **[ACTIVAT — 2026-10-15, 04:19 UTC]** Flagul e `true` (boolean). Amprentă verificată: 36 → **37 chei**, `md5(data − cheia_nouă)` identică. Punctul ăsta e ÎNCHIS; ce urmează e §1bis.
+
+---
+
+## 1bis. Prima rulare cu flagul ADR-073 PORNIT — verificarea inversă
+
+**Când**: următoarea rulare `night_sync`. Cron-ul de la 02:00 UTC pe 15 oct **nu rulase încă la 04:19** — tiparul documentat de throttling GitHub livrează slotul pe la ~07:00-09:00 UTC.
+
+**Criteriile, toate patru:**
+
+```sql
+SELECT experiment_name, experiment_group,
+       count(*) FILTER (WHERE prediction_time >= '<start rulare>') AS atinse,
+       count(*) FILTER (WHERE prediction_time >= '<start rulare>'
+                          AND feature_metadata ? 'schema_version') AS cu_inregistrare
+FROM shadow_predictions GROUP BY 1,2 ORDER BY 1,2;
+```
+
+1. `cu_inregistrare` **> 0** pe `control` (`xgboost_v1`, `blend_v1`), cu `schema_version = 1`.
+2. `treatment` rămâne la **`{}`** — înregistrarea Oracle n-are ce căuta pe rândul Challenger-ului.
+3. `flashscore_team_dna` își păstrează metadatele proprii.
+4. **Reproducerea**, pe un rând real: `calibrate_xg(**oracle_inputs)` trebuie să dea exact `oracle_outputs.{home,away}_xg_pre_injury`.
+
+**Dacă (1) e 0**: poarta nu citește flagul în producție — se investighează înainte de orice altceva.
+
+**Atribuire**: aceeași rulare aduce și efectul **D-10**. Cele două sunt independente observațional (tabele diferite: `experiment_registry` vs. `shadow_predictions.feature_metadata`), deci fiecare rămâne atribuibil fără ambiguitate.
 
 ---
 

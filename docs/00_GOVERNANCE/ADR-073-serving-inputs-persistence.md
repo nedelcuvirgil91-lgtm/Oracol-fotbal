@@ -2,13 +2,31 @@
 
 ## Status
 
-**PROPOSED** — 2026-10-14, aprobat explicit de proprietarul produsului pentru implementare („Atunci aprob", după o explicație completă a scopului).
+**ACCEPTED** — 2026-10-14, ✅ **ACTIV în producție de la 2026-10-15, 04:19 UTC**, aprobat explicit de proprietarul produsului pentru implementare („Atunci aprob", după o explicație completă a scopului).
 
 **Cod pe `main` de la `15f7c38`** (2026-10-14, merge aprobat explicit, fast-forward curat, `pytest tests/` verde pe `main` ÎNAINTE de push: 3427 passed, 2 skipped). Flagul `serving_inputs_persistence_enabled` e **ABSENT din `model_config` ȘI din `config.json`** (verificat prin interogare read-only: `flag_prezent = false`, `total_chei = 36` — exact amprenta de la activarea ADR-072, deci nimic altceva nu s-a adăugat între timp), deci `config.get(..., False)` = `False` și comportamentul în producție e **neschimbat** până la o activare separată, cu confirmare explicită (North Star #3).
 
 **Precizare care contează, verificată**: `challenger_shadow_logging_enabled` și `blend_challenger_shadow_logging_enabled` sunt AMBELE `true` în producție. Deci codul modificat de acest ADR **rulează** la fiecare rulare de noapte — singurul lucru care-l ține inert e poarta flagului. De aceea mutația M4 (poarta ștearsă, netrecută la prima rulare a gărzilor) nu era un detaliu de testare: fără întărirea ei, acest merge ar fi putut începe să scrie înregistrări la prima rulare, nedetectat.
 
 Derivat din decizia în așteptare **D-2** (CLAUDE.md), deschisă pe 2026-09-08, reîncadrată pe 2026-10-13 și reverificată pe 2026-10-14.
+
+## Activare — 2026-10-15, 04:19 UTC
+
+Flagul `serving_inputs_persistence_enabled` e **`true` în `model_config`**, valoare **boolean** (nu șirul `"true"` — contează, poarta face `config.get(...)` pe valoare). `UPDATE` rulat cu confirmare explicită a proprietarului produsului, după ce toate cele patru precondiții au fost bifate.
+
+**Scrierea verificată prin amprentă, nu prin „pare bine"**: 36 → **37 chei**, iar `md5((data - 'serving_inputs_persistence_enabled')::text)` e **identică** înainte și după (`d079d3f321f7100ea04c0a9f3082675a`) — deci exact o cheie adăugată, zero chei existente atinse. `challenger_baseline_from_control_enabled`, `challenger_shadow_logging_enabled`, `blend_challenger_shadow_logging_enabled` și `learning_core_enabled` reconfirmate `true`.
+
+**Precondiția 2, dovedită pe volum real**: rularea `38620259384` (14 oct, 87m29s, `success`) a produs **150 de rânduri atinse per grup — 750 de scrieri sub codul ADR-073 — cu ZERO `schema_version`**. Poarta a ținut pe un eșantion semnificativ, nu pe un rând.
+
+**Capcană de măsurare, consemnată**: contraponderea scrisă inițial („numărul de rânduri trebuie să crească") era **greșită** — `log_shadow_prediction()` face `upsert` pe cheie compusă, iar batch-ul ADR-056 reprocesează aceeași fereastră de 7 zile, deci rescrie rândurile existente. Totalurile au rămas identice, ceea ce citit literal ar fi însemnat „rularea n-a scris nimic". Semnalul corect e `prediction_time` avansat. O contrapondere pusă pe metrica greșită transformă o confirmare validă într-un fals negativ.
+
+**De verificat la prima rulare de după activare**:
+1. `feature_metadata ? 'schema_version'` **> 0** pe rândurile `control` ale `xgboost_v1`/`blend_v1`, și `schema_version = 1`.
+2. Rândurile `treatment` rămân la `{}` — înregistrarea Oracle nu are ce căuta pe rândul Challenger-ului.
+3. `flashscore_team_dna` rămâne cu metadatele lui proprii, neatinse.
+4. **Reproducerea**: `calibrate_xg(**oracle_inputs)` dintr-un rând real trebuie să dea exact `oracle_outputs.{home,away}_xg_pre_injury`.
+
+**Notă de atribuire**: prima rulare de după activare va fi și prima cu reparația D-10 (`6be6ecd`). Cele două sunt **independente observațional** — D-10 atinge `experiment_registry`, ADR-073 atinge `shadow_predictions.feature_metadata` — deci fiecare efect rămâne atribuibil fără ambiguitate. Consemnat explicit, fiindcă disciplina proiectului e „nu se bundle-uiește".
 
 ## Context
 
