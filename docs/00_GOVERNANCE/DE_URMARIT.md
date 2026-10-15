@@ -2,7 +2,7 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-10-15, 13:50 UTC**.
+Ultima actualizare: **2026-10-15, 15:00 UTC**.
 
 ---
 
@@ -254,6 +254,58 @@ Seria reală a lui `blend_v1/174e7e17`: **144** (13 oct 21:08) → **151** (14 o
 **Plafon determinist, confirmat a treia oară**: 14 apeluri se strâng într-o bandă de 520 ms în jurul a ~121,4 s, toate reușesc, iar restul de 488 răspund în 397 ms mediu. **28,4 minute din cele 87 ale rulării — 33%.**
 
 Concluzia rămâne cea din D-10 §D-9: **micșorarea timeout-ului NU ajută** (`timeout=12` e între octeți, nu total) și ar tăia cereri bune. Fixul corect, dacă se face, e un buget de durată totală per cerere. **Nereparat — e o decizie, nu o investigație.**
+
+---
+
+## 3ter. **26-29 octombrie** — primul verdict F2 cu eșantion suficient (ADR-071)
+
+Citit prima dată pe 15 octombrie, la cererea proprietarului produsului („hai să vedem ce profil câștigă la F2").
+
+### Verdictul de azi: NU se poate declara un câștigător
+
+ADR-071 cere **150 de selecții decise** per politică (`PRAG_ESANTION_MINIM`). Niciuna dintre politicile de radar nu a ajuns: maximul e **124**. Raportul oficial marchează `esantion_insuficient` pe toate.
+
+| Profil | Decise | Reușită | Piața | ROI | ROI piață | Brier vs piață |
+|---|---:|---:|---:|---:|---:|---|
+| `shrunk_100` | 111 | 60,4% | 44,7% | **+27,7%** | −5,3% | 0,2304 vs 0,2397 ✓ |
+| `market_floor_020` | 116 | 58,6% | 45,2% | +24,3% | −5,0% | ✓ |
+| `ranker_prob_value` | 112 | 57,1% | 43,3% | +24,3% | −5,4% | ✓ |
+| `shrunk_075` | 111 | 58,6% | 45,4% | +22,5% | −5,3% | ✓ |
+| **`shrunk_050`** (activ) | 112 | 58,9% | 46,0% | +21,1% | −5,0% | 0,2338 vs 0,2380 ✓ |
+| `market_only` (control) | 124 | 66,1% | 63,8% | −1,4% | −5,1% | ✗ |
+| `legacy` | **665** | 30,4% | 28,3% | −2,5% | −5,1% | ✗ |
+
+### Singurul rezultat CU eșantion suficient e un NU, și e util
+
+`legacy` — comportamentul ecranului dinainte de ADR-071 §17, „sortează după edge relativ" — are **665 de selecții decise**, de patru ori pragul, și **cade**: +2,60pp peste controlul de piață, sub criteriul GO de +3pp, cu interval ±8,3pp (deci nedistins de zero). Cota medie 4,65, rata de reușită 30%.
+
+**Avem putere statistică să spunem că vechiul selector nu bate piața.** Exact ce argumenta ADR-071 §2 — edge-ul relativ ridică outsiderii deasupra.
+
+### De ce NU iau de bune cifrele mari, deși arată spectaculos
+
+Verificat și rezistă: de-vig corect (cele trei probabilități însumează **exact 1,0000** pe 1172 de grupuri, marjă de casă 5,76%) · **zero** rânduri `leakage_suspect` · regula „prima apariție" aplicată, deci cotele nu sunt alese retroactiv · `shrunk_100` are z ≈ 3,3 pe rata de reușită.
+
+Ce reține concluzia:
+
+1. **Contrazice reperul extern.** Pe 986 de meciuri (14 oct), Oracle ia 0,4939 vs piața 0,5233 — Oracle e **mai slab** decât casele. Aici, pe ~112 meciuri selectate, pare să bată probabilitatea pieței cu 14pp. Nu e imposibil — selectorul alege tocmai subsetul unde modelul se abate cel mai mult — dar asta e **ipoteza pe care experimentul trebuie s-o dovedească**, nu una pe care are voie s-o presupună.
+2. **E maximul a 12 politici aplicate aproape acelorași meciuri** — deci un rezultat citit în 12 feluri, nu 12 teste independente.
+3. **112 < 150.** Pragul a fost pus exact pentru situația asta.
+
+### Descoperire colaterală
+
+`shrunk_050` și `market_floor_025` au aceeași amprentă (`32ccbf4a`) și cifre identice până la ultima zecimală — **aceeași politică sub două nume**. Experimentul are 12 politici distincte, nu 13. Cunoscut prin construcție (`value_selector_shadow.semantic_duplicates()` există tocmai pentru asta), nu un defect.
+
+### Când, și ce înseamnă dacă nu vine
+
+~3,3 selecții decise/zi, 112 acumulate → de la 112 la 150 ies **11-14 zile**, adică **26-29 octombrie**. **Interval, nu dată**: ritmul depinde de câte meciuri calificate are fiecare zi — exact variabila subestimată de trei ori la proiecția ADR-072.
+
+Dacă nu vine la termen: nu e defect, e calendar fotbalistic. Semnal real ar fi ca numărul de **decise** să stagneze de la o săptămână la alta, ceea ce ar însemna că selecțiile nu mai primesc rezultat.
+
+**Nimic nu se schimbă automat.** `shrunk_050` rămâne activ până la o decizie umană; schimbarea de profil e `UPDATE model_config`, arătat și confirmat explicit (North Star #6).
+
+### Gol de proces, de reținut
+
+Evaluatorul (`value_selector_evaluation.yml`) e `workflow_dispatch`-only, deliberat („o citire nu produce date, deci nu are motiv să ruleze automat"). Consecința reală: **a rulat o singură dată, pe 6 septembrie, ziua în care a fost construit, și apoi deloc 39 de zile** — până la întrebarea proprietarului produsului. Același tipar ca ADR-057: un mecanism corect pe care nimeni nu-l citește. **Nereparat** — dar dacă F2 se apropie de verdict, merită o cadență, chiar rară.
 
 ---
 
