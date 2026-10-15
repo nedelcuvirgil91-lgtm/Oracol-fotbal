@@ -21,9 +21,26 @@ name: Football Oracle — Value Selector Shadow (ADR-071 F2)
 # Fereastră: `--days-ahead 3` = azi + 3 zile calendaristice (azi..+3), NU azi+2.
 # Limita e `moment + timedelta(days=N)`, iar filtrul pe `kickoff_date` e `<=`,
 # deci ziua N intră întreagă. Verificat pe rularea 38743747073: a scris 15, 16,
-# 17 ȘI 18 octombrie. Ziua a patra e marjă utilă, nu risipă — dacă o rulare
-# programată e abandonată de coada GitHub (s-a întâmplat chiar pe 15 oct, la
-# slotul de 09:40), ecranul tot are rânduri pentru toate cele trei zile afișate.
+# 17 ȘI 18 octombrie. Ziua a patra e marjă utilă, nu risipă — vezi mai jos de ce.
+#
+# ÎNTÂRZIEREA REALĂ A SLOTULUI, măsurată pe 6 zile consecutive (9-14 oct): ora
+# declarată e 09:40 UTC, ora la care rularea chiar pornește e 14:38-19:16, adică
+# o întârziere de 5h-9h36m, în FIECARE zi. Coada GitHub, fenomenul documentat în
+# CLAUDE.md din august. Două consecințe:
+#   1. Ziua a patra din fereastră acoperă exact această întârziere — ecranul are
+#      rânduri pentru cele trei zile afișate chiar și când rularea de azi n-a
+#      sosit încă.
+#   2. Motivul de programare din antet („DUPĂ sync_pre_match_odds, ca să fie
+#      cotele proaspete") e corect ca intenție, dar în practică rularea aterizează
+#      după-amiaza, nu la 09:40. NEschimbat deliberat — mutarea orei declarate nu
+#      scurtează coada, iar fără măsurători pe mai multe săptămâni n-avem cum ști
+#      dacă ar ajuta.
+#
+# CORECTURĂ (2026-10-15): o versiune anterioară a acestui comentariu spunea că
+# slotul de 09:40 din 15 oct „a fost ABANDONAT". Fals — verificarea se făcuse la
+# 13:33 UTC, adică înainte de cea mai devreme oră la care rularea a sosit vreodată
+# (14:38). Un singur instantaneu citit ca o serie. Lăsat scris aici fiindcă
+# afirmația greșită apucase să intre într-un commit.
 #
 # Mărită de la 1 pe 2026-10-15, când ecranul Top
 # Value Bets a trecut pe trei zile: fără ea, zilele +1 și +2 n-ar avea rânduri
