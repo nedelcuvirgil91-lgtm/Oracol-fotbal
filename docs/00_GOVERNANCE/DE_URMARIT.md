@@ -2,7 +2,7 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-10-14, 21:40 UTC**.
+Ultima actualizare: **2026-10-14, 20:50 UTC** (după check-in-ul rulării 38620259384).
 
 ---
 
@@ -27,7 +27,25 @@ Deci feed-ul gol nu e o defecțiune și nu e autonomie — e consecința direct�
 
 ---
 
-## 1. Rularea `night_sync` 38620259384 — ADR-073, flagul oprit
+## 1. Rularea `night_sync` 38620259384 — ADR-073, flagul oprit — ✅ **POARTA A ȚINUT**
+
+> **[VERIFICAT — 2026-10-14, 20:45 UTC]** Rulare **completă, `success`**, 87m29s (19:02:12 → 20:29:41).
+>
+> | Experiment | Grup | Rânduri ATINSE de rulare | cu `schema_version` |
+> |---|---|---:|---:|
+> | `blend_v1` | control | **150** | **0** |
+> | `blend_v1` | treatment | 150 | 0 |
+> | `xgboost_v1` | control | **150** | **0** |
+> | `xgboost_v1` | treatment | 150 | 0 |
+> | `flashscore_team_dna` | treatment | 150 | 0 (și `metadata_gol = 0` → canalul dovedit merge mai departe) |
+>
+> **750 de scrieri reale sub codul ADR-073, zero înregistrări atașate.** Flagul oprit se respectă.
+>
+> **CONTRAPONDEREA MEA ERA PROST FORMULATĂ, și era să citesc greșit rezultatul.** Scrisesem „`randuri` trebuie să CREASCĂ, altfel testul e vid". Totalurile au rămas **identice** (1299 / 1457 / 1167) — ceea ce, citit literal, ar fi însemnat „rularea n-a scris nimic".
+>
+> **Fals.** `log_shadow_prediction()` face `upsert` pe cheia compusă `(fixture_id, experiment_name, experiment_version, experiment_group, processing_stage)`. Batch-ul ADR-056 reprocesează aceeași fereastră de 7 zile în fiecare noapte, deci **rescrie** rândurile existente; totalul crește doar când intră fixture-uri NOI în fereastră. Semnalul corect că rularea a scris nu e numărul de rânduri, ci `prediction_time` avansat — **150 pe grup**, verificat separat.
+>
+> Lecția, în aceeași familie cu celelalte de azi: **o contrapondere formulată pe metrica greșită transformă o confirmare validă într-un fals negativ.** Criteriul corect e scris acum în interogarea de mai jos.
 
 **Pornită**: 14 oct, 19:02 UTC, pe `9a8c0f6`. Check-in armat la 20:44 UTC.
 
@@ -44,9 +62,21 @@ FROM shadow_predictions GROUP BY 1,2 ORDER BY 1,2;
 
 Referință măsurată înainte (14 oct ~19:00 UTC): `blend_v1` control **1299**, `xgboost_v1` control **1457**, ambele integral `{}`, zero `schema_version`. `flashscore_team_dna/treatment` **1167**, zero goale.
 
-**Contrapondere obligatorie**: `randuri` trebuie să **crească** (altfel rularea n-a scris nimic și testul e vid), iar `flashscore_team_dna` trebuie să rămână la zero goale (altfel am rupt canalul care funcționa).
+**Contrapondere — forma CORECTATĂ.** Nu „rândurile cresc" (scrierea e `upsert`, vezi nota de sus), ci „câte rânduri a atins efectiv rularea":
+
+```sql
+SELECT experiment_name, experiment_group,
+       count(*) FILTER (WHERE prediction_time >= '<ora de start a rularii>') AS atinse_de_rulare,
+       count(*) FILTER (WHERE prediction_time >= '<ora de start a rularii>'
+                          AND feature_metadata ? 'schema_version') AS atinse_CU_schema_version
+FROM shadow_predictions GROUP BY 1,2 ORDER BY 1,2;
+```
+
+`atinse_de_rulare` trebuie să fie **de ordinul sutelor**; `atinse_CU_schema_version` trebuie să fie **0**. Plus `flashscore_team_dna` rămâne la zero goale (altfel am rupt canalul care funcționa).
 
 **Dacă pică**: nu se activează nimic; se repară poarta întâi.
+
+**Ce urmează, și cere confirmarea ta**: `UPDATE model_config` pentru activare — arătat exact înainte, niciodată rulat din proprie inițiativă (North Star #6).
 
 ---
 
@@ -93,6 +123,32 @@ Abia atunci ADR-072 e confirmat end-to-end, pe date reale.
 | **D-6** — două backup-uri | nimic; revizuire restantă de ~3 săptămâni | Se păstrează sau se șterg; decizie, nu urgență. |
 | **D-3** — consumatorii coloanelor înghețate | nimic; decizie necerută | — |
 | **D-11** — Decision Feed nu numește acțiunea | nimic | Același ecran va servi și propuneri de promovare și de rollback. A produs deja o confuzie reală (13 oct). |
+
+---
+
+### Confirmat la check-in (14 oct, 20:45 UTC)
+
+`blend_v1/174e7e17`: **151 → 153**. `xgboost_v1/dda4f7f3`: **0 → 2**. `baseline_source` **NULL pe ambele** — corect, ambele sub pragul de 200, verdictul iese pe return-ul devreme și câmpul nici nu se atașează.
+
+**Proiecția ~19-20 oct se CONFIRMĂ**: seria 144 (13 oct, 21:08) → 151 (14 oct, 05:30) → **153** (14 oct, 20:29) dă ~9/zi peste 23 de ore. De la 153 la 200 ies ~5 zile.
+
+---
+
+## 3bis. D-9 — reprodus a TREIA oară, independent (14 oct, seara)
+
+| | Rularea 38509946577 | Rularea 38620259384 |
+|---|---:|---:|
+| Apeluri `thesportsdb` | 486 | **502** |
+| Peste 100 s | 13 | **14** |
+| Eșecuri | 0 | **0** |
+| Banda plafonului | 120.355–120.912 ms | **121.134–121.654 ms** |
+| Amplitudinea benzii | 557 ms | **520 ms** |
+| Timp în apelurile lente | 89% | **89,8%** (1701 s din 1895 s) |
+| Restul apelurilor, medie | 393 ms | **397 ms** |
+
+**Plafon determinist, confirmat a treia oară**: 14 apeluri se strâng într-o bandă de 520 ms în jurul a ~121,4 s, toate reușesc, iar restul de 488 răspund în 397 ms mediu. **28,4 minute din cele 87 ale rulării — 33%.**
+
+Concluzia rămâne cea din D-10 §D-9: **micșorarea timeout-ului NU ajută** (`timeout=12` e între octeți, nu total) și ar tăia cereri bune. Fixul corect, dacă se face, e un buget de durată totală per cerere. **Nereparat — e o decizie, nu o investigație.**
 
 ---
 
