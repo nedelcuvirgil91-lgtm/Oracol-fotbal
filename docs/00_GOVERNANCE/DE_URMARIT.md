@@ -2,7 +2,7 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-10-15, 18:45 UTC**.
+Ultima actualizare: **2026-10-16, 12:40 UTC**.
 
 ---
 
@@ -341,7 +341,7 @@ Reparația: `mappings.TRACKED_COMPETITIONS` (derivat din `LEAGUE_PROVIDERS`, ADR
 
 ### DE CE nu e pe `main` — condiția de merge
 
-**`blend_v1/174e7e17` e la n = 175, pragul e 200.** E la 1-3 zile de **primul verdict pe baseline-ul corectat ADR-072** — lucrul așteptat din 14 octombrie.
+**`blend_v1/174e7e17` e la n = 193, pragul e 200** *(actualizat 16 oct, după rularea `38895061622`; era 175 pe 15 oct)*. **Mai lipsesc 7 meciuri** — foarte probabil rularea de mâine dimineață. E la un pas de **primul verdict pe baseline-ul corectat ADR-072**, lucrul așteptat din 14 octombrie.
 
 Reparația adaugă ~30 de meciuri pe săptămână în bazinul Challengerilor. Dacă intră acum, acel verdict se naște cu universul schimbat, și **nu se mai poate atribui**: baseline nou sau ligi noi? Două schimbări simultane, exact ce proiectul interzice.
 
@@ -383,7 +383,9 @@ Ceilalți 5 apelanți care folosesc implicitul (`odds_persistence`, `weather_for
 >
 > Verificat, 15 oct: doar **doi** Challengeri sunt `EVALUATING` — `blend_v1/174e7e17` (n=175) și `xgboost_v1/dda4f7f3` (n=24). Restul sunt `REJECTED`/`PROMOTED` și nu mai sunt evaluați. Deci primul verdict pe baseline-ul corectat **trebuie** să vină de la `174e7e17`.
 >
-> Seria lui: 91 (11 oct) → 132 → 141 → 144 → 151 → 153 → **175** (15 oct). Mai sunt **25**. Volumul care îi alimentează: azi 45 de meciuri, mâine 11, sâmbătă 47, duminică 43.
+> Seria lui: 91 (11 oct) → 132 → 141 → 144 → 151 → 153 → 175 (15 oct) → **193** (16 oct). **Mai sunt 7.**
+>
+> *(Actualizat 16 oct. Între 15 și 16 n-a fost o rulare normală: cea de dimineață a fost anulată de incidentul TheSportsDB — §3septies — iar 193 vine din rularea manuală de după reparație.)*
 >
 > #### Confuzia care a făcut întrebarea să pară fără ieșire — și era a mea
 >
@@ -520,6 +522,82 @@ S-a reparat citirea cotelor (`_load_odds()` completează din fallback). S-a cons
 Aceeași clasă cu: POC-ul API-Football declarat șters 34 de zile înainte de ștergerea efectivă · ADR-072 declarat „în producție" când era doar pe branch · `grep -c baseline_source → 7`, cifră pe care nicio comandă n-o întoarce.
 
 **Verificarea cerută la merge-ul din §3quater** (punctele 1-3) e scrisă exact în forma asta: nu „am schimbat codul", ci „`prob_home_pred` e populat pentru UECL și HNL, azi 0 din 25 și 0 din 5".
+
+---
+
+## 3septies. ✅ **INCIDENT ÎNCHIS** — TheSportsDB a doborât `night_sync` (16 oct)
+
+### Ce s-a întâmplat
+
+Rularea `38864084314` a fost **ANULATĂ la plafonul de 180 de minute**, după 10 rulări consecutive de 80-105 min. Nu derivă graduală — salt brusc.
+
+**Cauza, din `provider_call_log`**: TheSportsDB a trecut peste noapte de la 0-2 eșecuri/zi la **443 din 443**, HTTP **404** pe toate cele 4 rute `.php`. Codul nostru neatins (`main` la `dc34fff` din 15 oct).
+
+Nu rețea (ar fi timeout), nu cotă (429), nu autentificare (403). URL-ul e `/api/v1/json/`**`3`** — cheia publică gratuită. O notă de versiune a unui proiect terț spune că TheSportsDB a oprit tier-ul gratuit; **neconfirmat oficial**, deci nu se citează ca fapt.
+
+### Costul n-a fost eșecul, ci TIMPUL — și e D-9
+
+Distribuția latențelor, strict bimodală:
+
+| Latență | Apeluri |
+|---|---:|
+| sub 1 s | 327 (mediana 439 ms) |
+| 1-20 s | **0** |
+| 20-100 s | 110 |
+| peste 100 s | 7 (maxim 120.480 ms) |
+
+**117 apeluri (26%) au consumat 106 din cele 109 minute.** Exact D-9, diagnosticat pe 14 oct și nereparat: `timeout=12` pasat lui `requests` e timeout **între octeți**, nu total.
+
+### Ce s-a măsurat înainte de orice propunere
+
+Cerere explicită a proprietarului produsului: *„verifică, nu presupune"*, *„nu umple golurile din analiză prin deducere"*.
+
+**1. Nivelul 4 al cascadei de formă (TheSportsDB) e atins de ZERO echipe.** Replicată condiția fiecărui nivel în SQL, pe cele **288 de perechi echipă-ligă** care joacă în următoarele 7 zile:
+
+| Nivel | Echipe rezolvate |
+|---|---:|
+| Level DB (≥3 meciuri în ligă, 365 zile) | **256** (88,9%) |
+| Level FS (clasamente Flashscore) | **32** |
+| Level FS2 | 0 |
+| rămân descoperite | **0** |
+| **ajung la Level 4 (TSDB)** | **0** |
+
+Rezervă onestă: o fereastră de 7 zile, nu un sezon. Dar marja e totală, nu la limită.
+
+**2. Contribuția la descoperire e NEGATIVĂ, nu nulă.** Sezonul curent: Flashscore **1.817** rânduri, TSDB **29** (1,6%); ultima lună **623 vs 1**. Din cele 29, **15 n-au niciun rezultat** nici azi. Din cele 14 rămase, **13 au `home_xg_actual`** — câmp scris exclusiv de Flashscore — deci le văzuse și el.
+
+**3. Mecanismul poluării, confirmat**: RPC-ul canonic face `COALESCE(existent, nou)`, deci cine creează rândul fixează **identitatea**. TSDB descoperă devreme, scrie `tsdb_*` cu grafia lui, Flashscore vine după și doar îmbogățește. Așa a apărut `Mjällby` lângă `Mjallby` — echipă cu **104 meciuri** în istoric sub cealaltă grafie.
+
+### Reparația
+
+`provider_kill_switch.py` — întrerupător **generic**, nu flag per provider: următoarea cădere nu va fi neapărat a lui TheSportsDB, iar un flag dedicat ar cere cod nou la fiecare incident, exact când nu e timp.
+
+Poarta stă în `oracle_api._get()`, **punct unic** — toate cele 5 endpoint-uri trec prin el, deci unul adăugat mâine nu o poate ocoli. Plus scurt-circuit la nivel de etapă în `run_daily`.
+
+`model_config.disabled_providers = ["thesportsdb"]`, activat 16 oct cu confirmare explicită. Amprentă verificată: 37 → **38 chei**, `md5(data − cheia_nouă)` **identică** (`573d54df5fa55df5865cb3b06def5614`).
+
+**18 teste, 6 mutații, toate prinse.** `pytest tests/`: 3472 passed pe `main`.
+
+### Rezultatul, măsurat pe rularea `38895061622`
+
+| | Înainte | După |
+|---|---:|---:|
+| Durată | **180, anulată** | **47 min** |
+| Apeluri `thesportsdb` | 443 (toate 404) | **0** |
+| Meciuri în 7 zile | 153 | **153** |
+| Cu predicție | 132 | **141** |
+| `data_quality = live` | 122 | **131** |
+| `data_quality = neutral` | 0 / 0 | **0 / 0** |
+| Etapa 8 (Continuous Learning) | n-a apucat | **2 evaluări** |
+| `n` pentru `174e7e17` | 183 | **193** |
+
+**47 de minute, nu 80-105.** Rulările „normale" includeau deja cele ~26 de minute pe care D-9 le documenta ca pierdute pe acest provider chiar când funcționa. Fără el, rularea e **de două ori mai rapidă decât oricând în ultima lună**, iar calitatea a **crescut**, nu doar s-a păstrat.
+
+### 🔴 Ce rămâne DESCHIS
+
+1. **D-9 nereparat.** L-am **ocolit**, nu reparat. Următorul provider care cade face exact același lucru, iar întrerupătorul trebuie pornit **manual**. Reparația de fond rămâne un buget de durată totală per cerere — sau, mai ieftin și mai general, un întrerupător **automat** după N eșecuri consecutive într-o rulare. Azi nu există: `status_forcelist` nu include 404 și nu e niciun contor de eșecuri.
+2. **TheSportsDB oprit, nu eliminat.** Codul e acolo, stins printr-o linie de configurație. Eliminarea definitivă scoate un provider din contractul de descoperire → **cere ADR** (regula #5). De făcut după o săptămână de rulări verzi.
+3. **Resturile lui**: 15 rânduri fără rezultat, `Mjällby`/`Mjallby`, și 3 rânduri SuperLiga care par meciuri de cupă etichetate greșit (`Petrolul – Afumați`, 2 oct). Nu se curăță nimic fără aprobare explicită.
 
 ---
 
