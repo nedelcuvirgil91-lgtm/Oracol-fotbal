@@ -24,7 +24,13 @@
     "doua amanari per club pe durata eliminatoriilor; KNVB a mutat NEC-Excelsior",
     "ca sa nu cada intre turul si returul cu Bodo/Glimt. Deci fenomenul se va",
     "repeta previzibil in fiecare august si in fiecare pauza de cupe — argument",
-    "direct pentru ADR-068 (starea explicita, nu dedusa din absenta rezultatului)."
+    "direct pentru ADR-068 (starea explicita, nu dedusa din absenta rezultatului).",
+    "",
+    "[ADAUGAT 2026-10-16] NU toate intrarile se autocorecteaza. Nota de mai sus",
+    "descrie amanarile, unde exista o 'data noua' pe care Discovery o redescopera.",
+    "O eticheta de competitie GRESITA (vezi tsdb_2611284) nu are echivalent: nu",
+    "exista nimic de redescoperit, deci intrarea e permanenta pana la o decizie",
+    "explicita. Fiecare intrare spune in `motiv` din care clasa face parte."
   ],
   "fixture_stale": {
     "flashscore_rX6GkgVb": {
@@ -105,6 +111,13 @@
       "motiv": "Calificari cupe europene — descoperire structural incompleta, gol upstream deja documentat in CLAUDE.md. NEverificat individual.",
       "verificat_extern": false,
       "verificat_la": "2026-08-25"
+    },
+    "tsdb_2611284": {
+      "meci": "Petrolul Ploiesti - Afumati, 2026-10-02, etichetat 'Romania SuperLiga'",
+      "motiv": "ETICHETA DE COMPETITIE GRESITA, scrisa de TheSportsDB — NU un rezultat lipsa. STABILIT: Afumati nu e echipa de SuperLiga; clasamentul Flashscore al ligii are exact 16 echipe si Afumati nu e intre ele (captura 2026-10-15). NEconfirmat individual: ca meciul e din Cupa Romaniei (plauzibil — Afumati e club de liga inferioara). Consecinta decurge insa din partea STABILITA singura: colectarea Flashscore lucreaza per competitie, iar SuperLiga e singura competitie romaneasca urmarita, deci un meci cu o echipa din afara ei nu poate primi rezultat prin niciun flux existent. INTRARE PERMANENTA, spre deosebire de amanari: nu se autocorecteaza, fiindca nu exista o 'data noua' pe care Discovery sa o redescopere. Se sterge doar daca se adauga Cupa Romaniei la competitiile urmarite, sau daca randul e supersedat/corectat printr-o decizie separata. Context: TheSportsDB a fost oprit prin model_config.disabled_providers pe 2026-10-16 (incidentul night_sync 38864084314); acest rand e exact clasa de poluare care a motivat oprirea — provider care descopera devreme, fixeaza identitatea prin COALESCE si nu duce meciul la bun sfarsit.",
+      "verificat_extern": false,
+      "sursa": "flashscore_standings_snapshot, competition='Romania SuperLiga', 16 randuri, captured_at 2026-10-15 — Afumati absent",
+      "verificat_la": "2026-10-16"
     }
   }
 }
