@@ -228,7 +228,7 @@ Seria reală a lui `blend_v1/174e7e17`: **144** (13 oct 21:08) → **151** (14 o
 | **D-6** — două backup-uri | nimic; revizuire restantă de ~3 săptămâni | Se păstrează sau se șterg; decizie, nu urgență. |
 | **D-3** — consumatorii coloanelor înghețate | nimic; decizie necerută | — |
 | **D-11** — Decision Feed nu numește acțiunea | nimic | Același ecran va servi și propuneri de promovare și de rollback. A produs deja o confuzie reală (13 oct). |
-| **ADR-075** — dubluri de identitate între provideri | aprobarea ta pe una din cele 3 opțiuni (recomand **A**, detector read-only) | PROPOSED, zero cod. Datele celor 3 cazuri sunt deja reparate; golul de **observare** rămâne. Fără decizie, tiparul reapare la fiecare etapă descoperită devreme peste care alt provider scrie întâi. Detalii și lecții: **§3octies**. |
+| **ADR-075** — dubluri de identitate între provideri | ⏳ **AMÂNAT** până la poarta n≥200 (aceeași ca §3quater). Întâi investigația §8, apoi decizia. | PROPOSED, zero cod. Datele celor 3 cazuri sunt reparate; golul de **observare rapidă** rămâne. Monitorul le prinde deja, la ~6 zile, cu diagnostic manual — deci A e viteză, nu gol închis. Amânarea NU e din risc (A nu poate strica nimic), ci din §8: mecanismul nedeterminat ar putea indica altă reparație. Detalii: **§3octies**. |
 | **ADR-074** — istoric de cote din Flashscore | aprobarea ta; apoi implementare **după** pragul F2 | PROPOSED, zero cod. Flashscore dă deja 5,53 case/meci vs. 1,57 la Odds API și acoperă UECL+HNL; singurul lucru care lipsește e mișcarea cotei, și aia e o limită de stocare (suprascriem, 7416 capturi din 7416), nu de provider. Fluxul colectează datele de 2×/zi și le aruncă. |
 | **Campionate noi** (Austria, Elveția, Danemarca → apoi Norvegia, Suedia) | calendar complet în **§3quinquies** | Fereastra e ACUM, până la autorizarea F3 — nu „după F2". Analiza din 15 oct: 133 din 206 echipe de cupă n-au campionat urmărit. Precondiție: merge-ul din §3quater, altfel o ligă nouă neacoperită de Odds API ar cădea în aceeași capcană și ar fi adăugată pe jumătate, ca UECL în august. |
 
@@ -642,11 +642,22 @@ O singură dovadă n-ar fi fost de ajuns, și ăsta e exact argumentul contra au
 - **Baseline**: `tsdb_2611284`, cherry-pick chirurgical pe `main` (`cb65111`, un fișier JSON, zero cod) — ca să NU se elibereze merge-ul din §3quater înainte de verdictul ADR-072.
 - **Verificat**, nu presupus: replicarea logicii clasei 1 în SQL dă `NOU = 0`, total închis exact (27 = 0 recente + 8 cunoscute + 19 încheiate).
 
-### 🔴 Decizie cerută: ADR-075
+### ⏳ Decizie ADR-075 — **AMÂNATĂ EXPLICIT de proprietarul produsului (16 oct)**
 
-`docs/00_GOVERNANCE/ADR-075-cross-provider-duplicate-identity.md`, **Proposed, zero cod**. Recomandare: **opțiunea A** (detector read-only, niciun contract atins). B = supliment, nu alternativă. C (supersedare automată) **respinsă**, cu precedentul migrării 049 citat.
+`docs/00_GOVERNANCE/ADR-075-cross-provider-duplicate-identity.md`, **Proposed, zero cod**. Recomandare: **opțiunea A** (detector read-only). B = supliment, nu alternativă. C (supersedare automată) **respinsă**, cu precedentul migrării 049 citat.
 
-Fără ADR, tiparul reapare la fiecare etapă descoperită devreme peste care alt provider scrie întâi — **previzibil, nu accidental**.
+> **Decizia de a nu decide, cu motivul exact.** Cuvintele proprietarului produsului: *„Nu știu ce decizie să iau... revenim după ce se împlinesc cele 200 de meciuri. Nu aș dori să stricăm ceva."*
+>
+> **Declanșator (ACELAȘI ca §3quater, deliberat):** `n_matches_evaluated >= 200` pentru `blend_v1/174e7e17` **ȘI** cel puțin un rând cu `baseline_source = 'shadow_control'`. Reminderul zilnic existent (10:47 Europe/Bucharest) a fost **extins** să aducă ambele puncte, în loc să se creeze un al doilea — două remindere pentru o singură poartă e exact felul în care unul începe să fie ignorat.
+
+**Două precizări care trebuie repetate când subiectul revine, fiindcă prima e exact ce a produs ezitarea:**
+
+1. **Opțiunea A nu poate strica nimic.** Zero scrieri, niciun scriitor nou, niciun contract atins, zero cod pe calea de predicție. Dovedit azi în practică: baseline-ul s-a dus pe `main` chirurgical (`cb65111`, un fișier JSON) fără să elibereze merge-ul din §3quater. Grija „să nu stricăm ceva" e legitimă în general, dar **nu se aplică la A** — iar faptul că a părut să se aplice e vina felului în care am împachetat A, B și C într-un singur ADR.
+2. **Motivul REAL al amânării e ADR-075 §8**, nu riscul: nu s-a stabilit de ce colectarea Flashscore a ajuns la meciul Dortmund și nu la celelalte două. Dacă e o regulă de sărire pe care o controlăm noi, reparația corectă ar putea fi alta decât oricare dintre cele trei. **Deci ordinea corectă e: investigația §8 (read-only, nicio aprobare de scriere) → abia apoi decizia.** A alege între A/B/C înainte de §8 ar fi exact alegerea pe care proprietarul produsului a refuzat-o, pe bună dreptate.
+
+**Ce mărginește costul așteptării — verificat, nu presupus:** monitorul `check_data_health` prinde **deja** această clasă. Pe 16 oct a prins **toate trei** cazurile, inclusiv pe cel al cărui geamăn canonic avea rezultat (`flashscore_plkwWY3D`). Prinde la ~6 zile după data meciului și cere diagnostic manual de fiecare dată — deci opțiunea A ar fi o **îmbunătățire de viteză și de claritate, nu închiderea unui gol**. Nu suntem orbi în timpul așteptării, doar lenți.
+
+**Ce rămâne adevărat**: fără decizie, tiparul reapare la fiecare etapă descoperită devreme peste care alt provider scrie întâi — previzibil, nu accidental. Datele celor 3 cazuri sunt reparate; golul de **observare rapidă** rămâne deschis.
 
 ### Două lecții de metodă, ambele plătite în aceeași zi
 
