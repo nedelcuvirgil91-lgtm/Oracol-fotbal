@@ -370,6 +370,34 @@ class FootballOracleAPI:
         # e `None`.
         request_manager = getattr(self, "_request_manager", None)
         provider, _endpoint = self._detect_provider_endpoint(url)
+
+        # [ADAUGAT 2026-10-16] Întrerupător de provider — punct UNIC, înaintea
+        # oricărui cost. Un provider oprit din `model_config.disabled_providers`
+        # nu mai pleacă în rețea deloc.
+        #
+        # De ce aici și nu la apelanți: toate cele 5 endpoint-uri TheSportsDB
+        # (și fiecare endpoint al oricărui alt provider) trec prin `_get()`.
+        # O poartă aici nu poate fi ocolită de un endpoint adăugat mâine.
+        #
+        # Incidentul care a cerut-o: TheSportsDB a trecut peste noapte de la
+        # 0-2 eșecuri/zi la 443 din 443 (HTTP 404), iar 117 dintre apeluri au
+        # stat 20-120 s fiecare — 106 din cele 109 minute consumate de acest
+        # provider. `night_sync` a fost anulată la plafonul de 180 min, după
+        # 10 rulări consecutive de 80-105 min. Vezi `provider_kill_switch`.
+        if provider != "unknown":
+            try:
+                import provider_kill_switch
+                if provider_kill_switch.este_oprit(provider):
+                    logger.warning(
+                        "[ProviderOprit] %s: cerere sărită înainte de HTTP "
+                        "(model_config.disabled_providers).", provider)
+                    return _ret(None, None)
+            except Exception as exc:
+                # Fail-open: un întrerupător care nu poate fi citit nu are voie
+                # să oprească providerul. Aceeași direcție ca `RateLimitManager`.
+                logger.warning("[ProviderOprit] verificare eșuată pentru %s, "
+                               "las cererea să treacă: %s", provider, exc)
+
         if request_manager is not None and provider != "unknown" and not request_manager.should_request(provider):
             logger.warning(
                 "[RateLimit] %s: cerere blocata inainte de HTTP (buget epuizat, confirmat din header-e reale).",

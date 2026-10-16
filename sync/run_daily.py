@@ -169,6 +169,21 @@ def _validate_pipeline_steps(steps: tuple[PipelineStep, ...]) -> None:
 _validate_pipeline_steps(PIPELINE_STEPS)
 
 
+def _provider_oprit(provider: str) -> bool:
+    """`True` dacă providerul e stins din `model_config.disabled_providers`.
+
+    Fail-open, ca poarta din `oracle_api._get()`: dacă verificarea nu poate fi
+    făcută, etapa rulează. Un întrerupător necitit nu are voie să oprească
+    o etapă — ar transforma o indisponibilitate Supabase într-o rulare mută."""
+    try:
+        import provider_kill_switch
+        return provider_kill_switch.este_oprit(provider)
+    except Exception as exc:
+        logger.warning("[DailySync] verificarea întrerupătorului a eșuat "
+                       "pentru %s, rulez etapa: %s", provider, exc)
+        return False
+
+
 def _print_separator(char: str = "─", width: int = 60) -> None:
     print(char * width)
 
@@ -354,6 +369,12 @@ def run(
     _t0 = time.time()
     if dry_run:
         print("  ℹ️  Sărit (dry run)")
+    elif _provider_oprit("thesportsdb"):
+        # Scurt-circuit la nivel de ETAPĂ, nu doar la nivel de cerere.
+        # Poarta din `oracle_api._get()` ar opri oricum fiecare apel, dar
+        # etapa ar itera tot cele ~250 de echipe pentru nimic. Același tipar
+        # ca scurt-circuitul pe cotă epuizată din `_attach_odds()`.
+        print("  ⏭️  Sărit — provider oprit din model_config.disabled_providers")
     else:
         try:
             from sync.sync_team_stats_tsdb import run as run_team_stats_tsdb
