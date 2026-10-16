@@ -228,6 +228,7 @@ Seria reală a lui `blend_v1/174e7e17`: **144** (13 oct 21:08) → **151** (14 o
 | **D-6** — două backup-uri | nimic; revizuire restantă de ~3 săptămâni | Se păstrează sau se șterg; decizie, nu urgență. |
 | **D-3** — consumatorii coloanelor înghețate | nimic; decizie necerută | — |
 | **D-11** — Decision Feed nu numește acțiunea | nimic | Același ecran va servi și propuneri de promovare și de rollback. A produs deja o confuzie reală (13 oct). |
+| **ADR-075** — dubluri de identitate între provideri | aprobarea ta pe una din cele 3 opțiuni (recomand **A**, detector read-only) | PROPOSED, zero cod. Datele celor 3 cazuri sunt deja reparate; golul de **observare** rămâne. Fără decizie, tiparul reapare la fiecare etapă descoperită devreme peste care alt provider scrie întâi. Detalii și lecții: **§3octies**. |
 | **ADR-074** — istoric de cote din Flashscore | aprobarea ta; apoi implementare **după** pragul F2 | PROPOSED, zero cod. Flashscore dă deja 5,53 case/meci vs. 1,57 la Odds API și acoperă UECL+HNL; singurul lucru care lipsește e mișcarea cotei, și aia e o limită de stocare (suprascriem, 7416 capturi din 7416), nu de provider. Fluxul colectează datele de 2×/zi și le aruncă. |
 | **Campionate noi** (Austria, Elveția, Danemarca → apoi Norvegia, Suedia) | calendar complet în **§3quinquies** | Fereastra e ACUM, până la autorizarea F3 — nu „după F2". Analiza din 15 oct: 133 din 206 echipe de cupă n-au campionat urmărit. Precondiție: merge-ul din §3quater, altfel o ligă nouă neacoperită de Odds API ar cădea în aceeași capcană și ar fi adăugată pe jumătate, ca UECL în august. |
 
@@ -597,7 +598,67 @@ Poarta stă în `oracle_api._get()`, **punct unic** — toate cele 5 endpoint-ur
 
 1. **D-9 nereparat.** L-am **ocolit**, nu reparat. Următorul provider care cade face exact același lucru, iar întrerupătorul trebuie pornit **manual**. Reparația de fond rămâne un buget de durată totală per cerere — sau, mai ieftin și mai general, un întrerupător **automat** după N eșecuri consecutive într-o rulare. Azi nu există: `status_forcelist` nu include 404 și nu e niciun contor de eșecuri.
 2. **TheSportsDB oprit, nu eliminat.** Codul e acolo, stins printr-o linie de configurație. Eliminarea definitivă scoate un provider din contractul de descoperire → **cere ADR** (regula #5). De făcut după o săptămână de rulări verzi.
-3. **Resturile lui**: 15 rânduri fără rezultat, `Mjällby`/`Mjallby`, și 3 rânduri SuperLiga care par meciuri de cupă etichetate greșit (`Petrolul – Afumați`, 2 oct). Nu se curăță nimic fără aprobare explicită.
+3. **Resturile lui**: 15 rânduri fără rezultat, `Mjällby`/`Mjallby`, și ~~3 rânduri~~ **UN rând** SuperLiga care e meci de cupă etichetat greșit (`Petrolul – Afumați`, 2 oct). Nu se curăță nimic fără aprobare explicită.
+
+   > **[CORECTAT 2026-10-16]** Scrisesem „3 rânduri". **Măsurat: unul.** Verificare: rânduri live SuperLiga din sezon cu o echipă absentă din clasamentul ligii (16 echipe, captură 15 oct) → **2 rezultate**, dintre care al doilea e `shadow-probe-d7954f76`, data-santinelă `2099-01-01`, artefact de diagnostic deja documentat în `CLAUDE.md` (`scripts/shadow_probe.py`, curățenie deliberat NEautomată) — **nu** un meci de cupă. Cifra „3" venea dintr-o numărare pe care n-am refăcut-o la scriere. `tsdb_2611284` e acum în `scripts/data_health_baseline.json`, cu motivul care distinge ce e STABILIT (Afumați nu e în clasament) de ce e doar plauzibil (că e Cupa României).
+
+---
+
+## 3octies. ✅ **Monitorul roșu a găsit o clasă de defect necunoscută** — dubluri de identitate între provideri (16 oct)
+
+Declanșator: captură cu `check_data_health` roșu (rularea `38901865940`) și întrebarea „cum scăpăm de eroarea asta?".
+
+**Răspunsul nu era „scădem pragul".** `CLAUDE.md` documentează că monitorul e „roșu zilnic prin design", iar tentația era să citesc asta ca explicație și să trec mai departe. Era greșit: raportul arăta **1 clasă din 6**, baseline-ul funcționa (7 amânări separate corect), iar cele 5 rânduri „NOI" erau **trei lucruri diferite**.
+
+### Ce era, de fapt
+
+| Rând | Diagnostic |
+|---|---|
+| `tsdb_2611284` Petrolul – Afumați, 2 oct | Etichetă de competiție greșită. Afumați nu e în clasamentul SuperLigii (16 echipe). → baseline, intrare **permanentă** |
+| `odds_217a…` PSV – Heerenveen · `odds_eff2…` Galatasaray – Kasimpasa, 9 oct | Rândurile cu data **corectă**, fără rezultat — deși rezultatul era deja în propria noastră bază |
+| `flashscore_plkwWY3D` 10 oct · `flashscore_ABvXMeTa` 10 oct · `flashscore_YiWPvQZg` 11 oct | **Placeholder-uri** din 7 septembrie, pentru aceleași trei meciuri |
+
+Trei meciuri reale ocupau șase identități. Detectorul de duplicate nu le vedea: cheia lui e `(gazdă, oaspete, ZI)`, iar **ziua diferea** — invizibil prin construcție pentru singurul instrument care ar fi trebuit să le vadă.
+
+### Care dată era corectă — și de ce a cerut TREI dovezi
+
+Presupunerea obișnuită a proiectului („Flashscore are dreptate") e **falsă aici**:
+
+1. Flashscore însuși, în tab-ul H2H (`flashscore_match_context`), dă toate trei pe **9 oct**: 2-2, 2-0, 3-1.
+2. `home_xg_actual` are scriitor **unic** (Flashscore), și e populat pe rândul `odds` de 9 oct al lui Dortmund — deci Flashscore a scris acolo, nu pe rândul lui de 10 oct.
+3. Aritmetica etapelor închide independent pe toate trei ligile (9 meciuri/etapă). 9 oct 2026 e **vineri**.
+
+O singură dovadă n-ar fi fost de ajuns, și ăsta e exact argumentul contra automatizării (ADR-075 §5, opțiunea C respinsă).
+
+### Cauza rădăcină — și unde NU e
+
+`correct_flashscore_kickoff_if_mismatched()` (ADR-070) compară data scrapată cu cea stocată **pentru același `fixture_id`**. Odată ce alt provider a creat rândul cu data reală, `resolve_fixture_id()` întoarce `fixture_id`-ul ACELUIA, comparația dă egal, iar rândul placeholder **nu mai e vizitat de nimeni niciodată** (descoperirea privește doar înainte).
+
+**Golul NU e în RPC.** Migrarea 049 are deja garda exactă — `reschedule_target_occupied`, rând nescris, vizibil. Diagnosticul meu inițial („trebuie un mecanism nou de supersedare") era greșit: **nu lipsește un mecanism de rezolvare, lipsește unul de observare.** Asta face problema mult mai mică decât părea.
+
+### Ce s-a făcut
+
+- **Date**: 3 placeholder-uri supersedate + 2 rezultate scrise, SQL arătat integral și confirmat explicit, gardă triplă pe fiecare instrucțiune, toate cinci atomic cu CTE-uri, `RETURNING` → exact 5 rânduri atinse, dovedit. Consemnat ca **excepție la ADR-036**, nu precedent (vezi ADR-075 §7).
+- **Baseline**: `tsdb_2611284`, cherry-pick chirurgical pe `main` (`cb65111`, un fișier JSON, zero cod) — ca să NU se elibereze merge-ul din §3quater înainte de verdictul ADR-072.
+- **Verificat**, nu presupus: replicarea logicii clasei 1 în SQL dă `NOU = 0`, total închis exact (27 = 0 recente + 8 cunoscute + 19 încheiate).
+
+### 🔴 Decizie cerută: ADR-075
+
+`docs/00_GOVERNANCE/ADR-075-cross-provider-duplicate-identity.md`, **Proposed, zero cod**. Recomandare: **opțiunea A** (detector read-only, niciun contract atins). B = supliment, nu alternativă. C (supersedare automată) **respinsă**, cu precedentul migrării 049 citat.
+
+Fără ADR, tiparul reapare la fiecare etapă descoperită devreme peste care alt provider scrie întâi — **previzibil, nu accidental**.
+
+### Două lecții de metodă, ambele plătite în aceeași zi
+
+**(a) Numărul de rânduri duplicate NU implică numărare dublă în statistică.** Raportasem că „F2 a numărat cele 3 meciuri dublu". **Greșit.** `rezultat_selectiei()` întoarce `None` la `actual_result` NULL, iar placeholder-urile n-au avut niciodată rezultat — deci cele 13 selecții de pe fiecare **n-au intrat niciodată în statisticile de selecții decise**, cele pe care se sprijină pragul F3 și ROI-ul. Dedup-ul pe `(policy_id, fixture_id)` plus poarta „fără rezultat = nedecis" filtrau deja fantomele. Afirmația de severitate venea din numărarea rândurilor, **înainte de a citi cum se consumă**.
+
+Corolar util: scrierea de azi a **ajutat** F2 — a transformat 26 de selecții din nedecise în decise, cu rezultate reale pe selecții făcute înainte de meci.
+
+**(b) „Protejăm F2" era atribuirea greșită, și confuzia era a mea.** Întrebat dacă așteptăm ca să protejăm F2, răspunsul corect e **nu**: așteptăm **primul verdict ADR-072** al lui `blend_v1/174e7e17` (n = 193, prag 200). F2 **nu blochează** — `detecteaza_cutoff()` a fost construit exact ca să absoarbă lărgirea universului. §3quinquies consemnează că amestecasem deja aceste două sisteme o dată, pe 15 oct; a doua instanță a venit din faptul că **eu** am scris „ca să protejăm F2" în mesajul anterior, iar proprietarul produsului l-a repetat. **O formulare greșită de-a mea devine convingerea lui în pasul următor** — motiv suficient să corectez atribuirea explicit, nu să confirm din politețe.
+
+### Nedeterminat — nu se completează prin deducere
+
+De ce colectarea Flashscore a ajuns la meciul Dortmund (`home_xg_actual` prezent) și **nu** la celelalte două (absent). Explică de ce unul avea rezultat și două nu, dar mecanismul nu a fost stabilit. **Contează pentru alegerea opțiunii**: dacă e o regulă de sărire pe care o controlăm noi, ar putea exista o reparație mai bună decât A, B sau C — una care duce rezultatul la rândul corect fără decizie umană. De investigat **înainte** de a implementa, nu după.
 
 ---
 
