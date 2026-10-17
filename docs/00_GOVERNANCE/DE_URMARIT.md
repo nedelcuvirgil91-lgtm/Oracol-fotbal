@@ -228,7 +228,7 @@ Seria reală a lui `blend_v1/174e7e17`: **144** (13 oct 21:08) → **151** (14 o
 | **D-6** — două backup-uri | nimic; revizuire restantă de ~3 săptămâni | Se păstrează sau se șterg; decizie, nu urgență. |
 | **D-3** — consumatorii coloanelor înghețate | nimic; decizie necerută | — |
 | **D-11** — Decision Feed nu numește acțiunea | nimic | Același ecran va servi și propuneri de promovare și de rollback. A produs deja o confuzie reală (13 oct). |
-| **`Salzburg` ≡ `Red Bull Salzburg`** | decizia ta: care formă e canonică | Același club, două lanțuri ELO. 256 de rânduri de unificat, zero coliziuni de cheie naturală, dar 3 rânduri `consensus_capture_samples` sunt INTANGIBILE (append-only). Precedentul din august spune „forma lungă" — dar a fost stabilit pentru abrevieri, iar aici forma scurtă e cea geografică, pe care Flashscore o scrie zilnic. Detalii și cifre: **§3nonies**. |
+| ~~`Salzburg` ≡ `Red Bull Salzburg`~~ **✅ REZOLVAT 17 oct** | — | Canonic `Salzburg` (decizie proprietar produs). 26 de rânduri unificate atomic, 0 rămase cu forma lungă, 0 duplicate create. **Rămân deschise, NEverificate**: `Levski Sofia`/`PFC Levski Sofia` (a doua instanță, găsită pe parcurs), plus RB Leipzig și Bayer Leverkusen ca tipar plauzibil. **§3nonies**. |
 | **ADR-075** — dubluri de identitate între provideri | ⏳ **AMÂNAT** până la poarta n≥200 (aceeași ca §3quater). Întâi investigația §8, apoi decizia. | PROPOSED, zero cod. Datele celor 3 cazuri sunt reparate; golul de **observare rapidă** rămâne. Monitorul le prinde deja, la ~6 zile, cu diagnostic manual — deci A e viteză, nu gol închis. Amânarea NU e din risc (A nu poate strica nimic), ci din §8: mecanismul nedeterminat ar putea indica altă reparație. Detalii: **§3octies**. |
 | **ADR-074** — istoric de cote din Flashscore | aprobarea ta; apoi implementare **după** pragul F2 | PROPOSED, zero cod. Flashscore dă deja 5,53 case/meci vs. 1,57 la Odds API și acoperă UECL+HNL; singurul lucru care lipsește e mișcarea cotei, și aia e o limită de stocare (suprascriem, 7416 capturi din 7416), nu de provider. Fluxul colectează datele de 2×/zi și le aruncă. |
 | **Campionate noi** (Austria, Elveția, Danemarca → apoi Norvegia, Suedia) | calendar complet în **§3quinquies** | Fereastra e ACUM, până la autorizarea F3 — nu „după F2". Analiza din 15 oct: 133 din 206 echipe de cupă n-au campionat urmărit. Precondiție: merge-ul din §3quater, altfel o ligă nouă neacoperită de Odds API ar cădea în aceeași capcană și ar fi adăugată pe jumătate, ca UECL în august. |
@@ -692,7 +692,37 @@ De ce colectarea Flashscore a ajuns la meciul Dortmund (`home_xg_actual` prezent
 
 ---
 
-## 3nonies. ⏳ `Salzburg` și `Red Bull Salzburg` sunt același club, sub două nume (găsit 2026-10-17)
+## 3nonies. ✅ **REZOLVAT (17 oct)** — `Salzburg` și `Red Bull Salzburg` erau același club
+
+> **[ÎNCHIS 2026-10-17, în aceeași zi în care a fost găsit]** Decizie explicită a proprietarului produsului: canonic e forma **SCURTĂ**, `Salzburg`, cu argumentul *„important e cum vom colecta de acum înainte, nu cum a fost colectat"*.
+>
+> **Dovada care a închis discuția** a venit tot dintr-o captură: pagina de echipă Flashscore afișează `Salzburg` **în ambele competiții** — `AUSTRIA: Bundesliga` (Salzburg–Altach, 18.10) **și** `EUROPE: Europa League` (Celje–Salzburg, 22.10; Anderlecht–Salzburg, 05.11). Deci numele nu se schimbă cu competiția, iar Europa League e o competiție pe care o colectăm. Se potrivește cu istoricul: cele 110 rânduri `Salzburg` erau deja în `AUT | Europa League`, iar cele 23 `Red Bull Salzburg` **exclusiv** în Champions League, din `fd`/`kaggle`/`openfootball` — niciunul de la Flashscore.
+>
+> **Cod** (`7a72513`): `TEAM_ALIASES` — canonic `Salzburg`, cu `Red Bull Salzburg`, `FC Red Bull Salzburg`, `RB Salzburg` ca alias. Aliasul e necesar, nu cosmetic: `fd` (football-data.org) e **încă activ** în `sync_results` și ar rescrie forma lungă la următorul meci european.
+>
+> **Date**: 26 de rânduri, într-o singură instrucțiune atomică, cu `RETURNING` — `match_history` 12+11, `elo_ratings` 1, `scheduled_fixtures` 1, `tsdb_team_stats_snapshot` 1. Exact cifrele prezise. Verificat după: **0** rânduri rămase cu forma lungă pe toate cele 7 tabele, 133 de rânduri unificate peste 3 competiții, **0** duplicate pe cheia naturală create.
+>
+> **Cele 3 rânduri append-only n-au trebuit atinse** — erau deja pe forma scurtă. Asta a fost și argumentul decisiv al alegerii: forma lungă ar fi fost **imposibil** de dus la capăt.
+>
+> ### 🔴 Prima încercare n-a făcut NIMIC, și suita a rămas VERDE
+>
+> Adăugasem intrarea cu alias-uri lângă celelalte cluburi europene, fără să observ că mai jos exista deja `"Salzburg": []`. **Python păstrează ultima definiție a unei chei duplicate, fără eroare și fără avertisment** — deci harta inversă se construia din cea goală, iar `normalize_team_name("Red Bull Salzburg")` continua să întoarcă forma lungă. Niciun test n-a căzut.
+>
+> A ieșit la iveală doar fiindcă am verificat **rezultatul**, nu am presupus că editarea a avut efect. Scanat apoi tot fișierul prin AST: `TEAM_ALIASES` 389 de chei scrise / 388 unice — singurul duplicat era cel creat de mine, deci nu exista pierdere ascunsă dinainte.
+>
+> Două gărzi noi, una pentru cauză (chei duplicate, citite din SURSĂ prin AST — în dicționarul construit duplicatul e invizibil prin definiție) și una pentru efect (normalizarea chiar funcționează, pe toate cele 5 forme). Mutația care reintroduce duplicatul le doboară pe **amândouă**.
+>
+> ### Ce NU face, și rămâne deschis
+>
+> **Nu recalculează ELO retroactiv.** Identitatea e unificată, deci H2H găsește de acum cele 23 de meciuri de Champions League și ML vede un nume consecvent. Dar valorile `elo_after` din acele rânduri rămân cele calculate pe lanțul separat. Ratingul *curent* nu se schimbă — venea oricum din lanțul `Salzburg`, mai recent (2026-10-15 vs 2025-01-29). O recalculare completă e o discuție separată, **necerută**.
+>
+> **A doua instanță a clasei, găsită pe parcurs și NEreparată**: `scheduled_fixtures` are același meci de două ori — `Levski Sofia vs Red Bull Salzburg` și `PFC Levski Sofia vs Salzburg`, ambele 2026-09-17. Deci `Levski Sofia`/`PFC Levski Sofia` e o dublură proprie. Nereparată deliberat: ar fi fost extindere de scop fără verificarea ei.
+>
+> **Colateral util**: `Crvena Zvezda`/`Red Star Belgrade` — unul dintre candidații semnalați mai jos ca NEverificați — e **deja rezolvat** (`mappings.py:326`). RB Leipzig și Bayer Leverkusen rămân neverificați.
+
+---
+
+### Istoric — diagnosticul, păstrat ca atare
 
 **Cum a ieșit la iveală** — merită reținut ca metodă: NU dintr-un monitor, ci dintr-o verificare colaterală. Proprietarul produsului a trimis capturi cu clasamentele celor trei campionate noi, iar din ele am putut compara numele reale de echipe cu istoricul nostru. `check_data_health` clasa 3 (forme abreviate) **nu** prinde cazul — a raportat 0 în aceeași zi. **A cincea oară** când observarea ecranului bate diagnosticul meu.
 
