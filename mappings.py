@@ -1396,18 +1396,43 @@ LEAGUE_ALIASES: dict[str, list[str]] = {
     "Jupiler Pro League":   ["Belgium", "B1"],
     "Ekstraklasa":          ["Poland", "POL"],
     "Scottish Premiership": ["Scotland", "SC0", "Scottish Premier League"],
-    # [ADAUGAT 2026-10-17] Variante pentru cele 3 ligi noi. DELIBERAT fara
-    # coduri football-data.co.uk (de tipul B1/POL/SC0 de mai sus): acele
-    # coduri au fost confirmate live in `match_history`, pe randuri reale.
-    # Aici nu exista randuri — verificat: zero meciuri de Austria, Elvetia
-    # sau Danemarca in istoric (interogare pe `league ilike`, 2026-10-17).
-    # Un cod ghicit ar normaliza greșit, tacit, la primul import istoric.
-    # Se adauga cand si daca apar randuri reale, nu inainte.
+    # [ADAUGAT 2026-10-17] Variante pentru cele 3 ligi noi.
     #
-    # Numele sponsorizat "Admiral Bundesliga" e inclus pentru Austria: sigla
-    # paginii Flashscore o afiseaza asa, deci o sursa poate emite acea forma.
-    # NU e acelasi lucru cu slug-ul `austria/admiral-bundesliga`, care e o
+    # 🔴 [CORECTAT IN ACEEASI ZI] Prima versiune a acestui comentariu spunea:
+    # „DELIBERAT fara coduri football-data.co.uk... verificat: zero meciuri de
+    # Austria, Elvetia sau Danemarca in istoric". **FALS, si verificarea era
+    # a mea.** Cautasem `league ilike '%austri%'` — un filtru care nu putea
+    # prinde coduri de TREI LITERE. Istoricul contine, de fapt:
+    #     AUT  644 meciuri (2021-07-03 -> 2024-12-05), toate cu rezultat
+    #     SUI  655 meciuri (2021-07-02 -> 2024-12-05), toate cu rezultat
+    #     DEN  655 meciuri (2021-07-02 -> 2024-12-08), toate cu rezultat
+    #
+    # Ca sunt chiar primele divizii e CONFIRMAT, nu presupus: toate cele 12
+    # echipe din clasamentul live al fiecarei ligi (capturi de ecran,
+    # 2026-10-17) se regasesc in codul de tara corespunzator — 36 din 36.
+    #
+    # Lectia, consemnata pentru ca a fost cat pe ce sa devina cod: un filtru
+    # care nu POATE gasi ceva nu dovedeste absenta lui. „Zero rezultate" era
+    # raspunsul corect al unei intrebari gresite, iar eu l-am citit ca raspuns
+    # la intrebarea pe care voiam s-o pun.
+    #
+    # Ce NU face adaugarea codurilor: NU unifica retroactiv cele ~1950 de
+    # randuri istorice. `normalize_league_name()` se aplica la SCRIERE, iar
+    # importul acela s-a incheiat in 2024. Un backfill ar fi o migrare de date
+    # separata, cu aprobare proprie. Impactul practic e oricum mic: ELO si H2H
+    # sunt globale per club (fara filtru de liga), deci acele meciuri CONTRIBUIE
+    # deja; iar cascada de forma are fereastra de 365 de zile, pe care randurile
+    # de pana in 2024 oricum o depasesc.
+    #
+    # Numele sponsorizate sunt incluse pentru ca sigla paginii Flashscore le
+    # afiseaza, deci o sursa poate emite acea forma — confirmate pe capturi:
+    # „ADMIRAL BUNDESLIGA" (AT), „3F SUPERLIGA" (DK), „BRACK. Super League"
+    # (CH). NU se confunda cu slug-ul `austria/admiral-bundesliga`, care e o
     # arhiva 2021/22 si e EXCLUS din discovery — vezi discovery.py.
+    # „Credit Suisse Super League" e sponsorul ANTERIOR al ligii elvetiene,
+    # pastrat deliberat: randurile istorice de pana in 2023 pot purta acea
+    # forma. Scrisesem initial DOAR varianta veche, din memorie, si poza mi-a
+    # aratat-o — o valoare pusa fara dovada, exact ce proiectul interzice.
     # 🔴 DOUA FORME AU FOST SCOASE DELIBERAT, si motivul conteaza:
     # `"Super League"` si `"Superliga"` goale. Harta inversa
     # (`ALIAS_TO_CANONICAL_LEAGUE`) se construieste prin SUPRASCRIERE tacita,
@@ -1418,11 +1443,11 @@ LEAGUE_ALIASES: dict[str, list[str]] = {
     # fost o regresie introdusa de o adaugare, nu un defect existent.
     # `"Super League"` e ambiguu independent (Elvetia, Grecia, China).
     # Se pastreaza doar formele care nu pot aparține altei competitii.
-    "Austria Bundesliga":   ["Austria", "Austrian Bundesliga", "Admiral Bundesliga",
-                              "Osterreichische Bundesliga"],
-    "Swiss Super League":   ["Switzerland", "Swiss Super League",
-                              "Credit Suisse Super League"],
-    "Danish Superliga":     ["Denmark", "Danish Superliga", "3F Superliga",
+    "Austria Bundesliga":   ["AUT", "Austria", "Austrian Bundesliga",
+                              "Admiral Bundesliga", "Osterreichische Bundesliga"],
+    "Swiss Super League":   ["SUI", "Switzerland", "Swiss Super League",
+                              "Brack Super League", "Credit Suisse Super League"],
+    "Danish Superliga":     ["DEN", "Denmark", "Danish Superliga", "3F Superliga",
                               "Superligaen"],
 }
 

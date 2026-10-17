@@ -71,6 +71,28 @@ def test_superliga_goala_nu_se_mapeaza_la_danemarca():
             "ambiguă, trebuie să rămână neschimbată")
 
 
+@pytest.mark.parametrize("cod,asteptat", [
+    ("AUT", "Austria Bundesliga"),
+    ("SUI", "Swiss Super League"),
+    ("DEN", "Danish Superliga"),
+])
+def test_codurile_istorice_de_tara_se_mapeaza_la_liga_noua(cod, asteptat):
+    """Cele trei coduri există REAL în `match_history` — AUT 644 de meciuri,
+    SUI 655, DEN 655, toate cu rezultat — iar că sunt primele divizii e
+    confirmat: toate cele 12 echipe din clasamentul live al fiecărei ligi se
+    regăsesc în codul corespunzător (36 din 36).
+
+    Fără maparea asta, aceeași competiție ar purta două etichete: `AUT` pe
+    rândurile istorice și `Austria Bundesliga` pe cele noi.
+
+    Testul există și ca urmă a unei erori de metodă: prima versiune a codului
+    le-a omis deliberat, justificat cu „zero meciuri în istoric" — concluzie
+    produsă de un filtru (`league ilike '%austri%'`) care nu PUTEA găsi un cod
+    de trei litere."""
+    assert normalize_league_name(cod) == asteptat
+    assert normalize_league_name(cod.lower()) == asteptat
+
+
 def test_formele_neambigue_se_mapeaza_corect():
     """Contrapondere: dacă testul de mai sus ar trece fiindcă normalizarea nu
     mai face nimic pentru nimeni, asta ar prinde-o."""
