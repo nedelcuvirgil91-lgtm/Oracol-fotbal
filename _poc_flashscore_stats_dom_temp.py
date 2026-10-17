@@ -49,8 +49,8 @@ from collections import Counter
 # ambele din competiții urmărite, ambele cu `has_stats = true` în
 # `flashscore_data_completeness`.
 MECIURI = [
-    ("REFERINTA  7 sep", "https://www.flashscore.com/match/football/MN1IRPIG/"),
-    ("DEFECT     9 oct", "https://www.flashscore.com/match/football/YiWPvQZg/"),
+    ("REFERINTA  7 sep", "https://www.flashscore.com/match/football/MN1IRPIG"),
+    ("DEFECT     9 oct", "https://www.flashscore.com/match/football/YiWPvQZg"),
     # Al treilea caz, cel mai tare: Everton-Chelsea, 17.10.2026, Premier
     # League. Proprietarul produsului a trimis captura paginii — terminat 0-2,
     # tab-ul STATS plin (xG 0.45/1.54, xGOT 0.70/1.79, posesie, șuturi).
@@ -59,8 +59,50 @@ MECIURI = [
     # e defectul, viu, pe un meci de azi.
     # `mid`-ul e luat din `match_history`, NU ghicit: prima versiune a acestei
     # linii conținea un identificator inventat de mine.
-    ("DEFECT    17 oct", "https://www.flashscore.com/match/football/2wo3m634/"),
+    ("DEFECT    17 oct", "https://www.flashscore.com/match/football/2wo3m634"),
 ]
+
+# 🔴 [CORECTAT A DOUA OARA] A doua rulare a dat pagini de ~10.9 KB cu ZERO
+# `data-testid` pe toate trei — adica zidul de consimtamant, nu continutul.
+# Garda de randare a prins-o si a spus corect INCONCLUZIV, dar cauza erau
+# iar DOUA diferente fata de productie, ambele ale mele:
+#
+#   `providers/flashscore/adapter.py:185-190`
+#       url = f"{match_base_url}/{suffix}?mid={mid}"   <- `?mid=` lipsea
+#       if tab_name == "summary": _dismiss_gdpr_if_present(page)
+#
+# Productia viziteaza INTAI `summary`, respinge bannerul GDPR, si refoloseste
+# ACEEASI pagina pentru restul tab-urilor — deci consimtamantul se da o data
+# si tine pentru toate. POC-ul mergea direct pe `stats`, pe o pagina noua,
+# fara `?mid=`.
+#
+# Lectia, a treia oara in aceeasi investigatie: un POC care nu reproduce
+# EXACT calea productiei nu masoara defectul, masoara propria lui diferenta.
+MID_DIN_URL = re.compile(r"/match/football/([A-Za-z0-9]+)")
+
+# Reproduse din adapter.py ca VALORI, nu prin import (garda de izolare a
+# POC-urilor interzice importul modulelor de productie).
+SELECTOARE_GDPR = (
+    "#onetrust-accept-btn-handler",
+    "button:has-text('Accept & continue')",
+    "button:has-text('Accept all')",
+    "button:has-text('I Accept')",
+)
+NAV_TIMEOUT_MS = 30000
+POST_LOAD_WAIT_MS = 3500
+
+
+def _respinge_gdpr(page) -> bool:
+    for selector in SELECTOARE_GDPR:
+        try:
+            btn = page.locator(selector).first
+            if btn.is_visible(timeout=1500):
+                btn.click(timeout=2000)
+                page.wait_for_timeout(500)
+                return True
+        except Exception:
+            continue
+    return False
 
 # 🔴 [CORECTAT dupa prima rulare — eroarea era in POC, nu in diagnostic]
 # Prima versiune folosea navigarea prin HASH (`#/match-summary/match-
@@ -140,25 +182,41 @@ def main() -> int:
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         try:
-            for eticheta, base in MECIURI:
-                url = f"{base.rstrip('/')}/{SUFIX_TAB_STATS}"
-                page = browser.new_page()
-                try:
-                    page.goto(url, timeout=60000, wait_until="domcontentloaded")
-                    # Astept SEMNALUL, nu un numar fix de secunde: o pagina
-                    # lenta ar fi masurata ca „ruptă" de un timeout orb.
+            # O SINGURA pagina pentru tot, ca in productie: consimtamantul dat
+            # o data tine pentru restul vizitelor.
+            page = browser.new_page()
+            try:
+                for eticheta, base in MECIURI:
+                    m = MID_DIN_URL.search(base)
+                    if not m:
+                        print(f"[{eticheta}] URL fara mid, sar: {base}")
+                        continue
+                    mid = m.group(1)
                     try:
-                        page.wait_for_function(
-                            f"document.body.innerText.includes({MARCAJ_RANDARE!r})",
-                            timeout=25000)
-                    except Exception:
-                        print(f"  [{eticheta}] marcajul de randare n-a apărut în 25 s")
-                    rezultate.append(_raport(eticheta, page.content()))
-                except Exception as exc:
-                    print(f"\n[{eticheta}] EȘUAT: {exc}")
-                    rezultate.append({"eticheta": eticheta, "eroare": str(exc)})
-                finally:
-                    page.close()
+                        # Pas 1 — `summary`, EXACT ca productia, ca sa apara si
+                        # sa fie respins bannerul de consimtamant.
+                        page.goto(f"{base}/?mid={mid}", timeout=NAV_TIMEOUT_MS,
+                                  wait_until="domcontentloaded")
+                        if _respinge_gdpr(page):
+                            print(f"  [{eticheta}] banner GDPR respins")
+                        page.wait_for_timeout(POST_LOAD_WAIT_MS)
+
+                        # Pas 2 — tab-ul de statistici, aceeasi forma de URL.
+                        page.goto(f"{base}/{SUFIX_TAB_STATS}?mid={mid}",
+                                  timeout=NAV_TIMEOUT_MS, wait_until="domcontentloaded")
+                        page.wait_for_timeout(POST_LOAD_WAIT_MS)
+                        try:
+                            page.wait_for_function(
+                                f"document.body.innerText.includes({MARCAJ_RANDARE!r})",
+                                timeout=20000)
+                        except Exception:
+                            print(f"  [{eticheta}] marcajul de randare n-a apărut în 20 s")
+                        rezultate.append(_raport(eticheta, page.content()))
+                    except Exception as exc:
+                        print(f"\n[{eticheta}] EȘUAT: {exc}")
+                        rezultate.append({"eticheta": eticheta, "eroare": str(exc)})
+            finally:
+                page.close()
         finally:
             browser.close()
 
