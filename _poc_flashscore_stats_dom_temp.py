@@ -186,26 +186,32 @@ def _raport(eticheta: str, html: str) -> dict:
 
 
 def main() -> int:
-    """Intrebarea care decide MARIMEA reparatiei: mai ajunge `mid`-ul singur la
-    tabul de statistici, sau URL-ul trebuie descoperit per meci?
+    """TOATE cele 7 taburi pe care le cere productia, testate pe acelasi meci.
 
-    Stim din rularea precedenta ca URL-ul REAL de azi e:
-      /match/football/chelsea-<id>/everton-<id>/summary/stats/overall/?mid=<mid>
-    Noi avem stocat DOAR `mid`-ul. Daca forma cu `mid` in cale mai merge,
-    reparatia e un sufix. Daca nu, adaptorul trebuie sa citeasca href-ul
-    tabului din pagina de sumar — alta dimensiune, alta decizie.
+    Ipoteza, sugerata de date inainte de orice test: cele TREI taburi moarte
+    (stats, lineups, player_stats) sunt sub-cai `summary/...`, iar cele PATRU
+    vii (summary, odds, h2h, standings) sunt de nivel superior. Daca se
+    confirma, e UN singur defect cu trei victime, nu trei defecte.
+
+    Fiecare tab are un MARCAJ propriu de continut: absenta lui e semnalul, nu
+    dimensiunea paginii (o coaja goala si o pagina reala pot avea dimensiuni
+    apropiate la taburile mici).
     """
     from playwright.sync_api import sync_playwright
 
     mid = "2wo3m634"
-    FORME = {
-        "A. mid + /stats/ (PRODUCTIA DE AZI)":
-            f"https://www.flashscore.com/match/football/{mid}/summary/stats/?mid={mid}",
-        "B. mid + /stats/overall/":
-            f"https://www.flashscore.com/match/football/{mid}/summary/stats/overall/?mid={mid}",
-        "C. sloguri de echipa + /stats/overall/ (URL REAL)":
-            "https://www.flashscore.com/match/football/chelsea-4fGZN2oK/"
-            f"everton-KluSTr9s/summary/stats/overall/?mid={mid}",
+    BAZA = f"https://www.flashscore.com/match/football/{mid}"
+
+    # Identic cu _MATCH_TAB_SUFFIXES din providers/flashscore/adapter.py,
+    # copiat ca VALORI (garda de izolare interzice importul).
+    TABURI = {
+        "summary":      ("",                      "Referee"),
+        "stats":        ("summary/stats/",         "Expected goals"),
+        "lineups":      ("summary/lineups/",       "Formation"),
+        "player_stats": ("summary/player-stats/",  "Minutes played"),
+        "odds":         ("odds/",                  "1X2"),
+        "h2h":          ("h2h/",                   "Head-to-head"),
+        "standings":    ("standings/",             "Rank"),
     }
 
     rezultate = []
@@ -213,61 +219,57 @@ def main() -> int:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         try:
-            # Consimtamantul o data, pe sumar, exact ca productia.
-            page.goto(f"https://www.flashscore.com/match/football/{mid}/?mid={mid}",
-                      timeout=NAV_TIMEOUT_MS, wait_until="domcontentloaded")
+            page.goto(f"{BAZA}/?mid={mid}", timeout=NAV_TIMEOUT_MS,
+                      wait_until="domcontentloaded")
             if _respinge_gdpr(page):
                 print("  banner GDPR respins")
             page.wait_for_timeout(POST_LOAD_WAIT_MS)
 
-            print(f"\n{'#' * 78}\n  CE FORMA DE URL SERVESTE STATISTICILE?\n{'#' * 78}")
-            for nume, url in FORME.items():
+            print(f"\n{'#' * 78}")
+            print("  TOATE CELE 7 TABURI, cu forma de URL a PRODUCTIEI")
+            print(f"{'#' * 78}")
+            print(f"  {'tab':<14}{'sufix':<26}{'octeti':>9}{'marcaj':>9}  {'verdict'}")
+            print(f"  {'-' * 74}")
+
+            for nume, (sufix, marcaj) in TABURI.items():
                 try:
-                    page.goto(url, timeout=NAV_TIMEOUT_MS, wait_until="domcontentloaded")
+                    page.goto(f"{BAZA}/{sufix}?mid={mid}", timeout=NAV_TIMEOUT_MS,
+                              wait_until="domcontentloaded")
                     page.wait_for_timeout(POST_LOAD_WAIT_MS)
-                    try:
-                        page.wait_for_function(
-                            "document.querySelectorAll(\"[data-testid='wcl-statistics']\").length > 10",
-                            timeout=12000)
-                    except Exception:
-                        pass
-                    n = page.evaluate(
-                        "document.querySelectorAll(\"[data-testid='wcl-statistics']\").length")
                     html = page.content()
-                    final = page.url
-                    redirect = "DA" if final.rstrip("/") != url.split("?")[0].rstrip("/") else "nu"
-                    print(f"\n  {nume}")
-                    print(f"     octeți            : {len(html):>9}")
-                    print(f"     rânduri statistici: {n:>9}")
-                    print(f"     'Expected goals'  : {'DA' if MARCAJ_RANDARE in html else 'NU'}")
-                    print(f"     redirectat        : {redirect}")
-                    print(f"     URL final         : {final}")
-                    rezultate.append({"forma": nume, "octeti": len(html), "randuri": n,
-                                      "url_final": final})
+                    are = marcaj.lower() in html.lower()
+                    viu = len(html) > 50000 and are
+                    print(f"  {nume:<14}{sufix or '(radacina)':<26}{len(html):>9}"
+                          f"{('DA' if are else 'NU'):>9}  {'VIU' if viu else '*** MORT ***'}")
+                    rezultate.append({"tab": nume, "sufix": sufix, "octeti": len(html),
+                                      "marcaj": are, "viu": viu})
                 except Exception as exc:
-                    print(f"\n  {nume}\n     EȘUAT: {exc}")
-                    rezultate.append({"forma": nume, "eroare": str(exc)})
+                    print(f"  {nume:<14}{sufix:<26}{'EROARE':>9}  {exc}")
+                    rezultate.append({"tab": nume, "eroare": str(exc)})
         finally:
             page.close()
             browser.close()
 
     print(f"\n{'=' * 78}\n  VERDICT\n{'=' * 78}")
-    b = next((r for r in rezultate if r.get("forma", "").startswith("B.")), {})
-    c = next((r for r in rezultate if r.get("forma", "").startswith("C.")), {})
-    if b.get("randuri", 0) > 10:
-        print("  `mid`-ul SINGUR mai ajunge la statistici (forma B).")
-        print("  -> REPARATIE MICA: un sufix in _MATCH_TAB_SUFFIXES")
-        print("     ('summary/stats/' -> 'summary/stats/overall/') + selectorii.")
-    elif c.get("randuri", 0) > 10:
-        print("  Doar forma CU SLOGURI DE ECHIPA serveste statisticile.")
-        print("  -> REPARATIE MAI MARE: adaptorul trebuie sa citeasca href-ul")
-        print("     tabului din pagina de sumar si sa-l urmeze, fiindca noi")
-        print("     stocam doar `mid`-ul, nu slogurile.")
-    else:
-        print("  NICIUNA n-a servit statisticile in aceasta rulare.")
-        print("  -> inconcluziv; nu propun o reparatie pe asta.")
+    morti = [r for r in rezultate if r.get("viu") is False]
+    vii = [r for r in rezultate if r.get("viu") is True]
+    sub_summary = [r for r in morti if r.get("sufix", "").startswith("summary/")]
 
-    print("\nJSON:", json.dumps(rezultate, ensure_ascii=False)[:900])
+    print(f"  VII : {[r['tab'] for r in vii]}")
+    print(f"  MORTI: {[r['tab'] for r in morti]}")
+    if morti and len(sub_summary) == len(morti):
+        print("\n  CONFIRMAT: TOATE taburile moarte sunt sub-cai `summary/...`,")
+        print("  si NICIUN tab de nivel superior nu e afectat.")
+        print("  -> UN singur defect cu trei victime, nu trei defecte separate.")
+        print("     Reparatia URL-ului le repara pe toate deodata.")
+    elif not morti:
+        print("\n  NICIUN tab mort in aceasta rulare — rezultat neasteptat,")
+        print("  contrazice datele din baza. NU propun nimic pe el.")
+    else:
+        print("\n  TIPAR MIXT: morti si in afara `summary/...`.")
+        print("  -> sunt defecte DISTINCTE; ADR-ul trebuie sa le trateze separat.")
+
+    print("\nJSON:", json.dumps(rezultate, ensure_ascii=False)[:1200])
     return 0
 
 
