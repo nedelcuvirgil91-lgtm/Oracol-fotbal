@@ -51,7 +51,37 @@ from collections import Counter
 MECIURI = [
     ("REFERINTA  7 sep", "https://www.flashscore.com/match/football/MN1IRPIG/"),
     ("DEFECT     9 oct", "https://www.flashscore.com/match/football/YiWPvQZg/"),
+    # Al treilea caz, cel mai tare: Everton-Chelsea, 17.10.2026, Premier
+    # League. Proprietarul produsului a trimis captura paginii — terminat 0-2,
+    # tab-ul STATS plin (xG 0.45/1.54, xGOT 0.70/1.79, posesie, șuturi).
+    # La noi, ACELAȘI meci (`flashscore_2wo3m634`, id=126842) are
+    # `actual_result` NULL și xG NULL. Deci nu e o reconstrucție istorică —
+    # e defectul, viu, pe un meci de azi.
+    # `mid`-ul e luat din `match_history`, NU ghicit: prima versiune a acestei
+    # linii conținea un identificator inventat de mine.
+    ("DEFECT    17 oct", "https://www.flashscore.com/match/football/2wo3m634/"),
 ]
+
+# 🔴 [CORECTAT dupa prima rulare — eroarea era in POC, nu in diagnostic]
+# Prima versiune folosea navigarea prin HASH (`#/match-summary/match-
+# statistics/0`). Rezultatul: `wcl-statistics` -> 5 potriviri si
+# `-category`/`-value` -> 0, IDENTIC pe ambele pagini, inclusiv pe cea din
+# 7 septembrie despre care stim sigur ca a functionat in productie
+# (`home_shots=22` e in baza noastra). Deci POC-ul nu incarcase tab-ul real:
+# cele 5 potriviri erau widget-ul RESTRANS din sumar — exact „5 categorii"
+# pe care docstring-ul lui `normalize_match_statistics()` le descrie ca
+# fallback.
+#
+# Productia foloseste o CALE, nu un hash: `_MATCH_TAB_SUFFIXES` din
+# `providers/flashscore/adapter.py` da `"stats": "summary/stats/"`.
+# Reprodus acum identic, altfel POC-ul masoara altceva decat codul reparat.
+SUFIX_TAB_STATS = "summary/stats/"
+
+# Semnal de randare: daca textul asta nu e in HTML, pagina nu s-a terminat de
+# incarcat si orice numaratoare de selectori e lipsita de sens. Verificat pe
+# captura live a proprietarului produsului (Everton-Chelsea, 17.10.2026):
+# sectiunea „Expected goals (xG)" apare pe tab-ul de statistici.
+MARCAJ_RANDARE = "Expected goals"
 
 SELECTORI_ASTEPTATI = (
     "[data-testid='wcl-statistics']",
@@ -79,8 +109,12 @@ def _raport(eticheta: str, html: str) -> dict:
     candidati = {k: v for k, v in inventar.items()
                  if "stat" in k.lower() or "wcl" in k.lower()}
 
+    randat = MARCAJ_RANDARE in html
+
     print(f"\n{'=' * 78}\n  {eticheta}\n{'=' * 78}")
     print(f"  lungime HTML                 : {len(html)} octeți")
+    print(f"  conține '{MARCAJ_RANDARE}'    : {'DA' if randat else 'NU'}"
+          f"{'' if randat else '   <-- pagina NU s-a randat; cifrele de mai jos nu spun nimic'}")
     print(f"  total atribute data-testid   : {sum(inventar.values())} "
           f"({len(inventar)} distincte)")
     print("  SELECTORII FOLOSIȚI AZI ÎN PRODUCȚIE:")
@@ -94,7 +128,7 @@ def _raport(eticheta: str, html: str) -> dict:
         print("  TOP 25 data-testid de pe pagină, ca punct de plecare:")
         for k, v in inventar.most_common(25):
             print(f"     {v:5}x  {k}")
-    return {"eticheta": eticheta, "octeti": len(html),
+    return {"eticheta": eticheta, "octeti": len(html), "randat": randat,
             "selectori": gasite, "candidati": dict(candidati),
             "total_testid": sum(inventar.values())}
 
@@ -107,11 +141,18 @@ def main() -> int:
         browser = p.chromium.launch(headless=True)
         try:
             for eticheta, base in MECIURI:
-                url = f"{base}#/match-summary/match-statistics/0"
+                url = f"{base.rstrip('/')}/{SUFIX_TAB_STATS}"
                 page = browser.new_page()
                 try:
                     page.goto(url, timeout=60000, wait_until="domcontentloaded")
-                    page.wait_for_timeout(6000)  # randarea e pe JS
+                    # Astept SEMNALUL, nu un numar fix de secunde: o pagina
+                    # lenta ar fi masurata ca „ruptă" de un timeout orb.
+                    try:
+                        page.wait_for_function(
+                            f"document.body.innerText.includes({MARCAJ_RANDARE!r})",
+                            timeout=25000)
+                    except Exception:
+                        print(f"  [{eticheta}] marcajul de randare n-a apărut în 25 s")
                     rezultate.append(_raport(eticheta, page.content()))
                 except Exception as exc:
                     print(f"\n[{eticheta}] EȘUAT: {exc}")
@@ -123,23 +164,36 @@ def main() -> int:
 
     print(f"\n{'=' * 78}\n  VERDICT\n{'=' * 78}")
     ok = [r for r in rezultate if "selectori" in r]
-    if len(ok) == 2:
-        vechi, nou = ok[0]["selectori"], ok[1]["selectori"]
-        principal = SELECTORI_ASTEPTATI[0]
-        if vechi[principal] > 0 and nou[principal] == 0:
-            print("  CONFIRMAT: selectorul merge pe pagina veche și NU pe cea nouă")
-            print("  -> Flashscore a schimbat structura. Numele nou e în lista de")
-            print("     candidați de mai sus; reparația e un selector, nu un proiect.")
-        elif vechi[principal] == 0 and nou[principal] == 0:
-            print("  NECONFIRMAT: selectorul nu merge pe NICIUNA dintre pagini.")
-            print("  -> Cauza NU e o schimbare recentă de DOM. Posibil randare")
-            print("     incompletă în acest POC (timp de așteptare, consimțământ")
-            print("     cookies, geo). De investigat ALTFEL, nu de reparat orbește.")
-        else:
-            print("  NEAȘTEPTAT: selectorul merge pe pagina nouă.")
-            print("  -> Atunci ruptura e în AVAL de extragere (fetch, persistare).")
-    else:
-        print("  INCONCLUZIV — o pagină n-a putut fi încărcată. Vezi erorile.")
+
+    # 🔴 Prima versiune a verdictului se uita DOAR la containerul
+    # `wcl-statistics` si a tras o concluzie falsa („ruptura e in aval")
+    # cand acela era 5 pe ambele pagini — desi `-category`/`-value` erau 0
+    # pe AMBELE, inclusiv pe una despre care stim ca a mers in productie.
+    # Semnalul care conteaza e PERECHEA category+value, si numai pe pagini
+    # care s-au randat efectiv.
+    nerandate = [r["eticheta"] for r in ok if not r.get("randat")]
+    if nerandate:
+        print(f"  INCONCLUZIV — pagini nerandate: {', '.join(nerandate)}")
+        print("  -> Orice numărătoare de selectori pe ele e lipsită de sens.")
+        print("     Se repară POC-ul, NU codul de producție.")
+        return 0
+
+    cat, val = SELECTORI_ASTEPTATI[1], SELECTORI_ASTEPTATI[2]
+    merge = [r for r in ok if r["selectori"][cat] > 0 and r["selectori"][val] > 0]
+    nu_merge = [r for r in ok if r not in merge]
+
+    if not merge and nu_merge:
+        print("  CONFIRMAT: pe pagini RANDATE, perechea category+value nu mai")
+        print("  găsește nimic — pe NICIUNA, inclusiv pe cea de referință.")
+        print("  -> Flashscore a redenumit atributele. Numele nou e în lista de")
+        print("     candidați de mai sus; reparația e un selector, nu un proiect.")
+    elif merge and nu_merge:
+        print(f"  PARȚIAL: merge pe {[r['eticheta'] for r in merge]}, nu pe")
+        print(f"  {[r['eticheta'] for r in nu_merge]} -> schimbare progresivă.")
+    elif merge and not nu_merge:
+        print("  NEAȘTEPTAT: selectorii merg pe TOATE paginile randate.")
+        print("  -> Ipoteza DOM e INFIRMATĂ. Ruptura e în aval (fetch care nu")
+        print("     cere tab-ul, sau persistare). De investigat acolo.")
 
     print("\nJSON:", json.dumps(rezultate, ensure_ascii=False)[:1500])
     return 0
