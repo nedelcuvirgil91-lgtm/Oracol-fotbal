@@ -191,111 +191,93 @@ def main() -> int:
     rezultate = []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
         try:
-            # O SINGURA pagina pentru tot, ca in productie: consimtamantul dat
-            # o data tine pentru restul vizitelor.
-            page = browser.new_page()
+            eticheta, base = MECIURI[0]
+            mid = MID_DIN_URL.search(base).group(1)
+
+            page.goto(f"{base}/?mid={mid}", timeout=NAV_TIMEOUT_MS,
+                      wait_until="domcontentloaded")
+            if _respinge_gdpr(page):
+                print("  banner GDPR respins")
+            page.wait_for_timeout(POST_LOAD_WAIT_MS)
+
+            def _nr_statistici() -> int:
+                return page.evaluate(
+                    "document.querySelectorAll(\"[data-testid='wcl-statistics']\").length")
+
+            print(f"\n{'#' * 78}\n  {eticheta}\n{'#' * 78}")
+            print(f"  [1] pe SUMMARY: {_nr_statistici()} rânduri wcl-statistics "
+                  "(widgetul restrâns, ~5)")
+
+            # ÎNTREBAREA 1 — care e URL-ul REAL al tabului de statistici?
+            # Il citesc de pe pagina, din href-ul linkului, in loc sa-l ghicesc.
+            print("\n  [2] LINKURI DE TAB găsite pe pagină (href REAL, nu ghicit):")
+            linkuri = page.evaluate("""
+                Array.from(document.querySelectorAll('a[href], button[data-analytics-alias]'))
+                  .map(e => ({
+                      text: (e.innerText || '').trim().slice(0, 28),
+                      href: e.getAttribute('href') || '',
+                      alias: e.getAttribute('data-analytics-alias') || ''
+                  }))
+                  .filter(o => /stat/i.test(o.text) || /stat/i.test(o.href) || /stat/i.test(o.alias))
+                  .slice(0, 12)
+            """)
+            for l in linkuri:
+                print(f"      text={l['text']!r:32} alias={l['alias']!r:20} href={l['href']!r}")
+            if not linkuri:
+                print("      (niciunul — tabul nu e un link, probabil buton SPA)")
+
+            # ÎNTREBAREA 2 — ajunge tabul COMPLET (~36 categorii)?
+            # Se face ca un UTILIZATOR: click, nu navigare construita de mine.
+            print("\n  [3] CLICK pe tabul de statistici (ca un utilizator):")
+            apasat = False
+            for sel in ("a[href*='match-statistics']",
+                        "button:has-text('Stats')", "a:has-text('Stats')",
+                        "[data-analytics-alias*='statistics']"):
+                try:
+                    el = page.locator(sel).first
+                    if el.is_visible(timeout=2500):
+                        el.click(timeout=3000)
+                        print(f"      apăsat: {sel}")
+                        apasat = True
+                        break
+                except Exception:
+                    continue
+            if not apasat:
+                print("      n-am găsit niciun element de apăsat")
+
+            page.wait_for_timeout(POST_LOAD_WAIT_MS)
             try:
-                for eticheta, base in MECIURI:
-                    m = MID_DIN_URL.search(base)
-                    if not m:
-                        print(f"[{eticheta}] URL fara mid, sar: {base}")
-                        continue
-                    mid = m.group(1)
-                    try:
-                        # Pas 1 — `summary`, EXACT ca productia (si asa apare
-                        # bannerul de consimtamant, de respins o singura data).
-                        page.goto(f"{base}/?mid={mid}", timeout=NAV_TIMEOUT_MS,
-                                  wait_until="domcontentloaded")
-                        if _respinge_gdpr(page):
-                            print(f"  [{eticheta}] banner GDPR respins")
-                        page.wait_for_timeout(POST_LOAD_WAIT_MS)
-                        html_summary = page.content()
+                page.wait_for_function(
+                    "document.querySelectorAll(\"[data-testid='wcl-statistics']\").length > 10",
+                    timeout=15000)
+            except Exception:
+                print("      rândurile n-au trecut de 10 în 15 s")
 
-                        # Pas 2 — CELE DOUA FORME DE URL, comparate direct.
-                        # Asta e intrebarea reala acum: productia foloseste
-                        # forma CU CALE; primele rulari au aratat ca forma cu
-                        # HASH intoarce 1,2 MB iar cea cu cale ~10,9 KB.
-                        variante = {
-                            "CALE (productie)": f"{base}/{SUFIX_TAB_STATS}?mid={mid}",
-                            "HASH (SPA)": f"{base}/#/match-summary/match-statistics/0",
-                        }
-                        htmls = {}
-                        for nume, url in variante.items():
-                            page.goto(url, timeout=NAV_TIMEOUT_MS,
-                                      wait_until="domcontentloaded")
-                            page.wait_for_timeout(POST_LOAD_WAIT_MS)
-                            try:
-                                page.wait_for_function(
-                                    f"document.body.innerText.includes({MARCAJ_RANDARE!r})",
-                                    timeout=15000)
-                            except Exception:
-                                pass
-                            htmls[nume] = page.content()
+            n_dupa = _nr_statistici()
+            print(f"      URL după click : {page.url}")
+            print(f"      rânduri ACUM   : {n_dupa}")
+            html = page.content()
+            r = _raport(f"{eticheta} / după click", html)
+            r["randuri_dupa_click"] = n_dupa
+            _dump_zona_statistici(html)
+            rezultate.append(r)
 
-                        print(f"\n{'#' * 78}\n  {eticheta} — COMPARATIE FORME DE URL\n{'#' * 78}")
-                        print(f"  summary (referinta)     : {len(html_summary):>9} octeți, "
-                              f"'{MARCAJ_RANDARE}' {'DA' if MARCAJ_RANDARE in html_summary else 'NU'}")
-                        for nume, h in htmls.items():
-                            print(f"  {nume:<24}: {len(h):>9} octeți, "
-                                  f"'{MARCAJ_RANDARE}' {'DA' if MARCAJ_RANDARE in h else 'NU'}")
-
-                        # Raportul detaliat se face pe forma care a RANDAT.
-                        castigator = next(
-                            (n for n, h in htmls.items() if MARCAJ_RANDARE in h), None)
-                        if castigator:
-                            print(f"  -> analizez forma care a randat: {castigator}")
-                            r = _raport(f"{eticheta} / {castigator}", htmls[castigator])
-                            _dump_zona_statistici(htmls[castigator])
-                        else:
-                            print("  -> NICIUNA n-a randat statisticile.")
-                            r = _raport(f"{eticheta} / niciuna randata",
-                                        htmls["CALE (productie)"])
-                        r["forme"] = {n: len(h) for n, h in htmls.items()}
-                        r["forma_randata"] = castigator
-                        rezultate.append(r)
-                    except Exception as exc:
-                        print(f"\n[{eticheta}] EȘUAT: {exc}")
-                        rezultate.append({"eticheta": eticheta, "eroare": str(exc)})
-            finally:
-                page.close()
+            print(f"\n{'=' * 78}\n  VERDICT\n{'=' * 78}")
+            if n_dupa > 10:
+                print(f"  TABUL COMPLET SE ÎNCARCĂ ({n_dupa} rânduri).")
+                print(f"  URL-ul care îl produce: {page.url}")
+                print("  -> reparația are DOUĂ părți: URL-ul din _MATCH_TAB_SUFFIXES")
+                print("     ȘI selectorii copiilor din _extract_labeled_stat_pairs.")
+            else:
+                print(f"  DOAR {n_dupa} rânduri — tabul complet NU s-a încărcat.")
+                print("  -> nu scriu reparația pe o structură pe care n-am văzut-o.")
         finally:
+            page.close()
             browser.close()
 
-    print(f"\n{'=' * 78}\n  VERDICT\n{'=' * 78}")
-    ok = [r for r in rezultate if "selectori" in r]
-
-    # 🔴 Prima versiune a verdictului se uita DOAR la containerul
-    # `wcl-statistics` si a tras o concluzie falsa („ruptura e in aval")
-    # cand acela era 5 pe ambele pagini — desi `-category`/`-value` erau 0
-    # pe AMBELE, inclusiv pe una despre care stim ca a mers in productie.
-    # Semnalul care conteaza e PERECHEA category+value, si numai pe pagini
-    # care s-au randat efectiv.
-    nerandate = [r["eticheta"] for r in ok if not r.get("randat")]
-    if nerandate:
-        print(f"  INCONCLUZIV — pagini nerandate: {', '.join(nerandate)}")
-        print("  -> Orice numărătoare de selectori pe ele e lipsită de sens.")
-        print("     Se repară POC-ul, NU codul de producție.")
-        return 0
-
-    cat, val = SELECTORI_ASTEPTATI[1], SELECTORI_ASTEPTATI[2]
-    merge = [r for r in ok if r["selectori"][cat] > 0 and r["selectori"][val] > 0]
-    nu_merge = [r for r in ok if r not in merge]
-
-    if not merge and nu_merge:
-        print("  CONFIRMAT: pe pagini RANDATE, perechea category+value nu mai")
-        print("  găsește nimic — pe NICIUNA, inclusiv pe cea de referință.")
-        print("  -> Flashscore a redenumit atributele. Numele nou e în lista de")
-        print("     candidați de mai sus; reparația e un selector, nu un proiect.")
-    elif merge and nu_merge:
-        print(f"  PARȚIAL: merge pe {[r['eticheta'] for r in merge]}, nu pe")
-        print(f"  {[r['eticheta'] for r in nu_merge]} -> schimbare progresivă.")
-    elif merge and not nu_merge:
-        print("  NEAȘTEPTAT: selectorii merg pe TOATE paginile randate.")
-        print("  -> Ipoteza DOM e INFIRMATĂ. Ruptura e în aval (fetch care nu")
-        print("     cere tab-ul, sau persistare). De investigat acolo.")
-
-    print("\nJSON:", json.dumps(rezultate, ensure_ascii=False)[:1500])
+    print("\nJSON:", json.dumps(rezultate, ensure_ascii=False)[:1200])
     return 0
 
 
