@@ -49,17 +49,10 @@ from collections import Counter
 # ambele din competiții urmărite, ambele cu `has_stats = true` în
 # `flashscore_data_completeness`.
 MECIURI = [
-    ("REFERINTA  7 sep", "https://www.flashscore.com/match/football/MN1IRPIG"),
-    ("DEFECT     9 oct", "https://www.flashscore.com/match/football/YiWPvQZg"),
-    # Al treilea caz, cel mai tare: Everton-Chelsea, 17.10.2026, Premier
-    # League. Proprietarul produsului a trimis captura paginii — terminat 0-2,
-    # tab-ul STATS plin (xG 0.45/1.54, xGOT 0.70/1.79, posesie, șuturi).
-    # La noi, ACELAȘI meci (`flashscore_2wo3m634`, id=126842) are
-    # `actual_result` NULL și xG NULL. Deci nu e o reconstrucție istorică —
-    # e defectul, viu, pe un meci de azi.
-    # `mid`-ul e luat din `match_history`, NU ghicit: prima versiune a acestei
-    # linii conținea un identificator inventat de mine.
-    ("DEFECT    17 oct", "https://www.flashscore.com/match/football/2wo3m634"),
+    # Un singur meci pentru rularea decisiva: Everton-Chelsea, 17.10.2026,
+    # cel din captura proprietarului produsului — terminat 0-2, tab STATS
+    # plin pe ecran, iar la noi `actual_result` si xG NULL.
+    ("DEFECT 17 oct (Everton-Chelsea)", "https://www.flashscore.com/match/football/2wo3m634"),
 ]
 
 # 🔴 [CORECTAT A DOUA OARA] A doua rulare a dat pagini de ~10.9 KB cu ZERO
@@ -139,6 +132,23 @@ def _inventar_testid(html: str) -> Counter:
     return Counter(re.findall(r'data-testid="([^"]+)"', html))
 
 
+def _dump_zona_statistici(html: str, context: int = 1100) -> None:
+    """Tipareste HTML-ul din jurul primei aparitii a marcajului. Asta e ce
+    trebuie sa citeasca reparatia: structura REALA de azi, nu una ghicita.
+
+    Fara el, as sti doar CA selectorul nu merge, nu si CU CE sa-l inlocuiesc —
+    adica exact situatia care a produs trei rulari irosite."""
+    poz = html.find(MARCAJ_RANDARE)
+    if poz < 0:
+        print("  (marcajul nu e în HTML — nimic de arătat)")
+        return
+    start = max(0, poz - context)
+    fragment = html[start:poz + context]
+    print(f"\n  --- HTML în jurul '{MARCAJ_RANDARE}' (poziția {poz}) ---")
+    print("  " + fragment.replace("\n", " ")[:2200])
+    print("  --- sfârșit fragment ---")
+
+
 def _raport(eticheta: str, html: str) -> dict:
     from bs4 import BeautifulSoup
 
@@ -193,25 +203,57 @@ def main() -> int:
                         continue
                     mid = m.group(1)
                     try:
-                        # Pas 1 — `summary`, EXACT ca productia, ca sa apara si
-                        # sa fie respins bannerul de consimtamant.
+                        # Pas 1 — `summary`, EXACT ca productia (si asa apare
+                        # bannerul de consimtamant, de respins o singura data).
                         page.goto(f"{base}/?mid={mid}", timeout=NAV_TIMEOUT_MS,
                                   wait_until="domcontentloaded")
                         if _respinge_gdpr(page):
                             print(f"  [{eticheta}] banner GDPR respins")
                         page.wait_for_timeout(POST_LOAD_WAIT_MS)
+                        html_summary = page.content()
 
-                        # Pas 2 — tab-ul de statistici, aceeasi forma de URL.
-                        page.goto(f"{base}/{SUFIX_TAB_STATS}?mid={mid}",
-                                  timeout=NAV_TIMEOUT_MS, wait_until="domcontentloaded")
-                        page.wait_for_timeout(POST_LOAD_WAIT_MS)
-                        try:
-                            page.wait_for_function(
-                                f"document.body.innerText.includes({MARCAJ_RANDARE!r})",
-                                timeout=20000)
-                        except Exception:
-                            print(f"  [{eticheta}] marcajul de randare n-a apărut în 20 s")
-                        rezultate.append(_raport(eticheta, page.content()))
+                        # Pas 2 — CELE DOUA FORME DE URL, comparate direct.
+                        # Asta e intrebarea reala acum: productia foloseste
+                        # forma CU CALE; primele rulari au aratat ca forma cu
+                        # HASH intoarce 1,2 MB iar cea cu cale ~10,9 KB.
+                        variante = {
+                            "CALE (productie)": f"{base}/{SUFIX_TAB_STATS}?mid={mid}",
+                            "HASH (SPA)": f"{base}/#/match-summary/match-statistics/0",
+                        }
+                        htmls = {}
+                        for nume, url in variante.items():
+                            page.goto(url, timeout=NAV_TIMEOUT_MS,
+                                      wait_until="domcontentloaded")
+                            page.wait_for_timeout(POST_LOAD_WAIT_MS)
+                            try:
+                                page.wait_for_function(
+                                    f"document.body.innerText.includes({MARCAJ_RANDARE!r})",
+                                    timeout=15000)
+                            except Exception:
+                                pass
+                            htmls[nume] = page.content()
+
+                        print(f"\n{'#' * 78}\n  {eticheta} — COMPARATIE FORME DE URL\n{'#' * 78}")
+                        print(f"  summary (referinta)     : {len(html_summary):>9} octeți, "
+                              f"'{MARCAJ_RANDARE}' {'DA' if MARCAJ_RANDARE in html_summary else 'NU'}")
+                        for nume, h in htmls.items():
+                            print(f"  {nume:<24}: {len(h):>9} octeți, "
+                                  f"'{MARCAJ_RANDARE}' {'DA' if MARCAJ_RANDARE in h else 'NU'}")
+
+                        # Raportul detaliat se face pe forma care a RANDAT.
+                        castigator = next(
+                            (n for n, h in htmls.items() if MARCAJ_RANDARE in h), None)
+                        if castigator:
+                            print(f"  -> analizez forma care a randat: {castigator}")
+                            r = _raport(f"{eticheta} / {castigator}", htmls[castigator])
+                            _dump_zona_statistici(htmls[castigator])
+                        else:
+                            print("  -> NICIUNA n-a randat statisticile.")
+                            r = _raport(f"{eticheta} / niciuna randata",
+                                        htmls["CALE (productie)"])
+                        r["forme"] = {n: len(h) for n, h in htmls.items()}
+                        r["forma_randata"] = castigator
+                        rezultate.append(r)
                     except Exception as exc:
                         print(f"\n[{eticheta}] EȘUAT: {exc}")
                         rezultate.append({"eticheta": eticheta, "eroare": str(exc)})
