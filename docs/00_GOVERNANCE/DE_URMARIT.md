@@ -324,7 +324,25 @@ Evaluatorul (`value_selector_evaluation.yml`) e `workflow_dispatch`-only, delibe
 
 ---
 
-## 3quater. 🔴 **MERGE ÎN AȘTEPTARE** — reparația competițiilor, scrisă dar NEmergeuită
+## 3quater. ✅ **MERGE FĂCUT (17 oct)** — reparația competițiilor e pe `main`
+
+> **[ÎNCHIS 2026-10-17]** Merge aprobat explicit de proprietarul produsului și executat: `cb65111` → **`8b2fe2a`**, rebase pe `main` apoi fast-forward curat, istorie liniară. `pytest tests/` verde pe `main` **ÎNAINTE** de push: **3492 passed, 2 skipped**.
+>
+> **Poarta s-a deschis în aceeași dimineață**: `blend_v1/174e7e17` a atins **n = 204** cu **`baseline_source = 'shadow_control'`** (`challenger_evaluations` id=168, 17 oct 07:53:08), deci verdictul s-a născut cu universul VECHI și rămâne atribuibil — exact scopul pentru care merge-ul a fost ținut.
+>
+> **Verificat funcțional pe `main`, nu doar prin teste**: `TRACKED_COMPETITIONS` = **18**, `ODDS_SPORT_KEYS` = **16**, iar diferența e exact `['Conference League', 'HNL']`.
+>
+> **Două verificări de integritate ale merge-ului însuși**, fiindcă `main` avea deja cherry-pick-ul de pe 16 oct (`cb65111`), deci istoriile divergaseră:
+> 1. Git a recunoscut singur commit-urile deja aplicate (`--cherry-pick` a exclus `29ac426` și `62b27b2`) — 10 commit-uri aduse, nu 12.
+> 2. După rebase, `git diff 0aaf575 HEAD --stat` a ieșit **GOL** — deci rebase-ul nu a schimbat nicio linie de conținut, doar strămoșii. Verificat, nu presupus.
+>
+> Branch-ul a fost repus cu `--force-with-lease`; `main` nu a fost niciodată forțat.
+>
+> **CE AȘTEPTĂM ACUM** — cele 5 puncte din §„Ce se verifică la PRIMA rulare de noapte de după merge", mai jos, rămân valabile neschimbate. Prima rulare programată de după merge e cea de mâine dimineață (azi a rulat la 06:47, înainte de merge).
+>
+> **Ce NU repară merge-ul, și e corect așa** — măsurat pe 17 oct, înainte: din meciurile de sezon ale celor două ligi, doar **13** au rând `control` (2 din 147 Conference League trecute, 11 din 46 HNL trecute) — exact meciurile deschise manual în aplicație, fiindcă `app.py` pasa lista completă. Merge-ul acoperă imediat **31 de meciuri viitoare** (7 UECL + 24 HNL) și tot ce vine după. Cele ~180 de meciuri trecute rămân **definitiv** fără rând `control`: a le umple retroactiv ar însemna să generăm azi predicții pentru meciuri deja jucate, adică exact scurgerea temporală pe care North Star #7 interzice fără excepție. **Nu e o limitare de reparat, e o regulă respectată.**
+
+### Istoric — de ce a fost ținut (păstrat ca atare)
 
 > **Codul e gata, testat, pe branch. NU e pe `main`. Nu e din uitare — e sincronizare deliberată.**
 
@@ -424,8 +442,8 @@ Două regimuri, și dictează momente diferite:
 
 | Când | Ce | De ce atunci |
 |---|---|---|
-| 1-3 zile | merge-ul din **§3quater** | după primul verdict ADR-072, ca să nu confundăm cauzele |
-| imediat după | **Austria + Elveția + Danemarca**, ÎNTR-UN SINGUR LOT | fereastra pre-F3 e deschisă; un singur seam, nu trei |
+| ~~1-3 zile~~ **✅ FĂCUT 17 oct** | merge-ul din **§3quater** (`8b2fe2a`) | după primul verdict ADR-072, ca să nu confundăm cauzele — verdictul a venit în aceeași dimineață (n=204, `shadow_control`) |
+| **🟡 URMĂTORUL PAS** | **Austria + Elveția + Danemarca**, ÎNTR-UN SINGUR LOT | fereastra pre-F3 e deschisă; un singur seam, nu trei. Precondiția (merge-ul) e îndeplinită. Cerut explicit de proprietarul produsului pe 17 oct: „să nu uiți și de adăugarea noilor campionate" |
 | **martie 2027** | **Norvegia + Suedia** | să prindă sezonul de la început |
 | după ambele | colapsarea brațelor identice (ADR-071 §F3) → **abia apoi** autorizarea F3 | F3 pornește pe univers stabil și pe politici genuin distincte |
 
