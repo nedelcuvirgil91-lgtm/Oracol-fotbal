@@ -341,4 +341,9 @@ def test_clasa_6_e_chiar_cablata_in_raport():
 
     sursa = inspect.getsource(check_data_health.main)
     assert "flashscore_standings_snapshot" in sursa, "clasa 6 nu citeste tabela"
-    assert "findings}/6" in sursa, "sumarul inca raporteaza 5 clase, nu 6"
+    # Numarul e DELIBERAT literal, si trebuie actualizat la fiecare clasa
+    # noua: fragilitatea e scopul gardei. O clasa adaugata fara ca sumarul
+    # sa o numere ar raporta „constatari: 1/6" pentru 7 clase — exact genul
+    # de cifra care pare corecta si nu e. [ACTUALIZAT 2026-10-17, ADR-076:
+    # 6 -> 7, clasa „extragerea Flashscore a incetat sa produca".]
+    assert "findings}/7" in sursa, "sumarul nu numara toate clasele"

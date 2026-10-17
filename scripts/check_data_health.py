@@ -11,7 +11,7 @@ DE CE EXISTA: toate cele patru clase de probleme de mai jos au fost gasite
 arata 15/300). Nu exista nicio monitorizare pentru ele — deci cresteau tacut.
 Acest script le face vizibile.
 
-CE VERIFICA (patru clase distincte, fiecare cu propriul prag):
+CE VERIFICA (sapte clase distincte, fiecare cu propriul prag):
 
   1. FIXTURE-URI STALE — meciuri cu ora de start trecuta si fara rezultat,
      separate pe vechime. Cele recente sunt normale (runda in desfasurare);
@@ -32,6 +32,16 @@ CE VERIFICA (patru clase distincte, fiecare cu propriul prag):
      siguranta data la o parte de ADR-063. Daca o liga urmarita nu are
      niciun meci viitor descoperit de Flashscore, trebuie sa se vada
      IMEDIAT, nu peste doua saptamani.
+
+  5-6. INVERSARI DE TEREN si CLASAMENTE SUB FORMA NECANONICA — vezi
+     comentariile de la fiecare clasa, in `main()`.
+
+  7. EXTRAGEREA FLASHSCORE A INCETAT SA PRODUCA (ADR-076, adaugata
+     2026-10-17) — zero randuri noi in `match_statistics_extended` /
+     `player_match_stats`, desi s-au jucat meciuri. Clasa asta exista
+     pentru ca lipsa ei a costat 39 de zile de tacere si 693 de meciuri
+     fara xG real. Pragul e ZERO ABSOLUT, nu un procent — motivul, in
+     comentariul clasei.
 
 Utilizare:
     python scripts/check_data_health.py
@@ -495,7 +505,67 @@ def main() -> int:
         findings += 1
     print(BAR)
 
-    print(f"  Clase cu constatări: {findings}/6")
+    # ── 7. EXTRAGEREA FLASHSCORE A ÎNCETAT SĂ PRODUCĂ (ADR-076) ───────────
+    #
+    # Clasa asta există pentru că lipsa ei a costat 39 de zile. Extragerea
+    # statisticilor a murit tăcut pe 8-9 septembrie 2026 (și a doua, roster-ul,
+    # pe ~22), iar NIMIC nu a semnalat: `flashscore_data_completeness.has_stats`
+    # măsoară prezența paginii descărcate, nu succesul extragerii din ea (prin
+    # decizie documentată), iar în aval un dicționar gol și un meci nejucat
+    # produc exact aceeași scriere — `COALESCE(existent, nou)` în RPC-ul
+    # canonic. Rezultat: 693 de meciuri fără xG real, 691 dintre ele marcate
+    # „acoperit", deci cu providerii de rezervă săriți (ADR-045).
+    #
+    # PRAGUL E ZERO ABSOLUT, DELIBERAT. Acoperirea xG variază legitim între
+    # ligi (54-76% istoric), deci orice prag procentual ar fi o cifră inventată
+    # de mine, care ar produce fie alarme false, fie tăcere. „Niciun rând nou,
+    # deși s-au jucat meciuri" nu e ambiguu — și ar fi declanșat pe 11
+    # septembrie, nu pe 17 octombrie.
+    #
+    # LIMITA, scrisă explicit: asta prinde o rupere TOTALĂ. O rupere parțială
+    # (3 categorii din 45 redenumite) trece neobservată; instrumentul pentru
+    # ea e altul, și e în afara scopului ADR-076 (§4.1).
+    FEREASTRA_ZILE = 3
+    # Sub atât, fereastra poate fi legitim goală (pauză internațională), deci
+    # nu se afirmă nici „defect", nici „sănătos" — North Star #8.
+    MIN_MECIURI_PENTRU_VERDICT = 10
+
+    prag_zi = (today - timedelta(days=FEREASTRA_ZILE)).isoformat()
+    meciuri_recente = [
+        r for r in rows
+        if r.get("actual_result") and (r.get("kickoff_date") or "")[:10] >= prag_zi
+    ]
+    SONDE = (
+        ("match_statistics_extended", "captured_at", "statistici de meci"),
+        ("player_match_stats", "created_at", "aliniamente/jucători"),
+    )
+    print(f"  7. EXTRAGEREA FLASHSCORE (ultimele {FEREASTRA_ZILE} zile)")
+    print(f"     meciuri terminate în fereastră: {len(meciuri_recente)}")
+    if len(meciuri_recente) < MIN_MECIURI_PENTRU_VERDICT:
+        print(f"     INSUFICIENTE DATE pentru verdict (prag {MIN_MECIURI_PENTRU_VERDICT}) "
+              "— nu se afirmă nici defect, nici sănătate.")
+    else:
+        for tabela, coloana, rol in SONDE:
+            try:
+                res = (client.table(tabela).select("id")
+                       .gte(coloana, prag_zi).limit(1).execute())
+                scrieri = len(res.data or [])
+            except Exception as exc:
+                print(f"     [ATENȚIE] sonda {tabela} nu a putut rula ({exc}) "
+                      "— se raportează ca necunoscută.")
+                continue
+            if scrieri:
+                print(f"     OK   {tabela} ({rol}) — scrie")
+            else:
+                print(f"     ⛔ ZERO rânduri noi în {tabela} ({rol}) de la {prag_zi}, "
+                      f"deși s-au jucat {len(meciuri_recente)} meciuri.")
+                print("        Semnătura ADR-076: extragerea nu mai potrivește "
+                      "markup-ul Flashscore. Verifică log-ul pentru "
+                      "'STRUCTURA SCHIMBATA'.")
+                findings += 1
+    print(BAR)
+
+    print(f"  Clase cu constatări: {findings}/7")
     print("  Verificare încheiată. ZERO scriere efectuată.")
     print(BAR)
     return 1 if findings else 0

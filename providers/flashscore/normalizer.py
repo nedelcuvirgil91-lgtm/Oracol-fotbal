@@ -9,9 +9,18 @@ verificat direct in `gustavofariaa/FlashscoreScraping` (licenta permisiva,
 The Unlicense — vezi review-ul din sesiunea anterioara),
 `src/scraper/services/matches/index.js::extractMatchStatistics`/
 `extractMatchInformation`: fiecare rand de statistica e un container
-auto-descriptiv (`wcl-statistics` -> `wcl-statistics-category` = eticheta
-reala + doua valori `wcl-statistics-value`, home inaintea etichetei, away
-dupa — ordine DOAR in interiorul randului, niciodata globala pe pagina).
+auto-descriptiv (`wcl-statistics` -> eticheta reala + doua valori, home
+inaintea etichetei, away dupa — ordine DOAR in interiorul randului,
+niciodata globala pe pagina).
+
+[ACTUALIZAT 2026-10-17, ADR-076 — descrierea de mai sus numea `wcl-
+statistics-category`/`wcl-statistics-value` ca fapt; nu mai sunt.] Flashscore
+a redenumit copiii containerului in doua etape, iar extragerea a tacut 39 de
+zile pentru ca un dicționar gol si un meci fara statistici sunt indistincte
+in aval (`COALESCE` in RPC-ul canonic). Azi se trateaza AMBELE generatii, in
+cascada, iar containerul prezent cu zero copii potriviti se logheaza ca
+ERROR. Detalii, cifre si cele doua date:
+`docs/00_GOVERNANCE/ADR-076-flashscore-dom-selector-coupling.md`.
 Motivul explicit pentru care e superior mapari pozitionale globale: robust
 la reordonarea/adaugarea de randuri (eticheta e cheia, nu indexul),
 auto-descriptiv. Confirmat empiric pe fixture-ul real (POC): widget-ul
@@ -260,19 +269,141 @@ def _extract_kickoff_iso(soup: BeautifulSoup) -> str | None:
     return dt.isoformat()
 
 
+def _has_class_token(tag: Any, token: str) -> bool:
+    """`tag` are clasa CSS-module `token`, indiferent de hash-ul de build.
+
+    Flashscore livreaza clase de forma `wcl-value_Ywp3J`, unde sufixul e un
+    hash care se schimba la fiecare build. Potrivirea se face pe TOKEN —
+    `c == token` sau `c.startswith(token + "_")` — niciodata pe clasa
+    intreaga (s-ar rupe la urmatorul deploy) si niciodata pe prefix de SIR.
+
+    Diferenta token/prefix nu e teoretica, e defectul prins in candidatul
+    validat inainte de scrierea acestui cod: `startswith("wcl-label")`
+    prinde si `wcl-labelRow_*`, care e PARINTELE ce contine valoarea home +
+    eticheta + valoarea away. Rezultatul erau etichete poluate de forma
+    "0.45Expected goals (xG)1.54", deci zero potriviri in
+    STAT_LABEL_TO_FIELDS. Un token nu poate face asta."""
+    for cls in (tag.get("class") or []):
+        if cls == token or cls.startswith(token + "_"):
+            return True
+    return False
+
+
+def _select_class_token(node: Any, token: str) -> list[Any]:
+    """Descendentii cu clasa CSS-module `token`, in ordinea DOM."""
+    return [t for t in node.find_all(True) if _has_class_token(t, token)]
+
+
+def _ancestor_has_class_token(node: Any, token: str) -> bool:
+    parent = node.parent
+    while parent is not None:
+        if getattr(parent, "get", None) is not None and _has_class_token(parent, token):
+            return True
+        parent = parent.parent
+    return False
+
+
+# Valorile `data-testid` prin care Flashscore marcheaza un text simplu, in
+# ordinea in care se incearca. Forma cu `scores` e cea de dinainte de ~22
+# septembrie 2026; segmentul a CAZUT din familia de testid-uri (verificat pe
+# pagina reala: 100 de apariții `wcl-simple-text-01` pe tab-ul lineups, zero
+# `wcl-scores-simple-text-01`). Cascada, nu inlocuire: forma veche ramane
+# functionala pentru orice HTML salvat anterior, iar o lansare etapizata a
+# furnizorului nu produce o fereastra in care nicio forma nu merge.
+_TEXT_TESTIDS: tuple[str, ...] = (
+    "wcl-scores-simple-text-01",
+    "wcl-simple-text-01",
+)
+_OVERLINE_TESTIDS: tuple[str, ...] = (
+    "wcl-scores-overline-02",
+    "wcl-overline-02",
+)
+
+
+def _select_first_testid(node: Any, testids: tuple[str, ...]) -> list[Any]:
+    """Prima valoare din `testids` care da potriviri, cu TOATE potrivirile
+    ei. Cascada se opreste la prima forma prezenta — nu amesteca doua
+    generatii de markup in acelasi rezultat."""
+    for testid in testids:
+        found = node.select(f"[data-testid='{testid}']")
+        if found:
+            return found
+    return []
+
+
+def _stat_row_label(row: Any) -> str | None:
+    """Eticheta statisticii dintr-un rand `wcl-statistics`.
+
+    Cascada: `data-testid` dedicat (forma de dinainte de ~8 sep 2026),
+    altfel containerul de clasa `wcl-label`. In interiorul containerului se
+    prefera span-ul de text marcat — containerul mai contine si o iconita
+    `svg` de informatii (fara text, deci inofensiva azi, dar explicit
+    evitata ca o schimbare viitoare sa nu o aduca in eticheta)."""
+    category_el = row.select_one("[data-testid='wcl-statistics-category']")
+    if category_el is not None:
+        return category_el.get_text(strip=True) or None
+    containers = _select_class_token(row, "wcl-label")
+    if not containers:
+        return None
+    container = containers[0]
+    spans = _select_first_testid(container, _TEXT_TESTIDS)
+    source = spans[0] if spans else container
+    return source.get_text(strip=True) or None
+
+
+def _stat_row_values(row: Any) -> tuple[str | None, str | None]:
+    """Valorile (home, away) dintr-un rand `wcl-statistics`.
+
+    Partea se determina SEMANTIC, prin stramosul `wcl-awayValue*`, cu
+    ordinea DOM ca rezerva logata — exact tiparul impus in proiect de
+    incidentul de orientare gazda/oaspete, unde `duelParticipant__home/away`
+    a inlocuit `seen[0]`/`seen[1]`. Cele doua semnale au fost verificate
+    independent pe pagina reala si sunt concordante; daca vreodata se
+    contrazic, vreau sa se vada in log, nu sa aleg in tacere."""
+    values = row.select("[data-testid='wcl-statistics-value']")
+    if not values:
+        values = _select_class_token(row, "wcl-value")
+    if not values:
+        return None, None
+    home_side = [v for v in values if not _ancestor_has_class_token(v, "wcl-awayValue")]
+    away_side = [v for v in values if _ancestor_has_class_token(v, "wcl-awayValue")]
+    if home_side and away_side:
+        return (home_side[0].get_text(strip=True) or None,
+                away_side[0].get_text(strip=True) or None)
+    if away_side:
+        # Container semantic prezent doar pe o parte: nu deduc cealalta.
+        logger.warning(
+            "[Flashscore.Normalizer] rand de statistica cu `wcl-awayValue` dar "
+            "fara valoare de gazda (%d valori) - partea gazdei ramane necunoscuta",
+            len(values),
+        )
+        return None, away_side[0].get_text(strip=True) or None
+    return (values[0].get_text(strip=True) or None,
+            values[1].get_text(strip=True) if len(values) > 1 else None)
+
+
 def _extract_labeled_stat_pairs(soup: BeautifulSoup) -> dict[str, tuple[str | None, str | None]]:
     """Un dict {eticheta_reala: (valoare_home, valoare_away)} — vezi
-    docstring modul pentru justificarea tehnica a acestei abordari."""
+    docstring modul pentru justificarea tehnica a acestei abordari.
+
+    [ADR-076] Containerul `wcl-statistics` trateaza doua generatii de
+    markup. Daca el EXISTA dar nu se extrage nicio eticheta din el, asta e
+    semnatura exacta a clasei de defect care a tacut 39 de zile ("containerul
+    e acolo, copiii nu se potrivesc") si se loghează ca ERROR — nu se poate
+    confunda cu un meci fara statistici, unde containerul lipseste cu totul."""
     result: dict[str, tuple[str | None, str | None]] = {}
-    for row in soup.select("[data-testid='wcl-statistics']"):
-        category_el = row.select_one("[data-testid='wcl-statistics-category']")
-        if category_el is None:
+    rows = soup.select("[data-testid='wcl-statistics']")
+    for row in rows:
+        label = _stat_row_label(row)
+        if label is None:
             continue
-        label = category_el.get_text(strip=True)
-        values = row.select("[data-testid='wcl-statistics-value']")
-        home_val = values[0].get_text(strip=True) if len(values) > 0 else None
-        away_val = values[1].get_text(strip=True) if len(values) > 1 else None
-        result[label] = (home_val, away_val)
+        result[label] = _stat_row_values(row)
+    if rows and not result:
+        logger.error(
+            "[Flashscore.Normalizer] STRUCTURA SCHIMBATA: %d randuri "
+            "'wcl-statistics' prezente, ZERO etichete extrase - selectorii "
+            "copiilor nu se mai potrivesc (ADR-076)", len(rows),
+        )
     return result
 
 
@@ -301,7 +432,10 @@ def _extract_half_time_score(soup: BeautifulSoup) -> tuple[int | None, int | Non
     a doua repriza, NU cumulativ) nu are coloana dedicata in schema -
     neextras deliberat, nu gol de extractie."""
     for container in soup.select(".wclHeaderSection--summary"):
-        spans = container.select("[data-testid='wcl-scores-overline-02']")
+        # [ADR-076] Aceeasi cascada ca la roster — `wcl-scores-overline-02`
+        # -> `wcl-overline-02`. Aceeasi cauza, acelasi moment (ultimul meci cu
+        # scor la pauza: 21 sep; primul fara: 24 sep).
+        spans = _select_first_testid(container, _OVERLINE_TESTIDS)
         if len(spans) >= 2 and spans[0].get_text(strip=True) == "1st Half":
             m = re.match(r"(\d+)\s*-\s*(\d+)", spans[1].get_text(strip=True))
             if m:
@@ -484,8 +618,11 @@ def _extract_roster_rows(soup: BeautifulSoup) -> list[dict[str, Any]]:
     potrivire de nume intre cele doua vederi ar fi exact genul de
     implementare fragila cerut explicit sa evit. Deferred, nu ghicit."""
     rows: list[dict[str, Any]] = []
+    containere = 0
     for side, team in (("left", "home"), ("right", "away")):
-        for row in soup.select(f"[data-testid='wcl-lineupsParticipantGeneral-{side}']"):
+        randuri_parte = soup.select(f"[data-testid='wcl-lineupsParticipantGeneral-{side}']")
+        containere += len(randuri_parte)
+        for row in randuri_parte:
             # [ROBUSTETE] Wrapper-ul numelui e uneori <button> (jucator
             # fara profil), alteori <a href="/player/..."> (jucator cu
             # profil) - gasit prin testare pe 2 meciuri diferite, nu
@@ -493,7 +630,13 @@ def _extract_roster_rows(soup: BeautifulSoup) -> list[dict[str, Any]]:
             # continutului (nu de tag-ul wrapper-ului): span[0]=numar
             # (mereu numeric), primul span ulterior care NU incepe cu
             # "(" (exclude marcaje de rol - "(G)"/"(C)") = numele.
-            spans = row.select("[data-testid='wcl-scores-simple-text-01']")
+            # [ADR-076] Cascada `wcl-scores-simple-text-01` ->
+            # `wcl-simple-text-01`: segmentul `scores` a cazut din familia de
+            # testid-uri in jurul datei de 22 septembrie 2026, iar asta a golit
+            # roster-ul (si, prin join-ul de la persist, statisticile avansate
+            # de jucator). Verificat pe pagina reala: 20 de jucatori per parte
+            # se extrag din nou cu forma noua.
+            spans = _select_first_testid(row, _TEXT_TESTIDS)
             if not spans:
                 continue
             number_text = spans[0].get_text(strip=True)
@@ -509,6 +652,15 @@ def _extract_roster_rows(soup: BeautifulSoup) -> list[dict[str, Any]]:
                 "player_name": name_text,
                 "shirt_number": int(number_text) if number_text.isdigit() else None,
             })
+    if containere and not rows:
+        # [ADR-076] Acelasi semnal ca la statistici, acelasi motiv: randurile
+        # de jucator EXISTA dar nu se extrage niciunul => markup schimbat.
+        # Un meci fara aliniamente publicate nu are randurile deloc.
+        logger.error(
+            "[Flashscore.Normalizer] STRUCTURA SCHIMBATA: %d randuri de "
+            "aliniament prezente, ZERO jucatori extrasi - selectorii copiilor "
+            "nu se mai potrivesc (ADR-076)", containere,
+        )
     return rows
 
 
