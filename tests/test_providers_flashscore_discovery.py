@@ -61,7 +61,37 @@ def test_tracked_competitions_only_contains_verified_slugs():
         "Jupiler Pro League": ("belgium", "jupiler-pro-league"),
         "Ekstraklasa": ("poland", "ekstraklasa"),
         "Scottish Premiership": ("scotland", "premiership"),
+        # [ADAUGAT 2026-10-17] Nivel A — navigare live, 2026-10-15. Garda
+        # asta a CAZUT corect la adaugare, adica a facut exact ce trebuia:
+        # a cerut o actualizare deliberata a listei in loc sa lase un slug
+        # nou sa intre tacit.
+        #
+        # Formele GRESITE, de respins daca apar vreodata la o regenerare
+        # „logica": `("austria", "admiral-bundesliga")` (arhiva 2021/22),
+        # `("austria", "bundesliga-women")` si
+        # `("switzerland", "super-league-women")` — competitii DIFERITE sub
+        # nume aproape identic.
+        "Austria Bundesliga": ("austria", "bundesliga"),
+        "Swiss Super League": ("switzerland", "super-league"),
+        "Danish Superliga": ("denmark", "superliga"),
     }
+
+
+def test_slug_urile_feminine_si_arhivate_nu_sunt_folosite():
+    """Contrapondere la testul de mai sus, care verifica egalitatea cu o
+    lista — o lista se poate actualiza greșit la fel de ușor cum se
+    actualizeaza corect.
+
+    Aici se verifica PROPRIETATEA care conteaza: niciun slug nu are voie sa
+    trimita spre o competitie feminina sau spre numele sponsorizat arhivat.
+    Capcana e reala, nu teoretica: pagina Flashscore a Austriei listeaza
+    peste 17 competitii austriece, iar sigla ei afiseaza „ADMIRAL
+    Bundesliga", deci varianta arhivata pare cea corecta."""
+    for liga, (tara, slug) in FLASHSCORE_TRACKED_COMPETITIONS.items():
+        assert not slug.endswith("-women"), f"{liga}: slug de competitie feminina ({tara}/{slug})"
+        assert "women" not in slug, f"{liga}: slug de competitie feminina ({tara}/{slug})"
+        assert slug != "admiral-bundesliga", (
+            f"{liga}: numele sponsorizat e o arhiva 2021/22, nu sezonul curent")
 
 
 def test_tracked_competition_keys_are_all_canonical_league_names():

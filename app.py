@@ -134,6 +134,14 @@ COMPETITIONS_META = [
     {"key":"Jupiler Pro League",   "icon":"🇧🇪","label":"Jupiler Pro League",   "color":"#f1c40f"},
     {"key":"Ekstraklasa",          "icon":"🇵🇱","label":"Ekstraklasa",          "color":"#e74c3c"},
     {"key":"Scottish Premiership", "icon":"🏴","label":"Scottish Premiership", "color":"#8e44ad"},
+    # [ADAUGAT 2026-10-17] Obligatoriu, nu opțional: garda
+    # `test_interfata_si_pipeline_ul_urmaresc_aceleasi_competitii` impune ca
+    # această listă și `mappings.TRACKED_COMPETITIONS` să fie IDENTICE, în
+    # ambele direcții. Exact asimetria care a ascuns un sezon întreg defectul
+    # celor 16 din 18 competiții: pe ecran existau, în pipeline nu.
+    {"key":"Austria Bundesliga",   "icon":"🇦🇹","label":"Austria Bundesliga",   "color":"#c0392b"},
+    {"key":"Swiss Super League",   "icon":"🇨🇭","label":"Swiss Super League",   "color":"#e74c3c"},
+    {"key":"Danish Superliga",     "icon":"🇩🇰","label":"Danish Superliga",     "color":"#16a085"},
 ]
 
 @st.cache_resource(show_spinner=False)

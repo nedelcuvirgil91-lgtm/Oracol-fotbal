@@ -26,6 +26,35 @@ name: Football Oracle — Flashscore Extra Leagues (extindere etapizată)
 # Prima rulare (catch-up istoric pentru cele 3 ligi) poate dura mult mai
 # mult decât rulările ulterioare — Delta Sync (is_flashscore_match_already_
 # collected) face rulările următoare ieftine, sar meciurile deja colectate.
+#
+# ── [EXTINS 2026-10-17] 3 → 6 ligi: + Austria, Elveția, Danemarca ──────────
+#
+# Cele 3 ligi rămase din cele 6 propuse pe 2026-08-10, cerute explicit de
+# proprietarul produsului. Slug-uri verificate NIVEL A (navigare live,
+# 2026-10-15) — mai tare decât Nivelul B cu care au intrat primele 3.
+#
+# DE CE AICI, și nu în `night_sync`: `sync/run_night.py` are o listă
+# explicită (`_NIGHT_SYNC_LEAGUES`) cu nota „dacă se adaugă o ligă nouă la
+# setul de bază, lista trebuie extinsă manual, deliberat — nu implicit".
+# Night Sync are cel mai strâns buget de timp din proiect (anulat la 180 min
+# pe 16 oct, incidentul TheSportsDB). Lista lui rămâne NEATINSĂ, impus de o
+# gardă de test.
+#
+# DE CE catch-up-ul NU e lăsat pe `live_sync`, deși acela le-ar prinde
+# oricum: `run_live` cheamă `run_flashscore(leagues=None)`, adică TOATE
+# competițiile urmărite de Flashscore — deci cele 3 ligi noi intră automat
+# acolo, zilnic, fără să fie nevoie de vreo modificare. Dar `live_sync` are
+# `timeout-minutes: 50` și a fost deja tăiat de două ori (27 și 29 august).
+# Prima trecere, cea scumpă, se face aici, unde bugetul e 90 min.
+#
+# TIMEOUT-UL RĂMÂNE 90, NEATINS — decizie pe cifre măsurate, nu pe precauție:
+# ultimele 6 rulări programate au durat 1m51s … 1m59s fiecare (regim stabil,
+# Delta Sync sare tot). Catch-up-ul pentru 3 ligi noi, la plafonul de 50 de
+# meciuri/ligă și politețea de 2-4 s între cereri reale, iese ~12-15 min.
+# Marjă de peste 6×. Dacă totuși se lovește plafonul, ăsta e un semnal real,
+# nu unul mascat de o marjă mărită preventiv — aceeași disciplină ca la
+# `live_sync` (50 neatins) și `sync_pre_match_odds` (45 neatins până la
+# măsurătoare).
 
 on:
   schedule:
@@ -66,7 +95,7 @@ jobs:
       - name: Install Playwright Chromium
         run: playwright install --with-deps chromium
 
-      - name: Run Flashscore — Extra Leagues (Belgia/Polonia/Scoția)
+      - name: Run Flashscore — Extra Leagues (BE/PL/SCO + AT/CH/DK)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
@@ -75,7 +104,8 @@ jobs:
           from providers.flashscore.discovery import get_limit_per_league_automated
           from providers.flashscore.run_foundation_data_layer import run as run_flashscore
           exit_code = run_flashscore(
-              leagues=['Jupiler Pro League', 'Ekstraklasa', 'Scottish Premiership'],
+              leagues=['Jupiler Pro League', 'Ekstraklasa', 'Scottish Premiership',
+                       'Austria Bundesliga', 'Swiss Super League', 'Danish Superliga'],
               limit_per_league=get_limit_per_league_automated(),
               dry_run=False,
               include_future_fixtures=False,

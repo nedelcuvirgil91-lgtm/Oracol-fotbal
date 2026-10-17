@@ -940,6 +940,63 @@ LEAGUE_PROVIDERS: dict[str, LeagueDefinition] = {
                     "odds": True, "freelf": "necunoscut", "api_football": True,
                     "soccerfootballinfo": "necunoscut"},
     ),
+    # ── [ADAUGAT 2026-10-17] Austria, Elvetia, Danemarca ──────────────────
+    #
+    # Cerere explicita a proprietarului produsului. Fereastra aleasa
+    # deliberat: DUPA merge-ul reparatiei `TRACKED_COMPETITIONS` (8b2fe2a) si
+    # INAINTE de autorizarea F3 — vezi DE_URMARIT §3quinquies. Daca ar fi
+    # intrat inaintea merge-ului, o liga neacoperita de The Odds API ar fi
+    # fost adaugata pe jumatate, exact ca Conference League (147 de meciuri
+    # fara rand `control` pe un sezon intreg).
+    #
+    # TOATE `provider_ids` sunt None, si `supported` e False peste tot. Asta
+    # NU e "neauditat" si NU e o aproximare — e un fapt: niciun id de provider
+    # nu exista pentru aceste ligi, deci niciun provider din dicționarul de
+    # mai jos nu POATE servi liga. Alegerea lui `False` peste `"necunoscut"`
+    # e deliberata si verificata in cod: `football_providers.py:158` trateaza
+    # `"necunoscut"` ca "incearca oricum" ("necunoscut nu blocheaza, doar nu
+    # era inca confirmat la audit"), deci ar irosi cereri pe apeluri garantat
+    # fara id. Regula North Star #8 e respectata: starea nu e aproximata, e
+    # cunoscuta.
+    #
+    # Sursa reala de date e Flashscore, care NU e reprezentat aici — el are
+    # dicționarul propriu, `FLASHSCORE_TRACKED_COMPETITIONS`
+    # (`providers/flashscore/discovery.py`), cu slug-uri verificate NIVEL A
+    # (navigare live, 2026-10-15). Cotele vin prin `odds_fallback_flashscore`
+    # (ADR-043), nu prin The Odds API — verificat live pentru Austria: 6 case
+    # cu cote 1X2 pe SK Rapid-Hartberg.
+    #
+    # Consecinta intentionata a lui `odds: None`: aceste trei ligi NU intra in
+    # `ODDS_SPORT_KEYS`, deci invariantul `odds ⊂ canonic` (strict) se
+    # intareste de la 16/18 la 16/21. Exact ce garda din
+    # tests/test_tracked_competitions.py impune.
+    "Austria Bundesliga": LeagueDefinition(
+        name="Austria Bundesliga",
+        provider_ids={"football_data": None, "espn": None, "tsdb": None,
+                       "odds": None, "freelf": None, "api_football": None,
+                       "soccerfootballinfo": None},
+        supported={"football_data": False, "espn": False, "tsdb": False,
+                    "odds": False, "freelf": False, "api_football": False,
+                    "soccerfootballinfo": False},
+    ),
+    "Swiss Super League": LeagueDefinition(
+        name="Swiss Super League",
+        provider_ids={"football_data": None, "espn": None, "tsdb": None,
+                       "odds": None, "freelf": None, "api_football": None,
+                       "soccerfootballinfo": None},
+        supported={"football_data": False, "espn": False, "tsdb": False,
+                    "odds": False, "freelf": False, "api_football": False,
+                    "soccerfootballinfo": False},
+    ),
+    "Danish Superliga": LeagueDefinition(
+        name="Danish Superliga",
+        provider_ids={"football_data": None, "espn": None, "tsdb": None,
+                       "odds": None, "freelf": None, "api_football": None,
+                       "soccerfootballinfo": None},
+        supported={"football_data": False, "espn": False, "tsdb": False,
+                    "odds": False, "freelf": False, "api_football": False,
+                    "soccerfootballinfo": False},
+    ),
 }
 
 # ── Dictionare derivate — generate, NU scrise manual (elimina desincronizarea) ──
@@ -1189,6 +1246,28 @@ LEAGUE_BASELINES: dict[str, float] = {
     #   HNL: 424 goluri / 180 meciuri = 2.36 → 1.18 (Wikipedia, 2024–25
     #     Croatian Football League)
     "Primeira Liga": 1.28, "Eredivisie": 1.49, "Super Lig": 1.45, "HNL": 1.18,
+    # [ADAUGAT 2026-10-17] Aceeasi formula: (goluri sezon / meciuri) / 2.
+    # Fiecare cifra e PUBLICATA, din infobox-ul Wikipedia al sezonului, nu
+    # calculata de mine si nu aleasa:
+    #   Elvetia: 679 goluri / 228 meciuri = 2.978 -> 1.49 (2024-25 Swiss
+    #     Super League)
+    #   Danemarca: 606 goluri / 193 meciuri = 3.140 -> 1.57 (2024-25 Danish
+    #     Superliga)
+    #   Austria: 496 goluri / 192 meciuri = 2.583 -> 1.29 (**2023-24**
+    #     Austrian Football Bundesliga — sezon DIFERIT de celelalte doua,
+    #     spus explicit)
+    #
+    # DE CE Austria pe 2023-24, si de ce o cifra a fost RESPINSA: infobox-ul
+    # sezonului 2024-25 nu contine deloc "Matches played"/"Goals scored"
+    # (verificat prin citirea paginii, nu presupus — spre deosebire de
+    # Elvetia si Danemarca, care le au). Circula o valoare de ~537/192 =
+    # 2.80 -> 1.40, dar aceea e o SUMA per-echipa calculata dintr-un tabel
+    # de statistici, nu o cifra publicata, si e singura care se abate.
+    # Coroborare independenta pentru 1.29: sezonul 2025-26, partial, da
+    # 348/132 = 2.636 -> 1.32. Cele doua surse confirmate se susțin
+    # reciproc; cea nepublicata nu.
+    "Austria Bundesliga": 1.29, "Swiss Super League": 1.49,
+    "Danish Superliga": 1.57,
     "default": 1.25,
 }
 
@@ -1317,6 +1396,34 @@ LEAGUE_ALIASES: dict[str, list[str]] = {
     "Jupiler Pro League":   ["Belgium", "B1"],
     "Ekstraklasa":          ["Poland", "POL"],
     "Scottish Premiership": ["Scotland", "SC0", "Scottish Premier League"],
+    # [ADAUGAT 2026-10-17] Variante pentru cele 3 ligi noi. DELIBERAT fara
+    # coduri football-data.co.uk (de tipul B1/POL/SC0 de mai sus): acele
+    # coduri au fost confirmate live in `match_history`, pe randuri reale.
+    # Aici nu exista randuri — verificat: zero meciuri de Austria, Elvetia
+    # sau Danemarca in istoric (interogare pe `league ilike`, 2026-10-17).
+    # Un cod ghicit ar normaliza greșit, tacit, la primul import istoric.
+    # Se adauga cand si daca apar randuri reale, nu inainte.
+    #
+    # Numele sponsorizat "Admiral Bundesliga" e inclus pentru Austria: sigla
+    # paginii Flashscore o afiseaza asa, deci o sursa poate emite acea forma.
+    # NU e acelasi lucru cu slug-ul `austria/admiral-bundesliga`, care e o
+    # arhiva 2021/22 si e EXCLUS din discovery — vezi discovery.py.
+    # 🔴 DOUA FORME AU FOST SCOASE DELIBERAT, si motivul conteaza:
+    # `"Super League"` si `"Superliga"` goale. Harta inversa
+    # (`ALIAS_TO_CANONICAL_LEAGUE`) se construieste prin SUPRASCRIERE tacita,
+    # iar potrivirea e case-insensitive — deci `"Superliga"` ar fi facut ca
+    # un sir care azi ramane NESCHIMBAT (comportamentul sigur documentat in
+    # nota de design) sa se mapeze la Danemarca. Liga romaneasca se numeste
+    # literal "SuperLiga", iar `"superliga" == "SuperLiga".lower()`. Ar fi
+    # fost o regresie introdusa de o adaugare, nu un defect existent.
+    # `"Super League"` e ambiguu independent (Elvetia, Grecia, China).
+    # Se pastreaza doar formele care nu pot aparține altei competitii.
+    "Austria Bundesliga":   ["Austria", "Austrian Bundesliga", "Admiral Bundesliga",
+                              "Osterreichische Bundesliga"],
+    "Swiss Super League":   ["Switzerland", "Swiss Super League",
+                              "Credit Suisse Super League"],
+    "Danish Superliga":     ["Denmark", "Danish Superliga", "3F Superliga",
+                              "Superligaen"],
 }
 
 ALIAS_TO_CANONICAL_LEAGUE: dict[str, str] = {}

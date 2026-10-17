@@ -237,6 +237,17 @@ DEFAULT_WEIGHTS: dict[str, Any] = {
         "Eredivisie":        {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95,"sample_count":0},
         "Super Lig":         {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95,"sample_count":0},
         "HNL":               {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95,"sample_count":0},
+        # [ADAUGAT 2026-10-17] Austria, Elvetia, Danemarca — valori IDENTICE
+        # cu "default", pe acelasi raționament ca la cele 4 ligi din 2026-08-04
+        # (comentariul de mai sus): nicio calibrare per-liga reala nu exista
+        # (`sample_count=0`), prezenta explicita e doar structurala, si NU e o
+        # schimbare de parametru matematic. Regula din CLAUDE.md ("orice
+        # recalibrare de pondere/prag/cap = experiment separat, cu aprobare
+        # explicita") ramane respectata: nimic nu e recalibrat, iar o
+        # verificare a egalitatii cu "default" e impusa de o garda de test.
+        "Austria Bundesliga": {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95,"sample_count":0},
+        "Swiss Super League": {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95,"sample_count":0},
+        "Danish Superliga":  {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95,"sample_count":0},
         "default":           {"form_weight":0.60,"base_weight":0.40,"goals_weight":0.45,"shots_ot_weight":0.30,"possession_weight":0.25,"home_advantage":1.07,"away_penalty":0.95,"sample_count":0},
     },
 }

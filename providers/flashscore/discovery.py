@@ -216,6 +216,42 @@ FLASHSCORE_TRACKED_COMPETITIONS: dict[str, tuple[str, str]] = {
     "Jupiler Pro League":   ("belgium", "jupiler-pro-league"),
     "Ekstraklasa":          ("poland", "ekstraklasa"),
     "Scottish Premiership": ("scotland", "premiership"),
+    # ── [ADAUGAT 2026-10-17] NIVEL A — cele 3 ligi rămase din cele 6 propuse
+    #    pe 2026-08-10. Primele 3 (Belgia/Polonia/Scoția) au intrat atunci.
+    #
+    # Verificare NIVEL A, nu B: navigare LIVE pe pagina reala, 2026-10-15, pe
+    # dispozitivul proprietarului produsului, cu titlul, sezonul, intervalul
+    # si meciuri concrete citite de pe ecran. E o verificare mai TARE decat
+    # cea cu care au intrat ultimele 11 competitii (Nivel B, titlu indexat).
+    #   Austria    21:07 — `FOOTBALL > AUSTRIA > Bundesliga`, 2026/2027,
+    #     31.07 -> 22.05, etapa 9 (SK Rapid-Hartberg 16.10, Salzburg-Altach
+    #     18.10)
+    #   Elvetia    21:13 — `FOOTBALL > SWITZERLAND > Super League`, 2026/2027,
+    #     25.07 -> 04.06, Round 11 (Servette-Vaduz 24.10, Basel-Grasshoppers
+    #     25.10)
+    #   Danemarca  21:12 — `FOOTBALL > DENMARK > Superliga`, 2026/2027,
+    #     24.07 -> 03.06, Round 11 (Horsens-Randers 16.10, FC Copenhagen-
+    #     Aarhus 18.10)
+    #
+    # 🔴 CAPCANA GASITA LA DOUA DIN TREI, de aceea slug-urile NU se ghicesc
+    # din convenție: exista si `austria/bundesliga-women` si
+    # `switzerland/super-league-women` — competitii DIFERITE sub nume aproape
+    # identic — plus `austria/admiral-bundesliga`, numele sponsorizat, care e
+    # o ARHIVA 2021/22 (risca redirect sau pagina stale). Bara laterala a
+    # paginii Austria listeaza peste 17 competitii austriece (Bundesliga,
+    # 2. Liga, 4x Regionalliga, play-off-uri, competitii regionale, plus 9
+    # ascunse sub "Show more"); una singura e cea cautata. Sigla paginii
+    # spune "ADMIRAL Bundesliga", ceea ce explica de ce varianta sponsorizata
+    # pare plauzibila — numele comercial difera de slug. Acelasi tipar pentru
+    # care World Cup 2026 a fost EXCLUS (4 URL-uri conflictuale, Regula #8).
+    #
+    # Cotele 1X2 per meci: confirmate live pentru Austria (6 case pe SK
+    # Rapid-Hartberg). Sursa e `/odds/?mid=X`, tab-ul de cote al FIECARUI
+    # meci — NU "Winner Odds" de pe pagina competitiei, care sunt cote
+    # outright, la castigarea campionatului, si nu se folosesc nicaieri.
+    "Austria Bundesliga":   ("austria", "bundesliga"),
+    "Swiss Super League":   ("switzerland", "super-league"),
+    "Danish Superliga":     ("denmark", "superliga"),
 }
 
 
