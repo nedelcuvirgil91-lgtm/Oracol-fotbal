@@ -5,35 +5,46 @@ zero credențiale de bază de date. Se șterge după închiderea investigației;
 dovada rămâne în istoricul rulărilor GitHub Actions (tiparul deja aplicat de
 5 ori în proiect).
 
-### Ce s-a măsurat deja, și de ce POC-ul arată exact ce arată
+### Ce s-a stabilit deja (rulările 1-5, toate în istoricul Actions)
 
 `match_statistics_extended`, `player_match_stats` și
-`player_match_stats_extended` au ZERO rânduri scrise după **2026-09-08** — 39
-de zile. În aceeași perioadă `flashscore_match_context` (H2H) și
-`match_events` scriu normal, deci NU e rețea, NU e autentificare, NU e
-scriere în bază.
+`player_match_stats_extended` au ZERO rânduri scrise după **2026-09-08**. În
+aceeași perioadă `flashscore_match_context` (H2H) și `match_events` scriu
+normal, deci NU e rețea, NU e autentificare, NU e scriere în bază.
 
-Comparația extragerilor BRUTE o localizează și mai fin. Aceeași structură,
-același provider:
-  7 sep : home_shots=22, away_shots=12, home_fouls=13, lineup=[11 jucători]
-  azi   : home_shots=null, away_shots=null, home_fouls=null, lineup=[]
-Iar în ambele: arbitru, stadion, capacitate, scor — corecte.
+Ultima rulare (job 117432697950), prima cu BAZA REALĂ a producției (sloguri
+de echipă citite din dovada salvată în repo, nu construite de mine), a
+răspuns la întrebarea de structură: **toate cele 7 taburi răspund cu sufixele
+actuale ale producției**, iar `summary/stats/` întoarce 45 de rânduri
+`wcl-statistics`. Deci URL-ul NU e defect — ruptura e strict în selectorii
+COPII.
 
-Deci se rup DOUĂ lucruri, împreună: tabelul de statistici și aliniamentele.
+### Ce măsoară rularea ASTA, și de ce e ultima necesară
 
-### Ipoteza testată aici
+Două lucruri pe care încă NU le am măsurate, și fără care reparația ar fi
+ghicită:
 
-`normalizer._extract_labeled_stat_pairs()` se sprijină pe trei atribute:
-    [data-testid='wcl-statistics']
-    [data-testid='wcl-statistics-category']
-    [data-testid='wcl-statistics-value']
-Dacă Flashscore le-a redenumit, `soup.select(...)` întoarce listă goală,
-funcția întoarce `{}`, și fiecare statistică devine `null` — fără excepție,
-fără log, fără niciun semnal. Exact tăcerea observată.
+**(1) Un recensământ complet al selectorilor de producție**, pe tabul unde
+fiecare e folosit efectiv. Până acum am verificat trei (`wcl-statistics*`).
+Dar `normalizer.py` se sprijină pe treisprezece. Dacă Flashscore a făcut o
+redenumire de familie (ipoteza mea: a căzut segmentul `scores` din
+`wcl-scores-simple-text-01` -> `wcl-simple-text-01`), atunci aliniamentele
+s-au rupt din ACEEAȘI cauză, iar scorul la pauză (`wcl-scores-overline-02`)
+e rupt și el, tăcut, fără ca nimeni să fi observat. Recensământul spune care
+dintre cei treisprezece trăiesc și care nu — nu deduc, număr.
 
-POC-ul NU presupune că asta e cauza. Numără ce există pe pagina de AZI și
-tipărește inventarul real de `data-testid`, ca să se vadă dacă atributele au
-dispărut, s-au redenumit, sau sunt acolo și problema e alta.
+**(2) Validarea algoritmului de reparație, ÎNAINTE de a-l scrie în
+producție.** POC-ul implementează candidatul exact cum intenționez să-l scriu
+în `normalizer.py` și tipărește ce extrage. Dacă tipărește 45 de etichete cu
+valori corecte pentru Everton-Chelsea (meciul din captura proprietarului
+produsului), reparația e dovedită pe date reale înainte de prima linie de
+cod de producție. Dacă nu, aflu aici, nu după un merge.
+
+Capcana de evitat, consemnată explicit: numele de clase CSS conțin hash-uri
+de build (`wcl-value_Ywp3J`). A lega selectorul de hash ar reproduce exact
+același defect la următorul deploy Flashscore. Candidatul se sprijină pe
+`data-testid` unde există, și pe **prefix** de clasă unde nu — niciodată pe
+hash-ul întreg.
 """
 from __future__ import annotations
 
@@ -42,39 +53,8 @@ import re
 import sys
 from collections import Counter
 
-# Două meciuri REALE, deja în istoricul nostru, ambele terminate:
-#   - unul dinainte de ruptură (7 sep), ca referință;
-#   - unul de după (9 oct), cazul de reparat.
-# Alese astfel ca diferența dintre ele să nu poată fi pusă pe seama ligii:
-# ambele din competiții urmărite, ambele cu `has_stats = true` în
-# `flashscore_data_completeness`.
-MECIURI = [
-    # Un singur meci pentru rularea decisiva: Everton-Chelsea, 17.10.2026,
-    # cel din captura proprietarului produsului — terminat 0-2, tab STATS
-    # plin pe ecran, iar la noi `actual_result` si xG NULL.
-    ("DEFECT 17 oct (Everton-Chelsea)", "https://www.flashscore.com/match/football/2wo3m634"),
-]
-
-# 🔴 [CORECTAT A DOUA OARA] A doua rulare a dat pagini de ~10.9 KB cu ZERO
-# `data-testid` pe toate trei — adica zidul de consimtamant, nu continutul.
-# Garda de randare a prins-o si a spus corect INCONCLUZIV, dar cauza erau
-# iar DOUA diferente fata de productie, ambele ale mele:
-#
-#   `providers/flashscore/adapter.py:185-190`
-#       url = f"{match_base_url}/{suffix}?mid={mid}"   <- `?mid=` lipsea
-#       if tab_name == "summary": _dismiss_gdpr_if_present(page)
-#
-# Productia viziteaza INTAI `summary`, respinge bannerul GDPR, si refoloseste
-# ACEEASI pagina pentru restul tab-urilor — deci consimtamantul se da o data
-# si tine pentru toate. POC-ul mergea direct pe `stats`, pe o pagina noua,
-# fara `?mid=`.
-#
-# Lectia, a treia oara in aceeasi investigatie: un POC care nu reproduce
-# EXACT calea productiei nu masoara defectul, masoara propria lui diferenta.
-MID_DIN_URL = re.compile(r"/match/football/([A-Za-z0-9]+)")
-
 # Reproduse din adapter.py ca VALORI, nu prin import (garda de izolare a
-# POC-urilor interzice importul modulelor de productie).
+# POC-urilor interzice importul modulelor de producție).
 SELECTOARE_GDPR = (
     "#onetrust-accept-btn-handler",
     "button:has-text('Accept & continue')",
@@ -83,6 +63,68 @@ SELECTOARE_GDPR = (
 )
 NAV_TIMEOUT_MS = 30000
 POST_LOAD_WAIT_MS = 3500
+
+MID = "2wo3m634"
+# Baza REALA, citita din href-ul descoperit pe hub (nu construita de mine):
+# docs/06_UDAL/poc_evidence/flashscore_10matches/superliga_results_hub_raw.html
+BAZA = "https://www.flashscore.com/match/football/chelsea-4fGZN2oK/everton-KluSTr9s"
+
+# ---------------------------------------------------------------------------
+# (1) RECENSAMANT — toti selectorii pe care `normalizer.py` se sprijina azi,
+#     grupati dupa tabul pe care sunt folositi efectiv. Citite din cod, nu
+#     din memorie (grep pe `data-testid` + clasele din docstring-uri).
+# ---------------------------------------------------------------------------
+SELECTORI_PRODUCTIE: dict[str, tuple[tuple[str, str], ...]] = {
+    "summary": (
+        ("[data-testid='wcl-summaryMatchInformation']", "arbitru/stadion — SCRIE normal azi"),
+        ("[data-testid='wcl-scores-overline-02']", "scor la pauza — NEVERIFICAT"),
+        (".wclHeaderSection--summary", "container scor la pauza"),
+        (".detailScore__wrapper", "scor final — SCRIE normal azi"),
+        (".duelParticipant__home", "orientare gazda (identitate)"),
+        (".duelParticipant__away", "orientare oaspete"),
+        (".smv__participantRow", "timeline evenimente — SCRIE normal azi"),
+        ("[data-testid='wcl-icon-incidents-goal-soccer']", "incident gol"),
+        ("[data-testid='wcl-statistics']", "widget restrans (5 categorii, fallback)"),
+    ),
+    "stats": (
+        ("[data-testid='wcl-statistics']", "rand de statistica — VIU (45)"),
+        ("[data-testid='wcl-statistics-category']", "eticheta — SUSPECT PRINCIPAL"),
+        ("[data-testid='wcl-statistics-value']", "valoare — SUSPECT PRINCIPAL"),
+    ),
+    "lineups": (
+        ("[data-testid='wcl-lineupsParticipantGeneral-left']", "rand jucator gazda"),
+        ("[data-testid='wcl-lineupsParticipantGeneral-right']", "rand jucator oaspete"),
+        ("[data-testid='wcl-scores-simple-text-01']", "numar+nume jucator — SUSPECT"),
+        ("[data-testid='wcl-simple-text-01']", "ipoteza: acelasi, fara 'scores'"),
+    ),
+    "h2h": (
+        ("[data-testid='wcl-headerSection-text']", "categorie H2H — SCRIE normal azi"),
+        ("[data-testid='wcl-stageTime']", "data meciului H2H"),
+        ("[data-testid='wcl-matchRow-participant']", "echipele din randul H2H"),
+        ("[data-testid='wcl-tableScore']", "scorul din randul H2H"),
+    ),
+    "standings": (
+        ("[data-testid='wcl-tableBodyRow']", "rand clasament"),
+        ("[data-testid='wcl-tableBodyCell']", "celula clasament"),
+        ("[data-testid^='wcl-badgeForm-']", "forma (W/D/L)"),
+        (".tableCellParticipant__name", "nume echipa in clasament"),
+    ),
+    "player_stats": (
+        ("[data-testid='wcl-tableBodyRow']", "rand jucator"),
+        ("[data-testid='wcl-tableBodyCell']", "celula"),
+    ),
+    "odds": (),
+}
+
+TABURI: dict[str, tuple[str, str]] = {
+    "summary":      ("",                      "Referee"),
+    "stats":        ("summary/stats/",         "Expected goals"),
+    "lineups":      ("summary/lineups/",       "Formation"),
+    "player_stats": ("summary/player-stats/",  "Minutes played"),
+    "odds":         ("odds/",                  "1X2"),
+    "h2h":          ("h2h/",                   "Head-to-head"),
+    "standings":    ("standings/",             "Rank"),
+}
 
 
 def _respinge_gdpr(page) -> bool:
@@ -97,215 +139,266 @@ def _respinge_gdpr(page) -> bool:
             continue
     return False
 
-# 🔴 [CORECTAT dupa prima rulare — eroarea era in POC, nu in diagnostic]
-# Prima versiune folosea navigarea prin HASH (`#/match-summary/match-
-# statistics/0`). Rezultatul: `wcl-statistics` -> 5 potriviri si
-# `-category`/`-value` -> 0, IDENTIC pe ambele pagini, inclusiv pe cea din
-# 7 septembrie despre care stim sigur ca a functionat in productie
-# (`home_shots=22` e in baza noastra). Deci POC-ul nu incarcase tab-ul real:
-# cele 5 potriviri erau widget-ul RESTRANS din sumar — exact „5 categorii"
-# pe care docstring-ul lui `normalize_match_statistics()` le descrie ca
-# fallback.
-#
-# Productia foloseste o CALE, nu un hash: `_MATCH_TAB_SUFFIXES` din
-# `providers/flashscore/adapter.py` da `"stats": "summary/stats/"`.
-# Reprodus acum identic, altfel POC-ul masoara altceva decat codul reparat.
-SUFIX_TAB_STATS = "summary/stats/"
 
-# Semnal de randare: daca textul asta nu e in HTML, pagina nu s-a terminat de
-# incarcat si orice numaratoare de selectori e lipsita de sens. Verificat pe
-# captura live a proprietarului produsului (Everton-Chelsea, 17.10.2026):
-# sectiunea „Expected goals (xG)" apare pe tab-ul de statistici.
-MARCAJ_RANDARE = "Expected goals"
-
-SELECTORI_ASTEPTATI = (
-    "[data-testid='wcl-statistics']",
-    "[data-testid='wcl-statistics-category']",
-    "[data-testid='wcl-statistics-value']",
-)
+# ---------------------------------------------------------------------------
+# (2) CANDIDATUL DE REPARATIE — scris aici exact cum intentionez sa-l scriu
+#     in `normalizer.py`. Daca tipareste statistici corecte, reparatia e
+#     dovedita pe date reale INAINTE de prima linie de cod de productie.
+# ---------------------------------------------------------------------------
+def _are_clasa_cu_prefix(tag, prefix: str) -> bool:
+    return any(c.startswith(prefix) for c in (tag.get("class") or []))
 
 
-def _inventar_testid(html: str) -> Counter:
-    """Toate valorile `data-testid` de pe pagină, numărate. Dacă familia
-    `wcl-statistics*` a fost redenumită, numele NOU apare aici — fără să
-    trebuiască ghicit."""
-    return Counter(re.findall(r'data-testid="([^"]+)"', html))
+def _descendenti_cu_prefix(nod, prefix: str) -> list:
+    """Toti descendentii cu o clasa care INCEPE cu `prefix`, in ordinea DOM.
+
+    Prefix, niciodata clasa intreaga: `wcl-value_Ywp3J` are hash de build,
+    deci s-ar rupe la urmatorul deploy Flashscore — exact defectul de reparat,
+    reintrodus intr-o forma noua."""
+    return [t for t in nod.find_all(True) if _are_clasa_cu_prefix(t, prefix)]
 
 
-def _dump_zona_statistici(html: str, context: int = 1100) -> None:
-    """Tipareste HTML-ul din jurul primei aparitii a marcajului. Asta e ce
-    trebuie sa citeasca reparatia: structura REALA de azi, nu una ghicita.
+def _are_stramos_cu_prefix(nod, prefix: str) -> bool:
+    p = nod.parent
+    while p is not None:
+        if _are_clasa_cu_prefix(p, prefix):
+            return True
+        p = p.parent
+    return False
 
-    Fara el, as sti doar CA selectorul nu merge, nu si CU CE sa-l inlocuiesc —
-    adica exact situatia care a produs trei rulari irosite."""
-    poz = html.find(MARCAJ_RANDARE)
+
+def _candidat_statistici(soup) -> tuple[dict, list[str]]:
+    """{eticheta: (home, away)} cu structura de AZI. Intoarce si o lista de
+    observatii — lucruri pe care le-am presupus si care s-au verificat sau
+    nu, ca sa nu ramana nescrise."""
+    rezultat: dict[str, tuple[str | None, str | None]] = {}
+    obs: list[str] = []
+    randuri = soup.select("[data-testid='wcl-statistics']")
+    for idx, row in enumerate(randuri):
+        # Eticheta: `data-testid` vechi daca mai exista, altfel prefix de
+        # clasa `wcl-label`.
+        et_el = row.select_one("[data-testid='wcl-statistics-category']")
+        sursa_et = "testid-vechi"
+        if et_el is None:
+            cand = _descendenti_cu_prefix(row, "wcl-label")
+            et_el = cand[0] if cand else None
+            sursa_et = "clasa wcl-label*"
+        if et_el is None:
+            if idx == 0:
+                obs.append("NICIO eticheta: nici testid vechi, nici clasa wcl-label*")
+            continue
+        eticheta = et_el.get_text(strip=True)
+
+        # Valori: `data-testid` vechi daca mai exista, altfel prefix de
+        # clasa `wcl-value`.
+        valori = row.select("[data-testid='wcl-statistics-value']")
+        sursa_val = "testid-vechi"
+        if not valori:
+            valori = _descendenti_cu_prefix(row, "wcl-value")
+            sursa_val = "clasa wcl-value*"
+
+        home = valori[0].get_text(strip=True) if len(valori) > 0 else None
+        away = valori[1].get_text(strip=True) if len(valori) > 1 else None
+
+        # Contrapondere: ordinea DOM spune ca a doua valoare e a oaspetelui.
+        # O verific independent, prin stramosul `wcl-awayValue*`, in loc s-o
+        # presupun. Daca cele doua semnale se contrazic, vreau sa se vada.
+        if idx == 0:
+            obs.append(f"eticheta via {sursa_et}; valori via {sursa_val} "
+                       f"({len(valori)} gasite in primul rand)")
+            if len(valori) >= 2:
+                a0 = _are_stramos_cu_prefix(valori[0], "wcl-awayValue")
+                a1 = _are_stramos_cu_prefix(valori[1], "wcl-awayValue")
+                verdict = "CONCORDANT cu ordinea DOM" if (not a0 and a1) else "DISCORDANT — de investigat"
+                obs.append(f"stramos wcl-awayValue*: valoare[0]={a0}, valoare[1]={a1} -> {verdict}")
+            if len(valori) > 2:
+                obs.append(f"ATENTIE: {len(valori)} valori in primul rand, nu 2 — "
+                           "selectorul prinde si ceva ce nu e valoare")
+        rezultat[eticheta] = (home, away)
+    obs.insert(0, f"{len(randuri)} randuri wcl-statistics -> {len(rezultat)} etichete extrase")
+    return rezultat, obs
+
+
+def _candidat_aliniamente(soup) -> tuple[dict[str, list], list[str]]:
+    """Jucatori per parte. Aceeasi logica de productie (numar = primul span,
+    nume = primul span ulterior care nu incepe cu paranteza), dar cu lista de
+    testid-uri de text incercate in cascada."""
+    obs: list[str] = []
+    out: dict[str, list] = {"home": [], "away": []}
+    TESTIDE_TEXT = (
+        "[data-testid='wcl-scores-simple-text-01']",   # productia de azi
+        "[data-testid='wcl-simple-text-01']",           # ipoteza de redenumire
+    )
+    for side, team in (("left", "home"), ("right", "away")):
+        randuri = soup.select(f"[data-testid='wcl-lineupsParticipantGeneral-{side}']")
+        if side == "left":
+            obs.append(f"randuri wcl-lineupsParticipantGeneral-left: {len(randuri)}")
+        for row in randuri:
+            spans, sursa = [], None
+            for sel in TESTIDE_TEXT:
+                spans = row.select(sel)
+                if spans:
+                    sursa = sel
+                    break
+            if not spans:
+                continue
+            if side == "left" and not out["home"]:
+                obs.append(f"text de jucator via {sursa} ({len(spans)} span-uri in primul rand)")
+            numar = spans[0].get_text(strip=True)
+            nume = next((s.get_text(strip=True) for s in spans[1:]
+                         if s.get_text(strip=True) and not s.get_text(strip=True).startswith("(")), None)
+            if not nume:
+                continue
+            out[team].append({"nume": nume, "numar": int(numar) if numar.isdigit() else None})
+    return out, obs
+
+
+def _inventar_wcl(html: str) -> Counter:
+    return Counter(t for t in re.findall(r'data-testid="([^"]+)"', html))
+
+
+def _inventar_clase_wcl(html: str) -> Counter:
+    """Prefixele de clasa `wcl-xxx_HASH` -> numara `wcl-xxx`. Asta arata
+    familia de clase pe care se poate sprijini reparatia, fara hash."""
+    prefixe = []
+    for bloc in re.findall(r'class="([^"]+)"', html):
+        for c in bloc.split():
+            m = re.match(r"^(wcl-[A-Za-z0-9]+)_", c)
+            if m:
+                prefixe.append(m.group(1))
+    return Counter(prefixe)
+
+
+def _fragment(html: str, marcaj: str, context: int = 900) -> None:
+    poz = html.find(marcaj)
     if poz < 0:
-        print("  (marcajul nu e în HTML — nimic de arătat)")
+        print(f"    (marcajul {marcaj!r} nu e in HTML)")
         return
     start = max(0, poz - context)
-    fragment = html[start:poz + context]
-    print(f"\n  --- HTML în jurul '{MARCAJ_RANDARE}' (poziția {poz}) ---")
-    print("  " + fragment.replace("\n", " ")[:2200])
-    print("  --- sfârșit fragment ---")
-
-
-def _raport(eticheta: str, html: str) -> dict:
-    from bs4 import BeautifulSoup
-
-    soup = BeautifulSoup(html, "html.parser")
-    gasite = {s: len(soup.select(s)) for s in SELECTORI_ASTEPTATI}
-    inventar = _inventar_testid(html)
-
-    # Orice `data-testid` care seamănă a statistică, indiferent de nume —
-    # asta descoperă redenumirea, în loc s-o presupună.
-    candidati = {k: v for k, v in inventar.items()
-                 if "stat" in k.lower() or "wcl" in k.lower()}
-
-    randat = MARCAJ_RANDARE in html
-
-    print(f"\n{'=' * 78}\n  {eticheta}\n{'=' * 78}")
-    print(f"  lungime HTML                 : {len(html)} octeți")
-    print(f"  conține '{MARCAJ_RANDARE}'    : {'DA' if randat else 'NU'}"
-          f"{'' if randat else '   <-- pagina NU s-a randat; cifrele de mai jos nu spun nimic'}")
-    print(f"  total atribute data-testid   : {sum(inventar.values())} "
-          f"({len(inventar)} distincte)")
-    print("  SELECTORII FOLOSIȚI AZI ÎN PRODUCȚIE:")
-    for s, n in gasite.items():
-        print(f"     {'✅' if n else '❌'} {s:48} -> {n} potriviri")
-    print(f"  candidați ('stat' sau 'wcl' în nume): {len(candidati)}")
-    for k, v in sorted(candidati.items(), key=lambda x: -x[1])[:25]:
-        print(f"     {v:5}x  {k}")
-    if not candidati:
-        print("     (niciunul — pagina nu mai conține nimic de forma asta)")
-        print("  TOP 25 data-testid de pe pagină, ca punct de plecare:")
-        for k, v in inventar.most_common(25):
-            print(f"     {v:5}x  {k}")
-    return {"eticheta": eticheta, "octeti": len(html), "randat": randat,
-            "selectori": gasite, "candidati": dict(candidati),
-            "total_testid": sum(inventar.values())}
+    print(f"    --- HTML in jurul {marcaj!r} (poz {poz}) ---")
+    print("    " + html[start:poz + context].replace("\n", " ")[:1800])
+    print("    --- sfarsit fragment ---")
 
 
 def main() -> int:
-    """Toate cele 7 taburi, cu BAZA REALA a productiei (sloguri de echipa).
-
-    🔴 CORECTIE MAJORA fata de rularile anterioare. Testasem
-    `/match/football/<mid>/summary/stats/` — o forma pe care productia NU o
-    foloseste NICIODATA. `match_base_url` nu e construit de noi: vine din
-    Discovery, care citeste `a[href*='/match/football/']` de pe hub, iar acele
-    linkuri contin DEJA slogurile de echipa. Verificat pe dovada salvata in
-    repo (docs/06_UDAL/poc_evidence/.../superliga_results_hub_raw.html):
-
-        href=".../match/football/fc-botosani-GjY1JjUS/rapid-bucuresti-YFCpigVG/?mid=EeqI7WJc"
-
-    Deci productia cere deja forma cu sloguri. Concluzia mea precedenta —
-    „mid-ul singur nu merge, deci reparatie mare" — se sprijinea pe o
-    comparatie intre doua forme pe care productia nu le foloseste.
-
-    Intrebarea REALA, netestata pana acum: cu baza corecta, mai raspunde
-    sufixul `summary/stats/` al productiei, sau cere `overall/`?
-    """
+    from bs4 import BeautifulSoup
     from playwright.sync_api import sync_playwright
 
-    mid = "2wo3m634"
-    # Baza REALA, citita din href-ul descoperit pe pagina (nu construita).
-    BAZA = "https://www.flashscore.com/match/football/chelsea-4fGZN2oK/everton-KluSTr9s"
+    pagini: dict[str, str] = {}
 
-    TABURI = {
-        "summary":      ("",                      "Referee"),
-        "stats":        ("summary/stats/",         "Expected goals"),
-        "lineups":      ("summary/lineups/",       "Formation"),
-        "player_stats": ("summary/player-stats/",  "Minutes played"),
-        "odds":         ("odds/",                  "1X2"),
-        "h2h":          ("h2h/",                   "Head-to-head"),
-        "standings":    ("standings/",             "Rank"),
-    }
-    # Variante de verificat DOAR daca sufixul productiei cade.
-    ALTERNATIVE = {
-        "stats":        "summary/stats/overall/",
-        "player_stats": "summary/player-stats/overall/",
-    }
-
-    rezultate = []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         try:
-            page.goto(f"{BAZA}/?mid={mid}", timeout=NAV_TIMEOUT_MS,
+            page.goto(f"{BAZA}/?mid={MID}", timeout=NAV_TIMEOUT_MS,
                       wait_until="domcontentloaded")
             if _respinge_gdpr(page):
-                print("  banner GDPR respins")
+                print("banner GDPR respins")
             page.wait_for_timeout(POST_LOAD_WAIT_MS)
-
-            def _masoara(sufix: str, marcaj: str) -> dict:
-                page.goto(f"{BAZA}/{sufix}?mid={mid}", timeout=NAV_TIMEOUT_MS,
+            for nume, (sufix, _marcaj) in TABURI.items():
+                page.goto(f"{BAZA}/{sufix}?mid={MID}", timeout=NAV_TIMEOUT_MS,
                           wait_until="domcontentloaded")
                 page.wait_for_timeout(POST_LOAD_WAIT_MS)
-                html = page.content()
-                n = page.evaluate(
-                    "document.querySelectorAll(\"[data-testid='wcl-statistics']\").length")
-                return {"octeti": len(html), "marcaj": marcaj.lower() in html.lower(),
-                        "statistici": n,
-                        "viu": len(html) > 50000 and marcaj.lower() in html.lower()}
-
-            print(f"\n{'#' * 78}")
-            print("  CELE 7 TABURI, cu BAZA REALA a productiei (sloguri de echipa)")
-            print(f"{'#' * 78}")
-            print(f"  {'tab':<14}{'sufix productie':<28}{'octeti':>9}{'marcaj':>8}  verdict")
-            print(f"  {'-' * 76}")
-
-            for nume, (sufix, marcaj) in TABURI.items():
-                try:
-                    m = _masoara(sufix, marcaj)
-                    print(f"  {nume:<14}{sufix or '(radacina)':<28}{m['octeti']:>9}"
-                          f"{('DA' if m['marcaj'] else 'NU'):>8}  "
-                          f"{'VIU' if m['viu'] else '*** MORT ***'}")
-                    m.update({"tab": nume, "sufix": sufix})
-                    rezultate.append(m)
-                except Exception as exc:
-                    print(f"  {nume:<14}{sufix:<28}{'EROARE':>9}  {exc}")
-                    rezultate.append({"tab": nume, "eroare": str(exc)})
-
-            morti = [r for r in rezultate if r.get("viu") is False]
-            if morti:
-                print(f"\n  --- pentru taburile moarte, incerc varianta cu perioada ---")
-                for r in morti:
-                    alt = ALTERNATIVE.get(r["tab"])
-                    if not alt:
-                        print(f"  {r['tab']:<14}(nu am alternativa de incercat)")
-                        continue
-                    marcaj = TABURI[r["tab"]][1]
-                    try:
-                        m = _masoara(alt, marcaj)
-                        print(f"  {r['tab']:<14}{alt:<28}{m['octeti']:>9}"
-                              f"{('DA' if m['marcaj'] else 'NU'):>8}  "
-                              f"{'VIU' if m['viu'] else 'tot mort'}")
-                        r["alternativa"] = {"sufix": alt, **m}
-                    except Exception as exc:
-                        print(f"  {r['tab']:<14}{alt:<28}EROARE  {exc}")
-
+                pagini[nume] = page.content()
         finally:
             page.close()
             browser.close()
 
+    # --- (1) RECENSAMANT ---------------------------------------------------
+    print(f"\n{'#' * 78}")
+    print("  (1) RECENSAMANT: fiecare selector de productie, pe tabul lui")
+    print(f"{'#' * 78}")
+    morti: list[tuple[str, str, str]] = []
+    for tab, selectori in SELECTORI_PRODUCTIE.items():
+        html = pagini.get(tab, "")
+        marcaj = TABURI[tab][1]
+        randat = marcaj.lower() in html.lower()
+        print(f"\n  [{tab}]  {len(html)} octeti, marcaj {marcaj!r}: "
+              f"{'DA' if randat else 'NU  <-- cifrele de mai jos nu spun nimic'}")
+        if not selectori:
+            print("     (niciun selector de productie pe acest tab)")
+            continue
+        soup = BeautifulSoup(html, "html.parser")
+        for sel, rol in selectori:
+            n = len(soup.select(sel))
+            print(f"     {'OK ' if n else 'MORT'}  {n:5}x  {sel:58} {rol}")
+            if n == 0 and randat:
+                morti.append((tab, sel, rol))
+
+    print(f"\n{'=' * 78}")
+    print(f"  SELECTORI MORTI: {len(morti)}")
+    for tab, sel, rol in morti:
+        print(f"     [{tab}] {sel}  ({rol})")
+
+    # --- inventar, ca redenumirea sa apara prin nume, nu prin ghicit -------
+    for tab in ("stats", "lineups"):
+        html = pagini.get(tab, "")
+        print(f"\n  --- [{tab}] top 20 data-testid care contin 'wcl' ---")
+        for k, v in sorted(((k, v) for k, v in _inventar_wcl(html).items()
+                            if "wcl" in k.lower()), key=lambda x: -x[1])[:20]:
+            print(f"     {v:5}x  {k}")
+        print(f"  --- [{tab}] top 20 prefixe de clasa wcl-*_HASH ---")
+        for k, v in _inventar_clase_wcl(html).most_common(20):
+            print(f"     {v:5}x  {k}_*")
+
+    # --- (2) CANDIDATUL DE REPARATIE --------------------------------------
+    print(f"\n{'#' * 78}")
+    print("  (2) CANDIDATUL DE REPARATIE, rulat pe pagina reala de azi")
+    print(f"{'#' * 78}")
+
+    stats_soup = BeautifulSoup(pagini.get("stats", ""), "html.parser")
+    stats, obs = _candidat_statistici(stats_soup)
+    print("\n  [statistici] observatii:")
+    for o in obs:
+        print(f"     - {o}")
+    print(f"  [statistici] {len(stats)} etichete extrase. Primele 20:")
+    for k, (h, a) in list(stats.items())[:20]:
+        print(f"     {k:38} home={h!r:>12}  away={a!r:>12}")
+    # Cele care conteaza pentru schema noastra, numite explicit:
+    for cheie in ("Expected goals (xG)", "Ball possession", "Goal attempts",
+                  "Shots on goal", "Corner kicks", "Fouls"):
+        if cheie in stats:
+            print(f"     >>> {cheie:28} -> {stats[cheie]}")
+        else:
+            print(f"     >>> {cheie:28} -> ABSENT din extragere")
+
+    lin_soup = BeautifulSoup(pagini.get("lineups", ""), "html.parser")
+    aliniamente, obs_a = _candidat_aliniamente(lin_soup)
+    print("\n  [aliniamente] observatii:")
+    for o in obs_a:
+        print(f"     - {o}")
+    print(f"  [aliniamente] home={len(aliniamente['home'])} jucatori, "
+          f"away={len(aliniamente['away'])} jucatori")
+    for j in aliniamente["home"][:5]:
+        print(f"     home {j['numar']!r:>5}  {j['nume']}")
+    for j in aliniamente["away"][:5]:
+        print(f"     away {j['numar']!r:>5}  {j['nume']}")
+
+    # --- fragmente, pentru orice ramane de citit cu ochiul ----------------
+    print(f"\n{'#' * 78}")
+    print("  (3) FRAGMENTE DE HTML — structura reala, nu una ghicita")
+    print(f"{'#' * 78}")
+    _fragment(pagini.get("stats", ""), "Expected goals")
+    _fragment(pagini.get("lineups", ""), "Formation")
+
+    rezultate = {
+        "morti": [{"tab": t, "selector": s} for t, s, _ in morti],
+        "statistici_extrase": len(stats),
+        "aliniamente": {k: len(v) for k, v in aliniamente.items()},
+        "xg": stats.get("Expected goals (xG)"),
+    }
+    print("\nJSON:", json.dumps(rezultate, ensure_ascii=False)[:1200])
+
     print(f"\n{'=' * 78}\n  VERDICT\n{'=' * 78}")
-    morti = [r for r in rezultate if r.get("viu") is False]
-    reparabile = [r for r in morti if r.get("alternativa", {}).get("viu")]
-
-    if not morti:
-        print("  TOATE taburile raspund cu forma ACTUALA a productiei.")
-        print("  -> URL-ul NU e defect. Ruptura e DOAR in selectori.")
-        print("     REPARATIE MICA: _extract_labeled_stat_pairs + lineups.")
-    elif reparabile and len(reparabile) == len(morti):
-        print(f"  Taburile moarte ({[r['tab'] for r in morti]}) revin cu sufixul")
-        print("  de perioada (`overall/`).")
-        print("  -> REPARATIE MEDIE: sufixele din _MATCH_TAB_SUFFIXES + selectorii.")
-        print("     NU e nevoie de descoperirea URL-ului per meci — baza e deja buna.")
+    if len(stats) >= 20 and aliniamente["home"] and aliniamente["away"]:
+        print("  Candidatul extrage statistici SI aliniamente pe pagina de azi.")
+        print("  -> reparatia e dovedita pe date reale inainte de a fi scrisa.")
+    elif len(stats) >= 20:
+        print("  Statisticile se repara cu acest candidat; ALINIAMENTELE NU.")
+        print("  -> ADR-ul le trateaza separat; aliniamentele cer alta masuratoare.")
     else:
-        print(f"  Moarte: {[r['tab'] for r in morti]}; recuperate: "
-              f"{[r['tab'] for r in reparabile]}")
-        print("  -> reparatia difera pe taburi; ADR-ul le trateaza separat.")
-
-    print("\nJSON:", json.dumps(rezultate, ensure_ascii=False)[:1400])
+        print("  Candidatul NU extrage statistici. Citeste fragmentele de mai sus;")
+        print("  structura e alta decat cea presupusa. NU se scrie nimic in productie.")
     return 0
 
 
