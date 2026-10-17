@@ -186,98 +186,88 @@ def _raport(eticheta: str, html: str) -> dict:
 
 
 def main() -> int:
+    """Intrebarea care decide MARIMEA reparatiei: mai ajunge `mid`-ul singur la
+    tabul de statistici, sau URL-ul trebuie descoperit per meci?
+
+    Stim din rularea precedenta ca URL-ul REAL de azi e:
+      /match/football/chelsea-<id>/everton-<id>/summary/stats/overall/?mid=<mid>
+    Noi avem stocat DOAR `mid`-ul. Daca forma cu `mid` in cale mai merge,
+    reparatia e un sufix. Daca nu, adaptorul trebuie sa citeasca href-ul
+    tabului din pagina de sumar — alta dimensiune, alta decizie.
+    """
     from playwright.sync_api import sync_playwright
+
+    mid = "2wo3m634"
+    FORME = {
+        "A. mid + /stats/ (PRODUCTIA DE AZI)":
+            f"https://www.flashscore.com/match/football/{mid}/summary/stats/?mid={mid}",
+        "B. mid + /stats/overall/":
+            f"https://www.flashscore.com/match/football/{mid}/summary/stats/overall/?mid={mid}",
+        "C. sloguri de echipa + /stats/overall/ (URL REAL)":
+            "https://www.flashscore.com/match/football/chelsea-4fGZN2oK/"
+            f"everton-KluSTr9s/summary/stats/overall/?mid={mid}",
+    }
 
     rezultate = []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         page = browser.new_page()
         try:
-            eticheta, base = MECIURI[0]
-            mid = MID_DIN_URL.search(base).group(1)
-
-            page.goto(f"{base}/?mid={mid}", timeout=NAV_TIMEOUT_MS,
-                      wait_until="domcontentloaded")
+            # Consimtamantul o data, pe sumar, exact ca productia.
+            page.goto(f"https://www.flashscore.com/match/football/{mid}/?mid={mid}",
+                      timeout=NAV_TIMEOUT_MS, wait_until="domcontentloaded")
             if _respinge_gdpr(page):
                 print("  banner GDPR respins")
             page.wait_for_timeout(POST_LOAD_WAIT_MS)
 
-            def _nr_statistici() -> int:
-                return page.evaluate(
-                    "document.querySelectorAll(\"[data-testid='wcl-statistics']\").length")
-
-            print(f"\n{'#' * 78}\n  {eticheta}\n{'#' * 78}")
-            print(f"  [1] pe SUMMARY: {_nr_statistici()} rânduri wcl-statistics "
-                  "(widgetul restrâns, ~5)")
-
-            # ÎNTREBAREA 1 — care e URL-ul REAL al tabului de statistici?
-            # Il citesc de pe pagina, din href-ul linkului, in loc sa-l ghicesc.
-            print("\n  [2] LINKURI DE TAB găsite pe pagină (href REAL, nu ghicit):")
-            linkuri = page.evaluate("""
-                Array.from(document.querySelectorAll('a[href], button[data-analytics-alias]'))
-                  .map(e => ({
-                      text: (e.innerText || '').trim().slice(0, 28),
-                      href: e.getAttribute('href') || '',
-                      alias: e.getAttribute('data-analytics-alias') || ''
-                  }))
-                  .filter(o => /stat/i.test(o.text) || /stat/i.test(o.href) || /stat/i.test(o.alias))
-                  .slice(0, 12)
-            """)
-            for l in linkuri:
-                print(f"      text={l['text']!r:32} alias={l['alias']!r:20} href={l['href']!r}")
-            if not linkuri:
-                print("      (niciunul — tabul nu e un link, probabil buton SPA)")
-
-            # ÎNTREBAREA 2 — ajunge tabul COMPLET (~36 categorii)?
-            # Se face ca un UTILIZATOR: click, nu navigare construita de mine.
-            print("\n  [3] CLICK pe tabul de statistici (ca un utilizator):")
-            apasat = False
-            for sel in ("a[href*='match-statistics']",
-                        "button:has-text('Stats')", "a:has-text('Stats')",
-                        "[data-analytics-alias*='statistics']"):
+            print(f"\n{'#' * 78}\n  CE FORMA DE URL SERVESTE STATISTICILE?\n{'#' * 78}")
+            for nume, url in FORME.items():
                 try:
-                    el = page.locator(sel).first
-                    if el.is_visible(timeout=2500):
-                        el.click(timeout=3000)
-                        print(f"      apăsat: {sel}")
-                        apasat = True
-                        break
-                except Exception:
-                    continue
-            if not apasat:
-                print("      n-am găsit niciun element de apăsat")
-
-            page.wait_for_timeout(POST_LOAD_WAIT_MS)
-            try:
-                page.wait_for_function(
-                    "document.querySelectorAll(\"[data-testid='wcl-statistics']\").length > 10",
-                    timeout=15000)
-            except Exception:
-                print("      rândurile n-au trecut de 10 în 15 s")
-
-            n_dupa = _nr_statistici()
-            print(f"      URL după click : {page.url}")
-            print(f"      rânduri ACUM   : {n_dupa}")
-            html = page.content()
-            r = _raport(f"{eticheta} / după click", html)
-            r["randuri_dupa_click"] = n_dupa
-            _dump_zona_statistici(html)
-            rezultate.append(r)
-
-            print(f"\n{'=' * 78}\n  VERDICT\n{'=' * 78}")
-            if n_dupa > 10:
-                print(f"  TABUL COMPLET SE ÎNCARCĂ ({n_dupa} rânduri).")
-                print(f"  URL-ul care îl produce: {page.url}")
-                print("  -> reparația are DOUĂ părți: URL-ul din _MATCH_TAB_SUFFIXES")
-                print("     ȘI selectorii copiilor din _extract_labeled_stat_pairs.")
-            else:
-                print(f"  DOAR {n_dupa} rânduri — tabul complet NU s-a încărcat.")
-                print("  -> nu scriu reparația pe o structură pe care n-am văzut-o.")
+                    page.goto(url, timeout=NAV_TIMEOUT_MS, wait_until="domcontentloaded")
+                    page.wait_for_timeout(POST_LOAD_WAIT_MS)
+                    try:
+                        page.wait_for_function(
+                            "document.querySelectorAll(\"[data-testid='wcl-statistics']\").length > 10",
+                            timeout=12000)
+                    except Exception:
+                        pass
+                    n = page.evaluate(
+                        "document.querySelectorAll(\"[data-testid='wcl-statistics']\").length")
+                    html = page.content()
+                    final = page.url
+                    redirect = "DA" if final.rstrip("/") != url.split("?")[0].rstrip("/") else "nu"
+                    print(f"\n  {nume}")
+                    print(f"     octeți            : {len(html):>9}")
+                    print(f"     rânduri statistici: {n:>9}")
+                    print(f"     'Expected goals'  : {'DA' if MARCAJ_RANDARE in html else 'NU'}")
+                    print(f"     redirectat        : {redirect}")
+                    print(f"     URL final         : {final}")
+                    rezultate.append({"forma": nume, "octeti": len(html), "randuri": n,
+                                      "url_final": final})
+                except Exception as exc:
+                    print(f"\n  {nume}\n     EȘUAT: {exc}")
+                    rezultate.append({"forma": nume, "eroare": str(exc)})
         finally:
             page.close()
             browser.close()
 
-    print("\nJSON:", json.dumps(rezultate, ensure_ascii=False)[:1200])
+    print(f"\n{'=' * 78}\n  VERDICT\n{'=' * 78}")
+    b = next((r for r in rezultate if r.get("forma", "").startswith("B.")), {})
+    c = next((r for r in rezultate if r.get("forma", "").startswith("C.")), {})
+    if b.get("randuri", 0) > 10:
+        print("  `mid`-ul SINGUR mai ajunge la statistici (forma B).")
+        print("  -> REPARATIE MICA: un sufix in _MATCH_TAB_SUFFIXES")
+        print("     ('summary/stats/' -> 'summary/stats/overall/') + selectorii.")
+    elif c.get("randuri", 0) > 10:
+        print("  Doar forma CU SLOGURI DE ECHIPA serveste statisticile.")
+        print("  -> REPARATIE MAI MARE: adaptorul trebuie sa citeasca href-ul")
+        print("     tabului din pagina de sumar si sa-l urmeze, fiindca noi")
+        print("     stocam doar `mid`-ul, nu slogurile.")
+    else:
+        print("  NICIUNA n-a servit statisticile in aceasta rulare.")
+        print("  -> inconcluziv; nu propun o reparatie pe asta.")
+
+    print("\nJSON:", json.dumps(rezultate, ensure_ascii=False)[:900])
     return 0
 
 
