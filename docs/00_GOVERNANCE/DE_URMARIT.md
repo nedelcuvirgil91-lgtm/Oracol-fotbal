@@ -228,6 +228,7 @@ Seria reală a lui `blend_v1/174e7e17`: **144** (13 oct 21:08) → **151** (14 o
 | **D-6** — două backup-uri | nimic; revizuire restantă de ~3 săptămâni | Se păstrează sau se șterg; decizie, nu urgență. |
 | **D-3** — consumatorii coloanelor înghețate | nimic; decizie necerută | — |
 | **D-11** — Decision Feed nu numește acțiunea | nimic | Același ecran va servi și propuneri de promovare și de rollback. A produs deja o confuzie reală (13 oct). |
+| **`Salzburg` ≡ `Red Bull Salzburg`** | decizia ta: care formă e canonică | Același club, două lanțuri ELO. 256 de rânduri de unificat, zero coliziuni de cheie naturală, dar 3 rânduri `consensus_capture_samples` sunt INTANGIBILE (append-only). Precedentul din august spune „forma lungă" — dar a fost stabilit pentru abrevieri, iar aici forma scurtă e cea geografică, pe care Flashscore o scrie zilnic. Detalii și cifre: **§3nonies**. |
 | **ADR-075** — dubluri de identitate între provideri | ⏳ **AMÂNAT** până la poarta n≥200 (aceeași ca §3quater). Întâi investigația §8, apoi decizia. | PROPOSED, zero cod. Datele celor 3 cazuri sunt reparate; golul de **observare rapidă** rămâne. Monitorul le prinde deja, la ~6 zile, cu diagnostic manual — deci A e viteză, nu gol închis. Amânarea NU e din risc (A nu poate strica nimic), ci din §8: mecanismul nedeterminat ar putea indica altă reparație. Detalii: **§3octies**. |
 | **ADR-074** — istoric de cote din Flashscore | aprobarea ta; apoi implementare **după** pragul F2 | PROPOSED, zero cod. Flashscore dă deja 5,53 case/meci vs. 1,57 la Odds API și acoperă UECL+HNL; singurul lucru care lipsește e mișcarea cotei, și aia e o limită de stocare (suprascriem, 7416 capturi din 7416), nu de provider. Fluxul colectează datele de 2×/zi și le aruncă. |
 | **Campionate noi** (Austria, Elveția, Danemarca → apoi Norvegia, Suedia) | calendar complet în **§3quinquies** | Fereastra e ACUM, până la autorizarea F3 — nu „după F2". Analiza din 15 oct: 133 din 206 echipe de cupă n-au campionat urmărit. Precondiție: merge-ul din §3quater, altfel o ligă nouă neacoperită de Odds API ar cădea în aceeași capcană și ar fi adăugată pe jumătate, ca UECL în august. |
@@ -688,6 +689,46 @@ Corolar util: scrierea de azi a **ajutat** F2 — a transformat 26 de selecții 
 ### Nedeterminat — nu se completează prin deducere
 
 De ce colectarea Flashscore a ajuns la meciul Dortmund (`home_xg_actual` prezent) și **nu** la celelalte două (absent). Explică de ce unul avea rezultat și două nu, dar mecanismul nu a fost stabilit. **Contează pentru alegerea opțiunii**: dacă e o regulă de sărire pe care o controlăm noi, ar putea exista o reparație mai bună decât A, B sau C — una care duce rezultatul la rândul corect fără decizie umană. De investigat **înainte** de a implementa, nu după.
+
+---
+
+## 3nonies. ⏳ `Salzburg` și `Red Bull Salzburg` sunt același club, sub două nume (găsit 2026-10-17)
+
+**Cum a ieșit la iveală** — merită reținut ca metodă: NU dintr-un monitor, ci dintr-o verificare colaterală. Proprietarul produsului a trimis capturi cu clasamentele celor trei campionate noi, iar din ele am putut compara numele reale de echipe cu istoricul nostru. `check_data_health` clasa 3 (forme abreviate) **nu** prinde cazul — a raportat 0 în aceeași zi. **A cincea oară** când observarea ecranului bate diagnosticul meu.
+
+**Defect PREEXISTENT**, nelegat de adăugarea campionatelor; aceea doar l-a scos la suprafață.
+
+### Amploarea, măsurată pe fiecare tabelă
+
+| Tabelă | `Salzburg` | `Red Bull Salzburg` |
+|---|---:|---:|
+| `match_history` | 110 | 23 |
+| `flashscore_match_context` | 32 | 0 |
+| `shadow_predictions` | 17 | 0 |
+| **`elo_ratings`** (ratingul CURENT) | **0** | **1** |
+| **`elo_history`** | **96** | **0** |
+| `flashscore_standings_snapshot` | 1 | 0 |
+| `consensus_capture_samples` | 3 | 0 |
+
+**Ruptura e în locul cel mai prost cu putință**: ratingul ELO curent există doar sub numele LUNG, iar toată istoria care l-ar justifica (96 de rânduri) e sub cel SCURT. Cele 23 de meciuri de Champions League formează un lanț ELO separat de cele 110 din campionat + Europa League, pentru același club.
+
+### Ce face unificarea ușoară, și ce o complică
+
+**Ușor, verificat**: zero coliziuni pe cheia naturală `(gazdă, oaspete, zi)` la redenumire, în oricare direcție. Niciun `UPDATE` n-ar eșua la mijloc — exact problema care a cerut grijă la unificarea din 23 august (coliziunea Rijeka–Dinamo Zagreb).
+
+**🔴 Complicație, aceeași ca în august**: cele **3 rânduri din `consensus_capture_samples` NU pot fi atinse**. Tabela e strict append-only, impus de un trigger la nivel de bază de date — „o captură greșită nu se corectează, rămâne un fapt istoric". Orice monitorizare ulterioară trebuie să le **excludă**, nu să le raporteze ca rest necurățat. Identic cu cele 8 rânduri rămase abreviate după unificarea din august.
+
+### Decizia cerută
+
+Precedentul din **2026-08-23** (`Din. Zagreb`, `St. Mirren`, `St. Truiden`) a stabilit regula: **canonic e forma LUNGĂ, abrevierea devine alias**. Aplicată aici, ar însemna `Red Bull Salzburg` canonic, `Salzburg` alias — adică backfill pe **110 + 32 + 17 + 96 + 1 = 256 de rânduri**, plus o intrare în `TEAM_ALIASES`.
+
+Dar regula aceea a fost stabilită pentru abrevieri (`Din.` → `Dinamo`). Aici forma scurtă e numele **geografic**, iar cea lungă conține numele **sponsorului** — nu e evident că precedentul se aplică mecanic. Flashscore însuși afișează `Salzburg` în clasamentul austriac (captură, 17 oct), deci forma scurtă e cea pe care o va scrie de acum înainte, zilnic.
+
+**Nefăcut nimic deliberat.** Schimbarea identității unui club cere aprobare explicită — nu e o curățenie. Ambele variante sunt apărabile; decizia e a proprietarului produsului, nu mecanică.
+
+**Impact cât timp rămâne nereparat**: ELO-ul lui Salzburg e calculat pe două serii care nu se întâlnesc. Afectează predicțiile pentru meciurile lui din cupele europene și din campionatul austriac nou adăugat. Nu e urgent — clubul are oricum ELO pe ambele lanțuri, deci nu cade pe `neutral-defaults` — dar e o valoare mai slabă decât ar putea fi.
+
+**De verificat dacă mai există cazuri la fel**: căutarea de azi a fost punctuală (36 de echipe de pe trei ecrane). Un club care apare sub numele geografic într-o ligă și cu sponsor în alta e un tipar, nu un accident — RB Leipzig, Red Star/Crvena Zvezda, Bayer Leverkusen sunt candidați plauzibili, **NEverificați**.
 
 ---
 
