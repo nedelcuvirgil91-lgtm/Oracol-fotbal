@@ -20,6 +20,7 @@ Zero rețea, zero Supabase.
 """
 from __future__ import annotations
 
+import ast
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -34,6 +35,7 @@ from mappings import (
     ODDS_SPORT_KEYS,
     TRACKED_COMPETITIONS,
     normalize_league_name,
+    normalize_team_name,
 )
 from providers.flashscore.discovery import FLASHSCORE_TRACKED_COMPETITIONS
 
@@ -56,6 +58,46 @@ def test_niciun_alias_nu_e_revendicat_de_doua_competitii():
 
     coliziuni = {k: sorted(v) for k, v in revendicari.items() if len(v) > 1}
     assert not coliziuni, f"alias revendicat de mai multe competiții: {coliziuni}"
+
+
+def test_niciun_dictionar_de_alias_nu_are_chei_duplicate():
+    """Python păstrează ULTIMA definiție a unei chei duplicate, fără nicio
+    eroare și fără niciun avertisment. Într-un dicționar de alias asta
+    înseamnă că o listă întreagă de forme alternative poate dispărea tăcut.
+
+    Garda există pentru că defectul s-a produs REAL, în timpul unificării
+    `Salzburg`: adăugasem intrarea cu alias-uri lângă celelalte cluburi
+    europene, fără să observ că mai jos exista deja `"Salzburg": []`. Harta
+    inversă se construia din a doua, deci `normalize_team_name("Red Bull
+    Salzburg")` continua să întoarcă forma lungă — reparația „aplicată" nu
+    făcea nimic. Niciun test n-a căzut; a ieșit la iveală doar fiindcă am
+    verificat rezultatul în loc să presupun că editarea a avut efect.
+
+    Verificarea citește SURSA prin AST, nu dicționarul încărcat — în
+    dicționarul deja construit duplicatul e, prin definiție, invizibil."""
+    arbore = ast.parse((RADACINA / "mappings.py").read_text(encoding="utf-8"))
+    for nod in ast.walk(arbore):
+        if not (isinstance(nod, ast.AnnAssign) and isinstance(nod.target, ast.Name)):
+            continue
+        if nod.target.id not in ("TEAM_ALIASES", "LEAGUE_ALIASES"):
+            continue
+        chei = [(k.value, k.lineno) for k in nod.value.keys if isinstance(k, ast.Constant)]
+        vazute: dict[str, int] = {}
+        for cheie, linie in chei:
+            assert cheie not in vazute, (
+                f"{nod.target.id}: cheia {cheie!r} apare de două ori "
+                f"(liniile {vazute[cheie]} și {linie}) — prima e ștearsă tăcut")
+            vazute[cheie] = linie
+
+
+def test_unificarea_salzburg_e_efectiva_nu_doar_declarata():
+    """Contrapondere la testul de mai sus: duplicatul putea fi rezolvat și
+    greșit, păstrând intrarea goală. Aici se verifică EFECTUL, pe funcția
+    reală de normalizare, nu prezența unei linii în fișier."""
+    for forma in ("Red Bull Salzburg", "FC Red Bull Salzburg", "RB Salzburg",
+                  "Salzburg", "FC Salzburg"):
+        assert normalize_team_name(forma) == "Salzburg", (
+            f"{forma!r} -> {normalize_team_name(forma)!r}")
 
 
 def test_superliga_goala_nu_se_mapeaza_la_danemarca():

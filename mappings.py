@@ -321,7 +321,38 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "Dynamo Kyiv": ["Dynamo Kiev","FC Dynamo Kyiv"],
     "FC Copenhagen": ["FC København","FC Kobenhavn"],
     "Porto": ["FC Porto"],
-    "Red Bull Salzburg": ["FC Red Bull Salzburg"],
+    # [SCHIMBAT 2026-10-17 — decizie explicită a proprietarului produsului]
+    # Canonic era `Red Bull Salzburg`; e acum `Salzburg`. NU e răsturnarea unei
+    # alegeri deliberate: intrarea veche mapa DOAR „FC Red Bull Salzburg" ->
+    # „Red Bull Salzburg" și nu luase niciodată în calcul forma scurtă, care
+    # circula nenormalizată în paralel. O decizie incompletă, nu una contrazisă.
+    #
+    # Măsurat înainte: 110 rânduri `match_history` + 96 `elo_history` + 32
+    # `flashscore_match_context` + 17 `shadow_predictions` sub forma SCURTĂ,
+    # contra 23 + 1 sub cea lungă. Ratingul ELO curent era sub numele lung, iar
+    # toată istoria care îl justifică sub cel scurt — două lanțuri pentru
+    # același club.
+    #
+    # DE CE FORMA SCURTĂ, și de ce precedentul din 2026-08-23 („canonic e forma
+    # LUNGĂ") NU se aplică mecanic aici:
+    #   1. Acela a fost stabilit pentru ABREVIERI (`Din.` -> `Dinamo`). Aici
+    #      forma scurtă e numele GEOGRAFIC, cea lungă conține SPONSORUL.
+    #   2. Flashscore — singurul colector activ — scrie `Salzburg`, confirmat
+    #      pe clasamentul live (captură, 2026-10-17) și pe un meci din
+    #      2026-10-15. Forma lungă vine EXCLUSIV din importuri istorice
+    #      încheiate (`fd` ultimul meci 2025-01-29, `kaggle` 2022-03-08,
+    #      `openfootball` 2025-01-29).
+    #   3. ARGUMENTUL DECISIV, tehnic: `consensus_capture_samples` conține 3
+    #      rânduri sub forma SCURTĂ și 0 sub cea lungă, iar tabela e strict
+    #      append-only, impus de un trigger în baza de date. Alegerea formei
+    #      lungi ar fi fost IMPOSIBIL de dus la capăt — ar fi rămas permanent
+    #      parțială. Forma scurtă cere zero atingeri acolo.
+    #
+    # Aliasul e necesar, nu cosmetic: `fd` (football-data.org) e ÎNCĂ activ în
+    # `sync_results`, deci ar rescrie forma lungă la următorul meci european.
+    # Exact rolul stratului de alias (ADR-058): forma unui provider nu dictează
+    # vocabularul stocat.
+    "Salzburg": ["Red Bull Salzburg", "FC Red Bull Salzburg", "RB Salzburg"],
     "Bodo/Glimt": ["FK Bodø/Glimt","Bodo Glimt"],
     "Crvena Zvezda": ["FK Crvena Zvezda","Red Star Belgrade"],
     "Kairat Almaty": ["FK Kairat"],
@@ -484,7 +515,14 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "Royale Union SG":  [],
     "SK Rapid":         [],
     "Sabah Baku":       [],
-    "Salzburg":         [],
+    # "Salzburg": [] — SCOASA 2026-10-17, mutata mai sus cu lista ei de alias
+    # (`Red Bull Salzburg` si celelalte). NU o reintroduce aici: Python
+    # pastreaza ULTIMA definitie a unei chei duplicate, deci o reintroducere
+    # ar sterge TACIT alias-urile, fara nicio eroare. Exact asta s-a intamplat
+    # la prima incercare de reparatie, si n-a fost prins de niciun test — doar
+    # de o verificare manuala a rezultatului. Acum exista o garda dedicata:
+    # `tests/test_league_addition_invariants.py::test_niciun_dictionar_de_alias
+    # _nu_are_chei_duplicate`. Acelasi tipar ca la "St. Truiden" mai jos.
     "Shamrock Rovers":  [],
     "Shelbourne":       [],
     "Sion":             [],
