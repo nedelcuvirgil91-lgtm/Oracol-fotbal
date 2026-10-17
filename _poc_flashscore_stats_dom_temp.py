@@ -186,24 +186,30 @@ def _raport(eticheta: str, html: str) -> dict:
 
 
 def main() -> int:
-    """TOATE cele 7 taburi pe care le cere productia, testate pe acelasi meci.
+    """Toate cele 7 taburi, cu BAZA REALA a productiei (sloguri de echipa).
 
-    Ipoteza, sugerata de date inainte de orice test: cele TREI taburi moarte
-    (stats, lineups, player_stats) sunt sub-cai `summary/...`, iar cele PATRU
-    vii (summary, odds, h2h, standings) sunt de nivel superior. Daca se
-    confirma, e UN singur defect cu trei victime, nu trei defecte.
+    🔴 CORECTIE MAJORA fata de rularile anterioare. Testasem
+    `/match/football/<mid>/summary/stats/` — o forma pe care productia NU o
+    foloseste NICIODATA. `match_base_url` nu e construit de noi: vine din
+    Discovery, care citeste `a[href*='/match/football/']` de pe hub, iar acele
+    linkuri contin DEJA slogurile de echipa. Verificat pe dovada salvata in
+    repo (docs/06_UDAL/poc_evidence/.../superliga_results_hub_raw.html):
 
-    Fiecare tab are un MARCAJ propriu de continut: absenta lui e semnalul, nu
-    dimensiunea paginii (o coaja goala si o pagina reala pot avea dimensiuni
-    apropiate la taburile mici).
+        href=".../match/football/fc-botosani-GjY1JjUS/rapid-bucuresti-YFCpigVG/?mid=EeqI7WJc"
+
+    Deci productia cere deja forma cu sloguri. Concluzia mea precedenta —
+    „mid-ul singur nu merge, deci reparatie mare" — se sprijinea pe o
+    comparatie intre doua forme pe care productia nu le foloseste.
+
+    Intrebarea REALA, netestata pana acum: cu baza corecta, mai raspunde
+    sufixul `summary/stats/` al productiei, sau cere `overall/`?
     """
     from playwright.sync_api import sync_playwright
 
     mid = "2wo3m634"
-    BAZA = f"https://www.flashscore.com/match/football/{mid}"
+    # Baza REALA, citita din href-ul descoperit pe pagina (nu construita).
+    BAZA = "https://www.flashscore.com/match/football/chelsea-4fGZN2oK/everton-KluSTr9s"
 
-    # Identic cu _MATCH_TAB_SUFFIXES din providers/flashscore/adapter.py,
-    # copiat ca VALORI (garda de izolare interzice importul).
     TABURI = {
         "summary":      ("",                      "Referee"),
         "stats":        ("summary/stats/",         "Expected goals"),
@@ -212,6 +218,11 @@ def main() -> int:
         "odds":         ("odds/",                  "1X2"),
         "h2h":          ("h2h/",                   "Head-to-head"),
         "standings":    ("standings/",             "Rank"),
+    }
+    # Variante de verificat DOAR daca sufixul productiei cade.
+    ALTERNATIVE = {
+        "stats":        "summary/stats/overall/",
+        "player_stats": "summary/player-stats/overall/",
     }
 
     rezultate = []
@@ -225,51 +236,76 @@ def main() -> int:
                 print("  banner GDPR respins")
             page.wait_for_timeout(POST_LOAD_WAIT_MS)
 
+            def _masoara(sufix: str, marcaj: str) -> dict:
+                page.goto(f"{BAZA}/{sufix}?mid={mid}", timeout=NAV_TIMEOUT_MS,
+                          wait_until="domcontentloaded")
+                page.wait_for_timeout(POST_LOAD_WAIT_MS)
+                html = page.content()
+                n = page.evaluate(
+                    "document.querySelectorAll(\"[data-testid='wcl-statistics']\").length")
+                return {"octeti": len(html), "marcaj": marcaj.lower() in html.lower(),
+                        "statistici": n,
+                        "viu": len(html) > 50000 and marcaj.lower() in html.lower()}
+
             print(f"\n{'#' * 78}")
-            print("  TOATE CELE 7 TABURI, cu forma de URL a PRODUCTIEI")
+            print("  CELE 7 TABURI, cu BAZA REALA a productiei (sloguri de echipa)")
             print(f"{'#' * 78}")
-            print(f"  {'tab':<14}{'sufix':<26}{'octeti':>9}{'marcaj':>9}  {'verdict'}")
-            print(f"  {'-' * 74}")
+            print(f"  {'tab':<14}{'sufix productie':<28}{'octeti':>9}{'marcaj':>8}  verdict")
+            print(f"  {'-' * 76}")
 
             for nume, (sufix, marcaj) in TABURI.items():
                 try:
-                    page.goto(f"{BAZA}/{sufix}?mid={mid}", timeout=NAV_TIMEOUT_MS,
-                              wait_until="domcontentloaded")
-                    page.wait_for_timeout(POST_LOAD_WAIT_MS)
-                    html = page.content()
-                    are = marcaj.lower() in html.lower()
-                    viu = len(html) > 50000 and are
-                    print(f"  {nume:<14}{sufix or '(radacina)':<26}{len(html):>9}"
-                          f"{('DA' if are else 'NU'):>9}  {'VIU' if viu else '*** MORT ***'}")
-                    rezultate.append({"tab": nume, "sufix": sufix, "octeti": len(html),
-                                      "marcaj": are, "viu": viu})
+                    m = _masoara(sufix, marcaj)
+                    print(f"  {nume:<14}{sufix or '(radacina)':<28}{m['octeti']:>9}"
+                          f"{('DA' if m['marcaj'] else 'NU'):>8}  "
+                          f"{'VIU' if m['viu'] else '*** MORT ***'}")
+                    m.update({"tab": nume, "sufix": sufix})
+                    rezultate.append(m)
                 except Exception as exc:
-                    print(f"  {nume:<14}{sufix:<26}{'EROARE':>9}  {exc}")
+                    print(f"  {nume:<14}{sufix:<28}{'EROARE':>9}  {exc}")
                     rezultate.append({"tab": nume, "eroare": str(exc)})
+
+            morti = [r for r in rezultate if r.get("viu") is False]
+            if morti:
+                print(f"\n  --- pentru taburile moarte, incerc varianta cu perioada ---")
+                for r in morti:
+                    alt = ALTERNATIVE.get(r["tab"])
+                    if not alt:
+                        print(f"  {r['tab']:<14}(nu am alternativa de incercat)")
+                        continue
+                    marcaj = TABURI[r["tab"]][1]
+                    try:
+                        m = _masoara(alt, marcaj)
+                        print(f"  {r['tab']:<14}{alt:<28}{m['octeti']:>9}"
+                              f"{('DA' if m['marcaj'] else 'NU'):>8}  "
+                              f"{'VIU' if m['viu'] else 'tot mort'}")
+                        r["alternativa"] = {"sufix": alt, **m}
+                    except Exception as exc:
+                        print(f"  {r['tab']:<14}{alt:<28}EROARE  {exc}")
+
         finally:
             page.close()
             browser.close()
 
     print(f"\n{'=' * 78}\n  VERDICT\n{'=' * 78}")
     morti = [r for r in rezultate if r.get("viu") is False]
-    vii = [r for r in rezultate if r.get("viu") is True]
-    sub_summary = [r for r in morti if r.get("sufix", "").startswith("summary/")]
+    reparabile = [r for r in morti if r.get("alternativa", {}).get("viu")]
 
-    print(f"  VII : {[r['tab'] for r in vii]}")
-    print(f"  MORTI: {[r['tab'] for r in morti]}")
-    if morti and len(sub_summary) == len(morti):
-        print("\n  CONFIRMAT: TOATE taburile moarte sunt sub-cai `summary/...`,")
-        print("  si NICIUN tab de nivel superior nu e afectat.")
-        print("  -> UN singur defect cu trei victime, nu trei defecte separate.")
-        print("     Reparatia URL-ului le repara pe toate deodata.")
-    elif not morti:
-        print("\n  NICIUN tab mort in aceasta rulare — rezultat neasteptat,")
-        print("  contrazice datele din baza. NU propun nimic pe el.")
+    if not morti:
+        print("  TOATE taburile raspund cu forma ACTUALA a productiei.")
+        print("  -> URL-ul NU e defect. Ruptura e DOAR in selectori.")
+        print("     REPARATIE MICA: _extract_labeled_stat_pairs + lineups.")
+    elif reparabile and len(reparabile) == len(morti):
+        print(f"  Taburile moarte ({[r['tab'] for r in morti]}) revin cu sufixul")
+        print("  de perioada (`overall/`).")
+        print("  -> REPARATIE MEDIE: sufixele din _MATCH_TAB_SUFFIXES + selectorii.")
+        print("     NU e nevoie de descoperirea URL-ului per meci — baza e deja buna.")
     else:
-        print("\n  TIPAR MIXT: morti si in afara `summary/...`.")
-        print("  -> sunt defecte DISTINCTE; ADR-ul trebuie sa le trateze separat.")
+        print(f"  Moarte: {[r['tab'] for r in morti]}; recuperate: "
+              f"{[r['tab'] for r in reparabile]}")
+        print("  -> reparatia difera pe taburi; ADR-ul le trateaza separat.")
 
-    print("\nJSON:", json.dumps(rezultate, ensure_ascii=False)[:1200])
+    print("\nJSON:", json.dumps(rezultate, ensure_ascii=False)[:1400])
     return 0
 
 
