@@ -346,4 +346,6 @@ def test_clasa_6_e_chiar_cablata_in_raport():
     # sa o numere ar raporta „constatari: 1/6" pentru 7 clase — exact genul
     # de cifra care pare corecta si nu e. [ACTUALIZAT 2026-10-17, ADR-076:
     # 6 -> 7, clasa „extragerea Flashscore a incetat sa produca".]
-    assert "findings}/7" in sursa, "sumarul nu numara toate clasele"
+    # [ACTUALIZAT 2026-10-19, ADR-078: 7 -> 8, clasa „un id Flashscore cu
+    # doua etichete". Garda a cazut la adaugarea clasei, exact cum trebuia.]
+    assert "findings}/8" in sursa, "sumarul nu numara toate clasele"

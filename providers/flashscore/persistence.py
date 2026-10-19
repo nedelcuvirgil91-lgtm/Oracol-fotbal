@@ -39,6 +39,7 @@ from database.queries import (
     upsert_player_roster,
     upsert_raw_extraction,
     upsert_standings_snapshot,
+    upsert_team_identity,
 )
 from udal_validation import validate_flat_identity
 
@@ -51,6 +52,7 @@ from .normalizer import (
     normalize_player_match_stats,
     normalize_player_match_stats_table,
     normalize_standings,
+    normalize_team_identities,
 )
 
 # Cele 7 tab-uri Flashscore confirmate in POC (UDAL_FLASHSCORE_FULL_TABS_POC_
@@ -191,8 +193,29 @@ def persist_match_foundation_data(
     else:
         steps["standings_snapshot"] = True
 
+    # ── [ADR-078, Faza 0] Captarea identitatii de echipa a lui Flashscore ──
+    # DELIBERAT IN AFARA lui `steps`, si deci in afara lui `ok`.
+    #
+    # `run_foundation_data_layer.py` intoarce `exit code 1` la orice esec
+    # partial, oricat de mic (389/393 = 99% succes a fost tot rosu, 20 aug).
+    # O observatie care nu schimba nicio predictie nu are voie sa inroseasca
+    # rularea care aduce datele reale — Flashscore e prima linie, si Faza 0 nu
+    # poate avea voie sa o strice. De aceea: in afara lui `ok`, cu try/except
+    # care nu lasa nicio excepție sa scape, si gatat de un flag implicit oprit.
+    observate = 0
+    try:
+        from flashscore_team_identity_config import is_enabled as _identitate_pornita
+        if _identitate_pornita():
+            randuri_identitate = normalize_team_identities(pages)
+            if randuri_identitate and upsert_team_identity(randuri_identitate):
+                observate = len(randuri_identitate)
+    except Exception as exc:  # pragma: no cover — plasa de siguranta
+        logger.warning("[Flashscore.Persistence] captarea identitatii a eșuat "
+                       "(ignorat, nu afecteaza meciul): %s", exc)
+
     ok = all(steps.values())
-    return {"match_id": match_id, "ok": ok, "steps": steps}
+    return {"match_id": match_id, "ok": ok, "steps": steps,
+            "team_identity_observed": observate}
 
 
 def _raw_snapshot_by_tab(pages: dict[str, str], competition: str | None) -> dict[str, Any]:

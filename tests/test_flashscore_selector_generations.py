@@ -292,7 +292,10 @@ def test_clasa_7_e_cablata_in_check_data_health():
     sursa = inspect.getsource(check_data_health.main)
     assert "match_statistics_extended" in sursa, "sonda de statistici lipsește"
     assert "player_match_stats" in sursa, "sonda de roster lipsește"
-    assert "findings}/7" in sursa, "sumarul nu numără clasa 7"
+    # [ACTUALIZAT 2026-10-19, ADR-078: 7 -> 8, clasa „un id Flashscore cu
+    # două etichete".] Numărul e deliberat literal — vezi nota din
+    # `test_clasa_6_e_chiar_cablata_in_raport`.
+    assert "findings}/8" in sursa, "sumarul nu numără clasa 7"
 
 
 def test_clasa_7_incrementeaza_findings():

@@ -2482,6 +2482,114 @@ def upsert_standings_snapshot(rows: list[dict]) -> bool:
         return False
 
 
+def upsert_team_identity(rows: list[dict]) -> bool:
+    """`flashscore_team_identity` (migratia 057, ADR-078 Faza 0) —
+    `on_conflict="flashscore_team_id,display_name"`.
+
+    OBSERVATIE, nu identitate. Nimic nu citeste tabela asta ca sursa de adevar
+    pentru numele unui club; un `flashscore_team_id` cu doua `display_name`
+    distincte e drift de eticheta, detectabil printr-o interogare.
+
+    **`display_name` NU trece prin `normalize_team_name()`** — inversare
+    deliberata a precedentului din `upsert_standings_snapshot()`, care
+    normalizeaza tocmai ca potrivirea exacta sa functioneze. Aici scopul e
+    opus: eticheta BRUTA, exact cum a scris-o Flashscore. Normalizata, ambele
+    forme ale aceluiasi club ar colapsa in una si tabela ar raporta mereu „un
+    id, un nume" — adica ar ascunde exact fenomenul pentru care exista.
+
+    `first_seen_at` NU intra in payload: pe ramura `DO UPDATE` ar rescrie
+    „prima observare" la fiecare revedere. `last_seen_at` intra MEREU, prin
+    `_acum_utc()` — capcana timestamp-ului inghetat, sase instante deja
+    reparate in acest proiect (`tests/test_upsert_timestamp_freshness.py`)."""
+    if not rows:
+        return True
+    client = get_client()
+    if client is None:
+        return False
+    rows = _dedupe_by_keys(
+        rows, ("flashscore_team_id", "display_name"), "upsert_team_identity",
+    )
+    acum = _acum_utc()
+    payload = [
+        {
+            "flashscore_team_id": r["flashscore_team_id"],
+            "display_name": r["display_name"],
+            "team_slug": r.get("team_slug"),
+            "observed_fixture_id": r.get("observed_fixture_id"),
+            "side": r.get("side"),
+            "last_seen_at": acum,
+        }
+        for r in rows
+        if r.get("flashscore_team_id") and r.get("display_name")
+    ]
+    if not payload:
+        return True
+    try:
+        client.table("flashscore_team_identity").upsert(
+            payload, on_conflict="flashscore_team_id,display_name",
+        ).execute()
+        return True
+    except Exception as exc:
+        logger.error("[Queries] upsert_team_identity failed: %s", exc)
+        return False
+
+
+def get_team_identity_drift() -> list[dict]:
+    """Id-urile Flashscore vazute sub MAI MULTE etichete (ADR-078, clasa 8).
+
+    Prag ABSOLUT, nu procentual: un singur id cu doua nume e deja raspunsul.
+    Lista goala = niciun drift SAU tabela inca goala — cele doua se disting
+    prin numarul total de randuri, pe care apelantul il raporteaza separat;
+    aici nu se aproximeaza (Regula #8).
+
+    Paginat keyset pe `id`: plafonul implicit PostgREST de 1000 a fost deja
+    reparat de cinci ori in acest proiect, iar tabela creste cu fiecare echipa
+    noua vazuta. La eroare se intoarce lista GOALA, nu setul partial — un
+    parțial ar arata identic cu „niciun drift"."""
+    client = get_client()
+    if client is None:
+        return []
+    _PAGE = 1000
+    toate: list[dict] = []
+    cursor = 0
+    while True:
+        try:
+            res = (
+                client.table("flashscore_team_identity")
+                .select("id,flashscore_team_id,display_name,team_slug,last_seen_at")
+                .gt("id", cursor)
+                .order("id")
+                .limit(_PAGE)
+                .execute()
+            )
+        except Exception as exc:
+            logger.error("[Queries] get_team_identity_drift failed: %s", exc)
+            return []
+        pagina = res.data or []
+        if not pagina:
+            break
+        toate.extend(pagina)
+        ultim = max(int(r["id"]) for r in pagina)
+        if ultim <= cursor:
+            logger.warning("[Queries] get_team_identity_drift: cursorul nu "
+                           "avanseaza (id=%s) — opresc paginarea", ultim)
+            break
+        cursor = ultim
+        if len(pagina) < _PAGE:
+            break
+
+    pe_id: dict[str, list[dict]] = {}
+    for rand in toate:
+        pe_id.setdefault(str(rand["flashscore_team_id"]), []).append(rand)
+    return [
+        {"flashscore_team_id": tid,
+         "nume": sorted({str(r["display_name"]) for r in randuri}),
+         "team_slug": next((r.get("team_slug") for r in randuri if r.get("team_slug")), None)}
+        for tid, randuri in sorted(pe_id.items())
+        if len({str(r["display_name"]) for r in randuri}) > 1
+    ]
+
+
 def upsert_match_events(match_id: int, events: list[dict], season: str | None = None) -> bool:
     """`match_events` (migratia 032/033/039) - timeline complet (goluri/
     cartonase/schimbari/VAR), nu doar substitutii. `on_conflict` pe cheia

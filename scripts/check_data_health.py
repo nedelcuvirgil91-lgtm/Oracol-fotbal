@@ -255,7 +255,7 @@ def main() -> int:
         print("EROARE: Supabase indisponibil (SUPABASE_URL / SUPABASE_SECRET_KEY).")
         return 1
 
-    from database.queries import get_client
+    from database.queries import get_client, get_team_identity_drift
     from providers.flashscore.discovery import FLASHSCORE_TRACKED_COMPETITIONS
 
     client = get_client()
@@ -565,7 +565,53 @@ def main() -> int:
                 findings += 1
     print(BAR)
 
-    print(f"  Clase cu constatări: {findings}/7")
+    # ── 8. UN ID FLASHSCORE CU DOUĂ ETICHETE (ADR-078, Faza 0) ────────────
+    #
+    # Flashscore are UN identificator stabil per club (`/team/<slug>/<id>/`),
+    # dar scrie etichete diferite după tipul paginii: header-ul de calificare
+    # dă `Levski Sofia (BUL)`, iar widget-ul de formă recentă al ACELUIAȘI
+    # provider dă `Levski Sofia`. Ancorând identitatea pe etichetă, am ajuns
+    # cu 13 cluburi având două lanțuri ELO paralele și 330 de rânduri sub
+    # forma cu sufix — descoperit abia pe 19 octombrie, din întrebarea
+    # proprietarului produsului despre ELO-ul Borussiei, nu din vreun monitor.
+    #
+    # PRAGUL E ZERO ABSOLUT: un singur id cu două nume e deja răspunsul, nu un
+    # indiciu. Nu există aici variație legitimă de acoperire pe care un prag
+    # procentual ar trebui să o tolereze.
+    #
+    # LIMITA: clasa vede doar ce s-a CAPTAT. Cât timp flagul
+    # `flashscore_team_identity_capture_enabled` e oprit, tabela e goală și
+    # verificarea nu afirmă nimic — North Star #8, nu „sănătos".
+    print("  8. IDENTITATEA DE ECHIPĂ FLASHSCORE (ADR-078)")
+    try:
+        total = (client.table("flashscore_team_identity")
+                 .select("id", count="exact").limit(1).execute())
+        randuri_captate = total.count or 0
+    except Exception as exc:
+        randuri_captate = None
+        print(f"     [ATENȚIE] tabela nu a putut fi citită ({exc}) — "
+              "se raportează ca necunoscută (migrarea 057 aplicată?).")
+    if randuri_captate == 0:
+        print("     INSUFICIENTE DATE — nicio etichetă captată încă "
+              "(flag oprit sau prima rulare). Nu se afirmă nimic.")
+    elif randuri_captate:
+        drift = get_team_identity_drift()
+        print(f"     etichete captate: {randuri_captate}")
+        if not drift:
+            print("     OK   fiecare id Flashscore apare sub exact un nume")
+        else:
+            print(f"     ⛔ {len(drift)} id-uri Flashscore apar sub MAI MULTE nume:")
+            for d in drift[:15]:
+                print(f"        {d['flashscore_team_id']} "
+                      f"({d.get('team_slug') or '?'}) -> {d['nume']}")
+            if len(drift) > 15:
+                print(f"        … și încă {len(drift) - 15}")
+            print("        Același club sub două identități: lanț ELO despicat, "
+                  "H2H despicat. Vezi ADR-078.")
+            findings += 1
+    print(BAR)
+
+    print(f"  Clase cu constatări: {findings}/8")
     print("  Verificare încheiată. ZERO scriere efectuată.")
     print(BAR)
     return 1 if findings else 0

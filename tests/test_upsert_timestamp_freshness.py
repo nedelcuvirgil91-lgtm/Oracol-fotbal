@@ -36,6 +36,11 @@ TABELE_CU_MARCAJ_TEMPORAL: dict[str, str] = {
     "match_statistics_extended": "captured_at",
     "player_match_stats_extended": "captured_at",
     "flashscore_data_completeness": "computed_at",
+    # [ADR-078, migrarea 057] A saptea instanta posibila — adaugata ODATA cu
+    # scriitorul, nu dupa ce ar fi inghetat tacit. `first_seen_at` NU e aici
+    # deliberat: acela TREBUIE sa rezista pe ramura `DO UPDATE`, altfel „prima
+    # observare" ar fi rescrisa la fiecare revedere.
+    "flashscore_team_identity": "last_seen_at",
 }
 
 

@@ -254,6 +254,84 @@ def _extract_team_names(soup: BeautifulSoup) -> tuple[str | None, str | None]:
     return fallback_home, fallback_away
 
 
+# ── [ADR-078, Faza 0] Identitatea de echipa a lui Flashscore ─────────────────
+# Flashscore are UN identificator stabil per club, in URL-ul paginii lui:
+#   `Egnatia (ALB)`     -> /team/kf-egnatia/CjYs7BO9/
+#   `Din. Zagreb (CRO)` -> /team/din-zagreb/8G5ufQTg/
+# Verificat direct pe HTML-ul salvat in docs/06_UDAL/poc_evidence/ (55 de
+# fisiere, zero apeluri de retea).
+#
+# Codul de tara e o DECORATIE de pagina, nu identitate: pe paginile de
+# calificare header-ul scrie `Levski Sofia (BUL)`, iar widget-ul de forma
+# recenta al ACELUIASI provider scrie `Levski Sofia` simplu, inclusiv pentru
+# meciurile lui de Europa League (verificat in `flashscore_match_context`).
+# Noi am creat a doua identitate ancorand-o pe sirul afisat; `id`-ul sta in
+# ACELASI element din care citim deja numele si il aruncam.
+#
+# Faza 0 doar OBSERVA: nimic nu citeste `id`-ul ca identitate. Scopul e harta
+# `id -> nume afisate`, din care un id cu doua nume devine o interogare, nu o
+# descoperire intamplatoare.
+_TEAM_HREF_RE = re.compile(r"/team/(?P<slug>[^/]+)/(?P<team_id>[A-Za-z0-9]{4,16})/?\s*$")
+
+
+def _extract_team_identities(soup: BeautifulSoup) -> tuple[dict | None, dict | None]:
+    """`(gazda, oaspete)`, fiecare `{"flashscore_team_id", "team_slug",
+    "display_name"}` sau `None`.
+
+    Se citeste din ACELEASI containere semantice folosite de
+    `_extract_team_names()` (`duelParticipant__home`/`__away`), deliberat:
+    altfel un link luat de oriunde din pagina ar putea aparea de partea
+    greselita si ar reintroduce exact inversarea de teren reparata pe
+    2026-08-23. Container absent sau link absent => `None`, niciodata ghicit
+    (Regula #8) — iar `_extract_team_names()` ramane neatins, deci orientarea
+    nu depinde in niciun fel de functia asta."""
+    def _side(container_class: str) -> dict | None:
+        container = soup.select_one(f".{container_class}")
+        if container is None:
+            return None
+        for ancora in container.select("a[href]"):
+            potrivire = _TEAM_HREF_RE.search(ancora.get("href") or "")
+            if potrivire is None:
+                continue
+            el = container.select_one(".participant__participantName")
+            nume = el.get_text(strip=True) if el is not None else ""
+            if not nume:
+                # Structura inteleasa, dar numele lipseste: fara el, randul nu
+                # spune nimic despre maparea id -> nume, deci nu se scrie.
+                return None
+            return {
+                "flashscore_team_id": potrivire.group("team_id"),
+                "team_slug": potrivire.group("slug"),
+                "display_name": nume,
+            }
+        return None
+
+    return _side("duelParticipant__home"), _side("duelParticipant__away")
+
+
+def normalize_team_identities(pages: dict[str, str]) -> list[dict[str, Any]]:
+    """0-2 randuri pentru `flashscore_team_identity`, gata de scriere.
+
+    Functie SEPARATA de `normalize_match_statistics()`, deliberat: payload-ul
+    canonic al meciului nu se atinge in Faza 0. RPC-ul canonic ignora cheile
+    necunoscute, deci o cheie in plus ar fi fost inofensiva — dar „inofensiv"
+    nu e un motiv sa modifici contractul care scrie in `match_history`."""
+    html = pages.get("summary") or pages.get("stats")
+    if not html:
+        return []
+    soup = BeautifulSoup(html, "html.parser")
+    mid = _extract_mid(soup)
+    gazda, oaspete = _extract_team_identities(soup)
+    randuri: list[dict[str, Any]] = []
+    for latura, identitate in (("home", gazda), ("away", oaspete)):
+        if identitate is None:
+            continue
+        randuri.append({**identitate,
+                        "side": latura,
+                        "observed_fixture_id": f"flashscore_{mid}" if mid else None})
+    return randuri
+
+
 def _extract_kickoff_iso(soup: BeautifulSoup) -> str | None:
     el = soup.select_one(".duelParticipant__startTime")
     if el is None:
