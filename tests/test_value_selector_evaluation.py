@@ -411,6 +411,137 @@ def test_run_fara_date_nu_arunca(monkeypatch):
     assert "avertisment" in raport
 
 
+# ── Colapsarea bratelor dovedit identice (ADR-071 §F2, golul 1) ──────────────
+
+def test_doua_profile_cu_aceeasi_familie_sunt_raportate_ca_duplicat(client_fals):
+    client_fals({
+        "value_selector_shadow": [
+            rand(fixture_id="f1", leakage_suspect=False, policy_id="a@v1:32ccbf4a",
+                 policy_profile="shrunk_050", policy_family="market_floor_025"),
+            rand(fixture_id="f1", leakage_suspect=False, policy_id="b@v1:32ccbf4a",
+                 policy_profile="market_floor_025", policy_family="market_floor_025"),
+        ],
+        "match_history": [{"fixture_id": "f1", "actual_result": "H"}],
+    })
+    raport = run()
+    assert raport["duplicate_semantice"] == {
+        "market_floor_025": ["market_floor_025", "shrunk_050"]}
+    assert raport["politici_distincte"] == 2
+    assert raport["familii_distincte"] == 1
+    assert all(p["duplicat_semantic"] is True for p in raport["politici"])
+
+
+def test_un_profil_singur_nu_e_marcat_duplicat(client_fals):
+    client_fals({
+        "value_selector_shadow": [
+            rand(fixture_id="f1", leakage_suspect=False, policy_id="a@v1:aaaa",
+                 policy_profile="shrunk_100", policy_family="shrunk_100"),
+            rand(fixture_id="f2", leakage_suspect=False, policy_id="b@v1:bbbb",
+                 policy_profile="market_only", policy_family="market_only"),
+        ],
+        "match_history": [],
+    })
+    raport = run()
+    assert raport["duplicate_semantice"] == {}
+    assert raport["politici_distincte"] == raport["familii_distincte"] == 2
+    assert all(p["duplicat_semantic"] is False for p in raport["politici"])
+
+
+def test_familiile_sunt_mai_putine_decat_politicile_exact_cu_duplicatele(client_fals):
+    """Forma reala a experimentului: 13 profile, o singura coliziune de
+    amprenta, deci 12 experimente. Cifra pe care F3 trebuie sa o citeasca e a
+    doua, nu prima."""
+    profile = ["legacy", "market_only", "shrunk_025", "shrunk_075", "shrunk_100",
+               "market_floor_020", "market_floor_030", "market_floor_035",
+               "market_floor_040", "ranker_prob_value", "ranker_shrunk_ev"]
+    randuri = [rand(fixture_id="f1", leakage_suspect=False, policy_id=f"{p}@v1:{i:04x}",
+                    policy_profile=p, policy_family=p)
+               for i, p in enumerate(profile)]
+    randuri += [
+        rand(fixture_id="f1", leakage_suspect=False,
+             policy_id="shrunk_050@v1:32ccbf4a", policy_profile="shrunk_050",
+             policy_family="market_floor_025"),
+        rand(fixture_id="f1", leakage_suspect=False,
+             policy_id="market_floor_025@v1:32ccbf4a",
+             policy_profile="market_floor_025", policy_family="market_floor_025"),
+    ]
+    client_fals({"value_selector_shadow": randuri, "match_history": []})
+    raport = run()
+    assert raport["politici_distincte"] == 13
+    assert raport["familii_distincte"] == 12
+    assert len(raport["duplicate_semantice"]) == 1
+
+
+def test_gruparea_vine_din_randuri_nu_din_configurare(client_fals):
+    """`policy_family` persistat e sursa, nu `F2_PROFILES`. Altfel cifrele
+    istorice ar primi retroactiv gruparea de azi, in exact ziua in care un
+    profil e adaugat sau scos."""
+    client_fals({
+        "value_selector_shadow": [
+            rand(fixture_id="f1", leakage_suspect=False, policy_id="a@v1:aaaa",
+                 policy_profile="shrunk_050", policy_family="shrunk_050"),
+            rand(fixture_id="f1", leakage_suspect=False, policy_id="b@v1:bbbb",
+                 policy_profile="market_floor_025", policy_family="market_floor_025"),
+        ],
+        "match_history": [],
+    })
+    raport = run()
+    # In configurarea REALA cele doua sunt o familie; aici randurile spun
+    # altceva, si raportul trebuie sa urmeze randurile.
+    assert raport["duplicate_semantice"] == {}
+    assert raport["familii_distincte"] == 2
+
+
+def test_randul_fara_familie_ramane_propria_familie(client_fals):
+    """Regula #8: un rand scris inainte ca familiile sa existe nu se inghesuie
+    intr-un grup comun — asta ar uni tacit politici diferite."""
+    client_fals({
+        "value_selector_shadow": [
+            rand(fixture_id="f1", leakage_suspect=False, policy_id="a@v1:aaaa",
+                 policy_profile="p1", policy_family=None),
+            rand(fixture_id="f2", leakage_suspect=False, policy_id="b@v1:bbbb",
+                 policy_profile="p2", policy_family=None),
+        ],
+        "match_history": [],
+    })
+    raport = run()
+    assert raport["duplicate_semantice"] == {}
+    assert raport["familii_distincte"] == 2
+
+
+def test_colapsarea_NU_contopeste_scorarea(client_fals):
+    """Contrapondere la toate testele de mai sus: marcajul e un marcaj.
+
+    Cei doi membri ai unei familii selecteaza prin definitie ACELEASI meciuri,
+    deci contopirea randurilor ar numara fiecare meci de doua ori si ar dubla
+    artificial esantionul — exact cifra pe care pragul de 150 o guverneaza.
+    Scorarea trebuie sa ramana per `policy_id`."""
+    client_fals({
+        "value_selector_shadow": [
+            rand(fixture_id="f1", leakage_suspect=False, policy_id="a@v1:32ccbf4a",
+                 policy_profile="shrunk_050", policy_family="market_floor_025"),
+            rand(fixture_id="f1", leakage_suspect=False, policy_id="b@v1:32ccbf4a",
+                 policy_profile="market_floor_025", policy_family="market_floor_025"),
+        ],
+        "match_history": [{"fixture_id": "f1", "actual_result": "H"}],
+    })
+    raport = run()
+    assert len(raport["politici"]) == 2, "scorarea s-a contopit — esantionul se dubleaza"
+    for politica in raport["politici"]:
+        assert politica["categorii"]["top"]["decise"] == 1
+
+
+def test_duplicatul_din_configurarea_REALA_e_exact_perechea_cunoscuta():
+    """Puntea config ↔ raport. Daca cineva adauga un profil nou care coincide
+    cu unul existent, testul cade si cere o decizie, nu trece tacit."""
+    from value_selector_config import F2_PROFILES
+    from value_selector_shadow import semantic_duplicates
+
+    assert semantic_duplicates(F2_PROFILES) == {
+        "32ccbf4a": ["market_floor_025", "shrunk_050"]}
+    assert len(F2_PROFILES) == 13
+
+
 # ── Garda: evaluatorul nu scrie NICIODATA ────────────────────────────────────
 
 def _doar_cod(cale: Path) -> str:

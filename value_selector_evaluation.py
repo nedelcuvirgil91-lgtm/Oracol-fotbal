@@ -29,6 +29,14 @@ Doua reguli care nu se incalca:
    pierdere — e "in asteptare" si se contorizeaza separat. Nicio metrica nu se
    calculeaza pe el.
 
+3. **Doua profile cu aceeasi amprenta sunt UN experiment** (ADR-071 §F2, golul
+   1). `shrunk_050` si `market_floor_025` au amandoua `w=0.50, market_floor=
+   0.25` — centrul comun al celor doua grile, deci amprenta `32ccbf4a` si
+   selectii identice prin constructie. Raportul le marcheaza explicit si
+   numara `familii_distincte` alaturi de `politici_distincte`; comparatia
+   dintre politici se citeste pe prima cifra. Scorarea ramane per `policy_id`
+   — contopirea randurilor ar numara acelasi meci de doua ori.
+
 Cifrele NU sunt un verdict. Sub pragul de eșantion cerut de ADR-071 (150 de
 selectii), raportul marcheaza explicit `esantion_insuficient` si nu declara
 niciodata o politica invingatoare. Un ROI pe zece selectii e zgomot, nu semnal.
@@ -368,13 +376,57 @@ def imparte_pe_perioade(randuri: Sequence[dict],
     return {"inainte": inainte, "dupa": dupa}
 
 
-def _bloc_politici(randuri: Sequence[dict], rezultate: dict[str, Any]) -> list[dict]:
-    return [
-        {"policy_id": p.policy_id, "policy_profile": p.policy_profile,
-         "policy_family": p.policy_family,
-         "categorii": {k: asdict(v) for k, v in p.categorii.items()}}
-        for p in evalueaza(randuri, rezultate)
-    ]
+def _familie_rand(rand: dict) -> str:
+    """Familia unui rand, cu `policy_id` ca rezerva.
+
+    Un rand fara `policy_family` (scris inainte ca familiile sa existe) ramane
+    propria lui familie — nu e inghesuit intr-un grup comun, ceea ce ar uni
+    tacit politici diferite. Regula #8: necunoscutul nu se aproximeaza."""
+    return str(rand.get("policy_family") or rand.get("policy_id") or "")
+
+
+def grupeaza_pe_familie(randuri: Iterable[dict]) -> dict[str, list[str]]:
+    """`{familie: [profile…]}`, DOAR pentru familiile cu mai mult de un membru.
+
+    Doua profile cu aceeasi amprenta de praguri sunt acelasi experiment sub doua
+    nume — `shrunk_050` si `market_floor_025` (amprenta `32ccbf4a`) sunt centrul
+    comun al celor doua grile, identice PRIN CONSTRUCTIE, nu din intamplare.
+    Fara marcajul asta, raportul F3 arata 13 politici si cineva le citeste ca 13
+    experimente independente, iar unul dintre ele cantareste dublu (ADR-071 §F2,
+    golul 1: "se colapseaza bratele dovedit identice").
+
+    Derivat din RANDURILE PERSISTATE, nu din `F2_PROFILES`. Deliberat: raportul
+    descrie ce s-a colectat efectiv. Citit din configurare, ar minti retroactiv
+    in exact ziua in care un profil e adaugat sau scos — cifrele istorice ar
+    primi o grupare care nu era in vigoare cand au fost scrise.
+
+    Scorarea NU se atinge: ea ramane per `policy_id`, fiindca §16 dedupleaza pe
+    `(policy_id, fixture_id)`. Contopirea rândurilor ar numara acelasi meci de
+    doua ori — cei doi membri selecteaza, prin definitie, exact aceleasi meciuri.
+    Deci colapsarea e un MARCAJ plus o numaratoare de familii, nu o fuziune."""
+    pe_familie: dict[str, set[str]] = {}
+    for rand in randuri:
+        familie = _familie_rand(rand)
+        profil = str(rand.get("policy_profile") or "")
+        if not familie or not profil:
+            continue
+        pe_familie.setdefault(familie, set()).add(profil)
+    return {familie: sorted(membri)
+            for familie, membri in sorted(pe_familie.items())
+            if len(membri) > 1}
+
+
+def _ca_dict(p: RezultatPolitica, profile_duplicate: set[str]) -> dict:
+    return {"policy_id": p.policy_id, "policy_profile": p.policy_profile,
+            "policy_family": p.policy_family,
+            "duplicat_semantic": p.policy_profile in profile_duplicate,
+            "categorii": {k: asdict(v) for k, v in p.categorii.items()}}
+
+
+def _bloc_politici(randuri: Sequence[dict], rezultate: dict[str, Any],
+                   profile_duplicate: set[str]) -> list[dict]:
+    return [_ca_dict(p, profile_duplicate)
+            for p in evalueaza(randuri, rezultate)]
 
 
 def run(*, run_id: str | None = None) -> dict:
@@ -397,6 +449,13 @@ def run(*, run_id: str | None = None) -> dict:
     cu_rezultat = sum(1 for f in fixture_unice
                       if rezultat_selectiei("1", rezultate.get(f)) is not None)
 
+    # [ADR-071 §F2, golul 1] Colapsarea bratelor dovedit identice. `politici_
+    # distincte` e cate `policy_id` exista; `familii_distincte` e cate
+    # EXPERIMENTE exista. Cand cele doua difera, comparatia dintre politici
+    # trebuie citita pe a doua cifra, nu pe prima.
+    duplicate = grupeaza_pe_familie(selectii)
+    profile_duplicate = {p for membri in duplicate.values() for p in membri}
+
     raport = {
         "run_id_filtru": run_id,
         "selectii_citite": len(selectii),
@@ -406,12 +465,10 @@ def run(*, run_id: str | None = None) -> dict:
         "meciuri_cu_rezultat": cu_rezultat,
         "meciuri_in_asteptare": len(fixture_unice) - cu_rezultat,
         "prag_esantion_minim": PRAG_ESANTION_MINIM,
-        "politici": [
-            {"policy_id": p.policy_id, "policy_profile": p.policy_profile,
-             "policy_family": p.policy_family,
-             "categorii": {k: asdict(v) for k, v in p.categorii.items()}}
-            for p in politici
-        ],
+        "politici_distincte": len(politici),
+        "familii_distincte": len({_familie_rand(r) for r in selectii}),
+        "duplicate_semantice": duplicate,
+        "politici": [_ca_dict(p, profile_duplicate) for p in politici],
     }
 
     cutoff = detecteaza_cutoff(selectii)
@@ -422,13 +479,17 @@ def run(*, run_id: str | None = None) -> dict:
             nume: {
                 "selectii_citite": len(parti[nume]),
                 "rulari_distincte": len({str(r["run_id"]) for r in parti[nume]}),
-                "politici": _bloc_politici(parti[nume], rezultate),
+                "politici": _bloc_politici(parti[nume], rezultate,
+                                           profile_duplicate),
             }
             for nume in ("inainte", "dupa")
         }
 
-    logger.info("[ValueSelectorEval] %d selectii, %d meciuri, %d cu rezultat, cutoff=%s",
-                len(selectii), len(fixture_unice), cu_rezultat, cutoff)
+    logger.info("[ValueSelectorEval] %d selectii, %d meciuri, %d cu rezultat, "
+                "%d politici / %d familii, %d duplicate semantice, cutoff=%s",
+                len(selectii), len(fixture_unice), cu_rezultat,
+                raport["politici_distincte"], raport["familii_distincte"],
+                len(duplicate), cutoff)
     return raport
 
 

@@ -137,14 +137,51 @@ Invariantul e scris aici tocmai pentru că sistemul *are* toate ingredientele ca
 
 **F2, FĂCUT — infrastructură + prima rulare reală**: `value_selector_shadow.py` (colector read-only), migrarea 055, `value_selector_shadow.yml` (cron zilnic 09:40 UTC), 55 de teste de colector. Prima rulare reală: `run_id 2026-09-05T15:52Z`, 74 de meciuri × 3 selecții × 13 profile = **2886 de rânduri**, audit post-scriere complet trecut (0 duplicate, 0 leakage, H/X/A complet pe toate cele 962 de perechi, edge-uri recalculate independent în SQL cu 0 abateri, amprente artefact↔DB identice pe 74/74 fixture-uri).
 
-Colectarea zilnică e **ACTIVĂ din 2026-09-06** — `value_selector_shadow_logging_enabled = true` în `model_config` (aprobare explicită proprietar produs). `value_selector_v1_enabled` rămâne **absent**, deci UI-ul e neatins și lista Top Value Bets arată exact ce arăta înainte.
+Colectarea zilnică e **ACTIVĂ din 2026-09-06** — `value_selector_shadow_logging_enabled = true` în `model_config` (aprobare explicită proprietar produs). ~~`value_selector_v1_enabled` rămâne **absent**, deci UI-ul e neatins și lista Top Value Bets arată exact ce arăta înainte.~~
+
+> **[CORECTAT 2026-10-19]** Propoziția tăiată mai sus descria starea din 6 septembrie și a rămas neactualizată după activarea radarului. Măsurat read-only în `model_config`: `value_selector_v1_enabled` = **`true`**, `value_selector_policy_profile` = **`shrunk_050`**. Deci UI-ul **este** atins, iar lista Top Value Bets e servită prin §18 (din `value_selector_shadow`, nu recalculată). Activarea era anticipată de §17 („Activarea se face ÎN TIMPUL F3, nu după"), deci nu e o abatere — e o notă rămasă în urmă. **Consecință pentru F3**: profilul servit în UI, `shrunk_050`, e totodată un braț al experimentului; §18 explică deja de ce asta nu contaminează măsurătoarea (ecranul servește cea mai recentă rulare, F3 numără prima apariție).
 
 **F2 rămâne NEÎNCHISĂ.** Infrastructura funcționează și datele sunt corecte semantic, dar asta nu înseamnă „experiment valid". Două goluri, ambele blocante pentru F3:
 
 1. **Putere experimentală insuficientă, măsurată** (2026-09-06): cele 13 profile produc, pe setul Top, doar **7 seturi distincte de selecții**. `market_floor_020/025/030/035` și `shrunk_050` dau **exact aceleași 10 selecții, în aceeași ordine**; `market_floor_040` ≡ `shrunk_025` și `ranker_prob_value` ≡ `shrunk_100` (același set, altă ordonare). Cauza e structurală: o selecție care e deja lider de model și trece pragul de 3 pp edge absolut are tipic `fair_p` ∈ [0,40 · 0,60], deci un prag de plauzibilitate de 0,20-0,35 nu are ce tăia — abia 0,40 începe să muște. Pragul **nu e inert în general**: pe granița Longshot/Rejected discriminează clar (30/34/42/50/57). Măsurat pe o singură zi, deci nu e o condamnare — dar F3 nu poate porni până nu se măsoară pe mai multe zile și se colapsează brațele dovedit identice.
-2. **Evaluatorul de rezultate nu există**: nimic nu leagă `value_selector_shadow` de `match_history.actual_result` ca să producă rată de reușită / ROI / Brier per politică. Fără el, colectarea adună rânduri pe care nimeni nu le poate scora.
+2. ~~**Evaluatorul de rezultate nu există**: nimic nu leagă `value_selector_shadow` de `match_history.actual_result` ca să producă rată de reușită / ROI / Brier per politică. Fără el, colectarea adună rânduri pe care nimeni nu le poate scora.~~
+
+> **[GOLUL 2 — ÎNCHIS. Textul de mai sus era învechit la 2026-10-19, corectat atunci.]** Evaluatorul **există**: `value_selector_evaluation.py` + `.github/workflows/value_selector_evaluation.yml`, strict read-only (gardă AST: nicio operație de scriere, niciun import de motor upstream), doar `workflow_dispatch`, fără cron — deliberat, pentru că nu produce date. Aplică §16 (prima apariție per `(policy_id, fixture_id)`), tratează un meci fără rezultat ca „în așteptare", nu ca pierdere (Regula #8), și refuză să numească o câștigătoare sub `PRAG_ESANTION_MINIM = 150`.
+>
+> **Aceeași clasă de eroare care a costat 14 zile cu ADR-057**: un document care descrie o stare depășită și pe care nimeni nu o reverifică. Aici a costat o concluzie greșită despre ce blochează F3 — nu zile de antrenare.
+
+> **[GOLUL 1 — REDUS, nu închis. Măsurat 2026-10-19.]** Afirmația de mai sus („7 seturi distincte", plus echivalențele `market_floor_020/030/035`, `market_floor_040` ≡ `shrunk_025`, `ranker_prob_value` ≡ `shrunk_100`) a fost măsurată **pe o singură zi** și **nu se generalizează**. Două măsurători noi:
+>
+> 1. **Testul mecanic, care e cel corect**: amprenta de praguri (§10) decide identitatea, nu setul de selecții observat. Pe cele 13 profile → **12 amprente distincte**, exact **o** coliziune: `32ccbf4a` = {`market_floor_025`, `shrunk_050`}. Nu e coincidență empirică, e **identitate prin construcție** — ambele au `w = 0,50` și `market_floor = 0,25` (`value_selector_config.py:166` și `:171`), adică punctul în care cele două grile se încrucișează.
+> 2. **Verificarea empirică, pe 36 de rulări comune** (nu una): singura pereche identică în **100%** din cazuri e exact aceea, 36/36. Următoarele sunt la **75%** (`shrunk_075`≡`shrunk_100`, `market_floor_020`≡`market_floor_025`), deci **distincte**. Echivalențele revendicate în textul de sus nu se susțin.
+>
+> **Deci colapsarea cerută e un braț, nu șase.** Lecție de metodă: o echivalență observată pe o zi e o ipoteză; amprenta e dovada. Măsurarea pe un instantaneu a supraestimat golul de **șase ori**.
+>
+> **Reparația, făcută 2026-10-19 — un marcaj, NU o ștergere.** `policy_families()` și `semantic_duplicates()` existau deja (`value_selector_shadow.py:69`, `:91`), iar colectorul scrie `policy_family` pe fiecare rând (verificat în producție: familia `market_floor_025` are 2 membri și 8742 rânduri, celelalte 11 au câte unul; zero `NULL`). Dar **evaluatorul grupa pe `policy_id` și nu colapsa niciodată**, iar `semantic_duplicates()` era apelat exclusiv din teste — cod mort în producție, deși docstring-ul lui spunea „ce trebuie marcat explicit in raportul F3". Raportul expune acum `politici_distincte` (13), `familii_distincte` (**12**), `duplicate_semantice` și un `duplicat_semantic` per politică.
+>
+> **Trei lucruri NU s-au făcut, fiecare cu motivul lui:**
+> - **Niciun profil nu a fost șters.** `shrunk_050` e profilul servit în UI (vezi corecția de mai sus), deci ștergerea lui ar fi rupt radarul; ștergerea lui `market_floor_025` ar fi lăsat o gaură de nume în grila `market_floor` fără să atingă cele 153 de selecții istorice, care ar fi continuat să apară ca a 13-a politică în raport. Colectarea rămâne pornită pe ambele: costă ~150 de rânduri la 6 săptămâni și funcționează ca verificare vie a invariantului — dacă cele două **divergează** vreodată, amprenta e ruptă și raportul o arată.
+> - **Scorarea nu s-a contopit.** §16 deduplichează pe `(policy_id, fixture_id)`; cei doi membri selectează prin definiție **aceleași** meciuri, deci contopirea ar număra fiecare meci de două ori și ar dubla artificial eșantionul — exact cifra pe care pragul de 150 o guvernează. Există un test dedicat care cade dacă cineva „repară" asta prin fuziune.
+> - **Gruparea se citește din rândurile persistate, nu din `F2_PROFILES`.** Citită din configurare, ar rescrie retroactiv gruparea cifrelor istorice în ziua în care un profil e adăugat sau scos.
 
 **F3, NEÎNCEPUT și NEAUTORIZAT**: minimum 8 săptămâni ȘI minimum 150 de selecții (numărate conform §16 — prima apariție), politică înghețată, zero scurgere temporală, fără ajustarea pragurilor pe parcurs. Nu poate începe înainte de închiderea celor două goluri de mai sus.
+
+> **[STARE MĂSURATĂ — 2026-10-19]** Ce mai lipsește, cu cifre, nu cu impresii:
+>
+> | Cerință | Stare | Verificare |
+> |---|---|---|
+> | ≥ 8 săptămâni | ⛔ **6,2** (5 sep → 19 oct) | 39 de rulări, 38 de zile distincte |
+> | ≥ 150 selecții/politică (§16) | ⛔ 9/13 au trecut | sub prag: `market_floor_030` 156/146, `_035` 135/128, `_040` **103/99** (total / cu rezultat) |
+> | Politică înghețată (§10) | ✅ | **1** `policy_fingerprint` și **1** `policy_id` per profil, pe toate cele 38 de zile |
+> | Zero scurgere temporală | ✅ | 0 `leakage_suspect`, 0 `seconds_to_kickoff < 0`, pe 56.823 de rânduri |
+> | Evaluator de rezultate | ✅ | golul 2, închis mai sus |
+> | Colapsarea brațelor identice | ✅ | golul 1, marcaj în raport |
+>
+> **Proiecție, pe ritmul real al ultimelor 14 zile** (3,07 selecții/zi pentru brațul cel mai strict, `market_floor_040`): pragul de 150 se atinge în ~15 zile, adică **~3 noiembrie** — aceeași fereastră în care se împlinesc și cele 8 săptămâni (~31 octombrie). Cele două constrângeri se închid împreună; nu e nevoie de o a doua așteptare după prima.
+>
+> **Nu se declanșează nimic automat la acea dată.** F3 pornește doar prin decizie umană explicită (ADR-002), iar pragurile nu se ajustează „ca să iasă" — asta ar reseta numărătoarea prin schimbarea `policy_id`, exact ce §10 face verificabil mecanic.
+>
+> **Două zone de atenție, neblocante, măsurate**: (a) 7 zile fără nicio rulare (22, 24, 28 sep; 2-5 oct) și 7 rulări cu un singur meci — verificat că **nu sunt defect**: în acele zile existau efectiv 0-2 meciuri în calendar, iar pe 27 septembrie 9 din 10 meciuri MLS începuseră la 00:30-02:30 UTC, înainte de rularea de la 14:49; colectorul le-a exclus corect. (b) Slotul de colectare întârzie sistematic 5-10 ore (documentat separat în `DE_URMARIT` §4ter) — afectează prospețimea cotelor, nu validitatea §16.
 
 **F4, NEÎNCEPUT**: activare, doar dacă trec simultan toate criteriile GO/NO-GO stabilite de proprietarul produsului — incluzând „ROI > controlul de piață corespunzător + 3 pp", nu „ROI > 0".
 
