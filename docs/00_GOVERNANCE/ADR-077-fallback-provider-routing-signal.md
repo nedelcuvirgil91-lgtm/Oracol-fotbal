@@ -144,6 +144,38 @@ nou privește fereastra de sincronizare zilnică, nu recuperarea retroactivă.
 **Gol rămas deschis, mai larg decât acest ADR**: nimic nu detectează, azi, când
 un ADR nou adaugă un al doilea scriitor pe un câmp folosit de altul ca martor.
 `tests/test_canonical_feature_ownership.py` (ADR-036) impune owner unic pentru
-`FEATURE_COLUMNS`, dar `referee` nu e în acel set. O gardă echivalentă pentru
-câmpurile-martor ar fi reparația de clasă — **nu e în scopul acestui ADR**, dar
-merită să nu rămână nescris.
+`FEATURE_COLUMNS`, dar `referee` nu e în acel set.
+
+### 4.1 Garda statică evidentă e OARBĂ — măsurat, nu presupus (2026-10-19)
+
+Reparația de clasă părea să fie o gardă AST în idiomul deja folosit de proiect:
+„orice coloană folosită ca martor într-o interogare de rutare trebuie să aibă
+exact un scriitor". Am scris scanarea înainte de gardă, exact ca să nu livrez
+un instrument nedovedit. Rezultatul, pe codul de azi:
+
+| Coloană | Scriitori găsiți de scanare |
+|---|---|
+| **`referee`** | **1** — `soccerfootballinfo_match_statistics_adapter.py` |
+| `home_shots` | 1 — același |
+| `home_possession` | 2 |
+| `home_xg_actual` | 2 |
+
+**Garda ar fi declarat `referee` sănătos** — adică ar fi trecut verde pe exact
+defectul care a produs acest ADR. Cauza: criteriul „dicționar cu cheia X **și**
+apel de scriere, în ACELAȘI modul" nu urmărește calea Flashscore, unde
+înregistrarea se construiește în `providers/flashscore/normalizer.py:533` și se
+scrie din `providers/flashscore/persistence.py`. Două module, deci invizibilă.
+
+A urmări fluxul între module ar fi analiză statică reală (fragilă, și cu
+propriile puncte orbe). **Deci reparația de clasă NU e o gardă statică** —
+instrumentul corect e de tip *date*, în idiomul clasei 7 din
+`check_data_health`: **o interogare de rutare care întoarce ZERO candidați în
+timp ce datele pe care le gardează lipsesc pe ≥N meciuri** e, prin construcție,
+un proxy rupt. Nu poate fi păcălită de structura codului, și ar fi declanșat
+aici.
+
+**Nefăcut în acest ADR**, dar scris ca să nu se construiască varianta oarbă:
+cine reia subiectul pornește de la instrumentul pe date, nu de la gardă AST.
+A patra instanță în proiect a lecției „o gardă care își citește propriul
+comentariu / propria structură nu dovedește nimic" (după `pipefail`, numele de
+secrete, docstring-ul ADR-073).
