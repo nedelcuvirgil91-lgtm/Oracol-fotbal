@@ -1,6 +1,8 @@
 # ADR-076 — Cuplajul extragerii Flashscore la `data-testid` și absența unui semnal de rupere
 
-**Status**: PROPUNERE (2026-10-17) — cere aprobare explicită înainte de implementare
+**Status**: **ACCEPTED** (2026-10-17, aprobare explicită a proprietarului
+produsului: „Aprob tot") · **IMPLEMENTAT ȘI VERIFICAT PE DATE REALE**
+(2026-10-19, vezi §5 „DUPĂ")
 **Autor**: sesiune Claude Code, la cererea proprietarului produsului
 **Înlocuiește / modifică**: nimic. Atinge `providers/flashscore/normalizer.py` (extragere), nu contracte de date.
 **Legături**: ADR-045 (Single Owner), ADR-036 (Canonical Feature Ownership), ADR-072 (clasa „indicator înghețat"), migrațiile 008/026/032/035/037
@@ -147,12 +149,52 @@ zi în fiecare zi. **E exact clasa ADR-072** (un indicator înghețat citit ca
 proaspăt) și clasa „forma 2" din defectul filtrului de competiție: date reale,
 vechi, fără niciun câmp care să răspundă la „cât de vechi".
 
-**2.3 Providerii de rezervă n-au fost întrebați niciodată.** Din cele 693 de
-meciuri fără statistici, **691 sunt marcate `has_stats = true`** în
-`flashscore_data_completeness`. Rutarea Single Owner (ADR-045) folosește exact
-acel câmp ca să NU interogheze Soccer Football Info/FreeLF pentru un meci pe
-care Flashscore l-a acoperit. Deci pentru 691 de meciuri calea de rezervă a
-fost sărită — corect după regulă, pe baza unui semnal fals.
+**2.3 Providerii de rezervă n-au fost întrebați niciodată — dar NU din motivul
+pe care îl scrisesem aici.**
+
+> **[CORECTAT 2026-10-17, în aceeași zi, înainte de orice acțiune pe baza
+> acestui document.]** Versiunea inițială a acestei secțiuni spunea: *„din cele
+> 693 de meciuri, 691 sunt marcate `has_stats = true`, iar rutarea Single Owner
+> (ADR-045) folosește exact acel câmp ca să nu interogheze Soccer Football
+> Info/FreeLF"*. Prima propoziție e adevărată și verificată. **Atribuirea
+> cauzală e falsă**: cele 691 nu au ajuns NICIODATĂ la filtrul Single Owner.
+> Au fost excluse un pas mai sus, iar cauza reală e mai gravă.
+
+`sync/sync_match_statistics.py:119` e **singurul** apelant (verificat prin
+grep) și cere `get_finished_matches_missing_stats(require_referee=True)` —
+adică „meciuri terminate cu **`referee IS NULL`**". Abia pe lista aceea se
+aplică filtrul `has_stats`.
+
+Măsurat pe toate meciurile terminate de la 9 septembrie încoace:
+
+| Criteriu | Câte meciuri ar întoarce |
+|---|---:|
+| `require_referee=True` (modul folosit în producție) | **0** |
+| `require_referee=False` (`home_possession IS NULL`, modul FreeLF) | 597 |
+| total meciuri terminate în fereastră | 598 |
+
+**Zero.** Deci filtrul `has_stats` nu a sărit nimic — primea o listă deja
+goală.
+
+**Cauza reală**: `referee` e populat pe **100% din meciurile terminate** —
+679/679 în august, 534/534 în septembrie, **232/232 în octombrie**, luna în care
+xG-ul e la 0,4%. Extragerea arbitrului (`wcl-summaryMatchInformation`, verificat
+viu pe pagina de azi) a continuat să funcționeze impecabil în timp ce
+statisticile erau moarte. Iar `referee IS NULL` e folosit ca **proxy** pentru
+„lipsesc datele bogate".
+
+Proxy-ul era corect când a fost scris. Docstring-ul funcției o spune explicit:
+*„`referee` e populat STRICT de acest adaptor"* — adaptorul Soccer Football
+Info, la ADR-041. **ADR-044/045 au adus Flashscore ca scriitor al aceluiași
+câmp, și nimeni (eu inclusiv, până azi) nu a revizitat proxy-ul.** De atunci,
+un meci pe care Flashscore îl atinge are `referee` scris chiar dacă din el nu
+se extrage nicio statistică — deci dispare pentru totdeauna din lista
+providerilor de rezervă.
+
+Asta e aceeași clasă cu tot restul documentului: **un semnal care răspunde la
+altă întrebare decât cea pusă.** `has_stats` răspunde „am descărcat pagina?"
+când e întrebat „am datele?"; `referee` răspunde „a atins cineva meciul?" când
+e întrebat „lipsesc datele bogate?".
 
 **2.4 Scorul la pauză**: zero din 232 de meciuri de octombrie, 456 din 534 în
 septembrie. Nu alimentează nicio predicție (verificat: `home_ht_goals` nu e în
@@ -299,6 +341,32 @@ cu alarmă la cădere relativă) și **nu e în scopul acestui ADR**.
    **51091**, ultima **2026-09-21**; `player_match_stats_extended` **230153**,
    ultima **2026-09-23**; xG octombrie **1 din 232**.
 
+### „DUPĂ" — măsurat 2026-10-19, 05:21 UTC
+
+Merge pe `main` (`48fc8f6`, `pytest` verde ÎNAINTE de push: 3542 passed, 2
+skipped), apoi rularea de verificare `flashscore_foundation_data_layer`
+(run `39047836590`, Premier League + La Liga, limită 10, `success`, 2m57s).
+
+| Măsură | Înainte (17 oct 16:04) | După (19 oct 05:21) |
+|---|---:|---:|
+| `match_statistics_extended` | 19320 · ultima **8 sep** | **22490** · ultima **18 oct** |
+| `player_match_stats` | 51091 · ultima **21 sep** | **55040** · ultima **18 oct** |
+| `player_match_stats_extended` | 230153 · ultima **23 sep** | **250523** · ultima **18 oct** |
+| xG real, octombrie | **1** din 232 | **93** din 323 |
+| scor la pauză, octombrie | **0** | **94** |
+
+Scrieri pe zi după reparație: **1020** (17 oct) → **2171** (18 oct). Toate
+cele patru victime din §1 au revenit, iar fluxul s-a propagat **singur** prin
+`night_sync` — ultima scriere e din rularea nocturnă, nu din rularea manuală
+de verificare, deci nu e un efect al unei comenzi punctuale.
+
+**Ce NU s-a recuperat, și de ce nu e o surpriză**: septembrie rămâne la
+**141 din 534** (neschimbat), octombrie la 93 din 323. Batch-ul reprocesează o
+fereastră de 7 zile, iar Delta Sync sare orice meci deja persistat — exact
+limitarea anunțată la §4.2. Restanța e subiectul deciziei **D-B**, acum
+deblocată: precondiția pe care o pusesem („după ce reparația se dovedește pe
+meciuri noi") e îndeplinită.
+
 ---
 
 ## 6. Decizii cerute proprietarului produsului (Discovery Rule)
@@ -306,12 +374,30 @@ cu alarmă la cădere relativă) și **nu e în scopul acestui ADR**.
 Trei descoperiri care NU erau în scopul investigației și pe care nu le extind
 tacit:
 
-**D-A. `has_stats` rutează providerii de rezervă pe baza unui semnal care, prin
-construcție, nu poate ști dacă extragerea a reușit** (§3a). Variante: (i) un
-câmp nou care măsoară extragerea, lăsând `has_stats` neatins; (ii) rutarea
-Single Owner se sprijină pe existența rândurilor în `match_statistics_extended`,
-nu pe flag; (iii) se lasă, documentat. Oricare dintre (i)/(ii) atinge ADR-045 →
-ADR propriu.
+**D-A. `referee IS NULL` nu mai e un proxy valid pentru „lipsesc datele
+bogate", de la ADR-044/045 încoace** (§2.3, reformulat după corecția din
+aceeași zi — varianta inițială dădea vina pe `has_stats`, care primea o listă
+deja goală).
+
+Consecința e mai mare decât acest defect: **calea Soccer Football Info e
+efectiv moartă pentru toate meciurile pe care Flashscore le atinge**, nu doar
+pentru cele 693. Nu e o degradare apărută în septembrie — e starea de la
+activarea Flashscore FDL, pe care statisticile funcționale o mascau.
+
+Variante: (i) proxy-ul devine un câmp pe care **doar** SFI îl scrie (de
+identificat — `referee` nu mai e); (ii) criteriul devine „lipsesc datele", citit
+direct din coloanele țintă (`home_shots IS NULL OR home_xg_actual IS NULL`…),
+nu dintr-un câmp-martor; (iii) se lasă, documentat, cu Flashscore ca sursă
+unică de facto.
+
+**Recomandarea mea: (ii)**, pentru că elimină clasa de defect în loc să mute
+proxy-ul — un martor poate oricând să fie scris de altcineva, o coloană-țintă
+nu poate minți despre propria absență. Dar atinge contractul ADR-045 → **ADR
+propriu, cu propria lui verificare**. Nu îl implementez în acest ADR.
+
+Capcana de evitat la (ii), consemnată acum: criteriul trebuie chunk-uit —
+`get_match_ids_with_complete_flashscore_stats` folosește un singur `.in_(…)`,
+iar plafonul PostgREST de 1000 a fost deja reparat de patru ori în proiect.
 
 **D-B. Recuperarea celor 693 de meciuri.** Flashscore păstrează statisticile pe
 paginile de meciuri încheiate, deci datele sunt accesibile. Dar Delta Sync le
