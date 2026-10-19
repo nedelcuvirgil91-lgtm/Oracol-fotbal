@@ -409,6 +409,29 @@ noi, nu înainte — altfel am re-colecta cu un extractor neverificat în produc
 **D-C. Ruptura parțială rămâne nedetectabilă** (§4.1, limita lui P3). De decis
 dacă merită instrumentul per-categorie, sau dacă zero-absolut e suficient.
 
+> **[MĂSURAT 2026-10-19 — e mai ieftin decât credeam, dar nu se poate porni
+> azi.]** Instrumentul nu cere date noi: `match_statistics_extended` e deja
+> EAV (`stat_key`/`stat_label` per meci), deci „o etichetă care exista și a
+> dispărut" e o interogare, nu o colectare. Verificat: **34 de etichete
+> distincte** scrise de la reparație încoace.
+>
+> Pragul rămâne binar, ca la P3 — *dispariția* unei etichete prezente în
+> fereastra anterioară, nu o cădere procentuală. Nicio cifră inventată.
+>
+> **Dar linia de bază nu există încă.** Rulând comparația acum, toate cele 34
+> de etichete ies „apărute", fiindcă fereastra anterioară e golul de 39 de
+> zile. Un detector pornit azi ar compara cu nimic. Are nevoie de ~2 săptămâni
+> de date curate ca „fereastra anterioară" să însemne ceva.
+>
+> **Recomandare**: se implementează după ~2 săptămâni de scrieri normale
+> (deci în jurul lui **2 noiembrie 2026**), sau se implementează acum cu o
+> gardă explicită care îl ține tăcut până ambele ferestre au volum. Prefer
+> varianta a doua — codul scris la cald, cu defectul încă proaspăt, dar fără
+> să raporteze nimic până când comparația are sens. **Nefăcut în acest ADR**,
+> deliberat: nu e nici reparație, nici blocaj, iar graba ar produce exact
+> genul de indicator care arată verde fiindcă n-are cu ce compara — clasa
+> `coverage_percent = 100%` din §3a.
+
 ---
 
 ## 7. Consecințe

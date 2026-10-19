@@ -297,6 +297,23 @@ Același tipar ca la `sync_pre_match_odds` în august: instrumentare întâi, re
 
 **Decizie cerută**: se adaugă `decision_kind` + ținta în titlu (strict prezentare, probabil fără ADR per Change Policy), sau se lasă. **Nereparat deliberat** — atinge calea de aprobare umană.
 
+### D-12. Extragerea statisticilor Flashscore a fost moartă 39 de zile — ✅ **REPARATĂ (ADR-076, 17-19 oct)**, dar lasă două decizii deschise
+
+**Reparat și dovedit pe producție** (ADR-076, ACCEPTED, implementat, verificat): `match_statistics_extended` 19320 → **22490** (ultima scriere 8 sep → **18 oct**), `player_match_stats` 51091 → **55040**, xG octombrie **1/232 → 93/323**, scor la pauză **0 → 94**. S-a propagat singur prin `night_sync`, fără intervenție.
+
+**Cauza, pe scurt**: Flashscore a redenumit copiii containerului `wcl-statistics` în **două etape** (8-9 sep: `wcl-statistics-category`/`-value` dispărute; 21-23 sep: segmentul `scores` căzut din familia de testid-uri, care a omorât și roster-ul și scorul la pauză). Patru victime, două cauze. Reparația se sprijină pe `data-testid` unde există și pe **token** de clasă CSS-module unde nu — niciodată pe hash-ul de build (`wcl-value_Ywp3J`), care s-ar rupe la următorul deploy.
+
+**De ce a tăcut 39 de zile, și de ce contează mai mult decât defectul**: `flashscore_data_completeness.has_stats` măsoară prezența **paginii descărcate**, nu succesul extragerii — prin decizie documentată în propriul docstring. Iar `FUNCTIONAL_COMPLETION_REPORT.md` scria din **3 august** că `coverage_percent` are o singură valoare posibilă, 100%, pe 328/328 rânduri. **Un indicator cu o singură valoare posibilă nu e un indicator**, iar faptul că e la 100% arată exact ca sănătate. Semnalul nou (clasa 7 din `check_data_health`, prag **zero absolut**, nu procent) ar fi declanșat pe **11 septembrie**.
+
+**⏳ RĂMASE DE DECIS:**
+
+1. **ADR-077 (PROPUNERE, cere aprobare)** — `referee IS NULL` nu mai e un proxy valid pentru „lipsesc datele bogate". Măsurat: criteriul folosit azi de `sync_match_statistics` întoarce **0 meciuri pe orice fereastră** (7/14/60 zile), fiindcă `referee` e populat pe **100%** din meciurile terminate. **Calea Soccer Football Info e efectiv moartă pentru orice meci pe care Flashscore îl atinge** — nu de ieri, ci de la activarea Flashscore FDL; statisticile funcționale o mascau. Clasa de defect: **un ADR (044/045) a invalidat tacit precondiția altui ADR (041)**. Recomandarea mea e varianta (ii), criteriul să citească coloana-țintă (`home_shots IS NULL`). Costul care face din asta o decizie: SFI ar trece de la 0 la **~95 de meciuri/săptămână**, cu rată de succes **nemăsurată**.
+2. **D-C, ruptura PARȚIALĂ rămâne nedetectabilă** (3 categorii din 45 redenumite ar trece neobservate de clasa 7). Instrumentul e ieftin — `match_statistics_extended` e deja EAV, deci „o etichetă care exista și a dispărut" e o interogare, nu o colectare (34 de etichete distincte măsurate). **Dar linia de bază nu există încă**: pornit azi, ar compara cu golul de 39 de zile. De reluat în jurul lui **2 noiembrie**, sau de scris acum cu o gardă care îl ține tăcut până ambele ferestre au volum.
+
+**Gol mai larg, lăsat scris explicit**: nimic nu detectează azi când un ADR nou adaugă **al doilea scriitor** pe un câmp folosit de altul ca martor. Garda ADR-036 acoperă doar `FEATURE_COLUMNS`, iar `referee` nu e acolo.
+
+**Recuperarea restanței (D-B)**: implementată — `--recover-missing-stats`, bypass Delta Sync **doar** pentru `mid`-urile cerute explicit, cu plafon pe tranșă. Restanța măsurată la pornire: **653 de meciuri** (toate adresabile, `fixture_id = flashscore_<mid>` pe 653/653), 20 de competiții, 21 aug – 17 oct. Se rulează în tranșe; lista se recalculează din bază la fiecare rulare.
+
 ## Reperul extern — cât de bun e Oracle, de fapt (măsurat prima dată 2026-10-14)
 
 **Până azi, Oracle fusese comparat doar cu el însuși și cu propriii Challengeri.** Nu exista nicio măsurătoare contra unui reper din afară. Acum există, pe **986 de meciuri terminate**, cu predicția SERVITĂ (rândul `control`) contra favoritului caselor de pariuri (cote medii de închidere din `odds_history`, cel mai mic preț = favorit), pe **exact același set de meciuri**:
