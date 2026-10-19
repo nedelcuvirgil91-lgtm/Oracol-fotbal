@@ -314,6 +314,32 @@ Același tipar ca la `sync_pre_match_odds` în august: instrumentare întâi, re
 
 **Recuperarea restanței (D-B)**: implementată — `--recover-missing-stats`, bypass Delta Sync **doar** pentru `mid`-urile cerute explicit, cu plafon pe tranșă. Restanța măsurată la pornire: **653 de meciuri** (toate adresabile, `fixture_id = flashscore_<mid>` pe 653/653), 20 de competiții, 21 aug – 17 oct. Se rulează în tranșe; lista se recalculează din bază la fiecare rulare.
 
+### D-13. Un club, două identități — Faza 0 ACTIVĂ din 19 oct; Faza 1 (unificarea) NEAUTORIZATĂ
+
+> **[FAZA 0 — FĂCUTĂ ȘI ACTIVATĂ 2026-10-19]** `docs/00_GOVERNANCE/ADR-078-flashscore-team-identity.md` (ACCEPTED). Cod pe `main` (`a81cb4e`), migrarea **057 aplicată** (8 coloane, 4 indecși, RLS activ, politică `service_role`, 0 rânduri), flag `flashscore_team_identity_capture_enabled` = **`true`** (boolean). Amprentă: **38 → 39 chei**, `md5(data − cheia_nouă)` **identică** (`caa90b1b0d93830bdc39a87e523be663`) — exact o cheie adăugată.
+>
+> **Întrebarea care a pornit-o, și răspunsul ei verificat**: „avem cluburi cu 2 profiluri? colectăm de 2 ori date?" — **prima parte da, a doua NU.** Zero chei naturale duplicate **după normalizarea sufixului**, zero `mid`-uri duplicate din 2196. (Verificarea anterioară folosea numele EXACTE, deci prin construcție nu putea vedea perechea `Levski Sofia` / `Levski Sofia (BUL)`.) Cele două etichete țin seturi **disjuncte**: cu sufix = 142 de calificări (142 cu rezultat, 141 cu statistici, 49 cu xG real), scurtă = 367 din faza ligii. **Deci nu există nimic de șters** — o ștergere ar distruge meciuri reale, nu copii. Operația corectă e redenumirea = Faza 1.
+>
+> **Cauza**: Flashscore are UN id stabil per club (`Egnatia (ALB)` → `/team/kf-egnatia/CjYs7BO9/`), în **același container** din care citim deja numele. Codul de țară e decorație de pagină — widget-ul de formă recentă al aceluiași provider scrie `Levski Sofia` simplu, inclusiv pentru meciurile lui de EL. **Flashscore nu are două profiluri; noi am creat al doilea.** Gol de arhitectură: `scheduled_fixtures` are coloane de id pentru **cinci** provideri și niciuna pentru Flashscore, devenit primă linie.
+>
+> **Costul real, măsurat cap-coadă prin formulele adevărate**: mediana **−0,43 pp** pe P(1), cel mai rău −0,72 pp. H2H: **exact zero** (poarta cere ≥3 întâlniri; maximul pe orice pereche după unificare e 2). Forma: Level DB eșuează (1-2 < 3) dar **Level FS2 le prinde pe toate 13**, cu meciuri reale. Deci „−67 ELO" devine 0,7 pp în predicție — raportasem cifra spectaculoasă în loc de cea relevantă.
+>
+> **DE VERIFICAT la prima rulare de noapte de după activare** (încă NEverificat): rânduri noi în `flashscore_team_identity`; `last_seen_at` **avansează** la a doua vedere a aceluiași club (nu îngheață); `first_seen_at` **nu** avansează; clasa 8 din `check_data_health` raportează „insuficiente date" doar cât timp tabela e goală.
+>
+> **⏳ FAZA 1 — DECIZIE CERUTĂ, nefăcut nimic.** Scop măsurat: **632 de rânduri, 3 tabele** — `match_history` 330, `shadow_predictions` 252, `consensus_capture_samples` **50 (APPEND-ONLY, intangibile)**; zero în `elo_ratings`, `elo_history`, `flashscore_match_context`, `scheduled_fixtures`, `flashscore_standings_snapshot` și restul. Coliziunile sunt deja verificate: **zero chei duplicate după normalizare**, deci redenumirea spre forma scurtă nu produce niciuna. Decizia are trei părți care nu se separă: (a) forma canonică; (b) ce se face cu cele 330 de rânduri istorice; (c) dacă se acceptă mutarea celor 13 din FS2 în Level DB — **un troc, nu un câștig curat**: forma europeană e semnalul mai potrivit pentru cupe (dispersie 2,0 ppm, `DE_URMARIT` §2c), dar e mai subțire (3-9 meciuri în loc de 10-20). ELO-ul **nu** se recalculează retroactiv (precedentul Salzburg, 17 oct).
+>
+> **Revine în fiecare iulie**, la calificări, și crește: lanțul scurt acumulează, cel cu sufix rămâne orfan.
+
+### D-14. Lanțul de amprente `model_config` e rupt — o cheie neconsemnată (găsit 2026-10-19)
+
+Evidența din acest document dă **35 → 36** la activarea ADR-072 (14 oct) și **36 → 37** la ADR-073 (15 oct). Măsurat înainte de scrierea de pe 19 octombrie: **38**. O cheie a fost adăugată între 15 și 19 oct **fără să fie consemnată nicăieri**.
+
+**Nu pot numi care**, și nu o deduc: amprenta `md5` dovedește că fiecare scriere consemnată a fost chirurgicală, dar nu păstrează un instantaneu din care să reconstitui ce s-a schimbat între ele. Candidații plauzibili (`value_selector_v1_enabled`, `value_selector_policy_profile`) sunt documentați de ADR-071 §18 ca activați pe 6 septembrie, deci ar fi trebuit să fie deja în cele 37 — ceea ce face deducția inutilă.
+
+**Consecința practică, nu teoretică**: următoarea activare nu se poate sprijini pe „37 → 38" ca număr așteptat. Se măsoară de fiecare dată întâi, cum s-a făcut și pe 19 octombrie.
+
+**Decizie cerută**: se persistă un instantaneu al lui `model_config` la fiecare scriere (tabelă de audit, append-only), sau se acceptă că lanțul se re-ancorează la fiecare măsurătoare. Prima variantă e o tabelă nouă, deci ADR. **Nefăcut nimic deliberat.**
+
 ## Reperul extern — cât de bun e Oracle, de fapt (măsurat prima dată 2026-10-14)
 
 **Până azi, Oracle fusese comparat doar cu el însuși și cu propriii Challengeri.** Nu exista nicio măsurătoare contra unui reper din afară. Acum există, pe **986 de meciuri terminate**, cu predicția SERVITĂ (rândul `control`) contra favoritului caselor de pariuri (cote medii de închidere din `odds_history`, cel mai mic preț = favorit), pe **exact același set de meciuri**:
