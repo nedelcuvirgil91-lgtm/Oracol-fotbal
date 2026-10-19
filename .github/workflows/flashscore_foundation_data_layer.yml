@@ -48,6 +48,10 @@ on:
         description: "Plafon de meciuri recuperate în această tranșă (implicit 50)"
         required: false
         default: "50"
+      recover_days_back:
+        description: "Cât de departe în trecut caută restanța (implicit 60; sezonul întreg ≈ 120)"
+        required: false
+        default: "60"
 
 jobs:
   flashscore-foundation-data-layer:
@@ -84,7 +88,7 @@ jobs:
           # recalculeaza din baza la fiecare rulare.
           RECOVER_FLAG=""
           if [ "${{ github.event.inputs.recover_missing_stats }}" = "true" ]; then
-            RECOVER_FLAG="--recover-missing-stats --max-recover ${{ github.event.inputs.max_recover || '50' }}"
+            RECOVER_FLAG="--recover-missing-stats --max-recover ${{ github.event.inputs.max_recover || '50' }} --recover-days-back ${{ github.event.inputs.recover_days_back || '60' }}"
           fi
 
           LEAGUES_ARG=()

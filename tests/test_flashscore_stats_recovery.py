@@ -352,3 +352,12 @@ def test_workflow_expune_recuperarea():
     assert "recover_missing_stats" in text
     assert "--recover-missing-stats" in text
     assert "--max-recover" in text
+    # [ADĂUGAT 2026-10-19] `--recover-days-back` exista în CLI de la început,
+    # dar NU era expus în workflow — deci fereastra de recuperare era blocată
+    # la 60 de zile și meciurile din iulie/prima parte a lui august nu intrau
+    # NICIODATĂ în listă. Ieșit la iveală dintr-o obiecție a proprietarului
+    # produsului („100% nu sunt"), nu dintr-un test: ligi cu fereastra de 5
+    # meciuri plină aveau totuși zeci de meciuri de sezon fără statistici.
+    # Un parametru care există în cod dar nu poate fi cerut e cod mort.
+    assert "recover_days_back" in text, "intrarea de workflow lipsește"
+    assert "--recover-days-back" in text, "parametrul nu e pasat CLI-ului"
