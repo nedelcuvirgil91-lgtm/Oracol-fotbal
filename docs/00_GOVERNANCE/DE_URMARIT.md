@@ -810,3 +810,73 @@ Corectura e scrisă *în* comentariul din workflow, nu înlocuită tacit — afi
 - **Precizia predicțiilor** — nu există azi o pârghie identificată și dovedită **pe Oracle**. Dar vezi `COMPARATIE_MOTOARE_2026-10-14.md`: Blend bate Oracle semnificativ la Brier și log-loss (t = −2,82 / −3,08) pe 998 de meciuri comune, și e singurul statistic indistinct de piață (z = 1,34, față de 1,96 pentru Oracle). NU trece poarta North Star #2 (acuratețea e nesemnificativă, z = 1,54), deci nu e promovabil azi — dar e cea mai concretă direcție măsurată. Oracle e la −1,98pp de piață pe 97,5% din meciuri, **statistic nesemnificativ** (z=1,35). Calibrarea e închisă ca pârghie. Accidentările au coborât în prioritate: ar afecta exact meciurile unde nu se vede headroom.
 - **Team Profile** — D-7 închisă, reluare justificată abia la ~16 meciuri cu xG per echipă, estimativ februarie-martie 2027.
 - **`weather_forecast_cache`** — gol acceptat explicit (decizie din 28 august).
+
+---
+
+## 6. Filtrul de formă în cupele europene — dovada cea mai tare de până acum, și prioritate SCĂZUTĂ (2026-10-19)
+
+**Prioritizare explicită a proprietarului produsului, de respectat**: „competițiile
+intercluburi nu-s atât de importante pentru mine, campionatele mă interesează
+mai mult". Deci intrarea asta **nu se promovează singură în față** — e
+documentată ca dovadă, nu ca sarcină următoare.
+
+### Cazul
+
+Sabah Baku – Borussia Dortmund, Champions League, 20 octombrie. Oracle:
+**Sabah 56,3% / Dortmund 23,1%**. Piața: Dortmund la cota **1.33** (≈75%
+implicit). Divergență de ~52 de puncte procentuale — cea mai mare măsurată în
+proiect. Semnalată de proprietarul produsului **de pe ecran**, nu de vreun
+monitor (a cincea oară când observarea ecranului bate diagnosticul meu).
+
+### Mecanismul, măsurat linie cu linie
+
+ELO-ul e CORECT și îi ordonează corect: Dortmund **1786**, Sabah **1588**.
+
+| | Dortmund | Sabah Baku |
+|---|---:|---:|
+| multiplicator ofensiv din ELO | **1,2887** | 1,1603 |
+| rating ofensiv FINAL (după blend) | **1,1303** | **1,4169** |
+
+`compute_team_offdef_rating()` face `0,65 × statistici + 0,35 × ELO`, iar
+`calibrate_xg()` **nu primește deloc ELO** — intră exclusiv prin acel blend.
+Cele 35% nu pot răsturna cele 65%, iar ordinea se inversează.
+
+**De ce statisticile mint aici**: filtrul e `.eq("league", league)`, deci
+„ultimele 5 meciuri în Champions League". Dar:
+
+- **Sabah** și-a făcut cifrele în **tururile preliminare** — 5-2 cu H. Beer
+  Sheva, 4-0 cu Aarhus, 2-1 cu TNS, 2-0 cu KuPS. Total **12 goluri în 5 meciuri**
+  = 2,4/meci, care **lovește plafonul de saturație** `min(avg_goals_for/2,0; 1,0)`
+  și primește creditul ofensiv MAXIM posibil.
+- **Dortmund** pe ale lui în **faza principală** — Inter, Atalanta, Villarreal,
+  Bodo/Glimt. **6 goluri în 5 meciuri** = 1,2/meci, adică 60% din plafon. Trei
+  din cele cinci sunt din **ianuarie-februarie, vechi de 8 luni**.
+
+### A TREIA variantă a defectului, care nu era documentată
+
+`EUROPEAN_COMPETITION_FORM_FILTER_DEFECT.md` descrie forma 1 (cădere pe
+constante) și forma 2 (date reale dar vechi). Cazul ăsta le conține pe
+amândouă, plus una nouă: **preliminariile și faza principală poartă aceeași
+etichetă de competiție, dar sunt adversari incomparabili**. Filtrul care
+trebuia să ajusteze la tăria adversarului face exact opusul — compară goluri
+contra lui TNS cu goluri contra Interului, ca și cum ar fi același lucru.
+
+### Cele două remedii NU sunt echivalente
+
+1. **Repararea ferestrei** (filtru + legare de sezon + cale de rezervă, cele
+   trei decise ÎMPREUNĂ, prin ADR) — atacă defectul.
+2. **Mărirea `elo_blend_weight`** (0,35 → mai sus) — ar „rezolva" cazul, dar e
+   **schimbare de model**, interzisă ca parte a unui fix de bug (regula din
+   §Filosofia proiectului: orice modificare de parametru matematic e experiment
+   de calibrare separat, cu aprobare proprie). Ar masca defectul reglând un
+   buton.
+
+**Recomandarea mea rămâne (1)** — dar dată fiind prioritizarea de mai sus, se
+reia când campionatele domestice nu mai au nimic mai bun de oferit, nu acum.
+
+### Colateral, de verificat când se ajunge aici
+
+`Borussia Dortmund (GER)` există ca rând-fantomă cu ELO 1584, ultimul meci
+**aprilie 2025** — a treia instanță a clasei de identitate duplicată, după
+Salzburg (rezolvat) și `Levski Sofia`/`PFC Levski Sofia` (nereparat). Nu e
+cauza acestui caz, dar e aceeași clasă.
