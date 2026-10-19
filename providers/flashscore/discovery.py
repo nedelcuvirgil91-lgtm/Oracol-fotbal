@@ -711,6 +711,7 @@ def _describe_identity_gaps(rejected: list) -> str:
 
 def run_foundation_data_layer_for_discovered_matches(
     matches: list[DiscoveredMatch],
+    force_mids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Ruleaza fetch()/normalize()/validate() (FlashscoreAdapter,
     adapter.py) + `persist_match_with_data_trust_layer()` direct (nu
@@ -762,7 +763,23 @@ def run_foundation_data_layer_for_discovered_matches(
         # A doua taiere in 3 zile (si 2026-08-27, la 50m19s). Setul descoperit
         # creste pe masura ce sezoanele avanseaza (457 -> 487 in 5 ore), deci
         # timpul irosit creste liniar cu el — s-ar fi agravat de la sine.
-        if is_flashscore_match_already_collected is not None and is_flashscore_match_already_collected(match.mid):
+        # [ADR-076 D-B] `force_mids` — recuperare retroactiva TINTITA. Delta
+        # Sync e corect in regim normal, dar restanta lasata de extragerea
+        # rupta (8 sep - 17 oct 2026) nu se poate repara singura: meciul e
+        # deja persistat canonic, deci sarit pentru totdeauna. Bypass-ul se
+        # aplica DOAR mid-urilor cerute explicit, niciodata global — o lista
+        # calculata din baza („terminat, dar `home_shots IS NULL`"), nu un
+        # steag care dezactiveaza Delta Sync pentru toata rularea.
+        #
+        # Re-colectarea nu poate SUPRASCRIE nimic: RPC-ul canonic e
+        # `COALESCE(m.existent, p->nou)`, deci o valoare deja prezenta
+        # ramane. Poate doar completa NULL-uri. Verificat prin test.
+        if force_mids and match.mid in force_mids:
+            logger.info(
+                "[Flashscore.Discovery] recuperare tintita: mid=%s (%s) — "
+                "Delta Sync ocolit deliberat (ADR-076 D-B)", match.mid, match.league,
+            )
+        elif is_flashscore_match_already_collected is not None and is_flashscore_match_already_collected(match.mid):
             reports.append({
                 "match_id": None, "ok": True, "skipped": True,
                 "reason": "already_collected", "match": match,

@@ -38,9 +38,39 @@ def _print_separator(char: str = "─", width: int = 78) -> None:
     print(char * width)
 
 
+def _plan_recuperare(
+    matches: list, max_recover: int, days_back: int,
+) -> tuple[set[str], list, dict[str, int]]:
+    """Setul de `mid`-uri de recuperat (ADR-076 D-B) și lista de meciuri
+    restrânsă la ele.
+
+    De ce se RESTRÂNGE lista, în loc să se paseze doar `force_mids`: o
+    rulare de recuperare care parcurge toate meciurile descoperite ar cere
+    Delta Sync pentru fiecare (o interogare Supabase per meci) degeaba.
+    Recuperarea are o singură treabă — meciurile din restanță.
+
+    De ce există un PLAFON: 653 de meciuri × 7 taburi × ~3,5 s + pacing
+    politicos ≈ 5 ore, iar workflow-ul are 90 de minute. Fără plafon,
+    rularea ar fi tăiată la mijloc — exact tiparul deja plătit de
+    `live_sync` și `sync_pre_match_odds`. Se rulează repetat, în tranșe."""
+    from database.queries import get_flashscore_mids_missing_statistics
+
+    tinta = get_flashscore_mids_missing_statistics(days_back=days_back)
+    gasite = [m for m in matches if m.mid in tinta]
+    plafonate = gasite[:max_recover] if max_recover > 0 else gasite
+    stats = {
+        "in_restanta": len(tinta),
+        "gasite_pe_hub": len(gasite),
+        "de_recuperat_acum": len(plafonate),
+    }
+    return {m.mid for m in plafonate}, plafonate, stats
+
+
 def run(
     leagues: list[str] | None, limit_per_league: int | None, dry_run: bool,
     include_future_fixtures: bool = True, future_fixtures_only: bool = False,
+    recover_missing_stats: bool = False, max_recover: int = 50,
+    recover_days_back: int = 60,
 ) -> int:
     """`include_future_fixtures` [ADAUGAT Pasul 1 Master Repair Plan] —
     implicit True (comportament CLI/manual neschimbat). Rulările automate
@@ -90,10 +120,28 @@ def run(
         print("Niciun meci descoperit — nimic de rulat.")
         return 0
 
+    force_mids: set[str] | None = None
+    if recover_missing_stats:
+        force_mids, matches, plan = _plan_recuperare(matches, max_recover, recover_days_back)
+        print()
+        _print_separator("─")
+        print("  MOD RECUPERARE (ADR-076 D-B) — Delta Sync ocolit DOAR pentru ținte")
+        print(f"  meciuri în restanță (terminate, `home_shots IS NULL`): {plan['in_restanta']}")
+        print(f"  dintre ele, găsite pe hub-urile descoperite acum       : {plan['gasite_pe_hub']}")
+        print(f"  de recuperat în această tranșă (plafon {max_recover})  : {plan['de_recuperat_acum']}")
+        if plan["gasite_pe_hub"] > plan["de_recuperat_acum"]:
+            print(f"  RĂMÂN pentru tranșele următoare: "
+                  f"{plan['gasite_pe_hub'] - plan['de_recuperat_acum']} "
+                  "(rulează din nou — lista se recalculează din bază)")
+        _print_separator("─")
+        if not matches:
+            print("Niciun meci din restanță nu e pe hub-urile cerute — nimic de recuperat.")
+            return 0
+
     print()
     _print_separator("─")
     print("Foundation Data Layer — fetch/normalize/validate/persist per meci:")
-    reports = run_foundation_data_layer_for_discovered_matches(matches)
+    reports = run_foundation_data_layer_for_discovered_matches(matches, force_mids=force_mids)
 
     ok_count = sum(1 for r in reports if r.get("ok"))
     skipped_count = sum(1 for r in reports if r.get("skipped"))
@@ -184,14 +232,36 @@ def main() -> None:
         help="Cere DOAR /fixtures/ (meciuri viitoare), necondiționat — nu ca fallback la /results/ gol "
              "(folosit de flashscore_weekly_fixtures.yml; incompatibil cu --no-future-fixtures)",
     )
+    parser.add_argument(
+        "--recover-missing-stats", action="store_true",
+        help="MOD RECUPERARE (ADR-076 D-B): procesează DOAR meciurile terminate rămase fără "
+             "statistici (`home_shots IS NULL`), ocolind Delta Sync strict pentru ele. "
+             "Lista se calculează din bază la fiecare rulare, nu se dă manual.",
+    )
+    parser.add_argument(
+        "--max-recover", type=int, default=50,
+        help="Plafon de meciuri recuperate într-o tranșă (implicit 50). Există pentru că "
+             "restanța întreagă ar depăși timeout-ul workflow-ului; se rulează repetat.",
+    )
+    parser.add_argument(
+        "--recover-days-back", type=int, default=60,
+        help="Cât de departe în trecut caută restanța (implicit 60 de zile)",
+    )
     args = parser.parse_args()
+
+    if args.recover_missing_stats and args.future_fixtures_only:
+        parser.error("--recover-missing-stats lucrează pe meciuri TERMINATE; "
+                     "--future-fixtures-only cere doar meciuri viitoare. Se exclud reciproc.")
 
     if args.future_fixtures_only and args.no_future_fixtures:
         parser.error("--future-fixtures-only și --no-future-fixtures sunt incompatibile.")
 
     exit_code = run(leagues=args.leagues, limit_per_league=args.limit_per_league, dry_run=args.dry_run,
                      include_future_fixtures=not args.no_future_fixtures,
-                     future_fixtures_only=args.future_fixtures_only)
+                     future_fixtures_only=args.future_fixtures_only,
+                     recover_missing_stats=args.recover_missing_stats,
+                     max_recover=args.max_recover,
+                     recover_days_back=args.recover_days_back)
     sys.exit(exit_code)
 
 

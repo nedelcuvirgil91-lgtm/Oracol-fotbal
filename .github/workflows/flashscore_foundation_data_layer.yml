@@ -39,6 +39,15 @@ on:
         required: false
         default: "false"
         type: boolean
+      recover_missing_stats:
+        description: "RECUPERARE (ADR-076 D-B): doar meciurile terminate fără statistici, Delta Sync ocolit strict pentru ele"
+        required: false
+        default: "false"
+        type: boolean
+      max_recover:
+        description: "Plafon de meciuri recuperate în această tranșă (implicit 50)"
+        required: false
+        default: "50"
 
 jobs:
   flashscore-foundation-data-layer:
@@ -69,6 +78,15 @@ jobs:
           DRY_RUN_FLAG=""
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then DRY_RUN_FLAG="--dry-run"; fi
 
+          # [ADR-076 D-B] Recuperarea restantei. Plafonul exista pentru ca
+          # restanta intreaga (653 de meciuri x 7 taburi + pacing politicos)
+          # ar depasi `timeout-minutes: 90` — se ruleaza in transe, lista se
+          # recalculeaza din baza la fiecare rulare.
+          RECOVER_FLAG=""
+          if [ "${{ github.event.inputs.recover_missing_stats }}" = "true" ]; then
+            RECOVER_FLAG="--recover-missing-stats --max-recover ${{ github.event.inputs.max_recover || '50' }}"
+          fi
+
           LEAGUES_ARG=()
           if [ -n "${{ github.event.inputs.leagues }}" ]; then
             IFS=',' read -ra LEAGUES_ARG <<< "${{ github.event.inputs.leagues }}"
@@ -78,9 +96,9 @@ jobs:
             python -m providers.flashscore.run_foundation_data_layer \
               --leagues "${LEAGUES_ARG[@]}" \
               --limit-per-league "${{ github.event.inputs.limit_per_league || '8' }}" \
-              $DRY_RUN_FLAG
+              $DRY_RUN_FLAG $RECOVER_FLAG
           else
             python -m providers.flashscore.run_foundation_data_layer \
               --limit-per-league "${{ github.event.inputs.limit_per_league || '8' }}" \
-              $DRY_RUN_FLAG
+              $DRY_RUN_FLAG $RECOVER_FLAG
           fi

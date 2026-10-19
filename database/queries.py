@@ -2586,6 +2586,12 @@ def get_data_completeness(match_ref: str) -> dict | None:
         return None
 
 
+# Plafonul implicit al PostgREST pentru un `select()` fara `.limit()`. Definit
+# LOCAL, nu importat din `shadow_testing` — ar fi o dependinta „in sus" (North
+# Star #10): `database/queries.py` e stratul de date, `shadow_testing` e
+# deasupra lui.
+_PAGE_SIZE = 1000
+
 # ════════════════════════════════════════════════════════════════════════════
 # SINGLE OWNER — verificari de completitudine Flashscore pentru Sync Layer
 # (ADR-045, Pasul 1 Master Repair Plan). Folosite EXCLUSIV de scripturile de
@@ -2615,6 +2621,93 @@ def get_match_ids_with_complete_flashscore_stats(match_ids: list[int]) -> set[in
     except Exception as exc:
         logger.warning("[Queries] get_match_ids_with_complete_flashscore_stats failed: %s", exc)
         return set()
+
+
+def get_flashscore_mids_missing_statistics(
+    days_back: int = 60, limit: int = 2000, leagues: list[str] | None = None,
+) -> set[str]:
+    """`mid`-urile Flashscore ale meciurilor TERMINATE care au rămas fără
+    statistici — ținta recuperării retroactive de după ADR-076 (D-B).
+
+    DE CE EXISTĂ: extragerea statisticilor Flashscore a fost moartă între
+    8 septembrie și 17 octombrie 2026 (ADR-076 — două redenumiri de
+    `data-testid`). Reparația funcționează pentru meciurile NOI, dar Delta
+    Sync (`is_flashscore_match_already_collected`) sare peste orice meci deja
+    persistat canonic, deci restanța nu se repară singură. Funcția asta
+    identifică exact ce trebuie recerut; bypass-ul se face în
+    `discovery.run_foundation_data_layer_for_discovered_matches(force_mids=…)`.
+
+    CRITERIUL e `home_shots IS NULL` — o coloană-ȚINTĂ, nu un câmp-martor.
+    Lecția e cea din ADR-077: `referee` părea semnalul corect pentru
+    „lipsesc datele bogate" și a încetat să fie în momentul în care a
+    căpătat al doilea scriitor. O coloană-țintă nu poate minți despre
+    propria absență.
+
+    `mid`-ul se recuperează din `fixture_id` (`flashscore_<mid>`, convenția
+    scrisă de `normalize_match_statistics`) — verificat că acoperă 100% din
+    restanță (653 din 653 de meciuri, 20 de competiții, 2026-10-19).
+
+    PAGINARE KEYSET pe `id`, nu un singur `select()`: PostgREST taie implicit
+    la 1000 de rânduri, iar restanța e deja de 653 și criteriul se poate lărgi.
+    A cincea instanță a aceleiași clase în proiect — reparată din start aici,
+    nu după.
+
+    La eroare se întoarce setul GOL, niciodată unul parțial: un parțial ar
+    produce o recuperare care pare completă și nu e."""
+    client = get_client()
+    if client is None:
+        return set()
+    from datetime import date, timedelta
+    prag = (date.today() - timedelta(days=days_back)).isoformat()
+    mids: set[str] = set()
+    ultim_id = 0
+    try:
+        while len(mids) < limit:
+            q = (
+                client.table("match_history")
+                .select("id,fixture_id")
+                .not_.is_("actual_home_goals", "null")
+                .is_("superseded_by", "null")
+                .is_("home_shots", "null")
+                .gte("kickoff_date", prag)
+                .like("fixture_id", "flashscore_%")
+                .gt("id", ultim_id)
+                .order("id")
+                .limit(_PAGE_SIZE)
+            )
+            if leagues:
+                q = q.in_("league", leagues)
+            rows = q.execute().data or []
+            if not rows:
+                break
+            inainte = ultim_id
+            for r in rows:
+                fixture_id = r.get("fixture_id") or ""
+                if fixture_id.startswith("flashscore_"):
+                    mid = fixture_id[len("flashscore_"):]
+                    if mid:
+                        mids.add(mid)
+                ultim_id = max(ultim_id, r.get("id") or 0)
+            # [GARDĂ, găsită prin mutație] Dacă cursorul NU avansează, bucla
+            # cere la infinit aceeași pagină. Nu e ipotetic: mutația „cursorul
+            # ia primul rând în loc de ultimul" a BLOCAT rularea de teste, în
+            # loc să o facă să eșueze — adică exact felul de defect care, în
+            # producție, ar consuma tot bugetul de rulare în tăcere, nu ar
+            # arunca o eroare. O condiție de ieșire care nu depinde de
+            # corectitudinea aritmeticii cursorului.
+            if ultim_id <= inainte:
+                logger.warning(
+                    "[Queries] get_flashscore_mids_missing_statistics: cursorul nu "
+                    "avansează (id=%s) — opresc paginarea ca să nu buclez la infinit",
+                    ultim_id,
+                )
+                break
+            if len(rows) < _PAGE_SIZE:
+                break
+    except Exception as exc:
+        logger.warning("[Queries] get_flashscore_mids_missing_statistics failed: %s", exc)
+        return set()
+    return mids
 
 
 def get_flashscore_covered_standings_leagues(max_age_days: int = 7) -> set[str]:
