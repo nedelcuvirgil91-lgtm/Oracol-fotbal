@@ -344,13 +344,65 @@ def test_f3_abbreviations_resolve(variant, expected):
 
 @pytest.mark.parametrize(
     "suffixed_without_twin",
-    ["Dinamo City (ALB)", "Tre Fiori (SAN)", "Inter Escaldes (AND)"],
+    # [ACTUALIZAT 2026-10-19, ADR-078 Faza 1] `Inter Escaldes (AND)` a fost
+    # SCOS de aici: premisa lui („fara geamana in match_history") era adevarata
+    # in august si nu mai e — clubul are acum 3 randuri sub forma scurta, deci
+    # a intrat deliberat in Grupul A si se rezolva. Garda a cazut exact cand
+    # trebuia, si asta e valoarea ei; scopul (un nume fara baza cunoscuta NU se
+    # modifica) ramane neschimbat.
+    #
+    # Inlocuitorii sunt verificati NErezolvati la 2026-10-19, si alesi anume
+    # pentru ca sunt cazurile RISCANTE: nume oficiale lungi ale unor cluburi
+    # care exista deja sub alt nume canonic. A le „rezolva" prin ghicire ar
+    # crea o a doua identitate permanenta — exact ce Faza 1 refuza sa faca.
+    ["Dinamo City (ALB)", "Tre Fiori (SAN)",
+     "FC Bayern München (GER)", "Club Atlético de Madrid (ESP)", "Larne (NIR)"],
 )
 def test_f3_suffixed_without_known_base_stays_unchanged(suffixed_without_twin):
-    """Cele 98 de nume cu sufix FARA geamana in match_history nu au voie sa
-    fie modificate — regula de strip e cheie de CAUTARE, nu iesire
-    (ADR-058 §2.3)."""
+    """Numele cu sufix FARA baza cunoscuta nu au voie sa fie modificate —
+    regula de strip e cheie de CAUTARE, nu iesire (ADR-058 §2.3)."""
     assert normalize_team_name(suffixed_without_twin) == suffixed_without_twin
+
+
+# ── [ADR-078, Faza 1] Cele 13 cluburi care aveau DOUA identitati ────────────
+# Flashscore scrie codul de tara in header-ul paginilor de calificare si
+# numele simplu pe paginile fazei ligii — acelasi club, doua etichete, deci
+# doua lanturi ELO si doua istorii H2H. Reparatia e o intrare canonica per
+# club; forma cu sufix se rezolva apoi SINGURA, prin `_COUNTRY_SUFFIX_RE`.
+
+GRUP_A_ADR078 = {
+    "AEK Athens": "GRE", "Borac Banja Luka": "BIH", "Egnatia": "ALB",
+    "H. Beer Sheva": "ISR", "Inter Escaldes": "AND", "Jablonec": "CZE",
+    "Kauno Zalgiris": "LTU", "Levski Sofia": "BUL", "Omonia": "CYP",
+    "Pafos": "CYP", "Plzen": "CZE", "Riga FC": "LAT", "Sparta Prague": "CZE",
+}
+
+
+@pytest.mark.parametrize("baza,cod", sorted(GRUP_A_ADR078.items()))
+def test_adr078_forma_cu_sufix_se_rezolva_la_forma_scurta(baza, cod):
+    assert normalize_team_name(f"{baza} ({cod})") == baza
+
+
+@pytest.mark.parametrize("baza", sorted(GRUP_A_ADR078))
+def test_adr078_forma_scurta_e_canonica_nu_alias_al_altcuiva(baza):
+    """Forma scurta trebuie sa fie ea insasi canonicul. Daca cineva o adauga
+    maine ca alias al altui club, cele 13 ar fi redirectate tacit."""
+    assert normalize_team_name(baza) == baza
+
+
+def test_adr078_cele_doua_Zalgiris_ramane_cluburi_DISTINCTE():
+    """Kauno Zalgiris (Kaunas) si Zalgiris (Vilnius) sunt cluburi diferite.
+    Dezbracarea sufixului le pastreaza separate — iar `Zalgiris` NU a fost
+    adaugat ca nume canonic, tocmai ca sa nu existe tentatia unei uniri."""
+    assert normalize_team_name("Kauno Zalgiris (LTU)") == "Kauno Zalgiris"
+    assert normalize_team_name("Zalgiris (LTU)") == "Zalgiris (LTU)"
+    assert normalize_team_name("Kauno Zalgiris") != normalize_team_name("Zalgiris")
+
+
+def test_adr078_normalizarea_e_idempotenta_pe_grupul_A():
+    for baza, cod in GRUP_A_ADR078.items():
+        o_data = normalize_team_name(f"{baza} ({cod})")
+        assert normalize_team_name(o_data) == o_data
 
 
 # ── [F4.6] Goluri de vocabular aparute DUPA F3 ──────────────────────────────

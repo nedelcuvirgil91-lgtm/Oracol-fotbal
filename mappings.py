@@ -622,6 +622,50 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "Vitesse": ["SBV Vitesse"],
     "Waalwijk": ["RKC Waalwijk"],
     "Willem II": ["Willem II Tilburg"],
+
+    # ── [ADR-078, Faza 1] Cluburi care existau sub DOUA identitati ───────────
+    # Flashscore scrie codul de tara in header-ul paginilor de CALIFICARE
+    # (`Levski Sofia (BUL)`) si numele simplu pe paginile fazei ligii si in
+    # widgetul de forma recenta (`Levski Sofia`) — acelasi club, acelasi
+    # provider, doua suprafete. Rezultatul: doua lanturi ELO paralele si doua
+    # istorii H2H, pentru 13 cluburi.
+    #
+    # Intrarile de aici NU sunt alias-uri in sens obisnuit: sunt numele
+    # CANONICE, iar forma cu sufix se rezolva SINGURA prin regula structurala
+    # `_COUNTRY_SUFFIX_RE` (ADR-058 §2.3), care dezbraca sufixul ca CHEIE DE
+    # CAUTARE. De aceea lista are 13 intrari, nu 13 perechi — si de aceea
+    # orice club viitor cu acelasi tipar se rezolva fara cod nou, odata ce
+    # numele lui simplu e cunoscut.
+    #
+    # Forma SCURTA e canonica, nu cea cu sufix: e ce scrie Flashscore zilnic
+    # pentru faza ligii si pentru campionatele domestice, verificat in
+    # `flashscore_match_context` (10-20 de randuri per club, zero cu sufix).
+    #
+    # Alese EXCLUSIV cele 13 cu geaman real in baza, verificat — nu cele 54
+    # vazute doar cu sufix. Pentru acelea, adaugarea unui nume canonic nou ar
+    # fi vocabular, nu reparatie, iar in cateva cazuri (`FC Bayern München`,
+    # `Club Atlético de Madrid`) ar CREA o a doua identitate permanenta pentru
+    # un club care exista deja sub alt nume. Decizie separata, necerută.
+    #
+    # ATENTIE la regenerare oarba (precedentul `Din. Zagreb`/`St. Truiden`,
+    # 2026-08-23): `scripts/identity_f3_emit_aliases.py` nu cunoaste aceste
+    # 13 nume si le-ar putea reemite ca baze canonice separate.
+    #
+    # `Kauno Zalgiris` si `Zalgiris` sunt cluburi DIFERITE (Kaunas vs Vilnius)
+    # — dezbracarea sufixului le pastreaza distincte, si asa trebuie sa ramana.
+    "AEK Athens": [],
+    "Borac Banja Luka": [],
+    "Egnatia": [],
+    "H. Beer Sheva": [],
+    "Inter Escaldes": [],
+    "Jablonec": [],
+    "Kauno Zalgiris": [],
+    "Levski Sofia": [],
+    "Omonia": [],
+    "Pafos": [],
+    "Plzen": [],
+    "Riga FC": [],
+    "Sparta Prague": [],
 }
 
 ALIAS_TO_CANONICAL: dict[str, str] = {}

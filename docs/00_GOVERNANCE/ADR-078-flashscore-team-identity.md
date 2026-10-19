@@ -125,7 +125,65 @@ Nicio predicție schimbată. Niciun rând șters. Nicio redenumire. Niciun ELO r
 
 **Ce NU rezolvă**: cele 330 de rânduri existente rămân sub forma cu sufix, iar cele 13 cluburi rămân cu lanțuri ELO despicate. Faza 0 nu repară nimic — face reparația decidabilă.
 
-### 6.1 Faza 1, pregătită dar NEAUTORIZATĂ
+---
+
+## 7. FAZA 1 — EXECUTATĂ 2026-10-19, dar pe un scop mai mic decât cel estimat
+
+**Aprobată explicit** de proprietarul produsului. **Harta din Faza 0 NU a fost necesară**, și motivul e verificabil, nu o scurtătură: proprietatea de care aveam nevoie — că dezbrăcarea sufixului nu poate uni cluburi distincte — e deja auditată (ADR-058 §2.3, pe 58.299 de rânduri), iar am **reverificat-o pe datele de azi**: zero baze produse de două coduri de țară diferite, zero meciuri între cele două forme ale aceluiași club.
+
+### 7.1 Măsurătoarea care a redus scopul de la 103 la 13
+
+Rulând codul real pe toate cele 100 de nume cu sufix:
+
+| Clasă | Câte | Ce s-a făcut |
+|---|---:|---|
+| **Se rezolvau DEJA** prin stratul de alias | **33** | nimic — `Arsenal FC (ENG)`→`Arsenal`, `FC Internazionale Milano (ITA)`→`Inter Milan`, `FC Red Bull Salzburg (AUT)`→`Salzburg` |
+| **Grupul A** — bază cu geamăn REAL în bază | **13** | **reparate** (vezi mai jos) |
+| Văzute DOAR cu sufix, fără geamăn | **~49** | **neatinse** — vocabular, nu reparație |
+| Nume oficiale lungi ale unor cluburi existente sub alt nume | **~5** | **neatinse, deliberat** |
+
+**Doar Grupul A era „un club cu două profiluri"** — restul au un singur profil care se întâmplă să poarte un sufix. Estimarea mea anterioară („632 de rânduri, 3 tabele") descria dezbrăcarea TUTUROR celor 330 de rânduri; reparația reală a cerut **57 + 99 = 156**.
+
+### 7.2 Reparația e o REGULĂ, nu 13 perechi
+
+`ALIAS_TO_CANONICAL[_canonical.lower()] = _canonical` (`mappings.py:629`) — numele canonic e el însuși cheie de căutare. Deci adăugarea bazei ca **intrare canonică** face ca forma cu sufix să se rezolve **singură**, prin `_COUNTRY_SUFFIX_RE` (ADR-058 §2.3). 13 intrări, nu 13 mapări explicite — și orice club viitor cu același tipar se rezolvă fără cod nou, odată ce numele lui simplu e cunoscut.
+
+`TEAM_ALIASES`: **388 → 401 chei, toate unice** (verificat prin AST — capcana Salzburg, unde o cheie duplicată a fost înghițită tăcut de Python și suita a rămas verde).
+
+### 7.3 Backfill-ul
+
+`UPDATE` atomic, idempotent, într-o singură instrucțiune cu `RETURNING`: **57 de rânduri în `match_history`, 99 în `shadow_predictions`** — exact cifrele prezise înainte de rulare.
+
+Constrângerea reală verificată înainte: indexul unic pe cheia naturală e **parțial** (`WHERE superseded_by IS NULL`) — exact setul pe care am măsurat **0 coliziuni**. La `shadow_predictions` cheia unică nu conține numele echipelor, deci nu putea fi violată.
+
+**După**: 0 rânduri Grupul A rămase cu sufix în ambele tabele; 0 duplicate pe cheia naturală; **293** de rânduri rămase cu sufix (alte cluburi). Aritmetica se închide exact: 330 − 57 + **20** = 293, cele 20 fiind rânduri unde adversarul a rămas sufixat fiindcă nu e în Grupul A.
+
+`consensus_capture_samples`: **19 rânduri rămân sub forma cu sufix** — tabela e strict append-only prin trigger. Nu e un rest de curățat, e o regulă respectată; orice monitorizare trebuie să le **excludă**.
+
+### 7.4 Ce s-a schimbat efectiv în predicție
+
+**Lanțul de meciuri e unificat**: Levski Sofia 2 → **9** meciuri terminate, Omonia 2 → 8, Egnatia 1 → 7. Deci H2H și forma văd acum toate meciurile clubului.
+
+**ELO-ul NU a fost recalculat retroactiv** — precedentul Salzburg (17 oct). Valorile `*_elo_after` din rândurile istorice rămân cele calculate pe lanțurile separate; ce s-a schimbat e că de acum există **un singur lanț** pe care căutarea îl găsește.
+
+**Consecința (c) din decizie e acum ÎN EFECT**: cu 4-9 meciuri terminate per club, `MIN_DB_MATCHES = 3` e satisfăcut, deci cele 13 trec de la **Level FS2** (formă pe toate competițiile, 10-20 de meciuri) la **Level DB** (formă în competiție, 4-9). Troc acceptat conștient: semnal mai potrivit pentru cupe (dispersie 2,0 ppm, `DE_URMARIT` §2c), eșantion mai subțire.
+
+### 7.5 Ce rămâne, și de ce nu l-am făcut
+
+**~5 nume oficiale lungi** ale unor cluburi care există deja sub alt nume canonic — `FC Bayern München`, `Club Atlético de Madrid`, `ŠK Slovan Bratislava`, `Dyn. Kyiv`, `Din. Minsk`. A le „rezolva" prin dezbrăcare ar crea o **a doua identitate permanentă** (`FC Bayern München` lângă `Bayern Munich`), adică ar înlocui un orfan cu alt orfan — zero câștig, plus agitație. A le mapa corect cere cunoaștere de domeniu, exact unde proiectul interzice ghicitul. **Decizie separată, necerută.**
+
+**~49 de cluburi văzute doar cu sufix** — adăugarea bazelor lor ar fi igienă de vocabular, nu reparație: nu există niciun al doilea profil cu care să se unească.
+
+**Caz special de reținut**: `Kauno Zalgiris` (Kaunas) și `Zalgiris` (Vilnius) sunt cluburi **DIFERITE**. Dezbrăcarea le păstrează distincte, iar `Zalgiris` **nu** a fost adăugat ca nume canonic tocmai ca să nu existe tentația unei uniri. Gardă dedicată.
+
+### 7.6 Verificare
+
+- **30 de teste noi** în `tests/test_team_identity_invariants.py`: cele 13 se rezolvă, forma scurtă e canonicul (nu alias al altcuiva), cele două Zalgiris rămân distincte, idempotență.
+- **O gardă existentă a căzut, corect**: `test_f3_suffixed_without_known_base_stays_unchanged` avea `Inter Escaldes (AND)` în parametri — premisa „fără geamăn în `match_history`" era adevărată în august și nu mai e. Scos, cu notă datată, și **înlocuit cu cazurile riscante** (`FC Bayern München (GER)`, `Club Atlético de Madrid (ESP)`, `Larne (NIR)`) — deci garda a devenit mai strictă, nu mai slabă.
+- **4 mutații, toate prinse**: o intrare din Grupul A ștearsă · `Zalgiris` adăugat ca nume canonic · o bază redirectată ca alias al altui club · regula `_COUNTRY_SUFFIX_RE` dezactivată (21 de teste căzute).
+- `pytest tests/`: **3619 passed, 2 skipped** (3589 + 30, aritmetica se închide).
+
+### 6.1 Faza 1 — estimarea INIȚIALĂ, păstrată ca istoric
 
 Scopul unei unificări, măsurat pe fiecare tabelă:
 
