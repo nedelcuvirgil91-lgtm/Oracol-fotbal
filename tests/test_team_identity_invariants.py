@@ -435,3 +435,72 @@ def test_new_f4_6_aliases_are_idempotent():
     for name in ("Jagiellonia Białystok", "Iberia 1999 (GEO)"):
         once = normalize_team_name(name)
         assert normalize_team_name(once) == once
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# CLASA B (ADR-078, 2026-10-20) — geaman sub ALT nume, nu doar sub alt sufix
+#
+# Faza 1 a reparat 13 cluburi la care dezbracarea sufixului dadea EXACT numele
+# canonic. Clasa B e cazul vecin, pe care detectorul Fazei 1 nu-l putea vedea
+# prin construcție: forma dezbracata ("Dyn. Kyiv") NU e numele canonic
+# ("Dynamo Kyiv"), deci paruse "fara geaman" — desi geamanul exista.
+#
+# A treia instanta a clasei de punct orb: o verificare care nu poate vedea
+# lucrul pe care il cauta. Primele doua: verificarea pe nume EXACTE, care nu
+# putea vedea `Levski Sofia` / `Levski Sofia (BUL)`; si
+# `flashscore_data_completeness.has_stats`, care masura prezenta paginii, nu
+# succesul extragerii.
+# ════════════════════════════════════════════════════════════════════════════
+
+# baza vazuta de Flashscore -> (cod de tara, numele canonic ASTEPTAT)
+CLASA_B_ADR078 = {
+    "Dyn. Kyiv": ("UKR", "Dynamo Kyiv"),
+}
+
+
+@pytest.mark.parametrize("baza,cod,canonic",
+                         sorted((b, c, k) for b, (c, k) in CLASA_B_ADR078.items()))
+def test_clasa_b_forma_cu_sufix_ajunge_la_canonicul_CORECT(baza, cod, canonic):
+    """Garda centrala: forma cu sufix trebuie sa ajunga la lantul canonic
+    existent, nu la un al treilea nume."""
+    assert normalize_team_name(f"{baza} ({cod})") == canonic
+
+
+@pytest.mark.parametrize("baza,cod,canonic",
+                         sorted((b, c, k) for b, (c, k) in CLASA_B_ADR078.items()))
+def test_clasa_b_forma_dezbracata_ajunge_la_acelasi_canonic(baza, cod, canonic):
+    """Reparatia e o REGULA, nu o pereche: si forma fara sufix se rezolva,
+    fiindcă aliasul e cheia de căutare, iar sufixul doar se dezbraca."""
+    assert normalize_team_name(baza) == canonic
+
+
+@pytest.mark.parametrize("baza,cod,canonic",
+                         sorted((b, c, k) for b, (c, k) in CLASA_B_ADR078.items()))
+def test_clasa_b_canonicul_e_punct_fix(baza, cod, canonic):
+    """Canonicul nu trebuie sa se mute mai departe. Daca cineva il adauga maine
+    ca alias al altui club, intreg lantul ar fi redirectat tacit."""
+    assert normalize_team_name(canonic) == canonic
+
+
+def test_clasa_b_NU_e_nume_canonic_nou():
+    """Contrapondere de contract: `Dyn. Kyiv` trebuie sa fie ALIAS, nu o a doua
+    intrare canonica. Doua intrari canonice pentru acelasi club ar reface exact
+    despicarea pe care reparatia o inchide."""
+    from mappings import TEAM_ALIASES
+    for baza in CLASA_B_ADR078:
+        assert baza not in TEAM_ALIASES, (
+            f"{baza!r} a fost adaugat ca NUME CANONIC. Trebuie sa fie alias "
+            f"sub {CLASA_B_ADR078[baza][1]!r}, altfel clubul are iar doua "
+            f"identitati."
+        )
+
+
+def test_clasa_C_ramane_NEATINSA():
+    """`Din. Minsk` e Clasa C: n-are niciun geaman in baza, deci nu exista
+    nimic cu care sa fie unit. Trebuie sa se intoarca NESCHIMBAT — daca apare
+    vreodata un alias pentru el, a fost o decizie, nu un efect secundar.
+
+    Verifica si c-o alta abreviere `Din.`/`Dyn.` nu a fost prinsa colateral de
+    reparatia Clasei B."""
+    assert normalize_team_name("Din. Minsk (BLR)") == "Din. Minsk (BLR)"
+    assert normalize_team_name("Dyn. Dresden") == "Dyn. Dresden"

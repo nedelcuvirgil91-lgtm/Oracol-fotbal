@@ -318,7 +318,18 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "Young Boys": ["BSC Young Boys"],
     "Celtic": ["Celtic FC"],
     "Club Brugge": ["Club Brugge KV"],
-    "Dynamo Kyiv": ["Dynamo Kiev","FC Dynamo Kyiv"],
+    # [ADR-078 Clasa B, 2026-10-20] "Dyn. Kyiv" adaugat ca alias, NU ca nume
+    # canonic nou. Flashscore scrie clubul ca "Dyn. Kyiv (UKR)" la calificarile
+    # europene, iar Faza 1 nu l-a prins: detectorul ei normaliza DOAR sufixul de
+    # tara, iar "Dyn. Kyiv" != "Dynamo Kyiv" si dupa dezbracare, deci paruse
+    # "fara geaman". Masurat: 4 randuri orfane in match_history (toate
+    # flashscore_*, calificari 2026, toate terminate) contra unui lant canonic
+    # "Dynamo Kyiv" de 6 meciuri. Reparatia e o REGULA, nu 4 randuri: cu
+    # aliasul de mai jos, forma cu sufix se rezolva singura prin
+    # _COUNTRY_SUFFIX_RE (dezbraca -> "dyn. kyiv" -> gasit). Zero risc de
+    # coliziune: "Dyn." abreviaza Dynamo/Dinamo pentru mai multe cluburi, dar
+    # orasul (Kyiv) il dezambiguizeaza complet.
+    "Dynamo Kyiv": ["Dynamo Kiev","FC Dynamo Kyiv","Dyn. Kyiv"],
     "FC Copenhagen": ["FC København","FC Kobenhavn"],
     "Porto": ["FC Porto"],
     # [SCHIMBAT 2026-10-17 — decizie explicită a proprietarului produsului]

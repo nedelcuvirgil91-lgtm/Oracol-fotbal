@@ -227,3 +227,77 @@ Contează pentru alegerea opțiunii: dacă motivul e o regulă de sărire pe car
 controlăm noi, ar putea exista o reparație mai bună decât oricare dintre A, B,
 C — una care duce rezultatul la rândul corect fără să ceară decizie umană. **De
 investigat înainte de a implementa, nu după.**
+
+---
+
+### [ÎNCHIS 2026-10-20 — întrebarea avea un răspuns banal, iar investigația a găsit altceva]
+
+**Răspunsul: LATENȚĂ, nu o regulă de sărire.** Niciuna dintre cele două ipoteze
+(fereastra de descoperire, Delta Sync) nu era necesară. Remăsurat read-only pe
+20 octombrie, toate trei rândurile `odds_` au acum rezultat **și** xG:
+
+| meci | rezultat | xG (gazdă/oaspete) | potrivește dovada #1 (H2H Flashscore)? |
+|---|---|---|---|
+| Borussia Dortmund – SV Werder Bremen | D 2-2 | 2,42 / 1,10 | ✅ 2-2 |
+| PSV – SC Heerenveen | H 2-0 | 2,34 / 1,55 | ✅ 2-0 |
+| Galatasaray – Kasimpasa | H 3-1 | 2,52 / 0,49 | ✅ 3-1 |
+
+Exact cele trei scoruri pe care §2 le anticipase. Colectarea Flashscore a ajuns
+la toate trei; **Dortmund a fost doar primul.** Deci nu exista nicio „regulă de
+sărire pe care o controlăm noi", iar reparația pe care §8 o spera — una care
+duce rezultatul la rândul corect fără decizie umană — **nu are obiect**:
+rezultatul era deja pe rândul corect, pentru toate trei.
+
+**Consecință pentru alegerea opțiunii**: cazul live s-a stins singur. A, B și C
+se decid de-acum pe meritele detectorului, nu pe urgența unui duplicat activ.
+Reamintire din `DE_URMARIT` §679, reconfirmată: `check_data_health` prinde deja
+clasa, la ~6 zile după meci — deci A rămâne o îmbunătățire de **viteză și
+claritate**, nu închiderea unui gol.
+
+### Ce a ieșit la iveală în locul întrebării — un gol de trasabilitate real
+
+Cele trei rânduri placeholder Flashscore sunt acum `superseded_by`
+(132416 / 132415 / 132414) — **cu `superseded_reason` ȘI `superseded_at` NULL pe
+toate trei.** Combinația e unică în tabelă:
+
+```
+superseded_by IS NOT NULL                        →  6742 rânduri
+  … din care superseded_reason IS NULL           →     4
+  … din care superseded_at IS NULL               →     3
+  … din care AMBELE NULL                         →     3   ← exact cele trei
+```
+
+**Nimic din sistem nu poate produce asta** — verificat, nu presupus:
+
+- `services/match_identity_reconciliation_service._mark_superseded()` scrie
+  **mereu** toate trei coloanele, filtrat idempotent pe `superseded_by is null`.
+- RPC-ul canonic `_upsert_match_canonical_locked` **doar citește**
+  `superseded_by` (`WHERE superseded_by IS NULL`): nicio atribuire, fără SQL
+  dinamic, fără `jsonb_populate_record`, listă de coloane explicită.
+  *(Prima citire a fost greșită — `position('superseded_by' in src) > 0`
+  prinsese liniile de **citire**. Corectat prin regex pe atribuire.)*
+- Singurele funcții din bază care scriu un `superseded_by` sunt
+  `promote_challenger` și `rollback_champion` — pe `model_champions`, **altă
+  tabelă**.
+- Acest ADR e `Proposed`, nimic implementat; niciun commit din 15–20 oct îl
+  implementează.
+
+**Deci a fost o scriere din AFARA sistemului, iar singurul câmp care ar fi
+putut-o data e exact cel care e NULL.** Cine și când: **necunoscut**, și nu se
+deduce (Regula #8).
+
+### Reparație făcută (nu propusă): clasa 9 din `check_data_health`
+
+`database.queries.get_supersede_without_reason()` + clasa 9 în monitor, **prag
+zero absolut**: un rând scos din setul live fără să spună de ce e deja o
+pierdere de trasabilitate, nu un indiciu statistic. Detector **read-only**, deci
+nu atinge niciun contract — exact argumentul cu care §5 justifica opțiunea A.
+Nu repară nimic retroactiv; face **următoarea** astfel de scriere vizibilă în
+loc de tăcută (North Star #9). 9 teste, 6 mutații verificate.
+
+**Rămâne de decis, nefăcut deliberat**: un `CHECK` în Postgres care ar face
+starea **imposibilă**, nu doar detectabilă
+(`CHECK (superseded_by IS NULL OR (superseded_reason IS NOT NULL AND superseded_at IS NOT NULL))`).
+Ar fi garanția reală, dar schimbă un contract de date pe o tabelă centrală și ar
+trebui să trateze cele 4 rânduri existente care îl încalcă — deci **ADR propriu**,
+nu un amendament aici.

@@ -255,7 +255,8 @@ def main() -> int:
         print("EROARE: Supabase indisponibil (SUPABASE_URL / SUPABASE_SECRET_KEY).")
         return 1
 
-    from database.queries import get_client, get_team_identity_drift
+    from database.queries import (get_client, get_supersede_without_reason,
+                                 get_team_identity_drift)
     from providers.flashscore.discovery import FLASHSCORE_TRACKED_COMPETITIONS
 
     client = get_client()
@@ -611,7 +612,49 @@ def main() -> int:
             findings += 1
     print(BAR)
 
-    print(f"  Clase cu constatări: {findings}/8")
+    # ════════════════════════════════════════════════════════════════════
+    # CLASA 9 — supersedare fără motiv și fără marcaj (ADR-075 §8, 2026-10-20)
+    #
+    # De ce există. Cele trei rânduri placeholder Flashscore din cazul ADR-075
+    # au fost marcate `superseded_by` cu `superseded_reason` ȘI `superseded_at`
+    # NULL. Combinația e unică: 3 din 6742 de rânduri supersedate. Verificat
+    # că NIMIC din sistem nu o poate produce — `match_identity_reconciliation
+    # _service._mark_superseded()` scrie mereu toate trei coloanele, iar RPC-ul
+    # canonic `_upsert_match_canonical_locked` doar CITEȘTE `superseded_by`
+    # (fără atribuire, fără SQL dinamic, fără `jsonb_populate_record`).
+    # Singurele funcții din bază care scriu un `superseded_by` lucrează pe
+    # `model_champions`, altă tabelă.
+    #
+    # Deci a fost o scriere din AFARA sistemului — iar singurul câmp care ar
+    # fi putut-o data e exact cel NULL. Cine și când: necunoscut, și nu se
+    # deduce (Regula #8).
+    #
+    # Clasa asta nu repară nimic retroactiv. Face următoarea astfel de
+    # scriere VIZIBILĂ în loc de tăcută — direct North Star #9.
+    #
+    # PRAGUL E ZERO ABSOLUT: un rând scos din setul live fără să spună de ce
+    # e deja o pierdere de trasabilitate, nu un indiciu statistic.
+    print("  9. SUPERSEDARE FĂRĂ MOTIV (ADR-075 §8)")
+    n_orfane, exemple = get_supersede_without_reason()
+    if n_orfane is None:
+        print("     [ATENȚIE] interogarea nu a putut fi făcută — se raportează "
+              "ca NECUNOSCUTĂ, nu ca sănătoasă (Regula #8).")
+    elif n_orfane == 0:
+        print("     OK   fiecare rând supersedat spune de ce")
+    elif n_orfane:
+        print(f"     ⛔ {n_orfane} rânduri supersedate FĂRĂ `superseded_reason`:")
+        for r in exemple:
+            print(f"        id={r['id']} {r.get('fixture_id')} "
+                  f"{r.get('home_team')} - {r.get('away_team')} "
+                  f"{r.get('kickoff_date')} -> superseded_by={r.get('superseded_by')}")
+        if n_orfane > len(exemple):
+            print(f"        … și încă {n_orfane - len(exemple)}")
+        print("        Un rând scos din setul live fără motiv nu e trasabil. "
+              "Niciun scriitor din cod poate produce asta — vezi ADR-075 §8.")
+        findings += 1
+    print(BAR)
+
+    print(f"  Clase cu constatări: {findings}/9")
     print("  Verificare încheiată. ZERO scriere efectuată.")
     print(BAR)
     return 1 if findings else 0

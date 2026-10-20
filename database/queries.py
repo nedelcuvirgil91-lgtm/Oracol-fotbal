@@ -2590,6 +2590,48 @@ def get_team_identity_drift() -> list[dict]:
     ]
 
 
+def get_supersede_without_reason(limit_examples: int = 15) -> tuple[int | None, list[dict]]:
+    """Randuri `match_history` scoase din setul live FARA sa spuna de ce.
+
+    Intoarce `(total, exemple)`. `total` e numarat server-side cu
+    `count="exact"`, deci NU atinge plafonul implicit PostgREST de 1000 —
+    nu se citesc toate randurile, doar primele `limit_examples` ca exemple.
+    Asta e deliberat diferit de `get_team_identity_drift()`, care TREBUIE sa
+    vada tot setul ca sa poata grupa; aici intrebarea e „cate si cum arata
+    cateva", nu „care sunt toate".
+
+    `(None, [])` la eroare = NECUNOSCUT, niciodata „zero" (Regula #8): un
+    `(0, [])` intors pe eroare ar arata identic cu starea sanatoasa.
+
+    De ce exista (ADR-075 §8, 2026-10-20). Trei randuri placeholder Flashscore
+    au `superseded_by` setat cu `superseded_reason` SI `superseded_at` NULL —
+    3 din 6742. Verificat ca niciun scriitor din sistem nu poate produce asta:
+    `match_identity_reconciliation_service._mark_superseded()` scrie mereu
+    toate trei coloanele, iar RPC-ul canonic doar CITESTE `superseded_by`.
+    Deci a fost o scriere din afara sistemului, iar singurul camp care ar fi
+    putut-o data e exact cel NULL. Clasa nu repara retroactiv nimic — face
+    urmatoarea astfel de scriere vizibila (North Star #9)."""
+    client = get_client()
+    if client is None:
+        return None, []
+    try:
+        res = (
+            client.table("match_history")
+            .select("id,fixture_id,home_team,away_team,kickoff_date,"
+                    "superseded_by,superseded_at", count="exact")
+            .not_.is_("superseded_by", "null")
+            .is_("superseded_reason", "null")
+            .order("id")
+            .limit(max(1, int(limit_examples)))
+            .execute()
+        )
+    except Exception as exc:
+        logger.error("[Queries] get_supersede_without_reason failed: %s", exc)
+        return None, []
+    total = res.count if res.count is not None else len(res.data or [])
+    return int(total), list(res.data or [])
+
+
 def upsert_match_events(match_id: int, events: list[dict], season: str | None = None) -> bool:
     """`match_events` (migratia 032/033/039) - timeline complet (goluri/
     cartonase/schimbari/VAR), nu doar substitutii. `on_conflict` pe cheia

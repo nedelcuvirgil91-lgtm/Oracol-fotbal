@@ -40,6 +40,38 @@ logger = logging.getLogger("FootballOracle.SyncLayer.SoccerFootballInfoClient")
 PROVIDER_ID = "soccerfootballinfo"
 BASE_URL = "https://soccer-football-info.p.rapidapi.com"
 
+# [ADAUGAT 2026-10-20 — instrumentare, NU reparatie]
+# `provider_call_log` arata 75 de apeluri, 0 reusite, 100% HTTP 400, intre
+# 11 si 19 octombrie. Ultimul succes (din `api_cache`) e 10 oct 08:20:04;
+# primul 400 logat e 11 oct 08:37:03 — deci ruptura e incadrata in ~24h, iar
+# `git log` nu are NICIUN commit intre 8 si 12 oct, deci nu e o schimbare
+# de-a noastra. Ce lipsea ca sa stim DE CE: corpul raspunsului. Codul logheaza
+# doar statusul, iar un 400 de la RapidAPI isi spune motivul in corp
+# ("You are not subscribed to this API", parametru respins, plan expirat) —
+# distinctii care cer remedii DIFERITE.
+#
+# Se logheaza doar corpul RASPUNSULUI, niciodata cererea sau header-ele: cheia
+# RapidAPI circula exclusiv in header-ul de cerere, deci nu poate ajunge aici.
+# Trunchiat, fiindcă un HTML de eroare poate avea kilobytes.
+_LUNGIME_MAXIMA_CORP_DIAGNOSTIC = 400
+
+
+def _corp_diagnostic(resp) -> str:
+    """Corpul unui raspuns eșuat, trunchiat si pe o singura linie.
+
+    Nu arunca NICIODATA: e chemata pe calea de eroare, deci o excepție aici ar
+    masca defectul pe care tocmai incearca sa-l explice."""
+    try:
+        text = resp.text or ""
+    except Exception:  # pragma: no cover — corp necitibil (conexiune rupta)
+        return "<corp necitibil>"
+    text = " ".join(text.split())
+    if not text:
+        return "<corp gol>"
+    if len(text) > _LUNGIME_MAXIMA_CORP_DIAGNOSTIC:
+        return text[:_LUNGIME_MAXIMA_CORP_DIAGNOSTIC] + "…[trunchiat]"
+    return text
+
 
 class SoccerFootballInfoClient:
     """Client generic — NU cunoaște normalizarea către `match_history`
@@ -112,7 +144,8 @@ class SoccerFootballInfoClient:
                 if success:
                     data = resp.json()
                 else:
-                    logger.warning("[SoccerFootballInfo] HTTP %s pentru %s", resp.status_code, path)
+                    logger.warning("[SoccerFootballInfo] HTTP %s pentru %s — corp: %s",
+                                   resp.status_code, path, _corp_diagnostic(resp))
             except Exception as exc:
                 logger.error("[SoccerFootballInfo] Eroare request %s: %s", path, exc)
                 caught_exc = exc

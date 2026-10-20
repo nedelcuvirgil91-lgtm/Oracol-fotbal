@@ -348,4 +348,7 @@ def test_clasa_6_e_chiar_cablata_in_raport():
     # 6 -> 7, clasa „extragerea Flashscore a incetat sa produca".]
     # [ACTUALIZAT 2026-10-19, ADR-078: 7 -> 8, clasa „un id Flashscore cu
     # doua etichete". Garda a cazut la adaugarea clasei, exact cum trebuia.]
-    assert "findings}/8" in sursa, "sumarul nu numara toate clasele"
+    # [ACTUALIZAT 2026-10-20, ADR-075 §8: 8 -> 9, clasa „supersedare
+    # fara motiv". Garda a cazut din nou la adaugarea clasei, exact cum
+    # trebuia — a treia data consecutiv ca mecanismul si-a facut treaba.]
+    assert "findings}/9" in sursa, "sumarul nu numara toate clasele"

@@ -103,11 +103,12 @@ def test_get_match_detail_returns_none_when_result_missing():
 
 
 class _FakeResp:
-    def __init__(self, payload=None, ok=True, status_code=200):
+    def __init__(self, payload=None, ok=True, status_code=200, text=""):
         self._payload = payload
         self.ok = ok
         self.status_code = status_code
         self.headers = {}
+        self.text = text
 
     def json(self):
         return self._payload
@@ -175,3 +176,96 @@ def test_get_soccerfootballinfo_client_returns_singleton(monkeypatch):
     c1 = mod.get_soccerfootballinfo_client()
     c2 = mod.get_soccerfootballinfo_client()
     assert c1 is c2
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# INSTRUMENTARE 2026-10-20 — corpul raspunsului la eșec
+#
+# De ce exista: 75 de apeluri, 0 reusite, 100% HTTP 400 intre 11 si 19 oct, iar
+# codul logheaza doar STATUSUL. Un 400 de la RapidAPI isi spune motivul in corp,
+# iar motivele cer remedii DIFERITE ("not subscribed" -> audit de cheie;
+# parametru respins -> reparatie la noi). Fara corp, nu se poate decide.
+# ════════════════════════════════════════════════════════════════════════════
+
+def test_corpul_raspunsului_ajunge_in_log_la_eșec(caplog):
+    """Garda centrala: motivul trebuie sa fie VIZIBIL, nu doar codul."""
+    import logging
+    corp = '{"message":"You are not subscribed to this API."}'
+    client = _client_with_session(_FakeSession(resp=_FakeResp(ok=False, status_code=400, text=corp)))
+    with caplog.at_level(logging.WARNING, logger="FootballOracle.SyncLayer.SoccerFootballInfoClient"):
+        client.get_matches_for_day("2026-01-01")
+    mesaje = " ".join(r.getMessage() for r in caplog.records)
+    assert "not subscribed" in mesaje, "motivul respingerii trebuie sa apara in log"
+    assert "400" in mesaje
+
+
+def test_cheia_nu_poate_ajunge_in_log(caplog):
+    """Contrapondere de securitate: se logheaza corpul RASPUNSULUI, niciodata
+    cererea. Cheia circula doar in header-ul de cerere (`_FakeKeyManager` o
+    pune ca "fake"), deci nu are cale spre log — verificat, nu presupus."""
+    import logging
+    client = _client_with_session(_FakeSession(resp=_FakeResp(ok=False, status_code=400, text="refuzat")))
+    with caplog.at_level(logging.WARNING, logger="FootballOracle.SyncLayer.SoccerFootballInfoClient"):
+        client.get_matches_for_day("2026-01-01")
+    mesaje = " ".join(r.getMessage() for r in caplog.records)
+    assert "fake" not in mesaje
+    assert "x-rapidapi-key" not in mesaje
+
+
+def test_corp_lung_e_trunchiat():
+    """Un HTML de eroare poate avea kilobytes; log-ul de noapte are deja
+    peste 100.000 de linii."""
+    from soccerfootballinfo_client import _corp_diagnostic, _LUNGIME_MAXIMA_CORP_DIAGNOSTIC
+    rezultat = _corp_diagnostic(_FakeResp(text="x" * 5000))
+    assert len(rezultat) <= _LUNGIME_MAXIMA_CORP_DIAGNOSTIC + len("…[trunchiat]")
+    assert rezultat.endswith("…[trunchiat]")
+
+
+def test_corp_pe_o_singura_linie():
+    """Un corp cu linii noi ar rupe o singura intrare de log in mai multe,
+    facand-o ne-grepabila."""
+    from soccerfootballinfo_client import _corp_diagnostic
+    rezultat = _corp_diagnostic(_FakeResp(text="prima\n\nlinie   \t a doua\n"))
+    assert "\n" not in rezultat
+    assert rezultat == "prima linie a doua"
+
+
+def test_corp_gol_e_numit_explicit():
+    """Regula #8 — o stare necunoscuta rămâne explicit numita, nu se confunda
+    cu un corp care chiar lipsește."""
+    from soccerfootballinfo_client import _corp_diagnostic
+    assert _corp_diagnostic(_FakeResp(text="")) == "<corp gol>"
+
+
+def test_corp_necitibil_nu_arunca():
+    """Chemata pe calea de EROARE: o excepție aici ar masca exact defectul pe
+    care incearca sa-l explice."""
+    from soccerfootballinfo_client import _corp_diagnostic
+
+    class _RespRupt:
+        @property
+        def text(self):
+            raise OSError("conexiune inchisa inainte de corp")
+
+    assert _corp_diagnostic(_RespRupt()) == "<corp necitibil>"
+
+
+def test_succesul_nu_logheaza_corpul(caplog):
+    """Instrumentarea e strict pe calea de eșec — altfel fiecare apel reusit ar
+    adauga pana la 400 de caractere in log, degeaba."""
+    import logging
+    client = _client_with_session(
+        _FakeSession(resp=_FakeResp({"result": []}, ok=True, status_code=200, text="corp-de-succes")))
+    with caplog.at_level(logging.WARNING, logger="FootballOracle.SyncLayer.SoccerFootballInfoClient"):
+        client.get_matches_for_day("2026-01-01")
+    mesaje = " ".join(r.getMessage() for r in caplog.records)
+    assert "corp-de-succes" not in mesaje
+
+
+def test_instrumentarea_nu_schimba_valoarea_intoarsa():
+    """Zero schimbare de comportament: un eșec intoarce in continuare None, un
+    succes intoarce in continuare payload-ul."""
+    eșec = _client_with_session(_FakeSession(resp=_FakeResp(ok=False, status_code=400, text="x")))
+    assert eșec.get_matches_for_day("2026-01-01") is None
+    succes = _client_with_session(_FakeSession(resp=_FakeResp({"result": [1]}, ok=True, status_code=200, text="x")))
+    assert succes.get_matches_for_day("2026-01-02") == {"result": [1]}

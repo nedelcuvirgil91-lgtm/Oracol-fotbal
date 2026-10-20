@@ -21,6 +21,17 @@ Tool-uri care **necesită** acest skill înainte de apel: `execute_sql`, `apply_
 2. **Pentru schimbări de schemă riscante** (DDL, migrări noi): ia în calcul `create_branch` pentru testare izolată, în loc de scriere directă pe `Prediction`. Dacă alegi scriere directă, spune explicit de ce branch-ul nu e necesar în acest caz.
 3. **Pentru orice operație distructivă** (`delete_branch`, `reset_branch`, `pause_project`, `DROP`/`DELETE` în SQL): cere confirmare explicită, separată, chiar dacă utilizatorul a aprobat deja etapa în general — o aprobare de etapă nu e o aprobare per-operație distructivă.
 4. **Verifică schema existentă** (`list_tables`) înainte de orice migrare care atinge o tabelă deja existentă — nu presupune structura curentă.
+5. **Dacă tabela atinsă are o coloană de marcaj temporal, scrierea TREBUIE să o includă explicit.** `DEFAULT now()` se aplică **doar** pe `INSERT`, niciodată pe `UPDATE` sau pe ramura `DO UPDATE` a unui `upsert` — deci un `UPDATE` care o omite îngheață marcajul tăcut, iar rândul își împrospătează conținutul purtând ora primei scrieri.
+   - **Caz concret, verificat**: `model_config.updated_at` e înghețat la **2026-09-06 11:29:08**, deși au urmat cel puțin trei scrieri (ADR-072 pe 14 oct, ADR-073 pe 15 oct, ADR-078 pe 19 oct). Toate trei au fost `UPDATE model_config SET data = data || '…'::jsonb WHERE id = 1`, fără `updated_at`. `supabase_client.save_config()` îl scrie corect — doar scrierile prin MCP l-au sărit. Costul: lanțul de amprente al flag-urilor nu mai poate fi ancorat în timp (`CLAUDE.md` D-14).
+   - **Forma corectă pentru orice scriere de flag**:
+     ```sql
+     UPDATE model_config
+     SET data = data || '{"<flag>": true}'::jsonb,
+         updated_at = now()
+     WHERE id = 1;
+     ```
+   - **De ce apare aici și nu într-o gardă de cod**: gărzile AST existente (`tests/test_upsert_timestamp_freshness.py`, `tests/test_model_config_writers_set_updated_at.py`) citesc **cod**. Prin construcție nu pot vedea SQL ad-hoc rulat prin MCP — singurul loc care acoperă acea suprafață e acest skill.
+   - **Nu se rescrie retroactiv** un marcaj deja înghețat: ar fi o minciună în cealaltă direcție. Se corectează de la prima scriere reală următoare.
 
 ## Reguli de respectat (din CLAUDE.md)
 
