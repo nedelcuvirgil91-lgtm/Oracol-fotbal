@@ -21,7 +21,8 @@ Nimic din lista asta nu avansează fără tine. Ordinea e după cât costă amâ
 
 | # | Ce | Stare | Costul amânării |
 |---|---|---|---|
-| **1.1** | **`decision_feed` #8** — expirarea Challenger-ului `blend_v1/174e7e17` | `pending`, **creată azi**, TTL 27 oct | Blochează antrenarea unui `blend_v1` nou. Exact scenariul care a costat 14 zile în august. |
+| **1.1** | **ADR-079** — ciclul de viață al unei decizii T3a (toate trei fețele din §2) | PROPUNERE, cere aprobare | **Cel mai mare risc deschis azi**: o aprobare de expirare se poate executa ca **promovare** de campion, fără ca nimeni să fi aprobat o promovare (§4.1 din ADR). Fereastra e de ordinul a 3 zile. |
+| **1.1bis** | **`decision_feed` #8** — expirarea `blend_v1/174e7e17` | `pending`, TTL 27 oct — **NU se atinge, deliberat** | ⚠️ **Recomandarea mea de pe 20 oct dimineața era GREȘITĂ.** Ținta nu e înțepenită: 2 din 3 metrici semnificative, Δ acuratețe urcă monoton 0,98 → 2,33pp în 4 zile. Se rezolvă singură ~23 oct. `DE_URMARIT.md` §7. |
 | **1.2** | **D-6 — două tabele de backup** | restante de **~30 de zile** peste termenul propriu | Mic, dar una (ADR-069, 72 kB) e singura tabelă din 62 **fără RLS**. Decizia e „se păstrează" / „se șterg"; dacă se păstrează, merită RLS. |
 | **1.3** | **ADR-077** — criteriul de rutare SFI | propunere, recomandarea s-a **inversat** la măsurare | Zero cost acum (criteriul inert nu face rău). Dar ADR-ul stă deschis cu o recomandare greșită scrisă în el. |
 | **1.4** | **ADR-075** — `CHECK` care face imposibilă supersedarea fără motiv | propunere | Mic. Monitorul prinde deja clasa (clasa 9, activă). |
@@ -38,8 +39,14 @@ comisă de niciun cod** — vezi §2.1. Nu e o decizie care te așteaptă; e un 
 
 **Ăsta e cel mai important lucru din document, și e și cauza tehnică a
 problemei pe care ai ridicat-o**: lucrurile se pierd. Nu doar în conversație —
-**și în sistem**. Trei defecte independente compun același efect. **Unul din trei
-e reparat (2.3, pe 20 oct); celelalte două cer un ADR și te așteaptă.**
+**și în sistem**.
+
+**[ACTUALIZAT 20 oct, seara]** Erau trei defecte; **sunt patru**, iar al
+patrulea e cel mai grav și a ieșit la iveală exact din repararea lui 2.3.
+2.3 e livrat. Celelalte trei sunt acum **un singur ADR**:
+**`ADR-079-decision-lifecycle.md`** (PROPUNERE). §0 din el arată de ce nu se
+pot decide separat: cablarea sweep-ului (2.2) *produce* defectul 2.4 dacă 2.4
+nu e reparat întâi.
 
 ### 2.1 Decizii care nu pot fi comise (D-8)
 
@@ -82,10 +89,35 @@ Deciziile de consens (#6) **n-au `decision_kind` deloc** — acolo apare
 `FEL NECUNOSCUT (verdict: surface_worthy)`, niciodată gol și niciodată ghicit.
 14 teste, 7 mutații prinse, calea de scriere neatinsă. Fără ADR (prezentare).
 
-> **Recomandarea mea pentru Tier 1**: 2.3 e făcută. Rămân 2.1 și 2.2, de luat
-> **împreună**, ca un singur ADR despre ciclul de viață al unei decizii — sunt
-> aceeași problemă văzută din două unghiuri (lipsește execuția / lipsește
-> detecția).
+**Gol rămas în ea, găsit la o zi**: calea de promovare nu scrie niciodată
+`decision_kind` (Faza C compensează cu un implicit), deci o propunere de
+**promovare** — felul cu consecința cea mai mare — s-ar afișa ca
+`FEL NECUNOSCUT`. O linie, în ADR-079 §4.3. A ieșit la iveală tocmai pentru că
+2.3 a scos câmpul din adâncul unui `st.json` în titlu.
+
+### 2.4 O decizie deschisă își poate schimba tăcut FELUL — 🔴 cel mai grav
+
+`propose_decision()` suprascrie `evidence`-ul oricărei decizii **deschise** pe
+același `target_key` — inclusiv una `approved`. Clasa e deja cunoscută și
+numită în cod (garda `R3-Risk-1`), dar garda e aplicată pe **una din trei**
+căi: rollback o are, expirarea doar parțial, **promovarea deloc**.
+
+Fazele rulează A → … → C în **aceeași trecere**. Deci: aprobi #8 (expirare) →
+Challenger-ul devine candidat → Faza A suprascrie `evidence`-ul lui #8 cu unul
+de promovare → Faza C, câteva linii mai jos, **promovează campionul**. Ai
+aprobat o expirare, sistemul execută o promovare. **Contrazice ADR-002.**
+
+Singurul lucru care ține riscul închis azi e că #8 e `pending`, nu `approved`.
+Scenariul pas cu pas și reparația (la nivelul invariantului, nu al
+apelantului): **ADR-079 §4.1**.
+
+> **Recomandarea mea pentru Tier 1**: 2.3 e livrată. 2.1, 2.2 și 2.4 sunt
+> **ADR-079**, de aprobat ca un întreg — ordinea internă e fixată în el: 2.4
+> întâi (singurul ireversibil), apoi 2.2, apoi 2.1.
+>
+> *(formularea anterioară, din 20 oct dimineața, păstrată ca istoric: „Rămân
+> 2.1 și 2.2, de luat împreună, ca un singur ADR despre ciclul de viață al unei
+> decizii". Era corectă ca direcție, dar nu știa de 2.4.)*
 
 ---
 

@@ -34,6 +34,10 @@ Not Implemented
 >
 > **Concluzia arhitecturală care ordonează totul** (2026-10-20): defectul cel mai costisitor nu e la predicții, ci la **bucla de decizie umană** — propuneri care nu pot fi comise (D-8), nimic care semnalează o decizie uitată (D-5), și un ecran care nu numește ce aprobi (D-11). Împreună, ele sunt oglinda tehnică a problemei „ridicăm lucruri și se uită".
 >
+> **[ACTUALIZAT 20 oct, seara]** D-11 e **REPARAT**, iar repararea lui a scos la iveală **o a patra față, mai gravă decât celelalte trei**: o decizie `approved` își poate schimba tăcut felul, iar o aprobare de **expirare** se poate executa ca **promovare** de campion — fără ca nimeni să fi aprobat o promovare (contrazice ADR-002). Cele trei rămase sunt acum un singur document: **`docs/00_GOVERNANCE/ADR-079-decision-lifecycle.md`** (PROPUNERE, cere aprobare). §0 arată de ce nu se pot decide separat — cablarea sweep-ului (D-5) *produce* al patrulea defect dacă acela nu e reparat întâi.
+>
+> **Singurul lucru care ține riscul închis azi e că decizia #8 e `pending`, nu `approved`.** Vezi `DE_URMARIT.md` §7: #8 **nu se atinge** până ~23 oct, deliberat — recomandarea mea de a o aproba, dată pe 20 oct dimineața, era **greșită** (ținta e la 2 din 3 metrici semnificative și urcă monoton).
+>
 > ---
 >
 > **🧭 Analiza pe cele cinci decizii, cu §6.1-§6.4 (ce s-a executat efectiv): `docs/00_GOVERNANCE/PLAN_DECIZII_DESCHISE_2026-10-20.md`** — analiza completă, măsurată read-only, pe cele cinci care stăteau pe masă (reziduul de nume lungi, ADR-077, ADR-075 §8, D-14, F3), **plus pașii în ordine, cu precondiții și condiții de oprire** (§6). Documentul există ca să nu reluăm analiza de la zero: conține și §0 cu **trei afirmații din documentele proiectului dovedite FALSE**, și, pentru fiecare punct, o secțiune „Ce ar schimba decizia" — reevaluarea e ieftină prin construcție, nu o rediscuție completă. Două recomandări s-au inversat la măsurare (ADR-077 și reziduul).
@@ -195,6 +199,8 @@ Dar înseamnă și că **nimic nu semnalează o decizie uitată** — #7 a stat 
 
 **Decizie cerută**: se cablează sweep-ul (și atunci TTL-ul devine real, cu riscul de a expira propuneri pe care omul n-a apucat să le vadă), sau se elimină TTL-ul ca mecanism și se înlocuiește cu o alertă. **Nefăcut nimic deliberat** — ambele variante schimbă contractul ADR-026, deci cer ADR.
 
+> **[20 oct — DECIZIA E ÎN `ADR-079`, iar cablarea simplă e DOVEDIT greșită]** Dacă sweep-ul ar rula mâine, decizia #8 ar deveni `expired` pe 27 oct — iar `expired` **nu** e în `_OPEN_DECISION_STATUSES` (`automation_runs.py:39`), deci garda de idempotență n-o mai vede și rularea următoare ar propune #9, apoi #10, în fiecare noapte. **D-5 rezolvat singur produce defectul D-11bis.** ADR-079 §3.2 cablează sweep-ul **împreună** cu o perioadă de răcire de 168 h pe `resolved_at` (câmp existent, zero schemă nouă).
+
 ### D-6. Backup-uri cu revizuire programată, AMBELE restante
 
 Ambele ADR-uri care le-au creat notează explicit „fără reminder automat programat — de readus manual în discuție". Reminderul manual n-a venit. Intrarea asta e el.
@@ -227,6 +233,12 @@ Deci decizia **#6** (`surface_worthy`, `agreement_score`, `study_run_id: 1072`),
 **Diferit de D-5**: acolo lipsește detecția (sweep-ul nu rulează), aici lipsește execuția. **Nu afectează expirările** — acelea merg prin `continuous_learning`, calea dovedită de deciziile #4, #5.
 
 **Decizia cerută**: se implementează faza de execuție, sau se oprește producerea de decizii pe care nimeni nu le poate comite.
+
+> **[20 oct — ÎNCADRAREA ERA GREȘITĂ, iar asta schimbă decizia. Vezi `ADR-079` §2.]** „Lipsește codul de execuție" e fals: docstring-ul modulului (liniile 9-13) și ADR-033 §Decision **interzic explicit** oricărei linii din `consensus_validation` să atingă servirea (*„produc exclusiv evidență"*, *„Nu atinge niciodată `oracle_engine.py`, Model Registry, Challenger FSM sau Promotion Service"*). O fază de execuție acolo ar încălca regula normativă centrală a propriului ei ADR. Deci D-8 nu e un gol de implementare, e o **contradicție internă a ADR-033**: produce o decizie T3a — care prin ADR-026 înseamnă „cineva o execută după aprobare" — interzicându-și simultan orice execuție.
+>
+> Ce ar trebui să se întâmple e scris în chiar decizia #6, în `rollback_plan`: *„revenire la politica de serving implicită ADR-031 (flag de configurare)"*. Acțiunea e **comutarea unui flag** — exact operația pe care în proiectul ăsta o face omul, cu SQL arătat și confirmat, de fiecare dată. Recomandarea ADR-079: execuția e **operațională, nu de cod**, iar Decision Feed-ul primește un control „marchează ca executată", vizibil DIFERIT de „Aprobă".
+>
+> **Detaliu care contează**: `target_key` e `metric_name` (`agreement_score`), nu `familie|ligă` — deci deciziile de consens trăiesc într-un spațiu de nume separat și **nu se pot ciocni** cu cele de Challenger. Verificat în date.
 
 ### D-9. TheSportsDB — ~26 min/rulare. **CAUZĂ DETERMINATĂ 2026-10-14, iar remediul se INVERSEAZĂ**
 
@@ -317,6 +329,14 @@ Același tipar ca la `sync_pre_match_odds` în august: instrumentare întâi, re
 > **14 teste noi** (`tests/test_decision_feed_names_action.py`), **7 mutații, toate prinse**: titlul mut reintrodus · buton cu etichetă statică · apelul la rezumat eliminat · `verdict` promovat la acțiune · fel necunoscut cu etichetă inventată · ținta scoasă din titlu · garda `isinstance` scoasă. `pytest tests/`: **3671 passed, 2 skipped** — aritmetica se închide exact (3644 + 13 gardă GRANT + 14), deci niciun test umbrit. Calea de predicție **neatinsă**, verificat: `git diff --stat` pe `oracle_engine.py`/`feature_engine.py`/`ml_predictor.py`/`recalibration.py`/`oracle_api.py` e GOL.
 >
 > **Fără ADR**, per Change Policy: strict prezentare, nicio schimbare de contract, de model de date sau de responsabilitate. Calea de scriere (`approve_decision`/`reject_decision`) e **neatinsă**.
+>
+> **🔴 GOL GĂSIT ÎN PROPRIA REPARAȚIE, la câteva ore de la livrare — consemnat, nu ascuns.** `continuous_learning._handle_candidate_for_promotion` (liniile 279-280) **nu scrie niciodată `decision_kind`**; Faza C compensează cu un **implicit** codat: `evidence.get("decision_kind", "promotion")` (linia 800). Confirmat în date: decizia #3, promovarea lui `8ac89c70` (23 aug, `committed`), are câmpul NULL.
+>
+> Deci o propunere de **promovare** — felul cu consecința cea mai mare — s-ar afișa azi ca **`FEL NECUNOSCUT`**, nu ca „PROMOVARE Champion". **Nu e o eroare de randare**: ecranul raportează fidel ce scrie în `evidence`. Divergența e între ce scrie și ce va executa codul, adică același defect D-11 într-o formă nouă. Absența câmpului înseamnă **două lucruri diferite după cititor**: pentru Faza C = promovare, pentru ecran = necunoscut.
+>
+> Reparația e **o linie** (calea de promovare scrie felul explicit, simetric cu cea de expirare), dar atinge contractul deciziei, deci intră în **`ADR-079` §4.3**, nu ca editare tăcută.
+>
+> **De reținut ca metodă**: golul a ieșit la iveală **tocmai pentru că** D-11 a mutat `decision_kind` din adâncul unui `st.json` în titlu. Cât era îngropat, nimeni nu avea cum să observe că lipsește. O reparație care face un câmp vizibil îți arată și unde câmpul nu există.
 
 **Textul de mai jos descrie defectul ÎNAINTE de reparație**, păstrat ca istoric.
 

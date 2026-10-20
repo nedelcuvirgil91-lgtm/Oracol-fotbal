@@ -2,7 +2,9 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-10-16, 12:40 UTC**.
+Ultima actualizare: **2026-10-20**. Ultimul element adăugat: **§7 — decizia #8
+se rezolvă singură în jur de 23 oct, până atunci NU se atinge** (plus un gol
+găsit în propria reparație D-11).
 
 ---
 
@@ -882,3 +884,84 @@ reia când campionatele domestice nu mai au nimic mai bun de oferit, nu acum.
 **aprilie 2025** — a treia instanță a clasei de identitate duplicată, după
 Salzburg (rezolvat) și `Levski Sofia`/`PFC Levski Sofia` (nereparat). Nu e
 cauza acestui caz, dar e aceeași clasă.
+
+---
+
+## 7. 🔴 **~23 OCTOMBRIE** — decizia #8 se rezolvă singură, și până atunci NU se atinge (2026-10-20)
+
+**Declanșatorul e o cifră, nu o dată**: `accuracy_significant` pe
+`blend_v1/174e7e17`. Testul e binar, fără interpretare.
+
+```sql
+-- Starea deciziei + trendul tintei, intr-o singura citire
+SELECT n_matches_evaluated AS n,
+       round((delta_accuracy*100)::numeric,2) AS d_acc_pp, accuracy_significant,
+       brier_significant, logloss_significant, verdict, evaluated_at::date AS zi
+FROM challenger_evaluations
+WHERE training_run_id = '174e7e17-347e-498e-912f-893a855f742b'
+ORDER BY n_matches_evaluated DESC LIMIT 5;
+```
+
+### Ce așteptăm, și ce înseamnă fiecare rezultat
+
+| Rezultat | Înseamnă | Acțiune |
+|---|---|---|
+| `accuracy_significant = true` | verdictul devine `candidate_for_promotion` | **NU aprobi #8** — întrebarea corectă devine promovarea. Dar vezi avertismentul de mai jos: azi, calea de promovare ar suprascrie tăcut #8. |
+| rămâne `false`, Δ acuratețe **urcă** | încă nu, dar e pe drum | nu se atinge nimic |
+| rămâne `false`, Δ acuratețe **scade** sub 2/3 semnificative | Challenger-ul s-a degradat | expirarea redevine justificată |
+
+### Seria măsurată (de comparat, nu de reluat de la zero)
+
+| n | Δ acuratețe | sig. | Brier sig. | log-loss sig. |
+|---:|---:|:--:|:--:|:--:|
+| 204 (17 oct) | +0,98pp | nu | nu | nu |
+| 255 (18 oct) | +1,57pp | nu | nu | **DA** |
+| 290 (19 oct) | +2,07pp | nu | **DA** | **DA** |
+| **301 (20 oct)** | **+2,33pp** | nu | **DA** | **DA** |
+
+Ritm ~27 meciuri/zi. Fratele lui, `8ac89c70`, a trecut toate trei la n=383 —
+deci fereastra se deschide în jur de **23-24 octombrie**, înainte de TTL-ul
+deciziei (27 oct). **n=383 nu e o lege**, e locul unde a trecut un singur caz
+anterior; semnificația depinde de perechile discordante, nu doar de `n`.
+
+### ⚠️ De ce #8 se lasă `pending`, deliberat — e o decizie, nu o amânare
+
+Verificat în cod pe 20 octombrie, cele trei acțiuni posibile:
+
+- **Aprobă** → `174e7e17` devine `REJECTED(expired)`, **stare terminală**, nu
+  mai poate fi promovat niciodată. **Plus**: deschide calea prin care o
+  promovare s-ar executa fără ca nimeni s-o fi aprobat (vezi ADR-079 §4.1).
+- **Respinge** → `rejected` nu e stare „deschisă", deci rularea următoare
+  propune #9, identică, în fiecare noapte cât `n ≥ 300`.
+- **Nimic** → `pending` *este* stare deschisă, deci `propose_decision()`
+  returnează #8 și `surface_decision()` refuză s-o reîmpingă. Zero zgomot.
+  TTL-ul de 27 oct e inert, fiindcă `sweep_stale_decisions()` nu e cablată.
+
+**A nu face nimic e singura acțiune care nu distruge nimic și nu generează
+flux zilnic** — dar e un accident fericit, nu o proprietate proiectată.
+ADR-079 o transformă în comportament intenționat.
+
+### Legătura cu ADR-079 (PROPUNERE, cere aprobare)
+
+`docs/00_GOVERNANCE/ADR-079-decision-lifecycle.md` acoperă toate trei fețele:
+decizii care nu pot fi executate (#6, `approved` din 19 sept), nimic care
+semnalează o decizie uitată (sweep necablat), și o decizie deschisă care își
+poate schimba tăcut felul. **Până la aprobarea lui, riscul din §4.1 e activ**,
+și singurul lucru care îl ține închis e faptul că #8 e `pending`, nu
+`approved`.
+
+### Gol găsit în propria reparație D-11, la o zi de la livrare
+
+Calea de promovare (`continuous_learning._handle_candidate_for_promotion`)
+**nu scrie niciodată `decision_kind`** — Faza C compensează cu un implicit
+(`"promotion"`). Confirmat în date: decizia #3, promovarea lui `8ac89c70`
+(23 aug), are câmpul NULL.
+
+Deci o propunere de **promovare** — felul cu consecința cea mai mare — s-ar
+afișa azi pe ecran ca **`FEL NECUNOSCUT`**, nu ca „PROMOVARE Champion".
+Ecranul raportează fidel ce scrie în `evidence`; divergența e între ce scrie
+și ce va executa codul. Reparația e o linie, în ADR-079 §4.3.
+
+**De reținut ca metodă**: golul a ieșit la iveală pentru că D-11 a mutat
+`decision_kind` din adâncul unui `st.json` în titlu. Cât era îngropat, nimeni
+nu avea cum să observe că lipsește.
