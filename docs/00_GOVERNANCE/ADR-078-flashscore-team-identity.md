@@ -207,4 +207,13 @@ Două lucruri, în ordine, fiecare cu confirmare explicită:
 1. **Migrarea 057** — SQL arătat integral înainte de rulare (North Star #6). Până atunci codul e inert: flagul e oprit, deci nimic nu scrie.
 2. **`UPDATE model_config`** pentru `flashscore_team_identity_capture_enabled = true`, cu amprentă `md5` înainte/după, ca la ADR-072 și ADR-073.
 
-**De verificat la prima rulare de după activare**: rânduri noi în `flashscore_team_identity`, `last_seen_at` care avansează la a doua vedere a aceluiași club (nu îngheață), `first_seen_at` care **nu** avansează, și clasa 8 care raportează „insuficiente date" cât timp tabela e goală.
+**[VERIFICAT PE PRODUCȚIE — 2026-10-19, rularea FDL `39322557559`, `success`]** 28 de rânduri, 28 de id-uri distincte, 28 de nume distincte, 0 fără `team_slug`, pe 14 meciuri din 8 competiții.
+
+**Două rezultate care corectează așteptările scrise mai sus:**
+
+1. **Sufixul de țară apare și în sezonul în curs**, nu doar la calificări. `Iberia 1999 (GEO)` și `Jagiellonia (POL)` au fost captate cu eticheta intactă pe 19 octombrie. Prognoza mea („driftul va fi zero până în iulie") era prea pesimistă. Confirmă totodată decizia de a scrie eticheta **brută**: normalizată, ambele ar fi colapsat și tabela n-ar fi arătat nimic.
+2. **Comparația `last_seen_at` vs `first_seen_at` NU e fiabilă la nivel de secundă.** Pe 4 din 28 de rânduri, `last_seen_at` e cu o secundă *înaintea* lui `first_seen_at` — fiindcă primul vine din `DEFAULT now()` (serverul Postgres) și al doilea din `_acum_utc()` (runnerul GitHub, calculat înainte de `INSERT`). **Două ceasuri, nu un defect de scriere.** Verificarea „egale la prima vedere" din §6.2 e deci greșită ca test și se scrie cu toleranță. Detecția de îngheț rămâne validă: o a doua vedere mută marcajul cu minute sau ore.
+
+   Clasa e mai largă decât tabela asta — toate cele 6 instanțe reparate pe 2026-08-26 scriu marcajul din client; acolo e invizibil fiindcă au o singură coloană de timp. **Nereparat**: a scrie `last_seen_at` server-side ar contrazice garda care impune `_acum_utc()` (`tests/test_upsert_timestamp_freshness.py`).
+
+**Rămâne NEexercitat**: cele 28 de rânduri sunt 28 de cluburi distincte, fiecare văzut o singură dată, deci „`last_seen_at` avansează la a doua vedere" se testează abia la prima rulare care reprocesează un club deja văzut.
