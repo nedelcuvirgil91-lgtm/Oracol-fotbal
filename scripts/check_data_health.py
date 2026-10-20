@@ -617,7 +617,17 @@ def main() -> int:
     #
     # De ce există. Cele trei rânduri placeholder Flashscore din cazul ADR-075
     # au fost marcate `superseded_by` cu `superseded_reason` ȘI `superseded_at`
-    # NULL. Combinația e unică: 3 din 6742 de rânduri supersedate. Verificat
+    # NULL. Combinația e unică: 3 din 6742 de rânduri supersedate.
+    #
+    # ATENȚIE la cifră — clasa asta raportează 4, nu 3, și e corect:
+    # filtrul e `superseded_reason IS NULL` (un rând scos din setul live fără
+    # să spună DE CE nu e trasabil, indiferent dacă poartă marcaj de timp),
+    # pe când „cele 3" din ADR sunt subsetul cu AMBELE câmpuri NULL. Al
+    # patrulea (`id=130978`, Rijeka–Dinamo Zagreb) e IDENTIFICAT și benign:
+    # `superseded_at = 2026-08-23 19:41:11`, supersedarea manuală documentată
+    # în CLAUDE.md la unificarea formelor abreviate. Rămâne raportat oricum —
+    # îi lipsește motivul scris. Vezi ADR-075 §8, „PRECIZARE 2026-10-20".
+    # Verificat
     # că NIMIC din sistem nu o poate produce — `match_identity_reconciliation
     # _service._mark_superseded()` scrie mereu toate trei coloanele, iar RPC-ul
     # canonic `_upsert_match_canonical_locked` doar CITEȘTE `superseded_by`

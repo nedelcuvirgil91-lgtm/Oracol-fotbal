@@ -2610,7 +2610,16 @@ def get_supersede_without_reason(limit_examples: int = 15) -> tuple[int | None, 
     toate trei coloanele, iar RPC-ul canonic doar CITESTE `superseded_by`.
     Deci a fost o scriere din afara sistemului, iar singurul camp care ar fi
     putut-o data e exact cel NULL. Clasa nu repara retroactiv nimic — face
-    urmatoarea astfel de scriere vizibila (North Star #9)."""
+    urmatoarea astfel de scriere vizibila (North Star #9).
+
+    CIFRA INTOARSA E 4, NU 3, si e corect. Filtrul de aici e doar
+    `superseded_reason IS NULL` — intrebarea e „spune DE CE a fost scos?", nu
+    „stim si cand?". „Cele 3" din ADR sunt subsetul cu AMBELE campuri NULL.
+    Al patrulea (`id=130978`, Rijeka-Dinamo Zagreb, `superseded_at` pe
+    2026-08-23) e IDENTIFICAT si benign — supersedarea manuala documentata in
+    CLAUDE.md — dar ramane raportat: ii lipseste motivul scris. Nu se adauga
+    nicio exceptie pentru el; o lista de exceptii s-ar invechi exact ca
+    documentatia pe care clasa asta o inlocuieste."""
     client = get_client()
     if client is None:
         return None, []

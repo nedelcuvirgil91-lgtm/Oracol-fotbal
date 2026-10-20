@@ -286,6 +286,39 @@ superseded_by IS NOT NULL                        →  6742 rânduri
 putut-o data e exact cel care e NULL.** Cine și când: **necunoscut**, și nu se
 deduce (Regula #8).
 
+#### [PRECIZARE 2026-10-20, după prima rulare reală a clasei 9 — monitorul numără 4, nu 3]
+
+Tabelul de mai sus e corect, dar prozele din jur spun „cele trei", iar monitorul
+raportează **4 rânduri**. Cele două cifre nu se contrazic — numără criterii
+diferite — dar lăsate așa, cineva care citește monitorul și apoi ADR-ul caută o
+regresie inexistentă. **Aceeași clasă de eroare ca „→ 7" vs. „→ 3" din 14
+octombrie: o cifră de verificare care nu se reproduce e mai rea decât niciuna.**
+
+- Clasa 9 filtrează pe **`superseded_reason IS NULL`** — criteriul corect, fiindcă
+  un rând scos din setul live fără să spună **de ce** e deja o pierdere de
+  trasabilitate, indiferent dacă poartă sau nu un marcaj de timp. Deci **4**.
+- „Cele trei" din acest ADR sunt rândurile cu **AMBELE** câmpuri NULL — subsetul
+  despre care nu se poate spune nici măcar *când*.
+
+**Al patrulea e IDENTIFICAT și benign**: `id=130978`, `tsdb_2482525`,
+Rijeka – Dinamo Zagreb (8 aug), cu `superseded_at = 2026-08-23 19:41:11`. Data îl
+leagă fără dubiu de lucrarea documentată în `CLAUDE.md` la unificarea formelor
+abreviate — *„Coliziunea unică apărută (Rijeka–Dinamo Zagreb, 8 aug) rezolvată
+prin supersedarea rândului TSDB de către cel Flashscore"*.
+
+**Și asta e o pistă reală pentru cele trei, nu o concluzie**: dovedește că
+supersedarea manuală prin SQL e o **practică existentă și documentată** în
+proiect. Cele trei sunt foarte probabil același mecanism; diferența e că acolo
+s-a sărit **și** `superseded_at`, deci nu a mai rămas nimic care să le dateze.
+Asimetria merită reținută: pe 23 august s-a scris marcajul dar nu motivul; la
+cele trei, niciunul. Cine și când **rămâne necunoscut pentru cele trei** — pista
+nu se transformă în atribuire.
+
+**Consecință pentru monitor: niciuna.** Un `exit 1` pentru 4 rânduri netrasabile
+e verdictul corect, iar al patrulea nu se „scuză" fiindcă îi știm proveniența —
+îi lipsește tot motivul scris. Se închide când primește unul, sau prin `CHECK`-ul
+din secțiunea următoare.
+
 ### Reparație făcută (nu propusă): clasa 9 din `check_data_health`
 
 `database.queries.get_supersede_without_reason()` + clasa 9 în monitor, **prag
