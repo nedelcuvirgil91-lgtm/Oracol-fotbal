@@ -1,10 +1,31 @@
 # ADR-079 — Ciclul de viață al unei decizii T3a
 
-**Status**: PROPUNERE (2026-10-20) — cere aprobare explicită înainte de implementare
+**Status**: PROPUNERE, **revizia 2** (2026-10-20 seara) — cere aprobare
+explicită înainte de implementare
 **Decizie de proiectare delegată și luată de mine** (2026-10-20, la cererea
 explicită a proprietarului produsului): §4.2, plafonul regulii de trend. Prima
 mea recomandare (fără plafon) s-a dovedit **greșită la măsurare** — vezi
 §4.2.1. Rămâne de aprobat ADR-ul ca întreg, nu acest punct.
+
+> **REVIZIA 2 — trei corecții la cererea explicită a proprietarului produsului
+> („vezi dacă ai greșit ceva").** Nu sunt cosmetice; **două dintre ele ar fi
+> produs pagubă dacă revizia 1 s-ar fi implementat ca scrisă:**
+>
+> | # | Ce era greșit în revizia 1 | Consecința dacă s-ar fi implementat | Unde |
+> |---|---|---|---|
+> | **1** | Reparația §4.1 spunea „felul diferă → `return None`" | **Blocarea permanentă a familiei `blend_v1`** — o propunere de promovare dintr-un 3/3 trecător nu se retrage niciodată și interzice pe veci expirarea. Mai rău decât comportamentul de azi. | §4.1.1 |
+> | **2** | Răcirea de 168 h cheiată pe `resolved_at` | **Inertă exact pe `expired`** — sweep-ul nu scrie `resolved_at`. Aș fi cablat sweep-ul crezând că fluxul zilnic e oprit, fiind oprit doar pe calea care nu-l producea. | §3.2 |
+> | **3** | Back-testul cita n=458/468/506 ca „n la expirare" | Doar **imprecizie de dovadă**, concluzia (plafon 450) rezistă — dar afirmația „reproduce exact toate trei" era prea tare: una se deplasează 7 zile. | §4.2.2 |
+>
+> Corecția 1 a ieșit la iveală **rulând regulile propuse peste seriile reale**,
+> nu din recitire. Corecția 2, verificând linie cu linie ce coloane scrie
+> `sweep_stale_decisions()`. Corecția 3, comparând `evidence` cu
+> `challenger_evaluations` la aceeași dată — și ea **dovedește empiric premisa
+> §4.1**, pe care o argumentasem doar din cod.
+>
+> Plus două defecte mici pe aceeași cale, §4.4: contorul `summary["proposed"]`
+> raportează propuneri care nu s-au făcut, și `commit_decision()` n-are gardă
+> de stare, deși `surface_decision` a primit una exact pentru clasa asta.
 **Derivat din**: D-5, D-8 și D-11 (`CLAUDE.md` §DECIZII) + o a treia față descoperită
 pe 20 octombrie, în timpul analizei deciziei #8 (Discovery Rule)
 **Atinge**: contractul ADR-026 (Decision Feed, mașina de stări + politica de
@@ -193,6 +214,31 @@ Sweep-ul se cablează, **împreună cu o perioadă de răcire**, nu înaintea ei
    rezolvată în ultimele **168 de ore** (identic cu `_T3A_DECISION_TTL_HOURS`,
    ca să nu introducem o a doua constantă de timp). Folosește `resolved_at`,
    care există deja — **zero schemă nouă**.
+
+   > **🔴 CORECTAT la review (20 oct seara) — regula era INERTĂ exact pe
+   > jumătatea care contează.** `sweep_stale_decisions()` scrie **numai**
+   > `{"status": "expired"}` și `{"status": "orphaned"}` — verificat linie cu
+   > linie. **Nu atinge `resolved_at`.** Singurii scriitori ai acelui câmp
+   > sunt `approve_decision`, `reject_decision` și `resolve_signal` (liniile
+   > 271, 278, 313); `withdraw_decision`, `commit_decision` și
+   > `fail_decision_commit` nu-l scriu nici ele.
+   >
+   > Deci o răcire cheiată pe `resolved_at` ar fi funcționat pentru `rejected`
+   > (acțiune umană) și **nu ar fi văzut niciodată** un `expired` produs de
+   > sweep — adică exact cazul pentru care §3.1 arată că răcirea e necesară.
+   > Aș fi cablat sweep-ul și aș fi crezut că fluxul zilnic e oprit, în timp ce
+   > era oprit doar pe calea pe care nu se producea.
+   >
+   > **Reparația, parte din acest ADR**: sweep-ul scrie `resolved_at = now()` și
+   > `resolved_by = 'sweep-adr-026'` la ambele tranziții. Nu e o schimbare de
+   > schemă — coloanele există. `withdraw_decision()` îl scrie și ea, din
+   > același motiv (o retragere e o rezolvare).
+   >
+   > **A patra instanță a clasei marcajului înghețat**, cu un mecanism nou: nu
+   > `on_conflict` care omite coloana (cele 6 din 26 aug), nu un `UPDATE` scris
+   > de mână (D-14), ci **o tranziție de stare care uită să-și datoreze
+   > propria rezolvare.** Garda AST existentă acoperă `upsert`-uri, deci prin
+   > construcție nu o putea vedea.
 3. **Raportare**: numărul de decizii expirate/orfanizate intră în `summary`-ul
    rulării, ca o expirare să nu treacă neobservată. O decizie `orphaned` e un
    eșec de producător (ADR-026), nu o curățenie.
@@ -258,17 +304,59 @@ dovada empirică că nu scalează.
 
 În `propose_decision()`, când există o decizie deschisă pe `target_key`:
 
-- `status = 'approved'` → **nu se atinge nimic**, se întoarce `None`. Ce a
-  aprobat omul e înghețat. (Comentariul de la linia 330 formulează deja
-  regula: *„omul a aprobat un conținut anume, nu «ce se va nimeri la
-  execuție»"* — doar că o impune pe o singură cale.)
-- `status ∈ {'proposed','pending'}` și felul **diferă** → nu se atinge nimic,
-  se întoarce `None`, se loghează explicit.
+- `status = 'approved'` → **nu se atinge nimic**, se întoarce `None`, **și se
+  raportează ca eșec explicit în `summary`** (vezi 4.1.1 — un `None` tăcut
+  reintroduce defectul într-altă formă). Ce a aprobat omul e înghețat.
+  (Comentariul de la linia 330 formulează deja regula: *„omul a aprobat un
+  conținut anume, nu «ce se va nimeri la execuție»"* — doar că o impune pe o
+  singură cale.)
+- `status ∈ {'proposed','pending'}` și felul **diferă** → propunerea veche se
+  **RETRAGE** prin `withdraw_decision()`, cu motivul scris, și apoi se creează
+  cea nouă. **NU** se întoarce `None` tăcut — vezi 4.1.1.
 - felul e **același** → se actualizează `evidence` (comportamentul de azi,
   legitim: împrospătează cifrele aceleiași propuneri).
 
 Garda `R3-Risk-1` din calea de rollback rămâne — devine redundantă, nu
 greșită, și e a doua plasă.
+
+### 4.1.1 🔴 PRIMA VERSIUNE A ACESTEI REPARAȚII ERA GREȘITĂ (găsit la review, 20 oct seara)
+
+Scrisesem: felul diferă → „nu se atinge nimic, se întoarce `None`". **Asta ar
+fi blocat permanent familia `blend_v1`**, iar scenariul e reconstituibil din
+datele reale, nu ipotetic.
+
+Rulând regulile propuse peste seria lui `4e17c737` (§4.2.2):
+
+1. **n=329, 12 septembrie** — atinge 3/3 → `_handle_candidate_for_promotion`.
+   Sub regula de trend din §4.2, propunerea de expirare fusese **suprimată** la
+   n=311 și 320, deci **nu există nicio decizie deschisă** → se creează o
+   propunere de **PROMOVARE**, `pending`.
+2. **n=385, 13 septembrie** — recade la 2/3. Propunerea de promovare rămâne
+   `pending`. **Nimic nu o retrage** — nicio fază nu reevaluează premisa unei
+   propuneri deja emise.
+3. **n=457, 17 septembrie** — trendul e 2/3 și `n ≥ 450`, deci calea de
+   expirare vrea să propună. Cu versiunea mea inițială a reparației: felul
+   diferă (`expiry` vs. `promotion`) → `None` → **expirarea nu se propune
+   niciodată.**
+
+Rezultat: omul rămâne cu o propunere de PROMOVARE pentru un Challenger care s-a
+degradat, iar slotul nu se mai eliberează niciodată. **Mai rău decât azi**: azi
+suprascrierea tăcută convertește decizia, deci măcar o cale avansează.
+Reparația mea elimina conversia **fără să pună nimic în loc.**
+
+**Mecanismul corect exista deja în cod și nu e folosit de nimeni.**
+`automation_runs.withdraw_decision()` (linia 296): `proposed`/`pending` →
+`withdrawn`, cu motivul scris în `commit_error`. Docstring-ul ei spune exact
+situația: *„Procesul originator, dacă condiția s-a rezolvat singură."*
+Verificat cu `grep -rn`: **zero apelanți, nici măcar în teste.** Cod mort de la
+scriere — a treia instanță a clasei „mecanismul exista și era ignorat", după
+`model_config.updated_at` (D-14) și `sweep_stale_decisions` (§3).
+
+**Regula, corect formulată**: o propunere deschisă al cărei fel diferă de ce
+vrea producătorul acum **nu e un obstacol, e un rest**. Se retrage explicit,
+cu motiv, și se înlocuiește. O decizie `approved` e singura care nu se poate
+retrage automat — acolo producătorul **raportează** și nu propune, fiindcă
+numai omul poate desface ce a aprobat.
 
 ### 4.2 F3b — pragul de expirare nu distinge „înțepenit" de „în urcare"
 
@@ -325,17 +413,40 @@ Challenger mediocru.**
 Plafonul **nu** e un număr rotund ales din gust. E derivat din cele patru
 serii existente și verificat contra fiecăreia:
 
-| Challenger | A atins 3/3 la | Expirat la (decizia) | Plafonul 450 l-ar fi tăiat prematur? |
-|---|---:|---:|---|
-| `blend_v1/8ac89c70` (campion activ) | **207** | — | nu |
-| `blend_v1/4e17c737` | **329** | 468 (#5) | **nu** — trece la 329, devine expirabil de la 450, #5 a venit la 468 |
-| `xgboost_v1/6e7265c5` | niciodată | 458 (#7) | nu — la 458 era la **0/3**, regula de trend nici nu se aplică |
-| `xgboost_v1/e638c1dc` | niciodată | 506 (#4) | nu — 0/3 pe toată seria |
+> **🔴 CIFRELE DIN PRIMA VERSIUNE A ACESTEI TABELE ERAU GREȘITE** (corectat la
+> review, 20 oct seara). Citasem „expirările s-au produs la n=458 / 468 / 506",
+> luând `evidence->>'n_matches_evaluated'` din `decision_feed`. **Acelea nu sunt
+> valorile de la propunere** — sunt ultimele valori **împrospătate**, fiindcă
+> `propose_decision()` suprascrie `evidence`-ul unei decizii deschise la
+> fiecare rulare. Dovada, din date:
+>
+> | decizie | creată | `n` în `evidence` | `n` real al țintei la data creării |
+> |---|---|---:|---:|
+> | #5 | 10 sep | 468 | **311** |
+> | #7 | 21 sep | 458 | **316** |
+> | #4 | 6 sep | 506 | 506 (aprobată în 18 minute, n-a avut timp să fie rescrisă) |
+>
+> **Beneficiu colateral: asta dovedește EMPIRIC premisa §4.1**, pe care o
+> argumentasem doar din cod. Suprascrierea chiar rulează în producție, iar #7 a
+> fost rescrisă 22 de zile la rând. Nu e un risc teoretic.
 
-**Plafonul de 450 reproduce exact toate cele trei expirări istorice** și nu
-taie niciun Challenger înaintea punctului lui de trecere observat. Cel mai
-târziu crossing măsurat e **329**; 450 e cu ~37% peste el, iar cele trei
-expirări reale s-au produs la 458, 468 și 506 — toate peste plafon.
+Back-testul corect, pe `n`-ul de la **propunere**:
+
+| Challenger | 3/3 la | Propunere creată la | Sub regula nouă | Verdict |
+|---|---:|---:|---|---|
+| `8ac89c70` (campion activ) | **207** | — | nu se propune niciodată | ✓ identic |
+| `4e17c737` | **329** | n=311, 2/3 | suprimată la 311/320; emisă la **n=457** (17 sep) | **se deplasează 7 zile**, omul a aprobat pe 19 sep → rezultat păstrat |
+| `6e7265c5` | niciodată | n=316, **0/3** | trendul nu se aplică → emisă la 316 | ✓ identic |
+| `e638c1dc` | niciodată | n=506, **0/3** | trendul nu se aplică → emisă | ✓ identic |
+
+**Două din trei expirări se reproduc identic; una se deplasează cu 7 zile, cu
+rezultatul păstrat** (propunerea există înainte de momentul în care omul a
+aprobat efectiv). Plafonul nu taie niciun Challenger înaintea punctului lui de
+trecere observat: cel mai târziu crossing măsurat e **329**, iar 450 e cu ~37%
+peste el.
+
+**Formularea „reproduce exact toate cele trei expirări" era prea tare.** Cea
+corectă: *niciuna nu se pierde, una întârzie.*
 
 **Ce ar schimba decizia**: un Challenger care atinge 3/3 pentru prima dată la
 `n > 450`. Nu există azi niciunul, pe nicio familie. Dacă apare, plafonul se
@@ -372,6 +483,25 @@ Rândurile vechi nu se rescriu (ar șterge dovada). Sunt oricum toate
 
 ---
 
+### 4.4 Două defecte mici, găsite la același review — incluse, fiindcă sunt pe aceeași cale
+
+**(a) `summary["proposed"]` minte.** În toate cele trei căi, tiparul e
+`if decision_id: ar.surface_decision(decision_id); summary["proposed"] += 1` —
+**valoarea întoarsă de `surface_decision` e ignorată.** Când idempotența
+întoarce o decizie deja existentă, `surface_decision` refuză corect tranziția
+(nu mai e în `proposed`) și întoarce `False`, dar contorul raportează oricum o
+propunere nouă. Deci rapoartele de rulare numără propuneri care nu s-au făcut.
+Reparație: se incrementează doar dacă tranziția a reușit.
+
+**(b) `commit_decision()` nu are gardă de stare.** `surface_decision` a fost
+întărită pe 6 septembrie cu `from_status="proposed"`, exact pentru clasa asta;
+`commit_decision` (linia 285) a rămas fără `from_status`, deci poate comite o
+decizie din **orice** stare. Azi nu e atins — Faza C iterează doar liste de
+`approved` — dar e aceeași asimetrie care a costat o dată. Reparație:
+`from_status="approved"`. `fail_decision_commit` la fel.
+
+---
+
 ## 5. Ce NU face acest ADR
 
 - Nu promovează, nu expiră și nu respinge nimic. Nu atinge decizia #8 —
@@ -397,7 +527,11 @@ Rândurile vechi nu se rescriu (ar șterge dovada). Sunt oricum toate
    - răcirea scoasă → propunere repetată imediat după `rejected`;
    - condiția de trend inversată (`≤2` în loc de `≥2`);
    - **plafonul `MAX_MATCHES_FOR_TREND_HOLD` scos** → `4e17c737` nu mai e
-     expirabil niciodată (vezi 4.2.3);
+     expirabil niciodată;
+   - **retragerea înlocuită cu `return None`** (versiunea mea inițială,
+     §4.1.1) → propunerea veche de alt fel blochează permanent;
+   - **`resolved_at` scos din sweep** → răcirea devine inertă pe `expired`
+     (§3.2), deci fluxul zilnic de propuneri reapare;
    - `decision_kind="promotion"` șters din calea de promovare.
 
 ### 6.1 Back-test obligatoriu pe seriile REALE, nu doar teste sintetice
@@ -416,6 +550,23 @@ rețea). Cerințele, fiecare un test separat:
 
 Ultima linie e **contraponderea care contează**: dacă regula ar emite
 propunerea la n=301, ar reproduce exact greșeala pe care ADR-ul o repară.
+
+### 6.2 Testul care prinde defectul găsit la review (§4.1.1)
+
+Scenariul nu e vizibil în nicio funcție izolată — apare doar din **compunerea**
+regulii de trend cu regula de fel. Testul reconstituie seria lui `4e17c737`
+pas cu pas și cere, în ordine:
+
+1. n=311, 2/3 → nicio propunere (trend);
+2. n=329, 3/3 → propunere de **promovare**, `pending`;
+3. n=385, 2/3 → propunerea de promovare **se retrage** (`withdrawn`), fiindcă
+   premisa a căzut;
+4. n=457, 2/3 și ≥450 → propunere de **expirare**, emisă cu succes.
+
+Fără pasul 3, pasul 4 eșuează — și exact aceea e versiunea ADR-ului pe care am
+scris-o prima dată. **Pasul 3 e singurul lucru nou de implementat** față de
+mecanismele existente: `withdraw_decision()` există deja și n-a fost chemată
+niciodată de nimeni.
 3. **Testul §4.1 se scrie pe LANȚUL A→C, nu pe `propose_decision` singură.**
    Defectul nu e vizibil în funcție; e vizibil în ordinea fazelor. Un test pe
    funcție ar trece și cu defectul prezent.
