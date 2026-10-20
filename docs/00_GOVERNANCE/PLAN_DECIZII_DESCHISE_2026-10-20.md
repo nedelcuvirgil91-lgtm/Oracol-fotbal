@@ -372,12 +372,62 @@ Ordinea e dată de **informație per cost**, nu de cronologie sau de mărimea el
 
 | # | Pasul | De ce aici | Oprire / precondiție |
 |---|---|---|---|
-| **1** | **ADR-077** — sondă read-only pe `matches/view/full/` | cea mai mare informație pe cel mai mic cost; deblochează sau închide definitiv o decizie care stă | sonda e **read-only**, un apel; dacă cere cheie nouă sau atinge un secret → se oprește și se cere audit |
-| **2** | **D-14 varianta 1** — `updated_at = now()` în orice scriere de config | o clauză, zero risc, reancorează lanțul pentru activarea următoare | nicio scriere de config **fără** SQL arătat și confirmat (North Star #6) |
-| **3** | **ADR-075** — §8 se închide ca răspuns; se propune garda pe `superseded_by` fără motiv | închide o întrebare deschisă și acoperă un gol de trasabilitate real | garda e **propunere**; un `CHECK` nou pe o tabelă existentă atinge un contract → ADR |
-| **4** | **Reziduul, Clasa B** — 4 rânduri `Dyn. Kyiv` → `Dynamo Kyiv` | ieftin, neambiguu, tiparul deja dovedit al Fazei 1 | backfill arătat înainte; coliziuni reverificate la momentul scrierii, nu presupuse din această analiză |
-| **—** | **reevaluare** | ce s-a făcut, ce s-a schimbat, ce a apărut pe parcurs | — |
+| **1** | ✅ **ADR-077** — instrumentare, nu sondă | cea mai mare informație pe cel mai mic cost | **FĂCUT** — vezi §6.1 |
+| **2** | ✅ **D-14 varianta 1** | o clauză, zero risc, reancorează lanțul | **FĂCUT** — vezi §6.2 |
+| **3** | ✅ **ADR-075** — §8 închis; clasa 9 în monitor | închide o întrebare și acoperă un gol de trasabilitate real | **FĂCUT** — vezi §6.3 |
+| **4** | ✅ **Reziduul, Clasa B** — 4 rânduri | ieftin, neambiguu | **FĂCUT** — vezi §6.4 |
+| **—** | **reevaluare** | ce s-a făcut, ce s-a schimbat, ce a apărut pe parcurs | **aici suntem** |
 | **5** | **Clasa openfootball** — 1893 de rânduri active, duplicate posibile nemăsurate | **nu se începe înainte de reevaluare.** Supersedarea schimbă setul de antrenare → ADR propriu | se **măsoară** întâi; nicio supersedare înainte de ADR aprobat |
+
+### Ce s-a executat efectiv, 2026-10-20 — și ce a ieșit altfel decât în plan
+
+Cod pe `main`: **`b8b0be0`**, fast-forward curat, `pytest tests/` verde ÎNAINTE de push —
+**3644 passed, 2 skipped** (3627 + 3 + 9 + 5, aritmetica se închide exact). 27 de teste noi,
+**18 mutații, toate prinse**. Calea de predicție neatinsă, verificat: `git diff` pe
+`oracle_engine.py`/`feature_engine.py`/`ml_predictor.py`/`recalibration.py`/`app.py`/`oracle_api.py`
+e **GOL**. Singurele schimbări de comportament în producție: aliasul din `mappings.py` (intenționat)
+și logarea corpului la eșec în clientul SFI.
+
+**§6.1 — Pasul 1 s-a schimbat din sondă în instrumentare.** Sonda propusă nu mai era primul pas:
+`api_cache` arată că `matches/view/full/` **a funcționat** (153 de payload-uri, ultimul **10 oct
+08:20:04**), primul 400 logat e **11 oct 08:37:03**, iar `git log` nu are **niciun** commit între 8 și
+12 oct → ruptura e la provider, încadrată în ~24h. Plus: night_sync sondează SFI aproape zilnic
+(8 zile, 2-18 apeluri, **0 reușite**), deci sonda exista deja, gratuit. Ce lipsea era **motivul** —
+clientul loghează doar codul. Instrumentat: corpul răspunsului, trunchiat la 400 de caractere, pe o
+singură linie, **niciodată cererea sau header-ele** (contrapondere de securitate dedicată).
+**Descoperire care leagă două fire**: `key_manager.py:40` — SFI și FreeLF **împart aceeași cheie
+RapidAPI** (reutilizare deliberată, documentată din 27 iulie), deci „mai trăiește subscripția SFI"
+nu se poate separa de FreeLF.
+
+**§6.2 — D-14: reparația a mers în skill, nu în cod.** Golul real e la scrierile prin MCP, pe care o
+gardă AST nu le poate vedea prin construcție. Punctul 5 din `supabase-safety` acoperă acea suprafață;
+garda nouă (`tests/test_model_config_writers_set_updated_at.py`) acoperă viitorul scriitor din cod.
+**Marcajul înghețat NU s-a rescris retroactiv** — ar fi o minciună în cealaltă direcție.
+Garda a găsit **un al doilea scriitor necunoscut**: `save_weights()` pe `model_weights`, aceeași formă
+de payload — acoperă acum clasa, nu instanța. *(`model_weights.updated_at` e înghețat la 4 august, dar
+**legitim**: `auto_recalibration_enabled` e implicit `False` și absent din config, deci
+`recalibration_log` e gol prin design. Fals semnal evitat prin verificare.)*
+**Prima mutație pe garda asta nu a fost prinsă — și avea dreptate garda, nu eu**: nimerise
+`save_weights`, nu `save_config`, fiindcă ambele au payload identic textual.
+
+**§6.3 — ADR-075 §8 închis ca răspuns**, plus clasa 9 în `check_data_health` (prag zero absolut,
+detector read-only, deci fără ADR). `CHECK`-ul în Postgres rămâne de decis.
+Două gărzi existente au căzut **exact cum erau proiectate** (literalul `findings}/8` e deliberat
+fragil, documentat ca atare) — actualizate 8 → 9 după precedent, nu rescrise.
+
+**§6.4 — Clasa B executată.** Backfill atomic: **1 gazdă + 3 oaspete = 4 rânduri**, exact cifrele
+prezise. După: **0 rânduri cu sufix**, lanț canonic **6 → 10**, **0 duplicate pe cheia naturală în
+toată tabela**. **Ordinea a contat, și e inversă celei intuitive**: merge întâi, backfill după —
+altfel producția ar fi recreat orfani peste backfill-ul proaspăt.
+
+**🔴 O așteptare a planului, dovedită GREȘITĂ.** Pornind de la tiparul Fazei 1, anunțasem trecerea
+de la Level FS2 la Level DB. **Fals aici**: forma e filtrată per competiție
+(`supabase_client.py:372`), iar cele 4 meciuri se împart **2 Europa League + 2 Conference League**,
+deci **2 < 3** pe fiecare → **Level DB tot eșuează, FS2 duce în continuare echipa.**
+Efect real: H2H **exact zero** (maximul pe orice pereche e 2, poarta cere 3); ELO **nu** se
+recalculează retroactiv. Câștigul e la setul de antrenare și la lanțul ELO de aici înainte.
+Lanțul are o **gaură de 5 ani** (6 meciuri UCL 2021 + 4 calificări 2026) — de reținut la orice
+citire a lui. **Clasa C rămâne neatinsă**, cu gardă dedicată.
 
 **Regula care guvernează toți pașii**: niciun pas nu se bundle-uiește cu altul, iar fiecare
 măsurătoare „înainte/după" se consemnează. Dacă un pas descoperă un contract nou, o migrare nouă

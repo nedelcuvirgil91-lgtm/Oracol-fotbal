@@ -361,6 +361,16 @@ Același tipar ca la `sync_pre_match_odds` în august: instrumentare întâi, re
 >
 > **Golul mai mare, pe care reziduul doar îl semnalează (Discovery Rule)**: clasa de duplicate `openfootball` e **invizibilă indexului unic prin construcție**, fiindcă etichetele diferă. Setul total e de **2119 rânduri (1893 active)**, 7 competiții; dacă rândurile **nesufixate** duplică și ele — **NEMĂSURAT**. Ăsta e elementul real, nu cele 5 nume.
 >
+> **[CLASA B — EXECUTATĂ 2026-10-20, aprobată explicit]** Cod pe `main` (`b8b0be0`, fast-forward curat, `pytest tests/` verde ÎNAINTE de push: **3644 passed, 2 skipped**; calea de predicție neatinsă, verificat — `git diff` pe `oracle_engine.py`/`feature_engine.py`/`ml_predictor.py`/`recalibration.py`/`app.py`/`oracle_api.py` e GOL). Backfill atomic (o singură instrucțiune `WITH`): **1 gazdă + 3 oaspete = 4 rânduri**, exact cifrele prezise. După: **0 rânduri cu sufix**, lanțul canonic **6 → 10 meciuri** (toate terminate), **0 duplicate pe cheia naturală în toată tabela**.
+>
+> **Ordinea a contat, și e inversă celei intuitive**: merge ÎNTÂI, backfill după. Cu backfill-ul primul, producția ar fi văzut `Dyn. Kyiv (UKR)` fără alias pe `main` și ar fi recreat rânduri orfane peste backfill-ul proaspăt.
+>
+> **🔴 O AȘTEPTARE A MEA, GREȘITĂ — corectată prin verificare, nu descoperită mai târziu.** Pornind de la tiparul Fazei 1, anunțasem consecința (c): trecerea de la Level FS2 la Level DB, fiindcă `MIN_DB_MATCHES = 3` ar fi satisfăcut de lanțul unificat. **Fals aici.** Forma e filtrată **per competiție** (`supabase_client.py:372`, `.eq("league", league)` — filtrul păstrat deliberat, §2c), iar cele 4 meciuri unificate se împart **2 Europa League + 2 Conference League**. Deci pe fiecare competiție sunt **2 < 3** → **Level DB tot eșuează, FS2 continuă să ducă echipa.** Consecința (c) nu se aplică.
+>
+> **Efect real, măsurat, nu presupus**: H2H **exact zero** (maximul pe orice pereche după unificare e 2, poarta cere 3 — identic cu Faza 1); ELO **nu** s-a recalculat retroactiv (precedentul Salzburg). Câștigul real e că setul de antrenare și lanțul ELO de aici înainte nu mai tratează clubul ca două entități. Lanțul are o gaură de 5 ani (6 meciuri UCL 2021 + 4 calificări 2026) — de reținut la orice citire a lui.
+>
+> **Clasa C rămâne NEATINSĂ, deliberat** (`Din. Minsk (BLR)`, 2 rânduri): n-are niciun geamăn cu care să fie unită. Gardă dedicată care cade dacă e atinsă colateral.
+>
 > Plan complet, cu pașii în ordine: **`docs/00_GOVERNANCE/PLAN_DECIZII_DESCHISE_2026-10-20.md`** §1 și §6.
 >
 > **De reținut**: `Kauno Zalgiris` (Kaunas) și `Zalgiris` (Vilnius) sunt cluburi **DIFERITE**; `Zalgiris` NU a fost adăugat ca nume canonic tocmai ca să nu existe tentația unirii. Gardă dedicată.
