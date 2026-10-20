@@ -38,7 +38,8 @@ comisă de niciun cod** — vezi §2.1. Nu e o decizie care te așteaptă; e un 
 
 **Ăsta e cel mai important lucru din document, și e și cauza tehnică a
 problemei pe care ai ridicat-o**: lucrurile se pierd. Nu doar în conversație —
-**și în sistem**. Trei defecte independente compun același efect.
+**și în sistem**. Trei defecte independente compun același efect. **Unul din trei
+e reparat (2.3, pe 20 oct); celelalte două cer un ADR și te așteaptă.**
 
 ### 2.1 Decizii care nu pot fi comise (D-8)
 
@@ -65,22 +66,26 @@ zile fără niciun semnal**, iar #6 e blocată de o lună.
 **De decis**: se cablează sweep-ul (TTL-ul devine real, cu riscul de a expira
 propuneri nevăzute), sau se înlocuiește TTL-ul cu o alertă. Ambele cer ADR.
 
-### 2.3 Ecranul nu numește ce aprobi (D-11)
+### 2.3 Ecranul nu numește ce aprobi (D-11) — ✅ **REPARAT 20 oct**
 
-`app.py:1531` — titlul e `[T3a] decizie #7 · run_id=786`. **Nu numește niciodată
-acțiunea.** `decision_kind` apare doar îngropat într-un `st.json` brut, lângă un
-buton verde „✅ Aprobă".
+Titlul era `[T3a] decizie #7 · run_id=786` — mut despre acțiune, lângă un buton
+verde. A produs o confuzie reală: ai raportat „am promovat noul candidat", dar
+ce aprobaseși era o **expirare**.
 
-A produs deja o confuzie reală: ai raportat „am promovat noul candidat", dar
-ce aprobaseși era o **expirare**. Consecința a fost benignă atunci. Același
-ecran va servi și propuneri de **promovare** și de **rollback**.
+Acum titlul **și ambele butoane** numesc acțiunea și ținta:
 
-**Cost**: mic, strict prezentare, probabil fără ADR. **Valoare: mare** — e
-singurul punct unde ADR-002 (aprobarea umană) atinge efectiv un om.
+```
+[T3a] EXPIRARE Challenger · blend_v1/174e7e17 · n=301 · decizie #8
+```
 
-> **Recomandarea mea pentru Tier 1**: 2.3 întâi (ieftin, închide un risc de
-> guvernanță), apoi 2.1 și 2.2 împreună, ca un singur ADR despre ciclul de viață
-> al unei decizii — sunt aceeași problemă văzută din trei unghiuri.
+Deciziile de consens (#6) **n-au `decision_kind` deloc** — acolo apare
+`FEL NECUNOSCUT (verdict: surface_worthy)`, niciodată gol și niciodată ghicit.
+14 teste, 7 mutații prinse, calea de scriere neatinsă. Fără ADR (prezentare).
+
+> **Recomandarea mea pentru Tier 1**: 2.3 e făcută. Rămân 2.1 și 2.2, de luat
+> **împreună**, ca un singur ADR despre ciclul de viață al unei decizii — sunt
+> aceeași problemă văzută din două unghiuri (lipsește execuția / lipsește
+> detecția).
 
 ---
 

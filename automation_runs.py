@@ -445,6 +445,92 @@ def list_approved_decisions_for_target(target_key: str) -> list[dict[str, Any]]:
         return []
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# D-11 — Decision Feed trebuie sa NUMEASCA actiunea pe care o aprobi
+#
+# DE CE EXISTA (2026-10-20). Titlul ecranului era
+# `f"[{tier}] decizie #{id} · run_id={run_id}"` — nu numea NICIODATA actiunea.
+# Omul vedea `[T3a] decizie #7 · run_id=786`, un `st.json` brut, si un buton
+# VERDE „✅ Aprobă". `decision_kind` aparea doar ingropat in JSON.
+#
+# A produs deja o confuzie REALA: proprietarul produsului a raportat „am
+# promovat noul candidat din Streamlit". Verificat — nu se promovase nimic;
+# aprobase o EXPIRARE. Impresia era produsa de interfata, nu de memorie.
+#
+# De ce e guvernanta, nu cosmetica: ADR-002 face aprobarea umana SINGURA cale
+# de promovare si rollback. Un titlu mut plus un buton verde transforma
+# consimtamantul informat in consimtamant PREZUMAT. Aici consecinta a fost
+# benigna (expirarea era justificata independent), dar acelasi ecran va servi
+# si propuneri de PROMOVARE si de ROLLBACK.
+#
+# Functia e PURA — nicio citire din baza — tocmai ca sa fie testabila fara
+# Streamlit si fara Supabase.
+# ════════════════════════════════════════════════════════════════════════════
+
+# Fel cunoscut -> eticheta afisata. Un fel NEcunoscut NU primeste eticheta
+# inventata: se afiseaza brut, cu majuscule, ca sa fie vizibil ca e nou.
+_ETICHETE_FEL: dict[str, str] = {
+    "expiry": "EXPIRARE Challenger",
+    "promotion": "PROMOVARE Champion",
+    "rollback": "ROLLBACK Champion",
+    "surfacing": "SCOATERE LA SUPRAFAȚĂ",
+}
+
+FEL_NECUNOSCUT = "FEL NECUNOSCUT"
+
+
+def rezuma_decizia(d: dict[str, Any]) -> dict[str, str]:
+    """Descompune o decizie in `actiune` / `tinta` / `cifra` / `titlu`.
+
+    NU INVENTEAZA NIMIC (Regula #8). Masurat pe productie, exista DOUA forme
+    de `evidence`, fundamental diferite:
+
+      - expirare (#8): `decision_kind='expiry'`, `training_run_id`,
+        `n_matches_evaluated`
+      - consens (#6): NICIUN `decision_kind` — are `verdict='surface_worthy'`,
+        `study_run_id`, `n_samples_evaluated`
+
+    Pentru a doua, `verdict` NU e tratat ca si cum ar fi un fel de decizie: se
+    afiseaza etichetat ca verdict. Daca lipsesc amandoua, actiunea e
+    `FEL NECUNOSCUT` — explicit, niciodata ghicita si niciodata goala."""
+    dovada = d.get("evidence")
+    if not isinstance(dovada, dict):
+        dovada = {}
+
+    fel = str(dovada.get("decision_kind") or "").strip()
+    if fel:
+        actiune = _ETICHETE_FEL.get(fel.lower(), fel.upper())
+    else:
+        verdict = str(dovada.get("verdict") or "").strip()
+        actiune = f"{FEL_NECUNOSCUT} (verdict: {verdict})" if verdict else FEL_NECUNOSCUT
+
+    tinta = ""
+    run_antrenare = str(dovada.get("training_run_id") or "").strip()
+    if run_antrenare:
+        familie = str(dovada.get("algorithm_family") or "").strip()
+        scurt = run_antrenare[:8]
+        tinta = f"{familie}/{scurt}" if familie else scurt
+    elif dovada.get("study_run_id") is not None:
+        tinta = f"studiu #{dovada['study_run_id']}"
+
+    cifra = ""
+    for cheie, forma in (("n_matches_evaluated", "n={}"),
+                         ("n_samples_evaluated", "n={}")):
+        if dovada.get(cheie) is not None:
+            cifra = forma.format(dovada[cheie])
+            break
+
+    parti = [f"[{d.get('tier') or '?'}]", actiune]
+    if tinta:
+        parti.append(f"· {tinta}")
+    if cifra:
+        parti.append(f"· {cifra}")
+    parti.append(f"· decizie #{d.get('id')}")
+
+    return {"actiune": actiune, "tinta": tinta, "cifra": cifra,
+            "titlu": " ".join(parti)}
+
+
 def list_pending_decisions() -> list[dict[str, Any]]:
     """Decision Feed — exclusiv elementele care chiar așteaptă o decizie
     umană (status='pending'). Gol implicit, per design."""

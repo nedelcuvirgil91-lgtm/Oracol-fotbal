@@ -299,7 +299,26 @@ Același tipar ca la `sync_pre_match_odds` în august: instrumentare întâi, re
 
 **Decizie cerută**: reparația pare mică (paginare keyset, ca la instanța 2), dar **schimbă cifre pe care se iau decizii** — la prima rulare de după, cele 3 verdicte învechite se recalculează, inclusiv cel pe care D-7 se sprijină. **NU se repară înainte de a decide ce se face cu D-7**, și nu se bundle-uiește cu altceva. Măsurătoarea „înainte/după" se înregistrează.
 
-### D-11. Decision Feed nu numește acțiunea pe care o aprobi — atinge ADR-002 (găsit 2026-10-14)
+### D-11. Decision Feed nu numește acțiunea pe care o aprobi — ✅ **REPARAT 2026-10-20** (găsit 2026-10-14)
+
+> **[REPARAT — 2026-10-20]** `automation_runs.rezuma_decizia()` — funcție **pură**, fără nicio citire din bază, tocmai ca să fie testabilă fără Streamlit și fără Supabase. Titlul și **ambele etichete de buton** numesc acum acțiunea și ținta:
+>
+> ```
+> [T3a] EXPIRARE Challenger · blend_v1/174e7e17 · n=301 · decizie #8
+> [T3a] FEL NECUNOSCUT (verdict: surface_worthy) · studiu #1216 · n=965 · decizie #6
+> ```
+>
+> **Butoanele numesc și ele acțiunea, nu doar titlul** — „✅ Aprobă EXPIRARE Challenger". Titlul se citește o dată; butonul e **ultimul lucru văzut înainte de scriere**.
+>
+> **Două forme reale de `evidence`, măsurate pe producție, nu presupuse** — și a doua a schimbat proiectul: expirarea (#8) are `decision_kind`, `training_run_id`, `n_matches_evaluated`; consensul (#6) **n-are `decision_kind` deloc**, are `verdict`, `study_run_id`, `n_samples_evaluated`. Un titlu care ar presupune `decision_kind` ar fi fost **gol pe deciziile vechi** — exact defectul reparat, mutat. `verdict` **NU** e promovat la rangul de acțiune (ar fi fabricație, Regula #8): se arată etichetat ca verdict, iar acțiunea rămâne explicit `FEL NECUNOSCUT`. Un fel nou, necunoscut hărții, apare **brut cu majuscule**, nu cu o etichetă plauzibilă inventată.
+>
+> **Garda pe `app.py` folosește AST, nu text — și asta e dovedit, nu argumentat.** Comentariul pe care l-am scris acolo conține chiar șirul vechi (`decizie #7 · run_id=786`), ca explicație. Verificat: `grep -n "decizie #" app.py` pe codul **CORECT** întoarce **exact o linie — comentariul**. O gardă textuală ar fi dat fals pozitiv pe codul bun, iar „reparația" evidentă ar fi fost ștergerea explicației. **A patra instanță a clasei**, după `pipefail` (27 aug), numele de secrete (14 oct) și docstring-ul ADR-073. AST-ul ignoră comentariile **prin construcție** — nu e o reparație, e o imposibilitate.
+>
+> **14 teste noi** (`tests/test_decision_feed_names_action.py`), **7 mutații, toate prinse**: titlul mut reintrodus · buton cu etichetă statică · apelul la rezumat eliminat · `verdict` promovat la acțiune · fel necunoscut cu etichetă inventată · ținta scoasă din titlu · garda `isinstance` scoasă. `pytest tests/`: **3671 passed, 2 skipped** — aritmetica se închide exact (3644 + 13 gardă GRANT + 14), deci niciun test umbrit. Calea de predicție **neatinsă**, verificat: `git diff --stat` pe `oracle_engine.py`/`feature_engine.py`/`ml_predictor.py`/`recalibration.py`/`oracle_api.py` e GOL.
+>
+> **Fără ADR**, per Change Policy: strict prezentare, nicio schimbare de contract, de model de date sau de responsabilitate. Calea de scriere (`approve_decision`/`reject_decision`) e **neatinsă**.
+
+**Textul de mai jos descrie defectul ÎNAINTE de reparație**, păstrat ca istoric.
 
 `app.py:1531`: titlul expander-ului e `f"[{d.get('tier')}] decizie #{d['id']} · run_id={d.get('run_id')}"` — **nu numește niciodată acțiunea**. Omul vede `[T3a] decizie #7 · run_id=786`, un `st.json(ev)` brut, și un buton **verde** „✅ Aprobă". `decision_kind` apare doar îngropat în JSON.
 
@@ -307,7 +326,7 @@ Același tipar ca la `sync_pre_match_odds` în august: instrumentare întâi, re
 
 **De ce e guvernanță, nu cosmetică**: ADR-002 face aprobarea umană singura cale de promovare/rollback. Un titlu mut + buton verde transformă consimțământul informat în consimțământ prezumat. Aici consecința a fost benignă (expirarea era justificată independent: `6e7265c5` era sub Oracle pe AMBELE baseline-uri), dar același ecran va servi și propuneri de **promovare** și de **rollback**.
 
-**Decizie cerută**: se adaugă `decision_kind` + ținta în titlu (strict prezentare, probabil fără ADR per Change Policy), sau se lasă. **Nereparat deliberat** — atinge calea de aprobare umană.
+~~**Decizie cerută**: se adaugă `decision_kind` + ținta în titlu (strict prezentare, probabil fără ADR per Change Policy), sau se lasă. **Nereparat deliberat** — atinge calea de aprobare umană.~~ **Făcut** — vezi nota de reparație de mai sus.
 
 ### D-12. Extragerea statisticilor Flashscore a fost moartă 39 de zile — ✅ **REPARATĂ (ADR-076, 17-19 oct)**, dar lasă două decizii deschise
 

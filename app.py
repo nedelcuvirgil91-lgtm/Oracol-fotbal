@@ -1591,7 +1591,14 @@ elif nav == "settings":
             st.success("Nimic în așteptare — sistemul funcționează autonom, fără decizii blocate.")
         else:
             for d in pending:
-                with st.expander(f"[{d.get('tier')}] decizie #{d['id']} · run_id={d.get('run_id')}", expanded=True):
+                # [D-11, 2026-10-20] Titlul NUMESTE actiunea si tinta. Inainte
+                # era `decizie #7 · run_id=786` — mut despre ce aprobi, langa un
+                # buton verde. ADR-002 face aprobarea umana singura cale de
+                # promovare/rollback, deci asta e singurul punct unde regula
+                # atinge efectiv un om. Vezi `automation_runs.rezuma_decizia`.
+                rez = ar.rezuma_decizia(d)
+                with st.expander(rez["titlu"], expanded=True):
+                    st.caption(f"run_id={d.get('run_id')} · creată {d.get('created_at') or '—'}")
                     ev = d.get("evidence")
                     if ev:
                         st.json(ev)
@@ -1599,10 +1606,12 @@ elif nav == "settings":
                     if d.get("correction_method"):
                         st.caption(f"Metodă de corecție statistică: {d['correction_method']}")
                     ac1, ac2 = st.columns(2)
-                    if ac1.button("✅ Aprobă", key=f"approve_{d['id']}"):
+                    # Butoanele numesc si ele actiunea: titlul se citeste o data,
+                    # butonul se apasa — el e ultimul lucru vazut inainte de scriere.
+                    if ac1.button(f"✅ Aprobă {rez['actiune']}", key=f"approve_{d['id']}"):
                         ar.approve_decision(d["id"], resolved_by="owner")
                         st.rerun()
-                    if ac2.button("❌ Respinge", key=f"reject_{d['id']}"):
+                    if ac2.button(f"❌ Respinge {rez['actiune']}", key=f"reject_{d['id']}"):
                         ar.reject_decision(d["id"], resolved_by="owner")
                         st.rerun()
 
