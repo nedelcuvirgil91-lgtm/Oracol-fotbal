@@ -26,6 +26,8 @@ Not Implemented
 
 **Secțiunea asta există pentru că absența ei a costat deja.** ADR-057 nu era citat de niciun document și de niciun cod; condiția lui s-a împlinit pe 23 august, iar starea a fost descoperită abia pe 6 septembrie — **14 zile fără nicio antrenare**, și doar dintr-o întrebare întâmplătoare a proprietarului produsului. Orice decizie amânată se scrie AICI, cu declanșatorul verificabil, nu doar în ADR-ul ei.
 
+> **🧭 PLANUL PE DECIZIILE DESCHISE, citit ÎNAINTE de a relua oricare dintre ele: `docs/00_GOVERNANCE/PLAN_DECIZII_DESCHISE_2026-10-20.md`** — analiza completă, măsurată read-only, pe cele cinci care stăteau pe masă (reziduul de nume lungi, ADR-077, ADR-075 §8, D-14, F3), **plus pașii în ordine, cu precondiții și condiții de oprire** (§6). Documentul există ca să nu reluăm analiza de la zero: conține și §0 cu **trei afirmații din documentele proiectului dovedite FALSE**, și, pentru fiecare punct, o secțiune „Ce ar schimba decizia" — reevaluarea e ieftină prin construcție, nu o rediscuție completă. Două recomandări s-au inversat la măsurare (ADR-077 și reziduul).
+>
 > **📌 CE E DE URMĂRIT, ACUM: `docs/00_GOVERNANCE/DE_URMARIT.md`** — include §2ter, **semnalul deschis `n = 1000` fix** la `flashscore_team_dna` (eligibile reale 1022; plafon de cod EXCLUS prin verificare, explicație probabilă = meciuri care au căpătat rezultat după pasul de evaluare; **test binar la următoarea rulare**), și §3 cu proiecția ADR-072 corectată **a treia oară** (16-18 oct, nu 19-20) plus cauza erorii repetate.
 >
 > **(descrierea generală a documentului)** — listă vie, un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Conține și răspunsul verificat la întrebarea care revine: **promovarea unui campion e în continuare exclusiv manuală, nimic nu e automat** — nu ai ce aproba azi doar fiindcă niciun Challenger nu e eligibil (n = 0 și n = 151, prag 200).
@@ -346,7 +348,20 @@ Același tipar ca la `sync_pre_match_odds` în august: instrumentare întâi, re
 >
 > **Efect real**: lanțul e unificat (Levski Sofia 2 → **9** meciuri terminate, Omonia 2 → 8), deci H2H și forma văd tot. **ELO-ul NU s-a recalculat retroactiv** (precedentul Salzburg). **Consecința (c) e în efect**: cele 13 trec de la Level FS2 la Level DB, fiindcă `MIN_DB_MATCHES = 3` e acum satisfăcut — troc acceptat conștient, semnal mai potrivit pentru cupe dar eșantion mai subțire.
 >
-> **⏳ RĂMÂNE DE DECIS, nefăcut deliberat**: ~5 nume oficiale lungi ale unor cluburi care există deja sub alt nume (`FC Bayern München`, `Club Atlético de Madrid`, `ŠK Slovan Bratislava`, `Dyn. Kyiv`, `Din. Minsk`) — dezbrăcarea lor ar **înlocui un orfan cu alt orfan**, iar maparea corectă cere cunoaștere de domeniu. Plus ~49 de cluburi văzute doar cu sufix, unde nu există al doilea profil cu care să se unească (igienă de vocabular, nu reparație). **`consensus_capture_samples`: 19 rânduri rămân cu sufix — append-only prin trigger, de EXCLUS din monitorizare, nu de raportat ca rest.**
+> **⏳ RĂMÂNE DE DECIS, nefăcut deliberat**: ~5 nume oficiale lungi ale unor cluburi care există deja sub alt nume (`FC Bayern München`, `Club Atlético de Madrid`, `ŠK Slovan Bratislava`, `Dyn. Kyiv`, `Din. Minsk`). Plus ~49 de cluburi văzute doar cu sufix, unde nu există al doilea profil cu care să se unească (igienă de vocabular, nu reparație). **`consensus_capture_samples`: 19 rânduri rămân cu sufix — append-only prin trigger, de EXCLUS din monitorizare, nu de raportat ca rest.**
+>
+> **[CORECTAT 2026-10-20 — fraza tăiată de aici era FALSĂ.]** Spunea că „dezbrăcarea lor ar **înlocui un orfan cu alt orfan**, iar maparea corectă cere cunoaștere de domeniu". Măsurat: **36 de rânduri active distincte** (nu 38 — cifra aceea număra pe echipă, iar 2 rânduri au ambele părți sufixate), care se despart în **TREI clase cu operații DIFERITE**, niciuna „orfan contra orfan":
+> - **Clasa A, 30 de rânduri** — `Bayern`/`Atlético`/`Slovan`: **DUPLICATE**, nu orfane. Toate `openfootball%`, 100%, o singură competiție (Champions League), 2024-09 → 2025-04, toate cu `coliziuni = 1` la proiecția pe numele canonic. Dovada individuală: Inter–Bayern 16 apr 2025 există de două ori — id 3823 (`fd_524115`, 2 iul, `away_elo_after` 1854) și id 130925 (`openfootball_…`, 5 aug, **1685**), același rezultat D 2-2. **Redenumirea e imposibilă structural** (ar viola `idx_match_history_natural_key_canonical`); operația corectă e **supersedarea**.
+> - **Clasa B, 4 rânduri** — `Dyn. Kyiv (UKR)`, toate `flashscore_%`, calificări 2026: orfane reale, geamănul `Dynamo Kyiv` există (6 meciuri, doar 2021). **Redenumire**, tiparul Fazei 1.
+> - **Clasa C, 2 rânduri** — `Din. Minsk (BLR)`: fără niciun geamăn. Igienă de vocabular.
+>
+> **De ce Faza 1 nu le-a văzut**: detectorul ei normaliza **doar sufixul**, iar `FC Bayern München` ≠ `Bayern Munich` și după dezbrăcare. **A treia instanță a clasei de punct orb** — o verificare care prin construcție nu poate vedea lucrul căutat.
+>
+> **Impactul prospectiv e ZERO**: meciurile viitoare sunt deja sub numele scurt (Atlético și Slovan 3 nov, Bayern 7 nov). Cele 30 sunt exclusiv istorice, deci paguba e la adâncimea H2H și la setul de antrenare, nu la predicția servită — iar ELO-ul nu se recalculează retroactiv (precedentul Salzburg).
+>
+> **Golul mai mare, pe care reziduul doar îl semnalează (Discovery Rule)**: clasa de duplicate `openfootball` e **invizibilă indexului unic prin construcție**, fiindcă etichetele diferă. Setul total e de **2119 rânduri (1893 active)**, 7 competiții; dacă rândurile **nesufixate** duplică și ele — **NEMĂSURAT**. Ăsta e elementul real, nu cele 5 nume.
+>
+> Plan complet, cu pașii în ordine: **`docs/00_GOVERNANCE/PLAN_DECIZII_DESCHISE_2026-10-20.md`** §1 și §6.
 >
 > **De reținut**: `Kauno Zalgiris` (Kaunas) și `Zalgiris` (Vilnius) sunt cluburi **DIFERITE**; `Zalgiris` NU a fost adăugat ca nume canonic tocmai ca să nu existe tentația unirii. Gardă dedicată.
 >
@@ -363,6 +378,18 @@ Evidența din acest document dă **35 → 36** la activarea ADR-072 (14 oct) și
 **Consecința practică, nu teoretică**: următoarea activare nu se poate sprijini pe „37 → 38" ca număr așteptat. Se măsoară de fiecare dată întâi, cum s-a făcut și pe 19 octombrie.
 
 **Decizie cerută**: se persistă un instantaneu al lui `model_config` la fiecare scriere (tabelă de audit, append-only), sau se acceptă că lanțul se re-ancorează la fiecare măsurătoare. Prima variantă e o tabelă nouă, deci ADR. **Nefăcut nimic deliberat.**
+
+> **[CAUZĂ RĂDĂCINĂ GĂSITĂ 2026-10-20 — ancora exista tot timpul și era aruncată tăcut.]**
+>
+> **Ruta deducției e închisă onest**: 39 de chei azi, iar **toate 39 sunt citite de cel puțin un fișier de producție** (numărătoare de referințe, excluzând `tests/`). Nicio cheie orfană → nu există nimic anormal din care să fie numită cea neconsemnată. Deducția e **imposibilă**, nu doar grea.
+>
+> **Dar `model_config.updated_at` EXISTĂ**, iar `supabase_client.save_config()` (linia 129) îl scrie corect. Valoarea stocată în producție: **`2026-09-06 11:29:08`** — înghețată, deși au urmat cel puțin trei scrieri (ADR-072 pe 14 oct, ADR-073 pe 15 oct, ADR-078 pe 19 oct). Toate au fost `UPDATE … SET data = data || …`, **niciuna n-a atins `updated_at`**. Data de 6 sept = ultima scriere prin calea aplicației (ADR-071 §18).
+>
+> **Două concluzii verificabile**: (1) câmpul care ar fi ancorat lanțul exista și a fost ignorat de fiecare activare, inclusiv ale mele; (2) **cheia neconsemnată a fost și ea o scriere SQL brută, între 15 și 19 oct** — altfel `updated_at` s-ar fi mișcat.
+>
+> **A patra instanță a clasei marcajului înghețat, cu mecanism NOU**: nu `on_conflict` care omite coloana (cele 6 reparate pe 26 aug), ci un `UPDATE` scris de mână care o omite. Garda AST `tests/test_upsert_timestamp_freshness.py` citește **cod** — prin construcție nu poate vedea SQL ad-hoc rulat prin MCP.
+>
+> **Reparație recomandată: varianta 1+2, NU tabela de audit — încă.** (1) orice scriere viitoare de config include `updated_at = now()`; (2) nota activării consemnează chei + `md5(data − cheia_nouă)` + `updated_at`, deci devine autodatată. Costă o clauză și zero schemă, și recuperează exact proprietatea pierdută. Tabela cu trigger răspunde la altă întrebare („ce s-a schimbat între două date"), apărută o singură dată. **Se acceptă explicit că cheia a 38-a nu va fi niciodată numită** — lanțul se re-ancorează, nu se reconstituie. Detalii: `PLAN_DECIZII_DESCHISE_2026-10-20.md` §4.
 
 ## Reperul extern — cât de bun e Oracle, de fapt (măsurat prima dată 2026-10-14)
 
