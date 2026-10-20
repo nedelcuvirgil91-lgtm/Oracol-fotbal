@@ -919,10 +919,33 @@ ORDER BY n_matches_evaluated DESC LIMIT 5;
 | 290 (19 oct) | +2,07pp | nu | **DA** | **DA** |
 | **301 (20 oct)** | **+2,33pp** | nu | **DA** | **DA** |
 
-Ritm ~27 meciuri/zi. Fratele lui, `8ac89c70`, a trecut toate trei la n=383 —
-deci fereastra se deschide în jur de **23-24 octombrie**, înainte de TTL-ul
-deciziei (27 oct). **n=383 nu e o lege**, e locul unde a trecut un singur caz
-anterior; semnificația depinde de perechile discordante, nu doar de `n`.
+Ritm ~27 meciuri/zi.
+
+> **🔴 CORECȚIE, în aceeași zi (20 oct, seara) — estimarea „23-24 oct" era
+> prea optimistă, și cifra pe care o citam era greșită.** Scrisesem că
+> `8ac89c70` „a trecut toate trei la n=383". **Fals** — a trecut la **n=207**,
+> de la prima evaluare (`challenger_evaluations`, 23 aug). 383 era `n`-ul lui
+> din `experiment_registry` de AZI, adică de peste o lună mai târziu. Am
+> confundat „unde a trecut" cu „unde e acum".
+>
+> **Reperul corect e mult mai puțin încurajator.** Punctele de trecere reale,
+> pe toate seriile măsurate: `8ac89c70` la **207**, `4e17c737` la **329**,
+> `6e7265c5` și `e638c1dc` **niciodată**. Deci `174e7e17`, la n=301, e încă
+> în interval — dar dacă trece de **329** fără să atingă 3/3, iese din tot
+> precedentul istoric.
+>
+> **Și precedentul direct e descurajant**: `4e17c737` a stat **13 din 15
+> evaluări la exact 2/3, pe 14 zile**, a atins 3/3 o singură dată (n=329), a
+> recăzut imediat și nu a mai revenit. Staționarea la 2/3 nu e o etapă spre
+> promovare — e **starea de echilibru a unui Challenger mediocru** (Brier și
+> log-loss sunt corelate între ele; acuratețea e metrica cu cel mai mult
+> zgomot, plafonată la ~76% de remize).
+>
+> **Ce rămâne valabil**: #8 tot nu se atinge. Dar motivul se schimbă — nu
+> „pentru că se rezolvă în 3 zile", ci **pentru că un verdict dat acum, în
+> orice direcție, e luat în punctul cel mai puțin informativ al seriei.**
+> Fereastra onestă e n≈450 (plafonul decis în ADR-079 §4.2), adică ~5-6 zile
+> la ritmul măsurat: **26-27 octombrie**, exact la TTL.
 
 ### ⚠️ De ce #8 se lasă `pending`, deliberat — e o decizie, nu o amânare
 

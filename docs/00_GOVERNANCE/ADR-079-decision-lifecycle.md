@@ -1,6 +1,10 @@
 # ADR-079 — Ciclul de viață al unei decizii T3a
 
 **Status**: PROPUNERE (2026-10-20) — cere aprobare explicită înainte de implementare
+**Decizie de proiectare delegată și luată de mine** (2026-10-20, la cererea
+explicită a proprietarului produsului): §4.2, plafonul regulii de trend. Prima
+mea recomandare (fără plafon) s-a dovedit **greșită la măsurare** — vezi
+§4.2.1. Rămâne de aprobat ADR-ul ca întreg, nu acest punct.
 **Derivat din**: D-5, D-8 și D-11 (`CLAUDE.md` §DECIZII) + o a treia față descoperită
 pe 20 octombrie, în timpul analizei deciziei #8 (Discovery Rule)
 **Atinge**: contractul ADR-026 (Decision Feed, mașina de stări + politica de
@@ -277,22 +281,65 @@ exact produsul pentru care politica există — iar `REJECTED(expired)` e stare
 la el. La ritmul măsurat, un înlocuitor ar reface drumul până la n≈380 în
 ~2 săptămâni.
 
-**Decizie propusă**: nu se propune expirare cât timp Challenger-ul are **≥2
-din 3** metrici semnificativ mai bune decât baseline-ul. Se consemnează ca
-fapt explicit în `summary` (`expiry_skipped_trending: true`) — niciodată tăcut,
-fiindcă tăcerea e exact defectul ADR-057.
+**Decizie — varianta (ii), cu plafon `n ≥ 450`.** Nu se propune expirare cât
+timp Challenger-ul are **≥2 din 3** metrici semnificativ mai bune decât
+baseline-ul **ȘI `n < MAX_MATCHES_FOR_TREND_HOLD = 450`**. Peste plafon,
+propunerea se emite oricum, cu trendul consemnat în `evidence`
+(`trend_significant_metrics: 2`), ca omul să vadă că expiră ceva care arăta
+bine pe două metrici din trei. Suprimarea se consemnează explicit în `summary`
+(`expiry_skipped_trending: true`) — niciodată tăcut, fiindcă tăcerea e exact
+defectul ADR-057.
 
-Regula e **autolimitată**, deci nu reintroduce blocajul din august: ori
-Challenger-ul trece a treia metrică (→ propunere de promovare, slotul se
-eliberează prin promovare), ori trendul se degradează sub 2/3 (→ propunerea de
-expirare reapare). Nu e nevoie de niciun plafon numeric nou.
+### 4.2.1 Prima versiune a acestei decizii era GREȘITĂ, și datele au arătat-o
 
-**Onest despre gaura rămasă**: un Challenger ar putea oscila la exact 2/3 la
-nesfârșit, blocând familia. N-am măsurat dacă se întâmplă — n-avem decât două
-cazuri de blend. Dacă proprietarul produsului preferă o garanție tare, varianta
-(ii) e un plafon (ex. `n ≥ 2 × prag`) peste care expirarea se propune oricum,
-cu trendul consemnat în `evidence`. **Nu recomand plafonul azi**: ar fi un
-număr nemăsurat, iar `600` nu are nicio justificare în date.
+Recomandasem varianta (i), **fără plafon**, numind regula „autolimitată": ori
+Challenger-ul trece a treia metrică, ori trendul se degradează. Declarasem
+onest că n-am măsurat dacă poate sta la 2/3 la nesfârșit.
+
+**Măsurat. Se întâmplă, și s-a întâmplat deja** — `challenger_evaluations`,
+seria completă a lui `blend_v1/4e17c737`:
+
+| n | 230 | 248 | 269 | 281 | 289 | 311 | 320 | **329** | 385 | 422 | 436 | 441 | 457 | 468 | 479 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| metrici sig. | 2 | 2 | 2 | 2 | 2 | 2 | 2 | **3** | 2 | 2 | 2 | 2 | 2 | 2 | 2 |
+
+**13 din 15 evaluări la exact 2/3, pe 14 zile.** A atins 3/3 o singură dată
+(n=329), a recăzut imediat și a rămas la 2/3 până a fost expirat prin decizia
+#5 (aprobată 19 septembrie).
+
+**Deci varianta (i) ar fi suprimat exact propunerea care a produs decizia #5**,
+iar `4e17c737` ar ocupa și azi slotul `blend_v1`. Challenger-ul de acum,
+`174e7e17` — cel pe care §1.2 îl arată în urcare — **n-ar exista.** Regula
+„autolimitată" ar fi blocat familia pe care pretindea că o protejează.
+
+**De ce m-am înșelat, formulat precis**: presupusesem două ieșiri din 2/3 (a
+treia metrică vine, sau trendul se degradează). Există o a treia, care e de
+fapt cea tipică: **staționarea**. Brier și log-loss sunt corelate puternic
+între ele, iar acuratețea e metrica cu cel mai mult zgomot — plafonată
+structural la ~76% de cele 23,9% remize (§Reperul extern din `CLAUDE.md`).
+**2/3 nu înseamnă „aproape promovabil"; e starea de echilibru a unui
+Challenger mediocru.**
+
+### 4.2.2 De unde vine 450 — back-test pe toate seriile reale
+
+Plafonul **nu** e un număr rotund ales din gust. E derivat din cele patru
+serii existente și verificat contra fiecăreia:
+
+| Challenger | A atins 3/3 la | Expirat la (decizia) | Plafonul 450 l-ar fi tăiat prematur? |
+|---|---:|---:|---|
+| `blend_v1/8ac89c70` (campion activ) | **207** | — | nu |
+| `blend_v1/4e17c737` | **329** | 468 (#5) | **nu** — trece la 329, devine expirabil de la 450, #5 a venit la 468 |
+| `xgboost_v1/6e7265c5` | niciodată | 458 (#7) | nu — la 458 era la **0/3**, regula de trend nici nu se aplică |
+| `xgboost_v1/e638c1dc` | niciodată | 506 (#4) | nu — 0/3 pe toată seria |
+
+**Plafonul de 450 reproduce exact toate cele trei expirări istorice** și nu
+taie niciun Challenger înaintea punctului lui de trecere observat. Cel mai
+târziu crossing măsurat e **329**; 450 e cu ~37% peste el, iar cele trei
+expirări reale s-au produs la 458, 468 și 506 — toate peste plafon.
+
+**Ce ar schimba decizia**: un Challenger care atinge 3/3 pentru prima dată la
+`n > 450`. Nu există azi niciunul, pe nicio familie. Dacă apare, plafonul se
+ridică la noul maxim observat × ~1,4, cu aceeași aritmetică — nu se elimină.
 
 ### 4.3 F3c — calea de promovare nu scrie niciodată `decision_kind`
 
@@ -349,7 +396,26 @@ Rândurile vechi nu se rescriu (ar șterge dovada). Sunt oricum toate
    - comparația de fel înlocuită cu „orice deschisă trece";
    - răcirea scoasă → propunere repetată imediat după `rejected`;
    - condiția de trend inversată (`≤2` în loc de `≥2`);
+   - **plafonul `MAX_MATCHES_FOR_TREND_HOLD` scos** → `4e17c737` nu mai e
+     expirabil niciodată (vezi 4.2.3);
    - `decision_kind="promotion"` șters din calea de promovare.
+
+### 6.1 Back-test obligatoriu pe seriile REALE, nu doar teste sintetice
+
+Regula de trend se validează rulând-o peste cele patru serii măsurate din
+§4.2.2, ca date de test fixate în cod (nu citite din bază — testele rămân fără
+rețea). Cerințele, fiecare un test separat:
+
+| Serie | Ce trebuie să rezulte |
+|---|---|
+| `8ac89c70` (3/3 la n=207) | propunerea de expirare nu se emite niciodată |
+| `4e17c737` | suprimată la n=230…320; **emisă de la n≥450**; la n=468 emisă — exact decizia #5 reală |
+| `6e7265c5` | emisă la n=458 (0/3, trendul nu se aplică) — exact decizia #7 reală |
+| `e638c1dc` | emisă (0/3 pe toată seria) — exact decizia #4 reală |
+| `174e7e17` | suprimată la n=290 și 301 (2/3, sub plafon) |
+
+Ultima linie e **contraponderea care contează**: dacă regula ar emite
+propunerea la n=301, ar reproduce exact greșeala pe care ADR-ul o repară.
 3. **Testul §4.1 se scrie pe LANȚUL A→C, nu pe `propose_decision` singură.**
    Defectul nu e vizibil în funcție; e vizibil în ordinea fazelor. Un test pe
    funcție ar trece și cu defectul prezent.
@@ -379,8 +445,12 @@ Rândurile vechi nu se rescriu (ar șterge dovada). Sunt oricum toate
 - Răcirea de 168 h înseamnă că o decizie respinsă din greșeală nu se repropune
   o săptămână. Mitigare: `fire_trigger` manual rămâne disponibil; o propunere
   pierdută o săptămână e mai ieftină decât una repetată 7 ori.
-- Regula de trend poate ține un slot ocupat mai mult decât azi. Limita e
-  empirică, nu garantată — vezi gaura declarată la §4.2.
+- Regula de trend ține un slot ocupat mai mult decât azi: până la **450** de
+  meciuri în loc de 300, adică ~5 zile în plus la ritmul măsurat (~27/zi). Cost
+  acceptat explicit, cu back-test care arată că nu schimbă niciuna din cele
+  trei expirări istorice (§4.2.2).
+- Plafonul e **empiric, nu teoretic** — derivat din patru serii. Se ridică doar
+  cu aceeași aritmetică (max observat × ~1,4), niciodată „pentru siguranță".
 - „Marchează ca executată" e o afirmație umană despre lumea exterioară, deci
   poate fi greșită. E totuși mai onest decât o decizie `approved` pe veci.
 
