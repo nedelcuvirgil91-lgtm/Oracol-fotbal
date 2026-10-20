@@ -26,7 +26,17 @@ Not Implemented
 
 **Secțiunea asta există pentru că absența ei a costat deja.** ADR-057 nu era citat de niciun document și de niciun cod; condiția lui s-a împlinit pe 23 august, iar starea a fost descoperită abia pe 6 septembrie — **14 zile fără nicio antrenare**, și doar dintr-o întrebare întâmplătoare a proprietarului produsului. Orice decizie amânată se scrie AICI, cu declanșatorul verificabil, nu doar în ADR-ul ei.
 
-> **🧭 PLANUL PE DECIZIILE DESCHISE, citit ÎNAINTE de a relua oricare dintre ele: `docs/00_GOVERNANCE/PLAN_DECIZII_DESCHISE_2026-10-20.md`** — analiza completă, măsurată read-only, pe cele cinci care stăteau pe masă (reziduul de nume lungi, ADR-077, ADR-075 §8, D-14, F3), **plus pașii în ordine, cu precondiții și condiții de oprire** (§6). Documentul există ca să nu reluăm analiza de la zero: conține și §0 cu **trei afirmații din documentele proiectului dovedite FALSE**, și, pentru fiecare punct, o secțiune „Ce ar schimba decizia" — reevaluarea e ieftină prin construcție, nu o rediscuție completă. Două recomandări s-au inversat la măsurare (ADR-077 și reziduul).
+> # 📋 `docs/00_GOVERNANCE/BACKLOG.md` — SINGURA LISTĂ, CITITĂ PRIMA
+>
+> **Fără dată în nume, deliberat**: fiecare backlog datat a fost scris ca să fie „cel actual" și a devenit în câteva zile încă un loc în care să cauți. Se **actualizează**, nu se dublează. Un al doilea backlog cu dată în nume e un simptom.
+>
+> §1 = deciziile care AȘTEAPTĂ proprietarul produsului (singurul loc unde se pierd lucrurile). §2-§5 = munca, ordonată după valoare reală măsurată. §6 = ce NU facem și de ce, ca să nu se redeschidă. Documentele de mai jos rămân valabile **ca dovadă și istoric** — dar ordinea de lucru e în `BACKLOG.md`, nu în ele.
+>
+> **Concluzia arhitecturală care ordonează totul** (2026-10-20): defectul cel mai costisitor nu e la predicții, ci la **bucla de decizie umană** — propuneri care nu pot fi comise (D-8), nimic care semnalează o decizie uitată (D-5), și un ecran care nu numește ce aprobi (D-11). Împreună, ele sunt oglinda tehnică a problemei „ridicăm lucruri și se uită".
+>
+> ---
+>
+> **🧭 Analiza pe cele cinci decizii, cu §6.1-§6.4 (ce s-a executat efectiv): `docs/00_GOVERNANCE/PLAN_DECIZII_DESCHISE_2026-10-20.md`** — analiza completă, măsurată read-only, pe cele cinci care stăteau pe masă (reziduul de nume lungi, ADR-077, ADR-075 §8, D-14, F3), **plus pașii în ordine, cu precondiții și condiții de oprire** (§6). Documentul există ca să nu reluăm analiza de la zero: conține și §0 cu **trei afirmații din documentele proiectului dovedite FALSE**, și, pentru fiecare punct, o secțiune „Ce ar schimba decizia" — reevaluarea e ieftină prin construcție, nu o rediscuție completă. Două recomandări s-au inversat la măsurare (ADR-077 și reziduul).
 >
 > **📌 CE E DE URMĂRIT, ACUM: `docs/00_GOVERNANCE/DE_URMARIT.md`** — include §2ter, **semnalul deschis `n = 1000` fix** la `flashscore_team_dna` (eligibile reale 1022; plafon de cod EXCLUS prin verificare, explicație probabilă = meciuri care au căpătat rezultat după pasul de evaluare; **test binar la următoarea rulare**), și §3 cu proiecția ADR-072 corectată **a treia oară** (16-18 oct, nu 19-20) plus cauza erorii repetate.
 >
