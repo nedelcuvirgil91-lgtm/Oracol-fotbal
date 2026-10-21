@@ -1,6 +1,7 @@
 # ADR-080 — Stări terminale în `experiment_registry`
 
-**Status**: PROPUNERE (cere aprobare)
+**Status**: **ACCEPTED** (aprobat explicit de proprietarul produsului, 2026-10-21)
+**Implementat**: `main` @ `141f373` · backfill §5 **EXECUTAT** 2026-10-21
 **Data**: 2026-10-21
 **Autor**: sesiune Claude Code, la cererea proprietarului produsului
 **Înlocuiește / amendează**: nimic. Completează ADR-018 (verdicte imuabile) și
@@ -205,7 +206,34 @@ WHERE experiment_name = 'blend_v1'
 ```
 
 `promoted_at` e copiat din `model_champions` id=5, nu inventat.
-**Nefăcut până la confirmare explicită.**
+
+### ✅ EXECUTAT — 2026-10-21, cu aprobare explicită
+
+**Precondițiile au fost recitite ÎNAINTE de scriere, nu presupuse din ADR:**
+
+| Verificare | Rezultat |
+|---|---|
+| Cheia completă există | `blend_v1` / `8ac89c70-8727-459f-aa42-08a2edd16431` / `all` ✅ |
+| Statusul din gardă | `candidate_for_promotion` ✅ |
+| `promoted_at`/`promoted_by` în registru | **NULL** — nimic de suprascris ✅ |
+| `model_champions.promoted_at` | `2026-08-23 09:36:27.787184+00` — identic cu cifra din ADR ✅ |
+| Celelalte 2 rânduri `blend_v1` | `monitoring`, fără campion — negarantate de gardă, deci neatinse ✅ |
+
+**Rezultat**: exact **un rând** actualizat (`RETURNING` l-a confirmat).
+Starea registrului după: `monitoring` 4 · **`promoted` 1** · `rejected` 1 ·
+`insufficient_data` 1 — **zero `candidate_for_promotion`**. Contradicția
+„campionul activ e un candidat de promovat" nu mai există, iar acesta e
+**primul rând `promoted` din istoricul tabelei**.
+
+**Ordinea a contat, și e aceeași lecție ca la Clasa B din D-13**: codul a ajuns
+pe `main` **înainte** de backfill. Invers, evaluarea nocturnă n-ar fi avut încă
+garda terminală și ar fi suprascris `promoted` înapoi la verdictul statistic,
+la prima rulare.
+
+**`promoted_by = 'ADR-080-backfill'`, nu `'ADR-030-continuous-learning'`** —
+deliberat. A doua variantă ar fi făcut rândul să arate ca scris de calea
+normală, ceea ce e fals: promovarea reală a avut loc pe 23 august, marcajul e
+o corecție retroactivă de azi. Trasabilitatea cere să se vadă diferența (#9).
 
 ---
 
