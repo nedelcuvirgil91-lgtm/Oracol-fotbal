@@ -1325,3 +1325,28 @@ schimbare de logică.
 `tier=T1`, `target_key=2026-10-21`, `status=completed`, 9 etape / 9 reușite /
 0 eșuate, `critice_esuate=[]`, `github_run_id=39597915794`, 9 etape în rezumat.
 Primul rând din istoric, exact forma proiectată.
+
+### ⏳ CE RĂMÂNE DIN ACEST PAS
+
+**1. Patru apelanți cad în continuare pe `ODDS_SPORT_KEYS` — decizie, nu reparație.**
+Verificat că **azi** niciunul nu produce pagubă, dar clasa rămâne deschisă:
+implicitul unei funcții centrale e „ce acoperă Odds API", nu „ce urmărim".
+
+| Apelant | Efect azi | De ce nu se repară orbește |
+|---|---|---|
+| `sync/run_daily.py:612` (odds_persistence) | niciun efect | Odds API n-are `sport_key` pentru cele 5 — pasarea listei complete ar produce cereri inutile |
+| `sync/sync_pre_match_odds.py:44` | niciun efect | doar maparea `fixture_id`; verificat că cele 18 meciuri de Conference League se potrivesc oricum pe `fixture_id` în fallback |
+| `sync/sync_weather_forecast.py:48` | niciun efect | flux mort prin decizie (vezi §Goluri, `venue_city`) |
+| `sync/sync_team_health.py:45` | niciun efect | blocat de planul Free API-Football |
+
+**Schimbarea implicitului global ar fi greșită** — ar lovi primul rând din
+tabel. Reparația corectă, dacă se face, e **per apelant**, explicit, cu motiv
+scris. **Nefăcut deliberat**: zero pagubă demonstrată azi.
+
+**2. Rularea programată de mâine (09:40 UTC) trebuie să reproducă singură cele
+20 de ligi.** Rularea de azi a fost manuală. Dacă mâine se întoarce la 15,
+înseamnă că ceva din cale depinde de declanșarea manuală — test binar, zero
+cost, doar de privit.
+
+**3. `closing_*` ≈ `opening_*`** — semnalul de mai sus, nemăsurat. Atinge
+reperul extern, deci merită întrebare proprie, nu apendice.
