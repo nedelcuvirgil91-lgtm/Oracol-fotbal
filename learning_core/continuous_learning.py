@@ -77,6 +77,48 @@ _DEFAULT_CONFIG = {"learning_core_enabled": False}
 # (North Star #2 rămâne neschimbat).
 MIN_MATCHES_FOR_EXPIRY = 300
 
+# [ADR-079 §4.2] Plafonul peste care regula de trend NU mai reține expirarea.
+#
+# De ce există: pragul de 300 de mai sus a fost scris pentru un Challenger
+# BLOCAT în `monitoring`. Nu distinge „blocat" de „în urcare", iar `expired` e
+# stare TERMINALĂ — un Challenger la 2 din 3 metrici semnificative e, prin
+# definiția porții de promovare, la o singură metrică de `candidate_for_promotion`.
+#
+# De ce există totuși un PLAFON, și nu doar regula de trend: măsurat pe
+# `blend_v1/4e17c737`, un Challenger poate STAȚIONA la exact 2/3 — 13 din 15
+# evaluări, pe 14 zile. Brier și log-loss sunt corelate între ele, iar
+# acuratețea e metrica cu cel mai mult zgomot (plafonată la ~76% de remize).
+# 2/3 nu înseamnă „aproape promovabil"; e starea de echilibru a unui Challenger
+# mediocru. Fără plafon, regula ar fi blocat familia pe care pretindea c-o apără.
+#
+# De unde 450: back-testat pe toate cele patru serii reale. Cel mai târziu
+# punct de trecere la 3/3 observat e n=329 (`4e17c737`); 450 e cu ~37% peste.
+# Expirările reale s-au propus la n=311, 316 și 506 — niciuna nu se pierde, una
+# (#5) se deplasează 7 zile, cu rezultatul păstrat. Se ridică doar cu aceeași
+# aritmetică (max observat × ~1,4), niciodată „pentru siguranță".
+MAX_MATCHES_FOR_TREND_HOLD = 450
+
+# Câte metrici semnificativ mai bune fac un Challenger „în urcare", deci reținut
+# de la expirare. 2 din 3, fiindcă poarta de promovare cere toate trei simultan
+# (North Star #2) — deci 2 e exact „o metrică de la a fi candidat".
+MIN_SIGNIFICANT_FOR_TREND_HOLD = 2
+
+_CHEI_SEMNIFICATIE = ("brier_significant", "logloss_significant", "accuracy_significant")
+
+# Felul deciziei pe care calea de expirare îl produce. Numit explicit, nu
+# literal împrăștiat, fiindcă e comparat în două locuri.
+_FEL_EXPIRARE = "expiry"
+_FEL_PROMOVARE = "promotion"
+
+
+def _numar_metrici_semnificative(result: dict) -> int:
+    """Câte dintre Brier / log-loss / acuratețe sunt semnificativ mai bune.
+
+    `None` se numără ca NEsemnificativ, nu ca necunoscut — un verdict fără
+    teste calculate (n sub pragul de evaluare) nu e „în urcare" (Regula #8:
+    nu se aproximează, dar aici absența chiar înseamnă «nu s-a dovedit»)."""
+    return sum(1 for cheie in _CHEI_SEMNIFICATIE if result.get(cheie) is True)
+
 # TTL provizoriu pentru deciziile T3a (promovare SAU rollback) — valoare de
 # implementare, nu decizie de arhitectură (per Open Question ADR-030,
 # netratată ca blocantă).
@@ -165,7 +207,31 @@ def run_cycle() -> dict:
         "proposed": 0, "committed": 0, "guard_failures": 0,
         "health_checked": 0, "rollback_proposed": 0, "rollback_committed": 0,
         "expiry_proposed": 0, "expiry_committed": 0,
+        "stale_expired": 0, "stale_orphaned": 0,
     }
+
+    # [ADR-079 §3.2] Politica de staleness din ADR-026 era implementată și
+    # NEAPELATĂ de nicio linie de producție — `grep -rn` dădea doar două teste.
+    # Consecința: decizia #7 a stat 22 de zile fără niciun semnal, iar #6 e
+    # blocată `approved` de o lună. Exact golul pe care §8 din ADR-057 îl
+    # prevestea: „nu există azi nicio alertă care să semnaleze acea stare".
+    #
+    # Se apelează ÎNAINTEA fazelor, o singură dată pe rulare (nu per familie),
+    # ca deciziile deja expirate să nu mai fie numărate ca deschise de gărzile
+    # de mai jos. Nu e nevoie de niciun workflow nou — aceeași rulare
+    # periodică, idempotentă, acoperă și cazul ăsta.
+    #
+    # Cifrele intră în `summary`: o decizie `orphaned` e un EȘEC de producător
+    # (ADR-026), nu o curățenie — nu trece neobservată.
+    expirate, orfanizate = ar.sweep_stale_decisions()
+    summary["stale_expired"] = expirate
+    summary["stale_orphaned"] = orfanizate
+    if expirate or orfanizate:
+        logger.warning(
+            "[ContinuousLearning] sweep staleness (ADR-026): %s expirate, %s orfanizate. "
+            "O decizie orfanizata = propunere aprobata de om pe care nicio faza n-a executat-o.",
+            expirate, orfanizate,
+        )
 
     for name, version in model_registry.list_available():
         algorithm = model_registry.get(name, version)
@@ -278,6 +344,12 @@ def _handle_candidate_for_promotion(
 
     evidence = dict(result)
     evidence["training_run_id"] = training_run_id  # necesar pentru Faza C
+    # [ADR-079 §4.3] Felul se scrie EXPLICIT. Până azi calea asta nu-l scria
+    # niciodată, iar Faza C compensa cu un implicit codat — deci absența
+    # câmpului însemna două lucruri diferite după cititor: „promovare" pentru
+    # executant, „FEL NECUNOSCUT" pentru ecran (D-11). O propunere de
+    # promovare, felul cu consecința cea mai mare, se afișa fără nume.
+    evidence["decision_kind"] = _FEL_PROMOVARE
 
     decision_id = ar.propose_decision(
         decision_run_id, tier="T3a",
@@ -285,9 +357,12 @@ def _handle_candidate_for_promotion(
         evidence=evidence,
         correction_method="none — pre-ADR-034",
         ttl_hours=_T3A_DECISION_TTL_HOURS,
+        raport=summary,
     )
-    if decision_id:
-        ar.surface_decision(decision_id)
+    # [ADR-079 §4.4a] Contorul creștea necondiționat, ignorând valoarea
+    # întoarsă de `surface_decision` — deci raporta propuneri care nu s-au
+    # făcut (cazul idempotenței, unde tranziția e corect refuzată).
+    if decision_id and ar.surface_decision(decision_id):
         summary["proposed"] += 1
 
 
@@ -313,9 +388,41 @@ def _handle_monitoring_verdict(
     Challenger-ul pentru care s-a cerut aprobarea, niciodată „cel activ acum",
     care între timp poate fi altul."""
     n = result.get("n_matches_evaluated") or 0
-    rezumat = {"verdict": "monitoring", "n_matches_evaluated": n}
+    semnificative = _numar_metrici_semnificative(result)
+    rezumat = {"verdict": "monitoring", "n_matches_evaluated": n,
+               "trend_significant_metrics": semnificative}
+
+    # [ADR-079 §4.1.1 / §6.2 pasul 3] Verdictul e `monitoring`, deci orice
+    # propunere DESCHISĂ de alt fel (tipic: o promovare născută dintr-un 3/3
+    # trecător) și-a pierdut premisa. Se retrage ACUM, nu când altă cale se
+    # nimerește să vrea să propună — altfel omul vede zile întregi o propunere
+    # de PROMOVARE pentru un Challenger care s-a degradat.
+    #
+    # Reconstituit din seria reală a lui `4e17c737`: 3/3 la n=329, recădere la
+    # 2/3 la n=385, iar expirarea n-ar fi fost propusă decât la n=457. Fără
+    # pasul ăsta, propunerea greșită stă 7 zile în fața omului.
+    #
+    # O decizie `approved` NU se retrage automat — numai omul poate desface ce
+    # a aprobat (§4.1).
+    _retrage_propuneri_de_alt_fel(target_key, _FEL_EXPIRARE, rezumat)
 
     if n < MIN_MATCHES_FOR_EXPIRY:
+        ar.complete_run(run_id, summary=rezumat)
+        return
+
+    # [ADR-079 §4.2] Regula de trend: un Challenger la ≥2 din 3 metrici
+    # semnificativ mai bune nu se expiră, fiindcă e la o metrică de a fi
+    # candidat — DAR numai până la plafon, fiindcă staționarea la 2/3 e starea
+    # de echilibru a unui Challenger mediocru, nu o etapă spre promovare.
+    if (semnificative >= MIN_SIGNIFICANT_FOR_TREND_HOLD
+            and n < MAX_MATCHES_FOR_TREND_HOLD):
+        rezumat["expiry_threshold_reached"] = True
+        rezumat["expiry_skipped_trending"] = True
+        logger.info(
+            "[ContinuousLearning] expirare NEpropusa pentru %s: %s/3 metrici semnificative "
+            "la n=%s (sub plafonul de %s) — Challenger in urcare, nu intepenit (ADR-079 §4.2)",
+            training_run_id, semnificative, n, MAX_MATCHES_FOR_TREND_HOLD,
+        )
         ar.complete_run(run_id, summary=rezumat)
         return
 
@@ -350,9 +457,14 @@ def _handle_monitoring_verdict(
     ar.complete_run(decision_run_id)
 
     evidence = dict(result)
-    evidence["decision_kind"] = "expiry"
+    evidence["decision_kind"] = _FEL_EXPIRARE
     evidence["training_run_id"] = training_run_id  # ținta înghețată
     evidence["min_matches_for_expiry"] = MIN_MATCHES_FOR_EXPIRY
+    # [ADR-079 §4.2] Trendul intră în dovadă: dacă expirăm un Challenger care
+    # arăta bine pe două metrici din trei, omul trebuie să vadă asta în
+    # momentul aprobării, nu să afle după.
+    evidence["trend_significant_metrics"] = semnificative
+    evidence["max_matches_for_trend_hold"] = MAX_MATCHES_FOR_TREND_HOLD
 
     decision_id = ar.propose_decision(
         decision_run_id, tier="T3a",
@@ -365,10 +477,47 @@ def _handle_monitoring_verdict(
         evidence=evidence,
         correction_method="none — pre-ADR-034",
         ttl_hours=_T3A_DECISION_TTL_HOURS,
+        raport=summary,
     )
-    if decision_id:
-        ar.surface_decision(decision_id)
+    # [ADR-079 §4.4a] vezi nota identică de pe calea de promovare
+    if decision_id and ar.surface_decision(decision_id):
         summary["expiry_proposed"] += 1
+
+
+def _retrage_propuneri_de_alt_fel(target_key: str, fel_curent: str, rezumat: dict) -> None:
+    """[ADR-079 §4.1.1] Retrage propunerile DESCHISE al căror fel nu mai
+    corespunde verdictului curent.
+
+    Nu atinge niciodată o decizie `approved`: numai omul poate desface ce a
+    aprobat. Nu atinge nici una de felul curent — aceea e legitimă, iar
+    `propose_decision` o împrospătează.
+
+    Eșecurile se consemnează, nu se înghit: o retragere care nu reușește
+    înseamnă că cineva i-a schimbat starea între citire și scriere, iar
+    propunerea veche rămâne în fața omului."""
+    retrase: list[int] = []
+    for decizie in ar.list_open_decisions_for_target(target_key):
+        if decizie.get("status") == "approved":
+            continue
+        if ar.fel_decizie(decizie.get("evidence")) == fel_curent:
+            continue
+        motiv = (f"retrasa de ADR-079 §4.1.1: verdictul curent justifica "
+                 f"{fel_curent!r}, premisa acestei propuneri nu mai e valabila")
+        if ar.withdraw_decision(decizie["id"], motiv):
+            retrase.append(decizie["id"])
+            logger.info(
+                "[ContinuousLearning] propunerea #%s (%r) retrasa pentru %s — "
+                "verdictul curent justifica %r",
+                decizie["id"], ar.fel_decizie(decizie.get("evidence")),
+                target_key, fel_curent,
+            )
+        else:
+            logger.error(
+                "[ContinuousLearning] retragerea propunerii #%s pentru %s a ESUAT — "
+                "ramane deschisa, de verificat manual", decizie["id"], target_key,
+            )
+    if retrase:
+        rezumat["propuneri_retrase"] = retrase
 
 
 def _handle_rejected_verdict(run_id: int, training_run_id: str, result: dict) -> None:

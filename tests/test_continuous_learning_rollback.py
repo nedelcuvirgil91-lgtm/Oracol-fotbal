@@ -57,58 +57,13 @@ def fake_algorithm():
     return algo
 
 
-class _CallRecorder:
-    """Substituie automation_runs — captează apelurile fără nicio scriere reală."""
-
-    def __init__(self):
-        self.calls = []
-        self._next_run_id = 1
-        self._next_decision_id = 1
-        self.approved_for_target = {}
-
-    def write_run(self, producer, process_type, tier, target_key=None):
-        self.calls.append(("write_run", producer, process_type, tier, target_key))
-        rid = self._next_run_id
-        self._next_run_id += 1
-        return rid
-
-    def start_run(self, run_id):
-        self.calls.append(("start_run", run_id))
-        return True
-
-    def complete_run(self, run_id, summary=None):
-        self.calls.append(("complete_run", run_id, summary))
-        return True
-
-    def fail_run(self, run_id, error_detail):
-        self.calls.append(("fail_run", run_id, error_detail))
-        return True
-
-    def skip_run(self, run_id, skip_reason):
-        self.calls.append(("skip_run", run_id, skip_reason))
-        return True
-
-    def propose_decision(self, run_id, tier, rollback_plan=None, evidence=None,
-                          correction_method=None, ttl_hours=None):
-        self.calls.append(("propose_decision", run_id, tier, rollback_plan, evidence, correction_method))
-        did = self._next_decision_id
-        self._next_decision_id += 1
-        return did
-
-    def surface_decision(self, decision_id):
-        self.calls.append(("surface_decision", decision_id))
-        return True
-
-    def commit_decision(self, decision_id):
-        self.calls.append(("commit_decision", decision_id))
-        return True
-
-    def fail_decision_commit(self, decision_id, error_detail):
-        self.calls.append(("fail_decision_commit", decision_id, error_detail))
-        return True
-
-    def list_approved_decisions_for_target(self, target_key):
-        return self.approved_for_target.get(target_key, [])
+# [ADR-079] Era un DUPLICAT literal al clasei din `test_continuous_learning`,
+# verificat identic la nivel de AST înainte de înlocuire (nu „pare la fel").
+# Duplicatul a devenit un cost real: contractul `automation_runs` s-a extins, și
+# o dublură trebuia reparată în două locuri — exact felul în care una rămâne în
+# urmă tăcut. `test_challenger_expiry_policy` o importa deja de acolo; acum toate
+# trei folosesc aceeași dublură.
+from tests.test_continuous_learning import _CallRecorder  # noqa: E402
 
 
 @dataclass
@@ -311,7 +266,10 @@ def test_phase_d_opted_out_algorithm_is_skipped_entirely(monkeypatch):
     assert result["checked"] == 1
     assert result["health_checked"] == 0
     assert called["n"] == 0
-    assert rec.calls == []
+    # [ADR-079] Vezi nota identică din `test_continuous_learning`: sweep-ul e la
+    # nivel de ciclu, nu per algoritm, și nu creează niciun `automation_run`.
+    assert [c for c in rec.calls if c[0] != "sweep_stale_decisions"] == []
+    assert ("sweep_stale_decisions",) in rec.calls
 
 
 # ── R3.2A — propunere T3a de rollback ───────────────────────────────────────

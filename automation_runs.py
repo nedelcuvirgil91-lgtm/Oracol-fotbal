@@ -38,6 +38,48 @@ logger = logging.getLogger("FootballOracle.AutomationRuns")
 _OPEN_RUN_STATUSES = ("queued", "running")
 _OPEN_DECISION_STATUSES = ("proposed", "pending", "approved")
 
+# ════════════════════════════════════════════════════════════════════════════
+# [ADR-079] Felul unei decizii, si de ce are un IMPLICIT
+#
+# Calea de promovare nu a scris niciodata `decision_kind` in `evidence`, iar
+# Faza C compenseaza cu un implicit codat: `evidence.get("decision_kind",
+# "promotion")` (`continuous_learning.py`). Confirmat in date: decizia #3,
+# promovarea lui 8ac89c70 (23 aug), are campul NULL.
+#
+# Helper-ul de mai jos trebuie sa cada pe ACELASI implicit ca executantul.
+# Daca ar intoarce altceva (ex. „necunoscut"), comparatia de fel si executia ar
+# fi de acord pe hartie si in dezacord in fapt — exact clasa D-11, unde ecranul
+# spunea una si codul facea alta.
+#
+# ADR-079 §4.3 repara sursa (calea de promovare scrie felul explicit), dar
+# implicitul RAMANE pentru randurile istorice. Ele sunt toate `committed`, deci
+# nu mai apar in nicio comparatie — dar un implicit tacit nu se sterge pe
+# baza unei presupuneri despre ce exista in baza.
+_FEL_DECIZIE_IMPLICIT = "promotion"
+
+# Starile terminale care declanseaza racirea din §3.2: o decizie respinsa de om
+# sau expirata de sweep nu se repropune imediat.
+_STARI_PENTRU_RACIRE = ("rejected", "expired")
+
+# Identic cu `_T3A_DECISION_TTL_HOURS` din `continuous_learning`, DELIBERAT: o a
+# doua constanta de timp ar trebui justificata separat, si nu poate fi.
+RACIRE_PROPUNERE_ORE = 168.0
+
+# Cine a rezolvat o decizie prin sweep — distinct de un nume de om, ca o
+# expirare automata sa nu arate niciodata ca o decizie umana.
+_REZOLVAT_DE_SWEEP = "sweep-adr-026"
+
+
+def fel_decizie(evidence: Any) -> str:
+    """Felul normalizat al unei decizii, din `evidence`.
+
+    Niciodata gol: cade pe `_FEL_DECIZIE_IMPLICIT`, acelasi pe care il
+    foloseste Faza C la executie. Vezi comentariul de mai sus."""
+    if not isinstance(evidence, dict):
+        return _FEL_DECIZIE_IMPLICIT
+    fel = str(evidence.get("decision_kind") or "").strip().lower()
+    return fel or _FEL_DECIZIE_IMPLICIT
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -157,6 +199,7 @@ def propose_decision(
     evidence: dict[str, Any] | None = None,
     correction_method: str | None = None,
     ttl_hours: float | None = None,
+    raport: dict[str, Any] | None = None,
 ) -> int | None:
     """
     Creează o decizie nouă (status='proposed'), sau actualizează dovada unei
@@ -165,6 +208,24 @@ def propose_decision(
 
     tier='T3a' necesită rollback_plan (impus și la nivel de schema — vezi
     migrarea 011, constrângerea decision_feed_t3a_requires_rollback).
+
+    [ADR-079] Idempotența NU mai e orbă la felul deciziei. Patru ramuri:
+
+      - există una `approved` → **refuz**, `None`. Ce a aprobat omul e
+        înghețat; suprascrierea e calea prin care o aprobare de expirare se
+        execută ca promovare de campion (§4.1, contrazice ADR-002).
+      - există una `proposed`/`pending` de **alt fel** → se **retrage**
+        (`withdraw_decision`) și se creează cea nouă. Un `None` aici ar bloca
+        familia permanent — vezi §4.1.1, unde prima mea variantă greșea.
+      - există una de **același fel** → se actualizează `evidence`
+        (comportamentul dinainte, legitim: împrospătează cifrele).
+      - una de același fel a fost `rejected`/`expired` în ultimele
+        `RACIRE_PROPUNERE_ORE` → **refuz**, `None` (§3.2, răcire).
+
+    `raport`: dict opțional în care se scrie motivul unui refuz sau al unei
+    retrageri, ca apelantul să-l poată pune în `summary`-ul rulării. Fără el,
+    un refuz ar fi indistinct de „n-a fost nimic de propus" — adică tăcere,
+    exact defectul pe care ADR-057 l-a plătit cu 14 zile.
     """
     if tier == "T3a" and not rollback_plan:
         raise ValueError("propose_decision: T3a necesita rollback_plan (precondiție structurală)")
@@ -181,8 +242,18 @@ def propose_decision(
         logger.error("[AutomationRuns] citire target_key pentru run_id=%s esuata: %s", run_id, exc)
         target_key = None
 
+    fel_nou = fel_decizie(evidence)
+
     if target_key:
         try:
+            # [ADR-079, Discovery] Interogarea asta NU e paginata. Masurat
+            # 2026-10-20: maximul real e 198 de randuri
+            # (`production_champion|all`), ~2/zi din 17 iulie — plafonul
+            # PostgREST de 1000 e la ~400 de zile. Nu e rupt azi; se va rupe
+            # tacit, si atunci idempotenta ar rata deciziile al caror `run_id`
+            # nu intra in prima pagina. Lasat NEREPARAT deliberat: e o
+            # descoperire in afara scopului ADR-079, de decis separat
+            # (Discovery Rule), nu o largire tacita.
             sibling_runs = (
                 client.table("automation_runs")
                 .select("id")
@@ -190,9 +261,43 @@ def propose_decision(
                 .execute()
             )
             sibling_run_ids = [r["id"] for r in (sibling_runs.data or [])]
+
+            # ── §3.2 — racire: o decizie de ACELASI fel, respinsa de om sau
+            # expirata de sweep recent, nu se repropune imediat. Fara asta,
+            # „Respinge" si expirarea automata produc un flux zilnic de
+            # propuneri identice (`rejected`/`expired` nu sunt stari deschise,
+            # deci garda de idempotenta de mai jos nu le vede).
+            if sibling_run_ids:
+                limita = (datetime.now(timezone.utc)
+                          - timedelta(hours=RACIRE_PROPUNERE_ORE)).isoformat()
+                recente = (
+                    client.table("decision_feed")
+                    .select("id,status,evidence,resolved_at")
+                    .in_("run_id", sibling_run_ids)
+                    .in_("status", list(_STARI_PENTRU_RACIRE))
+                    .gte("resolved_at", limita)
+                    .execute()
+                )
+                for rand in (recente.data or []):
+                    if fel_decizie(rand.get("evidence")) != fel_nou:
+                        continue
+                    logger.info(
+                        "[AutomationRuns] propunere %r pentru target_key=%s sarita — "
+                        "decizia #%s a fost %s la %s, in ultimele %g ore (racire ADR-079 §3.2)",
+                        fel_nou, target_key, rand.get("id"), rand.get("status"),
+                        rand.get("resolved_at"), RACIRE_PROPUNERE_ORE,
+                    )
+                    if raport is not None:
+                        raport["propunere_in_racire"] = {
+                            "fel": fel_nou, "target_key": target_key,
+                            "decizie_anterioara": rand.get("id"),
+                            "status_anterior": rand.get("status"),
+                        }
+                    return None
+
             existing = (
                 client.table("decision_feed")
-                .select("id")
+                .select("id,status,evidence")
                 .in_("run_id", sibling_run_ids)
                 .in_("status", list(_OPEN_DECISION_STATUSES))
                 .limit(1)
@@ -200,17 +305,69 @@ def propose_decision(
                 if sibling_run_ids else None
             )
             if existing and existing.data:
-                decision_id = existing.data[0]["id"]
-                update_payload: dict[str, Any] = {}
-                if evidence is not None:
-                    update_payload["evidence"] = evidence
-                if update_payload:
-                    client.table("decision_feed").update(update_payload).eq("id", decision_id).execute()
-                logger.info(
-                    "[AutomationRuns] decizie deschisa deja existenta pentru target_key=%s (decision_id=%s) — actualizata, nu duplicata",
-                    target_key, decision_id,
-                )
-                return decision_id
+                rand = existing.data[0]
+                decision_id = rand["id"]
+                status_vechi = rand.get("status")
+                fel_vechi = fel_decizie(rand.get("evidence"))
+
+                # ── §4.1 — o decizie APROBATA e INGHETATA. Suprascrierea
+                # `evidence`-ului ei e calea prin care o aprobare de expirare
+                # se executa ca promovare de campion (contrazice ADR-002).
+                # Nu se atinge, si NU se tace: omul a aprobat un continut
+                # anume, iar faptul ca producatorul voia altceva e un semnal.
+                if status_vechi == "approved":
+                    logger.error(
+                        "[AutomationRuns] propunere %r pentru target_key=%s REFUZATA — "
+                        "decizia #%s e deja APROBATA (fel %r) si nu se suprascrie. "
+                        "Ce a aprobat omul nu se schimba sub el (ADR-079 §4.1).",
+                        fel_nou, target_key, decision_id, fel_vechi,
+                    )
+                    if raport is not None:
+                        raport["propunere_blocata_de_aprobata"] = {
+                            "fel_cerut": fel_nou, "fel_aprobat": fel_vechi,
+                            "decizie": decision_id, "target_key": target_key,
+                        }
+                    return None
+
+                # ── §4.1.1 — felul difera: propunerea veche e un REST, nu un
+                # obstacol. Se RETRAGE explicit si se creeaza cea noua. Un
+                # `return None` aici ar bloca familia permanent (vezi ADR).
+                if fel_vechi != fel_nou:
+                    motiv = (f"retrasa de ADR-079 §4.1: producatorul propune acum "
+                             f"{fel_nou!r}, premisa propunerii {fel_vechi!r} nu mai e valabila")
+                    retras = withdraw_decision(decision_id, motiv)
+                    logger.info(
+                        "[AutomationRuns] decizia #%s (%r, %s) retrasa=%s pentru target_key=%s "
+                        "— se propune %r in locul ei",
+                        decision_id, fel_vechi, status_vechi, retras, target_key, fel_nou,
+                    )
+                    if raport is not None:
+                        raport["propunere_veche_retrasa"] = {
+                            "decizie": decision_id, "fel_vechi": fel_vechi,
+                            "fel_nou": fel_nou, "reusit": retras,
+                        }
+                    if not retras:
+                        # Retragerea a eșuat (cursă: altcineva i-a schimbat
+                        # starea între citire și scriere). NU se creează una
+                        # nouă peste ea — ar fi exact stivuirea pe care
+                        # `R3-Risk-1` interzice.
+                        logger.error(
+                            "[AutomationRuns] retragerea deciziei #%s a esuat — nu se stivuieste "
+                            "o propunere %r peste ea", decision_id, fel_nou,
+                        )
+                        return None
+                    # cade mai jos, la INSERT-ul propunerii noi
+                else:
+                    update_payload: dict[str, Any] = {}
+                    if evidence is not None:
+                        update_payload["evidence"] = evidence
+                    if update_payload:
+                        client.table("decision_feed").update(update_payload).eq("id", decision_id).execute()
+                    logger.info(
+                        "[AutomationRuns] decizie deschisa deja existenta pentru target_key=%s (decision_id=%s, fel %r) — actualizata, nu duplicata",
+                        target_key, decision_id, fel_nou,
+                    )
+                    return decision_id
         except Exception as exc:
             logger.error("[AutomationRuns] verificare idempotency decizie esuata: %s", exc)
             return None
@@ -281,24 +438,48 @@ def reject_decision(decision_id: int, resolved_by: str) -> bool:
 
 def commit_decision(decision_id: int) -> bool:
     """approved -> committed. Exclusiv apelat de subsistemul proprietar,
-    după scriere reușită pe stare canonică. Terminal, imuabil."""
-    return _transition_decision(decision_id, {"status": "committed"})
+    după scriere reușită pe stare canonică. Terminal, imuabil.
+
+    [ADR-079 §4.4b] `from_status="approved"` adăugat. `surface_decision` a
+    fost întărită pe 6 septembrie exact pentru clasa asta, iar aici rămăsese
+    fără gardă — deci o decizie putea fi comisă din ORICE stare. Nu era atins
+    azi (Faza C iterează doar liste de `approved`), dar asimetria e aceeași
+    care a costat o dată."""
+    return _transition_decision(decision_id, {"status": "committed"},
+                                from_status="approved")
 
 
 def fail_decision_commit(decision_id: int, error_detail: str) -> bool:
     """approved -> commit_failed. Re-intră obligatoriu în vizibilitate activă
-    — nu se pierde silențios."""
+    — nu se pierde silențios. Gardă de stare: vezi `commit_decision`."""
     return _transition_decision(decision_id, {
         "status": "commit_failed", "commit_error": error_detail,
-    })
+    }, from_status="approved")
 
 
 def withdraw_decision(decision_id: int, reason: str) -> bool:
     """proposed/pending -> withdrawn. Procesul originator, dacă condiția
-    s-a rezolvat singură."""
-    return _transition_decision(decision_id, {
+    s-a rezolvat singură.
+
+    [ADR-079] Până azi: **zero apelanți, nici măcar în teste** — cod mort de la
+    scriere, deși e exact mecanismul de care §4.1.1 are nevoie. Două schimbări:
+
+    1. `resolved_at`/`resolved_by` se scriu. O retragere ESTE o rezolvare, iar
+       răcirea din §3.2 se sprijină pe acel câmp. Fără asta, aceeași clasă ca
+       marcajul înghețat (D-14): o tranziție care uită să-și datoreze propria
+       rezolvare.
+    2. Tranziția e **condiționată**, încercată pe `pending` apoi pe
+       `proposed`. Necondiționat, ar putea retrage o decizie `approved` — adică
+       exact ce §4.1 interzice, pe altă ușă.
+    """
+    payload = {
         "status": "withdrawn", "commit_error": reason,
-    })
+        "resolved_by": "producer-withdraw", "resolved_at": _now_iso(),
+    }
+    for stare in ("pending", "proposed"):
+        if _transition_decision(decision_id, payload, from_status=stare):
+            return True
+    return False
 
 
 def acknowledge_signal(decision_id: int, resolved_by: str) -> bool:
@@ -355,6 +536,15 @@ def sweep_stale_decisions() -> tuple[int, int]:
         ADR-026 §State Machines, extensia Producer Failure)
 
     Returnează (nr_expirate, nr_orfanizate).
+
+    [ADR-079 §3.2] Scrie acum și `resolved_at`/`resolved_by`. Înainte scria
+    **numai** `status`, iar răcirea din §3.2 se cheie pe `resolved_at` — deci
+    regula ar fi fost inertă exact pe `expired`, adică pe singura stare pe care
+    sweep-ul o produce. Aș fi cablat sweep-ul crezând că fluxul zilnic de
+    propuneri e oprit, fiind oprit doar pe calea care nu-l producea.
+
+    `resolved_by` e `'sweep-adr-026'`, niciodată un nume de om: o expirare
+    automată nu trebuie să arate ca o decizie umană (North Star #6).
     """
     client = get_client()
     if client is None:
@@ -365,7 +555,8 @@ def sweep_stale_decisions() -> tuple[int, int]:
     try:
         res = (
             client.table("decision_feed")
-            .update({"status": "expired"})
+            .update({"status": "expired",
+                     "resolved_by": _REZOLVAT_DE_SWEEP, "resolved_at": now})
             .eq("status", "pending")
             .lt("ttl_at", now)
             .execute()
@@ -377,7 +568,8 @@ def sweep_stale_decisions() -> tuple[int, int]:
     try:
         res = (
             client.table("decision_feed")
-            .update({"status": "orphaned"})
+            .update({"status": "orphaned",
+                     "resolved_by": _REZOLVAT_DE_SWEEP, "resolved_at": now})
             .eq("status", "approved")
             .lt("ttl_at", now)
             .execute()
@@ -529,6 +721,111 @@ def rezuma_decizia(d: dict[str, Any]) -> dict[str, str]:
 
     return {"actiune": actiune, "tinta": tinta, "cifra": cifra,
             "titlu": " ".join(parti)}
+
+
+# [ADR-079 §2] Producătorii ale căror decizii aprobate sunt executate de COD.
+#
+# Azi există exact unul: `continuous_learning._phase_c_execute_approved()` e
+# singurul apelant de `commit_decision()` în producție, și rulează exclusiv pe
+# `target_key` de forma `familie|ligă`, adică pe deciziile ADR-030.
+#
+# Deciziile ADR-033 (studiul de consens, `target_key = metric_name`) NU sunt
+# revendicate de nicio fază — și nici nu pot fi, fiindcă ADR-033 §Decision
+# interzice modulului orice atingere a servirii. Acțiunea lor reală e
+# comutarea unui flag, operație umană în acest proiect. De aceea ele primesc
+# un control manual de închidere, iar celelalte nu.
+#
+# Lista e impusă de o gardă AST (`tests/test_decision_lifecycle.py`): orice
+# modul cu `PRODUCER` care apelează `commit_decision` trebuie să fie aici. Un
+# producător nou cu executant propriu cade automat, nu tăcut.
+PRODUCATORI_CU_EXECUTIE_AUTOMATA = ("ADR-030",)
+
+
+def list_approved_awaiting_execution() -> list[dict[str, Any]]:
+    """[ADR-079 §2] Decizii `approved` care încă n-au fost comise, cu
+    producătorul și `target_key` atașate.
+
+    DE CE EXISTĂ: `list_pending_decisions()` arată **exclusiv** `pending`, deci
+    o decizie aprobată dispare de pe ecran în secunda în care omul o aprobă.
+    Pentru deciziile executate de cod e corect — Faza C le preia la următoarea
+    rulare. Pentru cele pe care nicio fază nu le revendică (consensul, ADR-033)
+    înseamnă că omul a aprobat ceva și **nu mai are nicio urmă a cererii**:
+    exact cazul deciziei #6, `approved` din 14 septembrie, invizibilă o lună.
+
+    Nu e paginată deliberat: `decision_feed` are 6 rânduri după 3 luni, iar
+    `approved`-neexecutat e o stare patologică prin definiție — dacă vreodată
+    trec de o pagină, problema e aceea, nu interogarea."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        res = (
+            client.table("decision_feed")
+            .select("*")
+            .eq("status", "approved")
+            .order("created_at", desc=False)
+            .execute()
+        )
+        decizii = res.data or []
+        if not decizii:
+            return []
+        run_ids = [d["run_id"] for d in decizii if d.get("run_id") is not None]
+        meta: dict[int, dict[str, Any]] = {}
+        if run_ids:
+            runs = (
+                client.table("automation_runs")
+                .select("id,producer,target_key")
+                .in_("id", run_ids)
+                .execute()
+            )
+            meta = {r["id"]: r for r in (runs.data or [])}
+        for d in decizii:
+            r = meta.get(d.get("run_id"), {})
+            d["producer"] = r.get("producer")
+            d["target_key"] = r.get("target_key")
+            d["executata_de_cod"] = r.get("producer") in PRODUCATORI_CU_EXECUTIE_AUTOMATA
+        return decizii
+    except Exception as exc:
+        logger.error("[AutomationRuns] list_approved_awaiting_execution esuat: %s", exc)
+        return []
+
+
+def list_open_decisions_for_target(target_key: str) -> list[dict[str, Any]]:
+    """[ADR-079] Toate deciziile DESCHISE (`proposed`/`pending`/`approved`)
+    pentru o cheie de target, cu status și `evidence`.
+
+    Necesară pentru §4.1.1: un producător care produce un verdict nou trebuie
+    să poată **retrage** o propunere deschisă al cărei fel nu mai corespunde,
+    chiar și când el însuși nu propune nimic (cazul regulii de trend, §4.2 —
+    altfel propunerea veche rămâne în fața omului zile întregi).
+
+    Diferită de `list_approved_decisions_for_target` prin exact asta: aceea
+    răspunde la „ce am de executat", asta la „ce stă deschis pe target"."""
+    client = get_client()
+    if client is None:
+        return []
+    try:
+        runs = (
+            client.table("automation_runs")
+            .select("id")
+            .eq("target_key", target_key)
+            .execute()
+        )
+        run_ids = [r["id"] for r in (runs.data or [])]
+        if not run_ids:
+            return []
+        res = (
+            client.table("decision_feed")
+            .select("id,status,evidence,tier,run_id")
+            .in_("run_id", run_ids)
+            .in_("status", list(_OPEN_DECISION_STATUSES))
+            .execute()
+        )
+        return res.data or []
+    except Exception as exc:
+        logger.error("[AutomationRuns] list_open_decisions_for_target esuat pentru %s: %s",
+                     target_key, exc)
+        return []
 
 
 def list_pending_decisions() -> list[dict[str, Any]]:

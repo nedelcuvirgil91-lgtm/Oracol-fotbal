@@ -1615,6 +1615,51 @@ elif nav == "settings":
                         ar.reject_decision(d["id"], resolved_by="owner")
                         st.rerun()
 
+        # [ADR-079 §2] Deciziile APROBATE nu apăreau nicăieri. `list_pending_decisions()`
+        # arată exclusiv `pending`, deci o decizie dispărea de pe ecran în secunda în
+        # care o aprobai. Pentru cele executate de cod e corect — Faza C le preia la
+        # următoarea rulare. Pentru cele pe care nicio fază nu le revendică (consensul,
+        # ADR-033) însemna că aprobai ceva și nu mai aveai nicio urmă a cererii: exact
+        # decizia #6, `approved` din 14 septembrie, invizibilă o lună întreagă.
+        aprobate = ar.list_approved_awaiting_execution()
+        if aprobate:
+            st.markdown("---")
+            st.markdown('<span class="sub-label">⏳ Aprobate, în așteptarea execuției</span>', unsafe_allow_html=True)
+            for d in aprobate:
+                rez = ar.rezuma_decizia(d)
+                with st.expander(f"⏳ {rez['titlu']}", expanded=True):
+                    st.caption(
+                        f"aprobată de {d.get('resolved_by') or '—'} la {d.get('resolved_at') or '—'} "
+                        f"· producător {d.get('producer') or '—'} · target {d.get('target_key') or '—'}"
+                    )
+                    if d.get("evidence"):
+                        st.json(d["evidence"])
+                    if d.get("executata_de_cod"):
+                        st.info(
+                            f"Se execută automat: **{rez['actiune']}** e preluată de "
+                            "Continuous Learning (Faza C) la următoarea rulare. "
+                            "Nu ai nimic de făcut aici."
+                        )
+                    else:
+                        # Acțiunea e operațională (tipic: comutarea unui flag), iar
+                        # ADR-033 interzice modulului care a produs decizia să atingă
+                        # servirea. Deci nu există cod care s-o execute, și nici nu
+                        # trebuie să existe. Butonul afirmă un FAPT despre lumea
+                        # exterioară, deci textul lui spune exact ce afirmi — nu „gata".
+                        st.warning(
+                            f"**Nicio fază de cod nu execută această decizie.** Acțiunea "
+                            f"({rez['actiune']}) e operațională — vezi planul de rollback "
+                            "de mai jos pentru ce anume trebuie comutat. Butonul de mai jos "
+                            "NU execută nimic: doar consemnează că ai făcut-o tu."
+                        )
+                        st.caption(f"Plan de rollback / ce înseamnă: {d.get('rollback_plan') or '—'}")
+                        if st.button(
+                            f"📝 Confirm că am executat manual: {rez['actiune']}",
+                            key=f"mark_done_{d['id']}",
+                        ):
+                            ar.commit_decision(d["id"])
+                            st.rerun()
+
         st.markdown("---")
         st.markdown('<span class="sub-label">📜 Activity Log — ultimele rulări autonome</span>', unsafe_allow_html=True)
         runs = ar.list_recent_runs(limit=50)

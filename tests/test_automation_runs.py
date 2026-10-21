@@ -28,6 +28,7 @@ class _FakeQuery:
         self.filters = {}     # col -> val (eq)
         self.in_filters = {}  # col -> list
         self.lt_filters = {}  # col -> val
+        self.gte_filters = {}  # col -> val  [ADR-079: racirea foloseste .gte()]
         self._limit = None
         self._order_col = None
         self._order_desc = False
@@ -42,6 +43,18 @@ class _FakeQuery:
 
     def lt(self, col, val):
         self.lt_filters[col] = val
+        return self
+
+    def gte(self, col, val):
+        """[ADR-079] Răcirea din §3.2 filtrează `resolved_at >= limita`.
+
+        Falsul trebuie să APLICE filtrul, nu doar să-l accepte: unul care l-ar
+        ignora ar face testul de răcire să treacă fără să dovedească nimic —
+        exact defectul găsit în clientul fals la D-10, unde plafonul implicit
+        al PostgREST nu era emulat și garda centrală trecea cu bug-ul
+        reintrodus. Un rând fără `resolved_at` (NULL) NU trece filtrul, la fel
+        ca în Postgres."""
+        self.gte_filters[col] = val
         return self
 
     def limit(self, n):
@@ -82,6 +95,10 @@ class _FakeTable:
         for col, val in q.lt_filters.items():
             rv = row.get(col)
             if rv is None or not (rv < val):
+                return False
+        for col, val in q.gte_filters.items():
+            rv = row.get(col)
+            if rv is None or not (rv >= val):
                 return False
         return True
 

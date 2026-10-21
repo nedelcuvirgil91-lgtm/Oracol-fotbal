@@ -66,6 +66,10 @@ class _CallRecorder:
         self._next_run_id = 1
         self._next_decision_id = 1
         self.approved_for_target = {}
+        # [ADR-079] Decizii DESCHISE per target, configurabile de test.
+        self.open_for_target = {}
+        self.sweep_result = (0, 0)
+        self.withdraw_result = True
 
     def write_run(self, producer, process_type, tier, target_key=None):
         self.calls.append(("write_run", producer, process_type, tier, target_key))
@@ -90,7 +94,7 @@ class _CallRecorder:
         return True
 
     def propose_decision(self, run_id, tier, rollback_plan=None, evidence=None,
-                          correction_method=None, ttl_hours=None):
+                          correction_method=None, ttl_hours=None, raport=None):
         self.calls.append(("propose_decision", run_id, tier, rollback_plan, evidence, correction_method))
         did = self._next_decision_id
         self._next_decision_id += 1
@@ -110,6 +114,28 @@ class _CallRecorder:
 
     def list_approved_decisions_for_target(self, target_key):
         return self.approved_for_target.get(target_key, [])
+
+    # ── [ADR-079] Suprafața nouă a contractului `automation_runs`.
+    #
+    # `fel_decizie` deleagă la funcția REALĂ, nu o reimplementează. Lecția e
+    # plătită: la D-10, clientul fals nu emula plafonul implicit al PostgREST,
+    # iar garda centrală trecea cu defectul reintrodus. Un fals care își
+    # rescrie propria logică de normalizare poate divergea tăcut de executant —
+    # exact clasa pe care §4.3 o repară.
+    def fel_decizie(self, evidence):
+        import automation_runs as _ar_real
+        return _ar_real.fel_decizie(evidence)
+
+    def list_open_decisions_for_target(self, target_key):
+        return self.open_for_target.get(target_key, [])
+
+    def withdraw_decision(self, decision_id, reason):
+        self.calls.append(("withdraw_decision", decision_id, reason))
+        return self.withdraw_result
+
+    def sweep_stale_decisions(self):
+        self.calls.append(("sweep_stale_decisions",))
+        return self.sweep_result
 
 
 class _FakeMatchResult:
@@ -685,7 +711,19 @@ def test_algorithm_opted_out_of_challenger_framework_is_skipped_entirely(recorde
     assert result["checked"] == 1
     assert result["trained"] == 0
     assert result["evaluated"] == 0
-    assert recorder.calls == [], "niciun automation_run nu trebuie creat pentru un algoritm opted-out"
+    # [ADR-079] Aserțiunea era `recorder.calls == []`, adică „zero apeluri".
+    # Sweep-ul de staleness e la nivel de CICLU, nu per algoritm, și nu creează
+    # niciun `automation_run` — deci aserțiunea veche confunda „nicio muncă pe
+    # algoritmul ăsta" cu „nicio activitate deloc". Se ascute, nu se slăbește:
+    # cerem explicit zero apeluri care creează runs sau decizii, și verificăm
+    # separat că sweep-ul chiar a rulat (altfel testul ar trece și dacă cineva
+    # l-ar șterge din ciclu).
+    _CICLU = {"sweep_stale_decisions"}
+    pe_algoritm = [c for c in recorder.calls if c[0] not in _CICLU]
+    assert pe_algoritm == [], "niciun automation_run nu trebuie creat pentru un algoritm opted-out"
+    assert ("sweep_stale_decisions",) in recorder.calls, (
+        "sweep-ul de staleness trebuie să ruleze o dată pe ciclu, indiferent de "
+        "ce algoritmi există (ADR-079 §3.2)")
 
 
 def test_generic_over_multiple_registry_entries(recorder, monkeypatch):

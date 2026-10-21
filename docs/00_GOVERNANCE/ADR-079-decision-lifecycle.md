@@ -1,7 +1,53 @@
 # ADR-079 — Ciclul de viață al unei decizii T3a
 
-**Status**: PROPUNERE, **revizia 2** (2026-10-20 seara) — cere aprobare
-explicită înainte de implementare
+**Status**: **ACCEPTED** (revizia 2, aprobată explicit de proprietarul
+produsului 2026-10-20) — **IMPLEMENTAT 2026-10-20/21**, cod pe branch, flag
+inexistent prin construcție (nu introduce niciunul)
+
+> **Ce a ieșit la iveală ÎN TIMPUL implementării** — consemnat aici, nu doar în
+> commit:
+>
+> 1. **Un test lipsea, și a ieșit la iveală prin MUTAȚIE, nu prin recitire.**
+>    Mutația „contorul necondiționat" (§4.4a) **trecea toate cele 33 de teste**.
+>    O reparație fără gardă e o reparație care se poate întoarce tăcut.
+>    Reparat: trei teste noi, iar mutația reluată doboară două.
+> 2. **Două straturi de apărare, și unul le ascundea pe celălalt.** Retragerea
+>    există acum în două locuri: proactiv în `_handle_monitoring_verdict`
+>    (§6.2 pasul 3) și reactiv în `propose_decision` (§4.1.1). Mutația care
+>    reintroduce varianta mea greșită (`return None`) **nu** doboară testul de
+>    lanț, fiindcă retragerea proactivă îl salvează. A fost nevoie de mutația
+>    **M10 — ambele straturi scoase** ca să reproducă exact revizia 1. Fără ea,
+>    aș fi crezut că lanțul acoperă defectul, iar acoperirea reală era pe
+>    altceva.
+> 3. **Garda de producători a prins `app.py`, și avea dreptate.** `app.py`
+>    apelează `commit_decision` prin noul control manual, dar nu e un
+>    *producător* — e mâna omului. Exceptarea e **numită și justificată**, nu
+>    strecurată printr-un `if producer is None`, care ar fi lăsat să treacă
+>    orice executant nou fără `PRODUCER`.
+> 4. **Un duplicat literal de clasă a devenit un cost real.** `_CallRecorder`
+>    exista în două fișiere de test, identice la nivel de AST (verificat, nu
+>    presupus). Contractul `automation_runs` s-a extins, deci dublura trebuia
+>    reparată în două locuri — exact felul în care una rămâne în urmă tăcut.
+>    Înlocuit cu un import; toate trei fișierele folosesc acum aceeași dublură.
+> 5. **Falsul de Supabase nu avea `.gte()`**, pe care răcirea îl folosește.
+>    Adăugat **în falsul comun**, și aplicând efectiv filtrul — un fals care
+>    l-ar accepta fără să filtreze ar face testul de răcire să treacă vid,
+>    exact defectul găsit la D-10.
+>
+> **13 mutații rulate, toate prinse** (una, M11, abia după ce i-am scris
+> testul). `pytest tests/`: **3710 passed, 2 skipped** — aritmetica se închide
+> exact (3671 + 39). Calea de predicție **neatinsă**, verificat pe
+> `oracle_engine.py`, `feature_engine.py`, `ml_predictor.py`,
+> `recalibration.py`, `oracle_api.py`, `shadow_testing.py` — `git diff` gol.
+>
+> **⏳ DISCOVERY, în afara scopului, de decis separat** (Discovery Rule, NU
+> lărgit tacit): interogarea de idempotență din `propose_decision` citește
+> `automation_runs` filtrat pe `target_key` **fără paginare**. Măsurat
+> 2026-10-20: maximul real e **198 de rânduri** (`production_champion|all`),
+> ~2/zi din 17 iulie — plafonul PostgREST de 1000 e la **~400 de zile**. Nu e
+> rupt azi; se va rupe tăcut, și atunci idempotența ar rata deciziile al căror
+> `run_id` nu intră în prima pagină. **A șasea instanță a clasei.** Lăsat
+> nereparat, cu comentariul la locul faptei.
 **Decizie de proiectare delegată și luată de mine** (2026-10-20, la cererea
 explicită a proprietarului produsului): §4.2, plafonul regulii de trend. Prima
 mea recomandare (fără plafon) s-a dovedit **greșită la măsurare** — vezi
