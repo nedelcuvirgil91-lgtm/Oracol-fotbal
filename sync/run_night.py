@@ -49,6 +49,7 @@ False în Season Cleanup).
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import time
 from datetime import datetime, timezone
@@ -94,6 +95,115 @@ def _run_stage(name: str, fn: Callable[[], Any], report: list[dict],
             "duration_s": round(time.time() - t0, 1), "error": str(exc),
         })
         print(f"   ❌ EȘUAT: {exc}")
+
+
+# [ADAUGAT 2026-10-21] Producător înregistrat sub ADR-026 §Idempotency.
+#
+# DE CE `automation_runs` si NU o tabela noua: tabela are deja exact campurile
+# necesare (`producer`, `process_type`, `status`, `error_detail`, `summary`
+# jsonb, `started_at`, `completed_at`) si are DEJA producatori din afara
+# Learning Core — `ADR-040` (echivalenta R-Sync-7b, stratul de sincronizare)
+# si `ADR-052` (validare). Deci zero schema noua, nicio migrare, nicio grija
+# cu regula `GRANT` de la 30 oct.
+#
+# CHEIA DE IDENTITATE, ceruta explicit de ADR-026 §2: data UTC a rularii.
+# Consecinta regulii „Reuse": o a doua rulare pornita cat timp prima e inca
+# `running` o REFOLOSESTE in loc sa scrie un rand paralel; una pornita dupa ce
+# prima s-a incheiat creeaza corect un rand nou (cazul real de azi, rulari 93
+# si 94 in aceeasi zi).
+#
+# UN SINGUR RAND PE RULARE, nu unul pe etapa — masurat, nu presupus:
+# `list_recent_runs(limit=50)` NU filtreaza pe `producer` si alimenteaza
+# ecranul „Activity Log" din `app.py`. La ~13 randuri/zi azi, 50 de randuri
+# inseamna ~4 zile de istoric; 10 randuri/noapte l-ar fi redus la ~2, cu ~43%
+# succese de rutina. As fi reparat un punct orb creand altul.
+_PRODUCATOR_NIGHT_SYNC = "night_sync"
+_PROCES_NIGHT_SYNC = "night_sync_run"
+
+
+def _deschide_rand_audit(started_at: str) -> int | None:
+    """Deschide rândul de audit al rulării, sau întoarce `None` dacă nu se poate.
+
+    **Observabilitatea nu are voie să rupă lucrul pe care îl observă** — exact
+    lecția din reparația de azi a cache-ului, unde o funcție auxiliară arunca
+    în apelant și omora o etapă întreagă. Orice eșec de aici (Supabase picat,
+    credențiale lipsă, modul inexistent) se loghează și se continuă: o rulare
+    de noapte nu se oprește fiindcă n-a putut scrie un rând de evidență.
+    """
+    try:
+        import automation_runs as ar
+        run_id = ar.write_run(
+            _PRODUCATOR_NIGHT_SYNC, _PROCES_NIGHT_SYNC, "T1",
+            target_key=started_at[:10],  # data UTC = cheia de identitate
+        )
+        if run_id is not None:
+            ar.start_run(run_id)
+        return run_id
+    except Exception as exc:
+        logger.warning("[NightSync] rândul de audit nu s-a putut deschide: %s", exc)
+        return None
+
+
+def _inchide_rand_audit(run_id: int | None, rezumat: dict[str, Any],
+                        critice: list[str]) -> None:
+    """Închide rândul de audit. `failed` DOAR dacă o etapă critică a eșuat —
+    aceeași regulă ca pentru codul de ieșire, ca `status` din bază și culoarea
+    jobului din GitHub să nu poată spune lucruri diferite."""
+    if run_id is None:
+        return
+    try:
+        import automation_runs as ar
+        if critice:
+            ar.fail_run(run_id, "etape critice eșuate: " + ", ".join(critice),
+                        summary=rezumat)
+        else:
+            ar.complete_run(run_id, rezumat)
+    except Exception as exc:
+        logger.warning("[NightSync] rândul de audit nu s-a putut închide: %s", exc)
+
+
+def rezumat_pentru_audit(report: list[dict[str, Any]],
+                         started_at: str, finished_at: str) -> dict[str, Any]:
+    """Raportul pe etape, condensat pentru `automation_runs.summary`.
+
+    Funcție **pură**. Păstrează per etapă doar ce se poate interoga ulterior
+    (nume, reușită, critică, durată) plus `step_durations_s` unde etapa îl
+    întoarce — adică exact defalcarea care, până acum, se calcula corect și se
+    arunca la ultima linie, și care a trebuit reconstituită din log-uri la
+    fiecare investigație de durată din august.
+
+    NU copiază `detail` întreg: e arbitrar ca mărime și ar transforma un rând
+    de audit într-un depozit.
+    """
+    etape = []
+    for r in report:
+        intrare: dict[str, Any] = {
+            "etapa": r.get("stage"),
+            "ok": bool(r.get("ok", False)),
+            "critic": bool(r.get("critic", False)),
+            "durata_s": r.get("duration_s"),
+        }
+        if not r.get("ok", False) and r.get("error"):
+            intrare["eroare"] = str(r["error"])[:500]
+        detaliu = r.get("detail")
+        if isinstance(detaliu, dict) and detaliu.get("step_durations_s"):
+            intrare["pasi_s"] = detaliu["step_durations_s"]
+        etape.append(intrare)
+
+    reusite = sum(1 for r in report if r.get("ok", False))
+    return {
+        "etape": etape,
+        "etape_total": len(report),
+        "etape_reusite": reusite,
+        "etape_esuate": len(report) - reusite,
+        "critice_esuate": etape_critice_esuate(report),
+        "inceput": started_at,
+        "sfarsit": finished_at,
+        # Legătura cu log-ul: API-ul GitHub întoarce doar ultimele ~5000 de
+        # linii, iar o rulare de noapte produce peste 100.000 — deci rândul
+        # ăsta trebuie să poată trimite la rularea exactă, nu invers.
+        "github_run_id": os.environ.get("GITHUB_RUN_ID"),
+    }
 
 
 def etape_critice_esuate(report: list[dict[str, Any]]) -> list[str]:
@@ -296,6 +406,7 @@ def run() -> list[dict[str, Any]]:
 
     started_at = datetime.now(timezone.utc).isoformat()
     report: list[dict[str, Any]] = []
+    run_id = _deschide_rand_audit(started_at)
 
     _run_stage("1-4. Discovery + API Providers + Validation + Canonical Database", _stage_api_providers, report)
     _run_stage("5. Flashscore (Discovery + fetch/persist, Delta Sync)", _stage_flashscore, report)
@@ -361,6 +472,16 @@ def run() -> list[dict[str, Any]]:
                 print(f"         [ATENȚIE] durate pentru pași absenți din manifest: {extra}")
     print("═" * 78)
     print()
+
+    # Rândul de audit se închide DUPĂ raportul tipărit: dacă scrierea în bază
+    # ar arunca (nu poate — e prinsă — dar să rămână adevărat și dacă cineva
+    # relaxează garda), raportul a fost deja afișat, nu pierdut.
+    critice = etape_critice_esuate(report)
+    _inchide_rand_audit(
+        run_id,
+        rezumat_pentru_audit(report, started_at, finished_at),
+        critice,
+    )
 
     return report
 

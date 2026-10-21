@@ -161,11 +161,22 @@ def complete_run(run_id: int, summary: dict[str, Any] | None = None) -> bool:
     return _transition_run(run_id, payload)
 
 
-def fail_run(run_id: int, error_detail: str) -> bool:
-    """running -> failed."""
-    return _transition_run(run_id, {
+def fail_run(run_id: int, error_detail: str,
+             summary: dict[str, Any] | None = None) -> bool:
+    """running -> failed.
+
+    `summary` e opțional și implicit `None`, deci apelanții existenți sunt
+    neatinși. Există fiindcă altfel defalcarea s-ar pierde exact pe rulările
+    unde contează cel mai mult: una eșuată n-ar păstra nimic în afară de
+    `error_detail`, iar motivul eșecului s-ar putea citi doar din log — adică
+    din sursa care se taie la ~5000 de linii.
+    """
+    payload: dict[str, Any] = {
         "status": "failed", "completed_at": _now_iso(), "error_detail": error_detail,
-    })
+    }
+    if summary is not None:
+        payload["summary"] = summary
+    return _transition_run(run_id, payload)
 
 
 def skip_run(run_id: int, skip_reason: str) -> bool:
