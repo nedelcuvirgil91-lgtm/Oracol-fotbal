@@ -30,8 +30,35 @@ Nimic din lista asta nu avansează fără tine. Ordinea e după cât costă amâ
 | **1.6** | **Punctul 5** — clasa de duplicate `openfootball` | nemăsurat | 1893 de rânduri active; dacă duplică, afectează setul de antrenare. **Se măsoară întâi, read-only.** |
 | **1.7** | **F3** — pornirea experimentului de value selection | ~**4 noiembrie** | Nimic nu pornește automat (ADR-002). |
 
-**`decision_feed` #6** stă `approved` din **14 septembrie** și **nu poate fi
-comisă de niciun cod** — vezi §2.1. Nu e o decizie care te așteaptă; e un defect.
+### ✅ DECIZIE LUATĂ 2026-10-21 — `decision_feed` #6 se lasă să fie ORFANIZATĂ
+
+**Nu e o acțiune, e o decizie de a NU acționa — consemnată tocmai ca să nu fie
+citită ca defect** de cine vede `orphaned` săptămâna viitoare.
+
+Starea: `approved` din 14 septembrie (consens, `agreement_score`, producător
+ADR-033), TTL depășit din 21 septembrie, niciodată `committed`. Până la ADR-079
+nu putea fi nici măcar **văzută** — `list_pending_decisions()` arată exclusiv
+`pending`, deci dispăruse de pe ecran în secunda în care a fost aprobată.
+
+**De ce orfanizarea e răspunsul CORECT, nu o renunțare.** Aseară recomandasem
+„dacă vrei s-o închizi manual, trebuie înainte de următoarea rulare".
+Reconsiderat: `orphaned` e **starea adevărată**. A fost aprobată și nicio linie
+de cod nu a executat-o — exact definiția ADR-026 pentru eșec de producător. A o
+marca „executată manual" ar fi o **afirmație falsă**: nu s-a comutat niciun
+flag. Controlul manual din ADR-079 §2 e pentru a consemna ce ai făcut, nu pentru
+a închide ce n-ai făcut.
+
+**Bucla se vindecă singură, verificat în cod**: `orphaned` nu e în
+`_OPEN_DECISION_STATUSES`, nici în `_STARI_PENTRU_RACIRE`. Deci la următoarea
+rulare `consensus_validation`, dacă verdictul e în continuare `surface_worthy`,
+se naște o **propunere nouă** — de data asta vizibilă, etichetată, și cu
+avertismentul că nicio fază n-o execută. Sistemul te întreabă din nou, onest.
+
+**Ce se întâmplă, și când**: prima rulare `night_sync` cu ADR-079 (așteptată
+~07:20 UTC pe 21 oct, vezi `DE_URMARIT` §7) apelează sweep-ul, care trece #6 în
+`orphaned` cu `resolved_by = 'sweep-adr-026'` și raportează
+`stale_orphaned = 1`. **Un `orphaned` acolo e comportamentul proiectat, nu o
+regresie.**
 
 ---
 
@@ -41,12 +68,22 @@ comisă de niciun cod** — vezi §2.1. Nu e o decizie care te așteaptă; e un 
 problemei pe care ai ridicat-o**: lucrurile se pierd. Nu doar în conversație —
 **și în sistem**.
 
-**[ACTUALIZAT 20 oct, seara]** Erau trei defecte; **sunt patru**, iar al
-patrulea e cel mai grav și a ieșit la iveală exact din repararea lui 2.3.
-2.3 e livrat. Celelalte trei sunt acum **un singur ADR**:
-**`ADR-079-decision-lifecycle.md`** (PROPUNERE). §0 din el arată de ce nu se
-pot decide separat: cablarea sweep-ului (2.2) *produce* defectul 2.4 dacă 2.4
-nu e reparat întâi.
+**[ÎNCHIS 2026-10-21 — toate patru]** Erau trei defecte; **au fost patru**, iar
+al patrulea (2.4, cel mai grav) a ieșit la iveală exact din repararea lui 2.3.
+2.3 a fost livrat pe 20 oct; celelalte trei au intrat într-un singur document,
+**`ADR-079-decision-lifecycle.md`** — ACCEPTED, revizia 2, **implementat și pe
+`main`** (`3ff2f4d`, 21 oct). §0 arată de ce nu se puteau decide separat:
+cablarea sweep-ului (2.2) *produce* defectul 2.4 dacă 2.4 nu e reparat întâi.
+
+**Nu declar secțiunea verificată, doar implementată.** Codul n-a rulat încă
+nicio dată — a intrat pe `main` la 03:26 UTC, iar prima rulare care îl prinde e
+așteptată ~07:20 UTC pe 21 oct. Lista exactă de verificat: `DE_URMARIT` §8.
+Până atunci, „merge" se sprijină pe 39 de teste și 13 mutații, nu pe producție.
+
+**Două erori de proiectare ale mele au fost prinse la review-ul cerut explicit**
+(„vezi dacă ai greșit ceva"), amândouă ar fi produs pagubă: reparația §4.1 ar fi
+blocat permanent familia `blend_v1`, iar răcirea §3.2 ar fi fost inertă exact pe
+`expired`. Detaliile, în ADR-079 §4.1.1 și §3.2.
 
 ### 2.1 Decizii care nu pot fi comise (D-8)
 

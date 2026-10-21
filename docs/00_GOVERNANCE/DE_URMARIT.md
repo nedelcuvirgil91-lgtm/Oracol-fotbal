@@ -2,9 +2,12 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-10-20**. Ultimul element adăugat: **§7 — decizia #8
-se rezolvă singură în jur de 23 oct, până atunci NU se atinge** (plus un gol
-găsit în propria reparație D-11).
+Ultima actualizare: **2026-10-21**. Ultimul element adăugat: **§8 — prima rulare
+cu ADR-079 (~07:20 UTC), cu lista exactă de verificat** și ce e comportament
+proiectat, nu regresie.
+
+**Două semnale deschise, în ordinea în care se declanșează**: §8 (azi, ~07:20
+UTC) și §7 (decizia #8, **~26-27 oct** — nu 23, vezi corecția din §7).
 
 ---
 
@@ -988,3 +991,68 @@ Ecranul raportează fidel ce scrie în `evidence`; divergența e între ce scrie
 **De reținut ca metodă**: golul a ieșit la iveală pentru că D-11 a mutat
 `decision_kind` din adâncul unui `st.json` în titlu. Cât era îngropat, nimeni
 nu avea cum să observe că lipsește.
+
+---
+
+## 8. 🔴 **~07:20 UTC, 21 OCTOMBRIE** — prima rulare cu ADR-079. Nu a rulat încă NICIODATĂ.
+
+ADR-079 a intrat pe `main` la **03:26 UTC pe 21 oct** (`3ff2f4d`). Ultima rulare
+`night_sync` e **run 92, 20 oct 07:22**, pe `2d4092b` — dinainte de cod. Deci
+totul despre ADR-079 se sprijină azi pe **39 de teste și 13 mutații**, nu pe
+producție.
+
+**De ce rularea de azi îl prinde, deși slotul e 02:00 și codul a intrat la
+03:26**: din auditul propriu de throttling (29 aug) știm că
+`created_at == run_started_at` în **20/20** de rulări — evenimentul însuși e
+creat la **livrare**, nu la slot. Run 92: ambele la 07:22, adică 5h20m după
+slot. Deci checkout-ul de azi se face pe `main`-ul de la ~07:20, cu ADR-079
+inclus. **Dacă vreodată asta se schimbă (evenimentul creat la slot), prima
+rulare cu ADR-079 ar fi cea de mâine** — de verificat `head_sha`, nu presupus.
+
+### Ce se verifică, exact
+
+| # | Verificare | Ce dovedește | Dacă nu apare |
+|---|---|---|---|
+| 1 | `summary.stale_orphaned = 1`, iar **#6** trece în `orphaned` cu `resolved_by = 'sweep-adr-026'` și `resolved_at` populat | §3.2 — sweep-ul e cablat **și** își datează rezolvarea | dacă `resolved_at` e NULL, defectul reparat la review s-a întors |
+| 2 | **#8** rămâne `pending`; **zero** decizii noi pe `blend_v1\|all` | §4.1 + §4.2 — nimic nu se stivuiește, nimic nu se repropune | o decizie #9 = regula de trend nu s-a aplicat |
+| 3 | `summary.expiry_skipped_trending = true` și `trend_significant_metrics = 2` | §4.2 — suprimarea e un **fapt consemnat**, nu absența unui fapt | tăcerea e exact defectul ADR-057 |
+| 4 | orice propunere NOUĂ are `decision_kind` în `evidence` | §4.3 | absența = ecranul ar arăta `FEL NECUNOSCUT` |
+| 5 | în aplicație: secțiunea „Aprobate, în așteptarea execuției" | §2 | — |
+
+```sql
+-- Verificarea 1+2+4, intr-o singura citire
+SELECT d.id, d.status, d.resolved_by, d.resolved_at,
+       r.producer, r.target_key, d.evidence->>'decision_kind' AS fel
+FROM decision_feed d LEFT JOIN automation_runs r ON r.id = d.run_id
+ORDER BY d.id;
+
+-- Verificarea 3: rezumatul rularii de Continuous Learning
+SELECT id, process_type, summary, created_at
+FROM automation_runs
+WHERE producer = 'ADR-030' AND created_at > '2026-10-21'
+ORDER BY id DESC LIMIT 10;
+```
+
+### Ce e comportament PROIECTAT, nu regresie
+
+- **#6 devine `orphaned`.** Decizie luată explicit pe 21 oct — vezi `BACKLOG`
+  §1. `orphaned` e starea adevărată: aprobată, niciodată executată, eșec de
+  producător (ADR-026). A o marca „executată manual" ar fi fost o afirmație
+  falsă — nu s-a comutat niciun flag.
+- **O propunere de consens NOUĂ, mai târziu.** `orphaned` nu e nici stare
+  deschisă, nici în răcire, deci `consensus_validation` o poate repropune dacă
+  verdictul rămâne `surface_worthy`. Asta e bucla care se vindecă, nu un
+  duplicat.
+- **Niciun rând nou în `challenger_evaluations` dacă `n` n-a crescut.**
+  `UNIQUE (training_run_id, n_matches_evaluated)` + `ignore_duplicates` îl
+  aruncă tăcut — mecanismul A2, cunoscut. Run 92 n-a produs niciun rând exact
+  așa, la `n = 301` neschimbat. **Nu e un semn că evaluarea s-a oprit.**
+
+### Ce rămâne deschis după rulare
+
+- **Decizia #8** — nu se atinge până ~26-27 oct (plafonul n≈450, `DE_URMARIT` §7).
+- **Discovery, de decis separat**: interogarea de idempotență din
+  `propose_decision` citește `automation_runs` pe `target_key` **fără paginare**.
+  Măsurat: maximul real **198** de rânduri, ~2/zi — plafonul PostgREST de 1000
+  e la **~400 de zile**. A șasea instanță a clasei. Nereparat deliberat, cu
+  comentariul la locul faptei; nu lărgesc scopul unui ADR aprobat din mers.
