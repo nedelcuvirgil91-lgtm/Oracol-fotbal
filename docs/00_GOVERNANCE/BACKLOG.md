@@ -5,8 +5,9 @@
 încă un loc în care să cauți. Documentul ăsta se **actualizează**, nu se
 dublează. Dacă apare un al doilea backlog cu dată în nume, e un simptom.
 
-**Ultima măsurare completă: 2026-10-20.** Totul de mai jos e verificat atunci,
-read-only, nu reluat din memorie. Unde o cifră e veche, scrie cât e de veche.
+**Ultima măsurare completă: 2026-10-20**, cu **§1.6bis, §1.8 și §1.9 remăsurate
+pe 2026-10-21**. Totul de mai jos e verificat atunci, read-only, nu reluat din
+memorie. Unde o cifră e veche, scrie cât e de veche.
 
 **Cum se folosește**: §1 e ce te așteaptă pe TINE (se citește prima, e singurul
 loc unde se pierd lucrurile). §2-§5 e munca, ordonată după valoare reală. §6 e
@@ -29,6 +30,65 @@ Nimic din lista asta nu avansează fără tine. Ordinea e după cât costă amâ
 | **1.5** | **D-14** — tabelă de audit `model_config` | decizie cerută | **Recomandarea mea: NU acum.** Reparația aplicată (skill + gardă) recuperează ce s-a pierdut. |
 | **1.6** | **Punctul 5** — clasa de duplicate `openfootball` | ✅ **ÎNCHIS 21 oct** — măsurat, reparat în cod, cele 30 supersedate (run `39545095203`). Vezi §1.6bis | Golul era **exact 30 de rânduri**, nu 1893. Cauza: un defect de 1 linie în `normalize_team_name`. Nimic de decis. |
 | **1.7** | **F3** — pornirea experimentului de value selection | ~**4 noiembrie** | Nimic nu pornește automat (ADR-002). |
+| **1.8** | **Radarul vedea 15 competiții din 20** | ✅ **ÎNCHIS 21 oct** — fără nicio linie de cod nouă. Vezi §1.8bis | Cauza nu era la cote. Nimic de decis. |
+| **1.9** | **`experiment_registry` contrazicea `model_champions`** | ✅ **ÎNCHIS 21 oct** — `ADR-080` ACCEPTED, implementat și backfill executat. Vezi §1.9bis | Riscul operațional era **ZERO**, verificat pe trei căi. Nimic de decis. |
+
+### ✅ §1.8bis — 21 oct: radarul vedea 15 din 20, iar cauza NU era la cote
+
+Lipseau Conference League, HNL, Austria Bundesliga, Swiss Super League, Danish
+Superliga. `oracle_api.py:1667` — `comps = competitions or list(ODDS_SPORT_KEYS.keys())`:
+implicitul unei funcții centrale e „ligile acoperite de **The Odds API**" (16),
+nu „ligile pe care le **urmărim**" (21), iar diferența e exact mulțimea celor 5.
+Batch-ul ADR-056 o apela fără argument → acele ligi n-au avut niciodată rând
+`control`, iar radarul cere predicția **înainte** de cote.
+
+Dovada curată, aceeași zi și același tip de competiție: **15 oct, Europa League
+18/18 cu `control`, Conference League 0/18.**
+
+**Reparația exista din 15 oct** (`332ca74`) și a stat **inertă șase zile**,
+fiindcă pe 17 oct cheia de cache a trecut de 255 de octeți și a omorât exact
+etapa care ar fi beneficiat de ea. Două defecte independente, al doilea
+mascându-l pe primul. **O reparație merge-uită nu e o reparație ajunsă în
+efect.**
+
+Verificat prin rulare manuală (`39601154972`): `fara_predictie` **31 → 0**,
+`retinute` **120/120**, **20 de ligi**, `cote_din_fallback` **0 → 28** (prima
+execuție în producție a punții scrise în septembrie pentru HNL).
+
+**Două afirmații ale mele, infirmate de măsurătoare**, ambele părând să
+confirme ipoteza corectă-ca-fapt a proprietarului produsului că „cele 5 citesc
+cotele din altă tabelă". Detalii: `DE_URMARIT.md` §10.
+
+### ✅ §1.9bis — 21 oct: analiza cerută înainte de ADR mi-a schimbat teza
+
+Propusesem să leg `experiment_registry` de `model_champions`. **Analiza a
+infirmat propunerea** — ar fi fost o dependență nouă către un strat superior,
+ca să repar un simptom.
+
+**Riscul operațional e ZERO**, verificat pe trei căi: nimic nu citește
+`experiment_registry.status` în producție; poarta de promovare cere starea FSM
+`SUCCEEDED` **și** verdictul imuabil din `challenger_evaluations`; iar calea de
+propunere ia ținta din `get_active_challenger()`, care nu întoarce niciodată un
+model promovat.
+
+**Cauza reală**: `promote_experiment()`/`deprecate_experiment()` aveau **ZERO
+apelanți de producție**, și niciun rând n-a purtat vreodată `promoted`.
+Agravant: `8ac89c70` are ultima scriere shadow cu **13 minute** înainte de
+propria promovare, deci evaluarea nocturnă recalcula la nesfârșit același
+verdict pe date înghețate — cu `last_evaluated_at` împrospătat de fiecare dată.
+**Rândul arăta proaspăt, măsurătoarea era de două luni.**
+
+**Discovery Rule**: prima implementare a pus apelul în `promotion_service` și a
+căzut pe o gardă **existentă** — *„Promotion execută, nu decide"* (ADR-019).
+Garda avea dreptate, n-a fost ștearsă, cablarea s-a mutat în orchestrator.
+
+**Executat**: ADR-080 ACCEPTED, `main` @ `51997c4`, 22 de teste, 9 mutații,
+backfill de **un rând** cu precondițiile recitite din bază. Registrul acum:
+`monitoring` 4 · **`promoted` 1** · `rejected` 1 · `insufficient_data` 1 —
+**zero `candidate_for_promotion`**.
+
+**Rămâne de verificat la prima rulare de noapte**: `last_evaluated_at` al
+rândului `promoted` **nu trebuie să avanseze**.
 
 ### ✅ §1.6bis — MĂSURAT 2026-10-21: clasa `openfootball` e 30 de rânduri, și are o CAUZĂ RĂDĂCINĂ
 

@@ -218,7 +218,11 @@ Contorul de meciuri evaluabile a trecut pragul: **301/300**, afișat de aplicaț
 
 **Nu se întâmplă nimic automat** — eticheta barei s-a schimbat, atât. Feature-ul rămâne NEPROMOVAT până când ablația îl justifică.
 
-**[ADĂUGAT 2026-10-14 — a doua problemă a cifrei lui, independentă de prima]** Verdictul `+2,90pp` din `experiment_registry` e **înghețat din 10 septembrie, vechi de 34 de zile** — experimentul a căzut din primele 1000 de rânduri pe care `get_distinct_experiments()` le vede (vezi **D-10**), deci evaluarea generică nu-l mai atinge. Tensiunea cu ablația negativă de pe 13 oct nu e deci neapărat o contradicție de construcție: **se compară o măsurătoare de ieri cu una de acum o lună.** Se reevaluează întâi (D-10 sau manual, read-only), se compară după.
+~~**[ADĂUGAT 2026-10-14 — a doua problemă a cifrei lui, independentă de prima]** Verdictul `+2,90pp` din `experiment_registry` e **înghețat din 10 septembrie, vechi de 34 de zile** — experimentul a căzut din primele 1000 de rânduri pe care `get_distinct_experiments()` le vede (vezi **D-10**), deci evaluarea generică nu-l mai atinge.~~
+
+**[REZOLVAT 2026-10-21]** Reparația D-10 a ajuns în efect: `flashscore_team_dna/v1` e reevaluat **în aceeași zi**, vechime 0, iar `n` a urcat de la 551 la **1157**. Tensiunea cu ablația negativă de pe 13 oct **nu mai poate fi pusă pe seama unei cifre vechi** — ambele sunt acum proaspete, deci dacă se redeschide subiectul se compară direct, fără explicația „una e de acum o lună".
+
+**Închide și semnalul `n = 1000` fix** (`DE_URMARIT` §2ter): nu era al cincilea plafon PostgREST, era creștere naturală. Testul binar cerut acolo a ieșit curat.
 
 **Legătură cu ADR-072, de reținut înainte de orice promovare**: `flashscore_team_dna/v1` e singurul `candidate_for_promotion` cu **0 rânduri `control`** (0 din 989), deci singurul pe care ADR-072 **nu îl poate verifica**. Cade corect pe `match_history_frozen` (D2 funcționează), dar cifra lui rămâne produsă de baseline-ul care, în 4 din 5 cazuri măsurate, flatează challenger-ul.
 
@@ -286,7 +290,13 @@ Același tipar ca la `sync_pre_match_odds` în august: instrumentare întâi, re
 >
 > **Cauzalitate confirmată, nu corelație**: rândurile proaspete sunt exact reuniunea {cele 2 vizibile} ∪ {Challengerii activi, evaluați separat prin `continuous_learning._process_pair()`}. Cele învechite nu sunt niciuna.
 >
-> **„DUPĂ" se măsoară la prima rulare de noapte cu reparația** — cele 3 verdicte învechite se recalculează. **De așteptat ca `blend_v1/8ac89c70` să NU mai fie `candidate_for_promotion`**: cifra lui (+5,29pp) a fost produsă pe baseline-ul înghețat, iar ADR-072 e activ acum.
+> **„DUPĂ" se măsoară la prima rulare de noapte cu reparația** — cele 3 verdicte învechite se recalculează. ~~**De așteptat ca `blend_v1/8ac89c70` să NU mai fie `candidate_for_promotion`**: cifra lui (+5,29pp) a fost produsă pe baseline-ul înghețat, iar ADR-072 e activ acum.~~
+>
+> **[MĂSURAT 2026-10-21 — predicția de mai sus e INFIRMATĂ, iar asta a dus la ADR-080]** „DUPĂ" s-a măsurat: toate cele 7 experimente evaluate în aceeași zi, vechime 0 zile — reparația D-10 funcționează. **Dar `8ac89c70` a rămas `candidate_for_promotion`**, reevaluat pe `baseline_source = 'shadow_control'`, deci pe cifre corecte. Explicația comodă („era artefactul baseline-ului înghețat") e **eliminată prin măsurare**.
+>
+> **Cauza reală, găsită cerând o analiză înainte de a scrie ADR-ul**: `promote_experiment()` și `deprecate_experiment()` aveau **ZERO apelanți de producție**, iar niciun rând n-a purtat vreodată `promoted`. Calea de promovare scria în `model_champions` și în FSM, dar **nu anunța niciodată registrul**. Agravant: `8ac89c70` are ultima scriere shadow pe **23 aug 09:23:17**, cu 13 minute înainte de promovare — deci evaluarea nocturnă recalcula la nesfârșit același verdict pe 394 de rânduri înghețate, cu `last_evaluated_at` împrospătat de fiecare dată. **Rândul arăta proaspăt, măsurătoarea era de două luni.**
+>
+> **ÎNCHIS prin `ADR-080` (ACCEPTED, `main` @ `51997c4`)**: stări terminale în registru, scrise de orchestrator (NU de `promotion_service` — o gardă ADR-019 existentă a prins prima implementare și avea dreptate), plus backfill-ul unui singur rând. Registrul acum: `monitoring` 4 · **`promoted` 1** · `rejected` 1 · `insufficient_data` 1 — **zero `candidate_for_promotion`**. Riscul operațional fusese verificat ca **ZERO** înainte: nimic nu citește `experiment_registry.status` în producție, iar poarta de promovare cere starea FSM `SUCCEEDED` **și** verdictul imuabil din `challenger_evaluations`.
 >
 > **DOUĂ DEFECTE GĂSITE ÎN PROPRIILE GĂRZI, ambele prin verificare, nu prin noroc:**
 >
