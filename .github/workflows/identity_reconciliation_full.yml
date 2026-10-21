@@ -19,7 +19,11 @@ on:
   workflow_dispatch:
     inputs:
       confirm:
-        description: 'Scrie exact "EXECUTE-FULL" pentru a confirma (scrie in productie, ~397 randuri).'
+        description: >-
+          Scrie exact "EXECUTE-FULL" pentru a confirma (SCRIE IN PRODUCTIE).
+          Numarul de randuri NU e fix si NU se citeste de aici — se masoara
+          inainte de fiecare rulare cu `identity_drift_check` (read-only).
+          Ultima masuratoare: 30 de randuri (2026-10-21, run 39544395145).
         required: true
         type: string
 

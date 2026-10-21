@@ -22,7 +22,22 @@ independent in baza — 6/6 randuri marcate corect, 0 randuri canonice atinse,
 confirmat apoi comportamentul asteptat (run 32557539823: 0 grupuri noi, 6
 rezolvate, verde).
 
-PROFIL DE IMPACT AL ACESTUI SET (verificat live inainte de rulare, 2026-08-22):
+SCRIPTUL NU ARE UN SET FIX. Proceseaza tot ce e reconciliabil in momentul
+rularii, deci numarul de randuri se MASOARA inainte de fiecare rulare — nu se
+citeste dintr-un antet. Unealta e `identity_drift_check` (read-only, zero
+scrieri), care raporteaza si cate grupuri sunt, si care sunt.
+
+RULARI REALE, in ordine:
+  2026-08-22 — 397 grupuri (profilul de mai jos).
+  2026-10-21 — 30 grupuri, run de masurare 39544395145. Toate 30 sunt grupuri
+    NOI, aparute in aceeasi zi dintr-o reparatie de resolver: dezbracarea
+    sufixului de tara era oarba la diacritice, deci `FC Bayern München (GER)`
+    nu se rezolva la `Bayern Munich` si clubul traia ca a doua identitate.
+    Datele existau de un an; abia `match_key()` reparat le-a putut grupa.
+    Dry-run inainte de rulare: 30 reconciliate, 0 hard_conflict, 0 sursa
+    necunoscuta, 0 randuri canonice cu gol de date.
+
+PROFIL DE IMPACT AL SETULUI DIN 2026-08-22 (verificat live atunci):
   - 398 randuri necanonice (397 grupuri reconciliabile + 1 grup HARD CONFLICT,
     al carui rand NU va fi scris — mecanismul il exclude automat);
   - TOATE au `actual_result` si `home_elo` — spre deosebire de cele 6 pilotate.
