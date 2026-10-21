@@ -68,23 +68,47 @@ logging.basicConfig(
 logger = logging.getLogger("FootballOracle.NightSync")
 
 
-def _run_stage(name: str, fn: Callable[[], Any], report: list[dict]) -> None:
+def _run_stage(name: str, fn: Callable[[], Any], report: list[dict],
+               critic: bool = False) -> None:
+    """Rulează o etapă și o înregistrează în raport.
+
+    `critic` — implicit **False**, deliberat. O etapă devine critică doar dacă
+    e marcată EXPLICIT la apel, niciodată din oficiu. Consecință: adăugarea
+    acestui parametru nu colorează nimic roșu de la sine, iar lista de etape
+    critice crește prin decizie, nu prin construcție (North Star #3, aplicat
+    și la ceva care nu e un flag de produs).
+    """
     print(f"\n▶  {name}")
     t0 = time.time()
     try:
         detail = fn()
         report.append({
-            "stage": name, "ok": True,
+            "stage": name, "ok": True, "critic": critic,
             "duration_s": round(time.time() - t0, 1), "detail": detail,
         })
         print(f"   ✅ OK ({report[-1]['duration_s']}s)")
     except Exception as exc:
         logger.error("[NightSync] Etapa %s a eșuat: %s", name, exc)
         report.append({
-            "stage": name, "ok": False,
+            "stage": name, "ok": False, "critic": critic,
             "duration_s": round(time.time() - t0, 1), "error": str(exc),
         })
         print(f"   ❌ EȘUAT: {exc}")
+
+
+def etape_critice_esuate(report: list[dict[str, Any]]) -> list[str]:
+    """Numele etapelor CRITICE care au eșuat. Funcție pură — nicio citire, nicio
+    scriere, niciun efect. Separată tocmai ca decizia „jobul e roșu sau verde"
+    să fie testabilă fără să ruleze o rulare de noapte.
+
+    `critic` absent se citește ca **False**: un raport scris de cod mai vechi
+    nu devine retroactiv critic.
+    """
+    return [
+        str(r.get("stage"))
+        for r in report
+        if not r.get("ok", False) and r.get("critic", False)
+    ]
 
 
 def _stage_api_providers() -> dict:
@@ -277,8 +301,17 @@ def run() -> list[dict[str, Any]]:
     _run_stage("5. Flashscore (Discovery + fetch/persist, Delta Sync)", _stage_flashscore, report)
     _run_stage("6. Team DNA", _stage_team_dna, report)
     _run_stage("7. Oracle Data Layer", _stage_oracle_data_layer, report)
+    # SINGURA etapă marcată critică azi, și e marcată pentru un motiv măsurat:
+    # a murit la 2,3 s în patru nopți consecutive (18-21 oct, nume de fișier de
+    # cache peste 255 de octeți) iar jobul a raportat VERDE de fiecare dată.
+    # Fără ea, rândul `control` nu se mai împrospătează — adică exact sursa pe
+    # care ADR-072 a promovat-o la bază de decizie pentru promovări.
+    #
+    # Celelalte 9 etape rămân NEmarcate deliberat: nu avem încă istoricul lor
+    # de eșecuri (raportul pe etape nu se persistă nicăieri), deci a le marca
+    # acum ar fi ghicit, nu măsurat.
     _run_stage("[extra, ADR-056] Challenger Shadow Batch (logare predicții pe toate meciurile)",
-               _stage_challenger_shadow_batch, report)
+               _stage_challenger_shadow_batch, report, critic=True)
     _run_stage("[extra, pre-existentă] Continuous Learning (ADR-030)", _stage_ml_refresh_pre_existing, report)
     _run_stage("8. Diagnostics", _stage_diagnostics, report)
     _run_stage("9. Cleanup (Season Cleanup — dry run)", _stage_cleanup, report)
@@ -295,7 +328,13 @@ def run() -> list[dict[str, Any]]:
     print(f"  Etape: {ok_count} reușite, {fail_count} eșuate din {len(report)}")
     for r in report:
         status = "✅" if r["ok"] else "❌"
-        print(f"    {status} {r['stage']} ({r['duration_s']}s)")
+        # Marcajul apare DOAR pe o etapă critică EȘUATĂ: pe cele reușite ar fi
+        # zgomot, iar pe cele necritice ar sugera că jobul devine roșu din
+        # cauza lor. Cine citește raportul trebuie să poată spune din prima
+        # linie DE CE jobul e roșu.
+        eticheta = "  ⟵ CRITICĂ, jobul eșuează din cauza ei" if (
+            not r["ok"] and r.get("critic", False)) else ""
+        print(f"    {status} {r['stage']} ({r['duration_s']}s){eticheta}")
 
         # [ADAUGAT 2026-08-27] Defalcarea pe pasii interiori, pentru etapele
         # care o intorc. Fara asta, `step_durations_s` era calculat corect,
@@ -327,4 +366,17 @@ def run() -> list[dict[str, Any]]:
 
 
 if __name__ == "__main__":
-    run()
+    # [ADAUGAT 2026-10-21] Înainte, aici era `run()` simplu: raportul era
+    # calculat corect, tipărit corect, și ARUNCAT. Jobul ieșea cu 0 oricâte
+    # etape eșuau — de aceea „Challenger Shadow Batch" a putut muri patru nopți
+    # la rând sub un job verde. Clasa `check_data_health` inversată: roșu-mereu
+    # te antrenează să ignori, verde-mereu te antrenează să nu te uiți.
+    #
+    # Ies cu 1 DOAR pentru etapele marcate critice. O etapă necritică eșuată
+    # lasă jobul verde, exact ca înainte — schimbarea nu colorează roșu nimic
+    # ce nu a fost marcat deliberat.
+    _raport = run()
+    _critice = etape_critice_esuate(_raport)
+    if _critice:
+        print(f"IEȘIRE 1 — etape critice eșuate: {', '.join(_critice)}")
+        raise SystemExit(1)
