@@ -341,6 +341,22 @@ def incarca_rezultate(fixture_ids: Sequence[str]) -> dict[str, Any]:
 # oricate ligi am mai adauga dupa. De aceea e scrisa explicit si NU derivata
 # din `TRACKED_COMPETITIONS - ODDS_SPORT_KEYS` — acea diferenta s-ar muta la
 # prima liga noua neacoperita de The Odds API, si cutoff-ul ar aluneca tacit.
+#
+# [CORECTAT 2026-10-21] Numele spune data REPARATIEI DE COD; intrarea reala in
+# datele radarului e 21 oct, rularea `2026-10-21T12:38Z`. Reparatia din 15 oct
+# a stat inerta sase zile, fiindca pe 17 oct cheia de cache a trecut de 255 de
+# octeti si a omorat exact etapa care ar fi beneficiat de ea.
+#
+# Si „16 din 18" de mai sus e acum „16 din 21": pe 17 oct s-au adaugat Austria
+# Bundesliga, Swiss Super League si Danish Superliga, tot neacoperite de The
+# Odds API — adica EXACT alunecarea pe care comentariul o anticipa, doua zile
+# mai tarziu.
+#
+# Multimea NU se extinde cu ele, si cutoff-ul ramane corect: toate cinci au
+# intrat in radar la ACEEASI rulare, deci `min(run_id)` da aceeasi granita fie
+# ca setul are doua elemente, fie cinci. Cele doua discontinuitati pe care le
+# anticipam s-au suprapus intr-una singura. Numele constantei ramane neschimbat
+# deliberat — o redenumire ar fi churn intr-un identificator deja citat.
 COMPETITII_INTRATE_2026_10_15: frozenset[str] = frozenset({"Conference League", "HNL"})
 
 

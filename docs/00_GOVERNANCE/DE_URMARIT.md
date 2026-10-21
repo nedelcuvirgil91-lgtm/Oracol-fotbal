@@ -1207,3 +1207,121 @@ două ori.
 **Declanșator**: niciunul automat. E o scriere pe producție, deci cere SQL
 arătat și confirmare explicită (North Star #6). **Confirmarea a venit pe 21
 oct** — vezi nota de execuție de mai sus.
+
+---
+
+## 10. ✅ **ÎNCHIS 2026-10-21** — radarul de value bets vedea 15 competiții din 20
+
+**Întrebarea proprietarului produsului**: „radarul de la bet value vede toate
+competițiile pe care le avem în listă?" Răspunsul măsurat era **nu** — 15 din
+20 (World Cup exclus din discuție, e în 2030). Lipseau exact: Conference
+League, HNL, Austria Bundesliga, Swiss Super League, Danish Superliga.
+
+### Cauza — și nu era la cote, deși totul arăta într-acolo
+
+`oracle_api.get_matches_for_week()` linia **1667**:
+`comps = competitions or list(ODDS_SPORT_KEYS.keys())`. Implicitul unei funcții
+centrale e „ligile pe care **The Odds API** le acoperă" (16), nu „ligile pe
+care le **urmărim**" (21). `TRACKED_COMPETITIONS − ODDS_SPORT_KEYS` e exact
+mulțimea celor 5.
+
+Batch-ul de noapte (ADR-056) apela funcția **fără argument**, deci nu producea
+niciodată rând `control` pentru acele ligi — iar radarul cere rând `control`
+înainte să se uite la cote. Dovada cea mai curată, aceeași zi și același tip de
+competiție: **15 oct — Europa League 18/18 cu `control`, Conference League
+0/18.**
+
+**Defectul fusese deja reparat pe 15 oct** (`332ca74`, competițiile se pasează
+explicit din lista canonică). Reparația a rămas însă **inertă 6 zile**, fiindcă
+pe 17 oct cheia de cache a trecut de 255 de octeți și a omorât exact etapa care
+ar fi beneficiat de ea. Două defecte independente, al doilea mascându-l pe
+primul.
+
+### Verificarea — rulare manuală `39601154972`, 21 oct 12:38 UTC
+
+```
+"gasite": 120,  "deja_incepute": 0,  "fara_predictie": 0,
+"fara_cote": 0,  "predictie_dupa_kickoff": 0,
+"retinute": 120,  "cote_din_fallback": 28
+```
+
+**20 de ligi, 120 de meciuri, 4680 de rânduri** (față de 14 ligi / 40 de meciuri
+pe 20 oct). `fara_predictie` **31 → 0**. Pe ziua de 22 oct, Conference League
+intră direct în sugestiile afișate, lângă Europa League.
+
+**`cote_din_fallback` 0 → 28 e prima execuție în producție** a punții
+`_completeaza_din_fallback()` → `odds_fallback_flashscore`. Scrisă în
+septembrie **explicit pentru HNL**, nu rulase niciodată în 40 de rulări.
+
+### Două afirmații ale mele, infirmate de măsurătoare
+
+1. **„Cele 11 meciuri HNL îndeplineau toate condițiile și n-au ajuns în radar"**
+   — părea dovadă că puntea de cote cade. **Artefact de calendar**: radarul
+   rulează abia din **5 sep 15:52**, iar meciurile sunt din 8 aug – 5 sep 15:00.
+   Restrâns la viața reală a radarului, rămâne **un singur** meci, cu predicția
+   scrisă la 1h44m **după** fluier, deci exclus corect. Zero dovezi de cădere.
+2. **„Cele 5 ligi citesc din altă tabelă"** — fals ca proprietate a lor.
+   `odds_fallback_flashscore` are rânduri pentru **toate cele 120** de meciuri
+   din fereastră. Ce decide calea e dacă meciul există în `odds_history`.
+
+### Asimetria de citire — măsurată, fără bias, NICIO schimbare de cod
+
+Cele două căi citesc puncte diferite de pe curba prețului, fiindcă **tabelele
+au forme diferite**, nu fiindcă cineva a scris o regulă pentru acele ligi:
+
+| Tabelă | Ce conține | Regula aplicată |
+|---|---|---|
+| `odds_history` | coloane explicite `opening_*`/`closing_*` | se ia **deschiderea** (garantat anterioară fluierului) |
+| `odds_fallback_flashscore` | doar instantanee datate, 5,5/meci, mai multe case | se ia **ultima captură** — regulă de **coerență între case**, nu alegere de moment |
+
+`get_odds_fallback_for_missing_fixtures()` are exact doi apelanți —
+`oracle_api.py:1551` (servire) și `value_selector_shadow.py:452` (radar) —
+reutilizare **deliberată**, ca experimentul să măsoare universul de cote
+efectiv servit.
+
+**Măsurat pe 711 meciuri cu ambele surse ȘI aceeași casă de pariuri:**
+
+| Semnal | Valoare |
+|---|---:|
+| fallback mai mare / mai mic / identic | **280 / 290 / 141** |
+| mediană cu semn | **0,00%** |
+| mediană absolută | 4,44% |
+| percentila 90, absolut | 14,58% |
+
+**Ipoteza mea — „ultima captură e mai ascuțită, deci edge sistematic mai mic" —
+e INFIRMATĂ.** 280 contra 290 e simetrie, nu direcție. Deci schimbarea de o
+linie pe care o pusesem pe masă (citirea celei mai **vechi** capturi în
+învelișul radarului) **nu e justificată de dovezi** și NU se face. Precedent de
+aceeași formă: `REST_DAYS_VALIDATION.md`.
+
+Rămâne consemnată **dispersia**: ~4,4% mediană absolută per meci. E o
+proprietate a existenței a două surse independente de preț, nu a regulii de
+citire — pentru verdictele agregate ale experimentului nu produce bias, dar
+pentru un meci individual aflat la pragul de edge contează.
+
+### 🔴 Semnal NOU, deschis, NEinvestigat (Discovery Rule)
+
+În aceeași măsurătoare: `closing_*` vs `opening_*` în `odds_history`, pe
+aceeași casă și același meci, dă **+0,01% / +0,01% / +0,06%** — adică
+**zero mișcare de preț** între deschidere și închidere, pe 1312 meciuri.
+Piețele reale se mișcă. Explicația probabilă e că `closing_*` nu e o captură
+genuin târzie, ci o copie a deschiderii — dar **nu e verificat**, și dacă e
+adevărat atunci „cota de închidere" din reperul extern (§Reperul extern din
+`CLAUDE.md`, favoritul casei calculat din `odds_history`) nu e ce spune numele.
+**Nemăsurat deliberat** — e o întrebare proprie, nu un apendice al acesteia.
+
+### Nepotrivire de nume, de corectat
+
+`value_selector_evaluation.COMPETITII_INTRATE_2026_10_15` e numit după data
+**reparației de cod** (15 oct); intrarea reală în datele radarului e **21 oct**.
+Cutoff-ul calculat rămâne **corect**, fiindcă toate cele 5 ligi au intrat la
+aceeași rulare (`2026-10-21T12:38Z`) — deci cele două discontinuități pe care
+le anticipasem s-au suprapus într-una singură. Corectat în comentariu, fără
+schimbare de logică.
+
+### Rândul de audit `night_sync` — verificat la prima rulare
+
+`automation_runs` id=**1237**, `producer=night_sync`, `process_type=night_sync_run`,
+`tier=T1`, `target_key=2026-10-21`, `status=completed`, 9 etape / 9 reușite /
+0 eșuate, `critice_esuate=[]`, `github_run_id=39597915794`, 9 etape în rezumat.
+Primul rând din istoric, exact forma proiectată.
