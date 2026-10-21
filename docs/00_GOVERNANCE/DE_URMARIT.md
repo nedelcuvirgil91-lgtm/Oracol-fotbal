@@ -6,8 +6,9 @@ Ultima actualizare: **2026-10-21**. Ultimul element adăugat: **§8 — prima ru
 cu ADR-079 (~07:20 UTC), cu lista exactă de verificat** și ce e comportament
 proiectat, nu regresie.
 
-**Două semnale deschise, în ordinea în care se declanșează**: §8 (azi, ~07:20
-UTC) și §7 (decizia #8, **~26-27 oct** — nu 23, vezi corecția din §7).
+**Trei elemente deschise**: **§8** (azi, ~07:20 UTC — prima rulare cu ADR-079),
+**§7** (decizia #8, **~26-27 oct** — nu 23, vezi corecția din §7), **§9**
+(supersedarea celor 30 de rânduri `openfootball` — **fără termen, te așteaptă**).
 
 ---
 
@@ -1056,3 +1057,37 @@ ORDER BY id DESC LIMIT 10;
   Măsurat: maximul real **198** de rânduri, ~2/zi — plafonul PostgREST de 1000
   e la **~400 de zile**. A șasea instanță a clasei. Nereparat deliberat, cu
   comentariul la locul faptei; nu lărgesc scopul unui ADR aprobat din mers.
+
+---
+
+## 9. Supersedarea celor 30 de rânduri `openfootball` — AȘTEAPTĂ o decizie, fără termen
+
+**Nu e un semnal de urmărit, e o decizie care te așteaptă** — scrisă aici
+fiindcă partea de cod s-a făcut și partea de date nu, iar asta e exact felul de
+lucru care se pierde între sesiuni.
+
+Starea, măsurată 21 oct (detalii complete: `BACKLOG` §1.6bis): clasa de
+duplicate `openfootball` e **exact 30 de rânduri**, toate Champions League,
+toate provenind din trei etichete cu diacritic + sufix de țară
+(`FC Bayern München (GER)` 14, `Club Atlético de Madrid (ESP)` 10,
+`ŠK Slovan Bratislava (SVK)` 8). Cauza rădăcină — dezbrăcarea sufixului căuta
+forma fără diacritice — **e reparată în cod**.
+
+**Ce NU face reparația**: nu unifică retroactiv nimic. Schimbă rezolvarea de
+aici înainte. Cele 30 de rânduri istorice rămân ca atare până la o operație
+dedicată.
+
+**De ce supersedare și nu redenumire**: redenumirea ar viola
+`idx_match_history_natural_key_canonical` — ambele rânduri ale perechii ar
+ajunge pe aceeași cheie naturală. Precedentele de aceeași formă:
+Rijeka–Dinamo Zagreb (23 aug) și cele 3 fantome din 16 oct.
+
+**Ce costă amânarea**: paguba e la **adâncimea H2H și la setul de antrenare**,
+nu la predicția servită — meciurile sunt exclusiv istorice (2024-09 → 2025-04),
+iar meciurile viitoare ale celor trei cluburi sunt deja sub numele scurt.
+ELO-ul **nu** se recalculează retroactiv (precedentul Salzburg). Deci amânarea
+e ieftină, dar nu gratuită: fiecare antrenare ML numără acele 30 de meciuri de
+două ori.
+
+**Declanșator**: niciunul automat. E o scriere pe producție, deci cere SQL
+arătat și confirmare explicită (North Star #6).

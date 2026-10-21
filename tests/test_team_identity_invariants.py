@@ -355,8 +355,30 @@ def test_f3_abbreviations_resolve(variant, expected):
     # pentru ca sunt cazurile RISCANTE: nume oficiale lungi ale unor cluburi
     # care exista deja sub alt nume canonic. A le „rezolva" prin ghicire ar
     # crea o a doua identitate permanenta — exact ce Faza 1 refuza sa faca.
-    ["Dinamo City (ALB)", "Tre Fiori (SAN)",
-     "FC Bayern München (GER)", "Club Atlético de Madrid (ESP)", "Larne (NIR)"],
+    #
+    # [CORECTAT 2026-10-21] `FC Bayern München (GER)` si
+    # `Club Atlético de Madrid (ESP)` au fost SCOASE de aici, si motivul merita
+    # scris: premisa „fara baza cunoscuta" era FALSA pentru ele.
+    #
+    #     'fc bayern münchen'       in ALIAS_TO_CANONICAL -> True
+    #     'club atlético de madrid' in ALIAS_TO_CANONICAL -> True
+    #     'dinamo city' / 'tre fiori' / 'larne'           -> False
+    #
+    # Baza lor E un alias INREGISTRAT, deci rezolvarea nu e ghicire, e lookup
+    # exact. Fusesera clasificate „fara baza" pentru ca `normalize_team_name`
+    # le intorcea neschimbate — dar motivul era un DEFECT: calea de dezbracare
+    # a sufixului cauta forma fara diacritice, iar aliasul e inregistrat CU
+    # diacritic (reparat 2026-10-21, vezi `test_country_suffix_diacritics.py`).
+    #
+    # Comentariul de mai sus spune „verificati NErezolvati" — verificare facuta
+    # pe IESIREA resolverului defect, nu pe dictionar. Asta a transformat un bug
+    # in specificatie. Aceeasi clasa ca `coverage_percent` fix 100% (un indicator
+    # cu o singura valoare posibila arata exact ca sanatate) si ca
+    # `data_quality = live` pe forma veche de cinci luni.
+    #
+    # REGULA e neschimbata si rAmane corecta; doar FIXTURA era greșita. Cele
+    # trei rAmase au baza genuin necunoscuta, verificat in dictionar.
+    ["Dinamo City (ALB)", "Tre Fiori (SAN)", "Larne (NIR)"],
 )
 def test_f3_suffixed_without_known_base_stays_unchanged(suffixed_without_twin):
     """Numele cu sufix FARA baza cunoscuta nu au voie sa fie modificate —

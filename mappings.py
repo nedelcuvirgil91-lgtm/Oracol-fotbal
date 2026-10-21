@@ -1410,9 +1410,37 @@ def normalize_team_name(name: str) -> str:
     # [ADR-058 §2.3] Sufixul de tara e strict CHEIE DE CAUTARE, niciodata
     # iesire: daca forma dezbracata nu e cunoscuta, se cade mai jos si numele
     # original se intoarce neschimbat (linia finala). Vezi _COUNTRY_SUFFIX_RE.
+    # [REPARAT 2026-10-21] Se incearca AMBELE forme ale bazei dezbracate: cea
+    # unicode-normalizata SI cea care pastreaza diacriticele.
+    #
+    # DEFECTUL: se caUta doar forma fara diacritice (`uni`), dar alias-urile sunt
+    # inregistrate CU diacritic — 52 din 977. Deci dezbracarea sufixului rata
+    # exact numele care aveau nevoie de ea:
+    #
+    #     'fc bayern münchen'  in ALIAS_TO_CANONICAL -> True
+    #     'fc bayern munchen'  in ALIAS_TO_CANONICAL -> False   (ce caUta codul)
+    #
+    # `normalize_team_name("FC Bayern München")` functiona (lookup direct, linia
+    # de sus), dar `("FC Bayern München (GER)")` se intorcea NESCHIMBAT, deci
+    # clubul trAia ca a doua identitate. Masurat pe productie: exact 3 cluburi
+    # afectate (Bayern, Atlético, Slovan — toate cu diacritic), 30 de randuri
+    # `match_history` duplicate, toate Champions League. Cauza rAdacina a clasei
+    # pe care D-13 o descria drept „invizibila indexului unic PRIN CONSTRUCTIE";
+    # nu era prin constructie. Detalii: `BACKLOG.md` §1.6bis.
+    #
+    # SUFIXUL RAMANE STRICT CHEIE DE CAUTARE (ADR-058 §2.3) — se intoarce ceva
+    # DOAR daca forma dezbracata e un alias CUNOSCUT. Prima versiune a acestei
+    # reparatii renormaliza forma dezbracata si o intorcea ca IESIRE, ceea ce
+    # schimba toate cele 53 de etichete cu sufix in loc de 3: `TNS (WAL)` -> `TNS`,
+    # `Klaksvik (FAI)` -> `Klaksvik`. Ar fi redenumit tacit 50 de cluburi,
+    # incalcand exact regula din comentariul de dedesubt. Prinsa prin masurare.
     if _COUNTRY_SUFFIX_RE.search(uni):
-        base_lookup = _COUNTRY_SUFFIX_RE.sub("", uni).strip().lower()
-        if base_lookup in ALIAS_TO_CANONICAL: return ALIAS_TO_CANONICAL[base_lookup]
+        for base_lookup in (_COUNTRY_SUFFIX_RE.sub("", uni).strip().lower(),
+                            _COUNTRY_SUFFIX_RE.sub("", cleaned).strip().lower()):
+            if base_lookup in ALIAS_TO_CANONICAL: return ALIAS_TO_CANONICAL[base_lookup]
+    # [ADR-058 §2.3] Sufixul de tara e strict CHEIE DE CAUTARE, niciodata
+    # iesire: daca forma dezbracata nu e cunoscuta, se cade mai jos si numele
+    # original se intoarce neschimbat (linia finala). Vezi _COUNTRY_SUFFIX_RE.
     stripped = uni.lower()
     for suffix in _STRIP_SUFFIXES:
         if stripped.endswith(suffix): stripped = stripped[:-len(suffix)].strip(); break
