@@ -1350,3 +1350,63 @@ cost, doar de privit.
 
 **3. `closing_*` ≈ `opening_*`** — semnalul de mai sus, nemăsurat. Atinge
 reperul extern, deci merită întrebare proprie, nu apendice.
+
+---
+
+## 11. Verificarea rulării `night_sync` manuale (21 oct, 12:14→13:21 UTC)
+
+GitHub `39597915794`, rând de audit `automation_runs` **1237**, 9/9 etape.
+
+### ✅ Șase verificări restante, închise
+
+| Ce | Rezultat |
+|---|---|
+| **§2ter** — `n = 1000` fix la `flashscore_team_dna` | **n = 1157.** Creștere naturală, **NU** al cincilea plafon PostgREST. Subiect închis. |
+| **D-10 „DUPĂ"** — verdicte învechite | **Toate 7 experimentele evaluate azi**, vechime 0 zile. Înainte: 3 verdicte de 32-34 de zile. |
+| **ADR-072** — baseline proaspăt | `baseline_source = 'shadow_control'` pe toate verdictele noi. |
+| **ADR-073** — intrări de la servire | **210 rânduri `control`, toate cu `schema_version`; 210 `treatment`, ZERO.** Exact contractul. |
+| **ADR-079** — stivuire de decizii | `max(id)` în `decision_feed` e tot **8**; #8 rămâne `pending`; #6 `orphaned` de `sweep-adr-026`. Nicio #9 după **două** rulări în plus. |
+| **Rândul de audit** | id=1237, `T1`, `target_key=2026-10-21`, `completed`, `critice_esuate=[]`, 9 etape în rezumat. |
+
+### De reținut ca să nu fie citit greșit
+
+**Rularea manuală NU a produs rând nou în `challenger_evaluations`.** Ultimele
+rânduri sunt de la **07:57** (run 93). Cauza e comportamentul documentat A2:
+`n` nu s-a schimbat între rulări (310 la ambele), iar
+`UNIQUE (training_run_id, n_matches_evaluated)` + `ignore_duplicates` aruncă
+tăcut duplicatul. **Nu e un eșec al rulării** — `experiment_registry` s-a
+actualizat normal la 13:21.
+
+### 🔴 O PREDICȚIE A MEA, INFIRMATĂ — și eliminarea explicației comode
+
+`CLAUDE.md` D-10 scria: *„De așteptat ca `blend_v1/8ac89c70` să NU mai fie
+`candidate_for_promotion`: cifra lui (+5,29pp) a fost produsă pe baseline-ul
+înghețat, iar ADR-072 e activ acum."*
+
+**Fals, măsurat.** Reevaluat **azi**, pe baseline-ul `shadow_control` corect,
+`8ac89c70` e **în continuare `candidate_for_promotion`** (n = 383). Iar
+`model_champions` id=5 îl arată **campion ACTIV** din 23 august,
+`superseded_at` NULL.
+
+Deci contradicția „**campionul activ e un candidat de promovat**" **nu era un
+artefact al baseline-ului înghețat**, cum am presupus. Explicația comodă e
+eliminată; cauza reală rămâne nedeterminată.
+
+**Nu e periculos azi** — nimic nu promovează automat (ADR-002), iar promovarea
+campionului activ ar fi oricum o operație nulă. Dar e o stare pe care sistemul
+o afirmă despre el însuși și care nu poate fi adevărată, iar acum e afirmată
+**pe cifre corecte**, nu pe unele vechi. Ipoteza de testat prima: statusul din
+`experiment_registry` e calculat de `evaluate_experiment()` **fără să știe** că
+experimentul a fost deja promovat — registrul și `model_champions` n-au nicio
+legătură între ele.
+
+**Decizie cerută**: se leagă cele două (statusul nu mai poate fi
+`candidate_for_promotion` pentru un `training_run_id` deja activ în
+`model_champions`), sau se acceptă și se documentează ca limbaj al registrului.
+Prima variantă atinge contractul de evaluare → **ADR**. **Nefăcut nimic
+deliberat.**
+
+### Schimbare de stare, consemnată
+
+`xgboost_v1/e638c1dc` a trecut `monitoring` → **`rejected`** (n = 677).
+`xgboost_v1/dda4f7f3` e la n = 157, prag 200 — `insufficient_data`, normal.
