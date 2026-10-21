@@ -622,3 +622,26 @@ def test_garda_de_producatori_NU_trece_vid():
                and n.func.attr == "commit_decision" for n in _ast.walk(arbore)):
             apelanti.append(cale.name)
     assert apelanti, "garda ar trece vid — nimeni nu apelează commit_decision"
+
+
+def test_cel_mult_o_decizie_deschisa_per_target_invariantul_care_face_ordinea_sigura(client):
+    """Invariantul pe care se sprijină ordinea din `propose_decision`
+    (răcire ÎNAINTEA deciziei deschise).
+
+    Cât timp una e deschisă, idempotența o returnează în loc să creeze alta —
+    deci nu poate exista o a doua, pe același target și același fel, care să
+    fie respinsă și să declanșeze răcirea peste cea deschisă. Testul ăsta
+    documentează invariantul; fără el, ordinea e doar o presupunere."""
+    target = "blend_v1|all"
+    primul = ar.propose_decision(_run(client, target), tier="T3a", rollback_plan="x",
+                                 evidence={"decision_kind": "expiry", "n_matches_evaluated": 311})
+    al_doilea = ar.propose_decision(_run(client, target), tier="T3a", rollback_plan="x",
+                                    evidence={"decision_kind": "expiry", "n_matches_evaluated": 320})
+    al_treilea = ar.propose_decision(_run(client, target), tier="T3a", rollback_plan="x",
+                                     evidence={"decision_kind": "expiry", "n_matches_evaluated": 329})
+
+    assert primul == al_doilea == al_treilea, "trei cicluri, o singură decizie"
+    store, _ = client._tables["decision_feed"]
+    deschise = [r for r in store if r["status"] in ar._OPEN_DECISION_STATUSES]
+    assert len(deschise) == 1, "invariantul e rupt — ordinea din propose_decision nu mai e sigură"
+    assert deschise[0]["evidence"]["n_matches_evaluated"] == 329, "cifrele s-au împrospătat"

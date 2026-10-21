@@ -262,6 +262,23 @@ def propose_decision(
             )
             sibling_run_ids = [r["id"] for r in (sibling_runs.data or [])]
 
+            # ── ORDINEA de aici e deliberata, si e sigura doar prin invariantul
+            # „cel mult o decizie DESCHISA per target" (pe care chiar functia
+            # asta il impune). Racirea se verifica INAINTEA deciziei deschise.
+            #
+            # Intrebarea evidenta: n-ar putea racirea sa refuze improspatarea
+            # unei propuneri deschise de acelasi fel? Ar insemna sa coexiste o
+            # deschisa si una respinsa recent, pe acelasi target si acelasi fel.
+            # NU se poate: cat timp una e deschisa, idempotenta o returneaza in
+            # loc sa creeze alta, deci nu exista a doua care sa fie respinsa.
+            # Dupa respingere, racirea blocheaza crearea celei noi — exact ce
+            # vrem. Verificat prin test (`test_cel_mult_o_decizie_deschisa...`).
+            #
+            # Daca invariantul s-ar rupe vreodata (insert manual, producator
+            # care ocoleste functia), consecinta e BENIGNA si acum VIZIBILA: o
+            # propunere deschisa ar afisa cifre neimprospatate, iar D-11 pune
+            # cifrele in titlu, deci vechimea se vede.
+            #
             # ── §3.2 — racire: o decizie de ACELASI fel, respinsa de om sau
             # expirata de sweep recent, nu se repropune imediat. Fara asta,
             # „Respinge" si expirarea automata produc un flux zilnic de
