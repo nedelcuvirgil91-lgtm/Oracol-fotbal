@@ -29,7 +29,11 @@ scrieri), care raporteaza si cate grupuri sunt, si care sunt.
 
 RULARI REALE, in ordine:
   2026-08-22 — 397 grupuri (profilul de mai jos).
-  2026-10-21 — 30 grupuri, run de masurare 39544395145. Toate 30 sunt grupuri
+  2026-10-21 — 30 grupuri. Masurare: run 39544395145. EXECUTIE: run
+    39545095203 (verificat in baza: 30 marcate, 30/30 spre geamanul corect
+    `football_data`, 0 randuri canonice atinse, 0 redenumiri; total
+    52793 active + 6772 supersedate, aritmetica se inchide exact).
+    Toate 30 sunt grupuri
     NOI, aparute in aceeasi zi dintr-o reparatie de resolver: dezbracarea
     sufixului de tara era oarba la diacritice, deci `FC Bayern München (GER)`
     nu se rezolva la `Bayern Munich` si clubul traia ca a doua identitate.

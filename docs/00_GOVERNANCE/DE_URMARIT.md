@@ -1060,11 +1060,62 @@ ORDER BY id DESC LIMIT 10;
 
 ---
 
-## 9. Supersedarea celor 30 de rânduri `openfootball` — AȘTEAPTĂ o decizie, fără termen
+## 9. ✅ **EXECUTAT 2026-10-21** — supersedarea celor 30 de rânduri `openfootball`
 
-**Nu e un semnal de urmărit, e o decizie care te așteaptă** — scrisă aici
-fiindcă partea de cod s-a făcut și partea de date nu, iar asta e exact felul de
-lucru care se pierde între sesiuni.
+**Aprobată explicit de proprietarul produsului**, executată prin
+`identity_reconciliation_full.yml` (`confirm: EXECUTE-FULL`), **run
+`39545095203`**, pe `main` @ `2b20f39`.
+
+**Scrierea e exact cea autorizată de ADR-059**, verificată în bază după rulare,
+nu presupusă:
+
+| Verificare | Rezultat |
+|---|---:|
+| Rânduri `openfootball` marcate azi | **30** |
+| Marcate spre geamănul CORECT (`football_data`) | **30 / 30** |
+| Cu `superseded_reason` scris | **30 / 30** |
+| Cu `superseded_at` scris | **30 / 30** |
+| Rânduri canonice (`football_data`) atinse | **0** — toate 30 fără niciun marcaj |
+| Datele fizice ale rândurilor necanonice | **păstrate**, 30/30 |
+| Numele rândurilor necanonice schimbate | **0** (nicio redenumire) |
+
+**Starea ÎNAINTE, înregistrată ca punct de comparație**: 30/30 nemarcate pe
+ambele părți, 30/30 cu **rezultat identic** și aceeași zi — deci erau
+dovedit același meci real, nu două meciuri distincte.
+
+**Aritmetica se închide exact**: `match_history` 59.565 de rânduri în total,
+**52.793 active**, **6772 supersedate** — 6742 (înainte) + 30 = 6772. Nicio
+pierdere de rânduri (ADR-059: nimic nu se șterge, doar se marchează).
+
+**Efectul real, nu cel spectaculos**: cele 30 ies din setul de antrenare ML
+(`get_training_data` filtrează `superseded_by IS NULL`) și din replay-ul ELO —
+deci se oprește dubla numărare a aceluiași meci. **ELO-ul deja persistat NU se
+recalculează** (precedentul Salzburg, 17 oct); replay-ul devine corect de acum
+înainte. Predicția servită e neatinsă: meciurile sunt exclusiv istorice
+(2024-09 → 2025-04).
+
+**Rollback documentat, un singur pas** (de rulat doar cu confirmare explicită,
+North Star #6):
+
+```sql
+UPDATE match_history
+   SET superseded_by = NULL, superseded_at = NULL, superseded_reason = NULL
+ WHERE superseded_at >= '<timestamp-ul rularii 39545095203>';
+```
+
+**De verificat la următoarea rulare `identity_drift_check` (06:30 UTC)**: cele
+30 de grupuri trebuie să apară drept **rezolvate**, nu noi. Dacă reapar ca
+grupuri noi, marcajul nu e citit de detector — ar fi un defect, nu o reluare
+normală.
+
+**Reziduul rămas, deliberat NEATINS**: `Dyn. Kyiv` Clasa B e deja executată
+(20 oct), iar **Clasa C** (`Din. Minsk (BLR)`, 2 rânduri, fără niciun geamăn)
+rămâne neatinsă — n-are cu ce fi unită. Plus ~49 de cluburi văzute doar cu
+sufix: igienă de vocabular, nu reparație.
+
+---
+
+### Istoric — decizia, așa cum stătea până la execuție
 
 Starea, măsurată 21 oct (detalii complete: `BACKLOG` §1.6bis): clasa de
 duplicate `openfootball` e **exact 30 de rânduri**, toate Champions League,
@@ -1090,4 +1141,5 @@ e ieftină, dar nu gratuită: fiecare antrenare ML numără acele 30 de meciuri 
 două ori.
 
 **Declanșator**: niciunul automat. E o scriere pe producție, deci cere SQL
-arătat și confirmare explicită (North Star #6).
+arătat și confirmare explicită (North Star #6). **Confirmarea a venit pe 21
+oct** — vezi nota de execuție de mai sus.

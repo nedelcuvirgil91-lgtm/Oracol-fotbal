@@ -27,7 +27,7 @@ Nimic din lista asta nu avansează fără tine. Ordinea e după cât costă amâ
 | **1.3** | **ADR-077** — criteriul de rutare SFI | propunere, recomandarea s-a **inversat** la măsurare | Zero cost acum (criteriul inert nu face rău). Dar ADR-ul stă deschis cu o recomandare greșită scrisă în el. |
 | **1.4** | **ADR-075** — `CHECK` care face imposibilă supersedarea fără motiv | propunere | Mic. Monitorul prinde deja clasa (clasa 9, activă). |
 | **1.5** | **D-14** — tabelă de audit `model_config` | decizie cerută | **Recomandarea mea: NU acum.** Reparația aplicată (skill + gardă) recuperează ce s-a pierdut. |
-| **1.6** | **Punctul 5** — clasa de duplicate `openfootball` | ✅ **MĂSURAT 21 oct — cauză rădăcină găsită.** Vezi §1.6bis | Golul e **exact 30 de rânduri**, nu 1893. Cauza e un defect de 1 linie în `normalize_team_name`. Rămâne de decis doar **supersedarea** celor 30. |
+| **1.6** | **Punctul 5** — clasa de duplicate `openfootball` | ✅ **ÎNCHIS 21 oct** — măsurat, reparat în cod, cele 30 supersedate (run `39545095203`). Vezi §1.6bis | Golul era **exact 30 de rânduri**, nu 1893. Cauza: un defect de 1 linie în `normalize_team_name`. Nimic de decis. |
 | **1.7** | **F3** — pornirea experimentului de value selection | ~**4 noiembrie** | Nimic nu pornește automat (ADR-002). |
 
 ### ✅ §1.6bis — MĂSURAT 2026-10-21: clasa `openfootball` e 30 de rânduri, și are o CAUZĂ RĂDĂCINĂ
@@ -88,16 +88,29 @@ mărginită prin construcție (fixul stă în ramura gardată de „are sufix"):
 | **rezolvări care se schimbă** | **3** |
 | nume NEsufixate atinse | **0** |
 
-#### Ce rămâne de decis: supersedarea celor 30 de rânduri
+#### ✅ EXECUTAT 2026-10-21 — supersedarea celor 30 de rânduri
 
-Reparația resolverului **nu** unifică retroactiv nimic — schimbă rezolvarea de
-aici înainte. Cele 30 de rânduri istorice cer o operație separată, iar
-**redenumirea e imposibilă structural** (ar viola
+Reparația resolverului **nu** unifica retroactiv nimic — schimba rezolvarea de
+aici înainte. Cele 30 de rânduri istorice cereau o operație separată, iar
+**redenumirea era imposibilă structural** (ar viola
 `idx_match_history_natural_key_canonical`): operația corectă e
 **supersedarea**, precedentul fiind Rijeka–Dinamo Zagreb și cele 3 fantome din
-16 oct. Scriere pe producție, deci SQL arătat și confirmat explicit.
+16 oct.
 
-**Ordinea, cu precedentul D-13 Clasa B**: cod întâi, date după.
+**Aprobată explicit** și executată prin `identity_reconciliation_full.yml`
+(`confirm: EXECUTE-FULL`), **run `39545095203`**, pe `main` @ `2b20f39`.
+Verificat în bază după rulare: **30** marcate, **30/30** spre geamănul corect
+`football_data`, **30/30** cu motiv + marcaj temporal, **0** rânduri canonice
+atinse, **0** redenumiri, datele fizice păstrate 30/30. Total: 59.565 de
+rânduri, **52.793 active**, **6772 supersedate** — 6742 + 30 se închide exact.
+
+**Starea ÎNAINTE, ca punct de comparație**: 30/30 nemarcate pe ambele părți,
+30/30 cu rezultat identic și aceeași zi — dovedit același meci, nu două.
+
+Rollback, efect real și ce rămâne neatins: `DE_URMARIT` §9.
+
+**Ordinea, cu precedentul D-13 Clasa B**: cod întâi, date după. Respectată —
+`326afea` (resolver) și `2b20f39` erau pe `main` înainte de rulare.
 
 ---
 
@@ -308,7 +321,7 @@ pariuri. Pe pariuri pare demult complet (1342) — nu e.
 | Ce | Măsurat | Acțiune |
 |---|---|---|
 | Rânduri `gate_validation_test` în `model_champions`/`challengers` | 3 „campioni activi" + 1 challenger, din 14 iulie | artefacte de test care poluează orice interogare de stare — de șters sau de marcat |
-| `openfootball` | 2119 rânduri, **1893 active** | ✅ **măsurat 21 oct**: duplică exact **30**, toate din 3 etichete cu diacritic + sufix. Cele nesufixate NU duplică. Vezi §1.6bis |
+| `openfootball` | 2119 rânduri, **1893 active** | ✅ **ÎNCHIS 21 oct**: duplica exact **30**, toate din 3 etichete cu diacritic + sufix; cele nesufixate NU duplică. Cele 30 sunt **supersedate** (run `39545095203`). Vezi §1.6bis |
 | Backup-uri | 9,77 MB + 72 kB, 59 de zile | §1.2 |
 | `Din. Minsk (BLR)` | 2 rânduri, fără geamăn | lăsat deliberat, cu gardă |
 | ~49 de cluburi văzute doar cu sufix | — | igienă de vocabular, nu reparație |
