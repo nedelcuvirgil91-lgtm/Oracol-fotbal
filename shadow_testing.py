@@ -711,6 +711,17 @@ def evaluate_experiment(
     return result
 
 
+# [ADR-080] Starile care descriu o DECIZIE despre experiment, nu o masuratoare
+# a lui. Verdictele statistice (`candidate_for_promotion`, `monitoring`,
+# `rejected`, `insufficient_data`) spun ce masoara experimentul; astea doua
+# spun ce s-a hotarat despre el, iar hotararea are precedenta.
+#
+# `deprecated` e inclus DELIBERAT desi nimeni nu-l scrie azi: Rollback Engine
+# (ADR-037) e implementat dar neactivat in productie. Daca se activeaza, nu
+# trebuie sa ne mai amintim sa largim multimea.
+TERMINAL_REGISTRY_STATUSES = frozenset({"promoted", "deprecated"})
+
+
 def _update_registry(experiment_name: str, experiment_version: str, league_scope: str, **fields) -> bool:
     client = sb.get_client()
     if client is None:
@@ -844,8 +855,11 @@ def evaluate_all_active_experiments(
     Nu modifică NICIODATĂ weights.json/model_config — doar actualizează
     experiment_registry (singura sursă de adevăr pt status).
     """
+    terminale = _chei_terminale(league_scope)
     results = []
     for name, version in get_distinct_experiments():
+        if (name, version) in terminale:
+            continue
         r = evaluate_experiment(
             name, version, league_scope=league_scope,
             min_matches=min_matches, statistical_method=statistical_method,
@@ -854,3 +868,28 @@ def evaluate_all_active_experiments(
             r = {**r, "experiment_name": name, "experiment_version": version}
             results.append(r)
     return results
+
+
+def _chei_terminale(league_scope: str) -> set[tuple[str, str]]:
+    """[ADR-080] Perechile (nume, versiune) aflate intr-o stare TERMINALA.
+
+    DE CE SE SARE AICI, in bucla, si nu in `_update_registry()`: acolo ar fi
+    check-then-act pe calea de scriere, ceea ce proiectul interzice. Aici e o
+    singura citire a registrului inainte de bucla, iar singurul scriitor de
+    stare terminala e o actiune umana rara (promovarea), deci nu exista cursa
+    reala. Calea FSM (`evaluate_active_challenger`) nu are nevoie de garda:
+    `get_active_challenger()` nu intoarce niciodata un model `PROMOTED`.
+
+    La orice eroare de citire se intoarce multimea VIDA — adica se evalueaza
+    tot, exact comportamentul de dinainte de ADR-080. Un esec de citire nu are
+    voie sa sara tacit experimente vii."""
+    try:
+        return {
+            (r.get("experiment_name"), r.get("experiment_version"))
+            for r in get_experiment_registry()
+            if r.get("status") in TERMINAL_REGISTRY_STATUSES
+            and r.get("league_scope") == league_scope
+        }
+    except Exception as exc:
+        logger.warning("[ShadowTesting] citirea starilor terminale a esuat: %s", exc)
+        return set()

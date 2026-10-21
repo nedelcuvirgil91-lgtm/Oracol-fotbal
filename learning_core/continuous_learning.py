@@ -967,10 +967,54 @@ def _phase_c_execute_approved(target_key: str, summary: dict) -> None:
             league_scope=league, promoted_by="ADR-030-continuous-learning",
         )
         if result.status in ("promoted", "already_active"):
+            _marcheaza_in_registru(family, training_run_id, league)
             ar.commit_decision(decision["id"])
             summary["committed"] += 1
         else:
             ar.fail_decision_commit(decision["id"], f"promote_challenger: {result.status} — {result.reason}")
+
+
+def _marcheaza_in_registru(family: str, training_run_id: str, league: str) -> None:
+    """[ADR-080] Anunta `experiment_registry` ca modelul a fost promovat.
+
+    DE CE AICI, SI NU IN `promotion_service`. Prima implementare a pus apelul
+    acolo si a cazut pe o garda EXISTENTA: *„promotion_service.py nu are voie
+    sa importe shadow_testing — Promotion executa, nu decide"* (ADR-019,
+    `tests/test_promotion_service.py`). Garda avea dreptate, iar ADR-080 nu o
+    identificase — Discovery Rule, consemnata in ADR §7.
+
+    Orchestratorul e locul corect: cunoaste deja ambele straturi (importa
+    `promote_challenger` de la ADR-030) si e singurul apelant legitim al
+    promovarii. Executantul ramane curat.
+
+    DE CE EXISTA DELOC. Pana la ADR-080, promovarea scria in
+    `model_champions` si in FSM, dar NU anunta registrul, iar
+    `promote_experiment()` avea ZERO apelanti de productie. Masurat:
+    `blend_v1/8ac89c70` a ramas `candidate_for_promotion` doua luni dupa ce
+    devenise campion activ, cu verdictul recalculat nocturn pe randuri
+    inghetate din 23 august — si `last_evaluated_at` improspatat de fiecare
+    data, deci un rand care ARATA proaspat.
+
+    ESECUL NU OPRESTE NIMIC: registrul e evidenta, nu poarta. Decizia e deja
+    comisa in `model_champions` cand ajungem aici. Un rand de evidenta nescris
+    e pierdere de INFORMATIE; o promovare rupta din cauza lui ar fi pierdere
+    de DECIZIE."""
+    try:
+        import shadow_testing
+
+        if not shadow_testing.promote_experiment(
+            experiment_name=family, experiment_version=training_run_id,
+            league_scope=league, promoted_by=PRODUCER,
+        ):
+            logger.warning(
+                "[ContinuousLearning] experiment_registry nu a putut fi marcat "
+                "'promoted' pentru %s/%s — promovarea RAMANE valida.", family, training_run_id,
+            )
+    except Exception as exc:
+        logger.warning(
+            "[ContinuousLearning] marcarea in experiment_registry a esuat pentru "
+            "%s/%s: %s — promovarea RAMANE valida.", family, training_run_id, exc,
+        )
 
 
 def _phase_c_execute_expiry(decision: dict, evidence: dict, summary: dict) -> None:
