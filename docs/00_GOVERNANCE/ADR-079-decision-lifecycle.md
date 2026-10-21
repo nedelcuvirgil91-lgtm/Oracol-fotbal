@@ -1,8 +1,21 @@
 # ADR-079 — Ciclul de viață al unei decizii T3a
 
 **Status**: **ACCEPTED** (revizia 2, aprobată explicit de proprietarul
-produsului 2026-10-20) — **IMPLEMENTAT 2026-10-20/21**, cod pe branch, flag
-inexistent prin construcție (nu introduce niciunul)
+produsului 2026-10-20) — **IMPLEMENTAT ȘI PE `main`** (2026-10-21, `1f0dc41`,
+fast-forward curat de la `8cfd557`), flag inexistent prin construcție (ADR-ul
+nu introduce niciunul, deci nu există nimic de activat separat)
+
+> **Verificat pe `main` REMOT, nu local**: `pytest tests/` rulat pe `main`
+> ÎNAINTE de push — **3711 passed, 2 skipped**. Calea de predicție neatinsă
+> între vechiul și noul `main`: `git diff --stat 8cfd557 HEAD` pe
+> `oracle_engine.py`, `feature_engine.py`, `ml_predictor.py`,
+> `recalibration.py`, `oracle_api.py`, `shadow_testing.py` e **GOL**.
+>
+> **Nota asta e scrisă la acest nivel de precizie deliberat.** Precedentul e
+> D-1, unde intrarea spunea „cod în producție" înainte să fie adevărat, și
+> POC-ul API-Football, declarat șters 34 de zile înainte de ștergerea efectivă.
+> „Pe branch" și „pe `main`" nu sunt același lucru, iar aplicația live
+> deployează din `main`.
 
 > **Ce a ieșit la iveală ÎN TIMPUL implementării** — consemnat aici, nu doar în
 > commit:
