@@ -947,6 +947,27 @@ Ritm ~27 meciuri/zi.
 > De aceea proiecția „~23 oct" nu se recalculează aici: depinde de confirmarea
 > că batch-ul chiar scrie din nou. Se măsoară la prima rulare de după
 > reparație, nu se estimează.
+>
+> **✅ CONFIRMAT — 2026-10-21, `night_sync` `39584871018` (run 94, pornită
+> manual 10:28 UTC pe `main` @ `ad6c539`).** Batch-ul scrie din nou. Verificat
+> în DATE, nu în log, și chiar în timp ce rularea era încă în curs:
+>
+> | Verificare | Înainte | Acum |
+> |---|---|---|
+> | Ultima scriere în `shadow_predictions` | **19 oct 18:58** | **21 oct 11:36:39** (în curs) |
+> | Rânduri scrise azi | 0 | **1050** |
+> | Meciuri 21-28 oct fără rând `treatment` | **122** din 210 | **0** din 210 |
+>
+> **Nicio pierdere definitivă**: toate cele 122 erau încă nejucate, deci s-au
+> recuperat integral. Golul real e strict **17-21 oct** pentru meciurile jucate
+> în acea fereastră, care fuseseră logate ÎNAINTE de 17 oct (rezerva de 90) —
+> acelea n-au fost afectate.
+>
+> **`n` NU sare azi, și e corect așa.** Rămâne 310 (run 93, 07:57). Cele 122 de
+> meciuri abia acum logate n-au rezultat încă, deci intră în `n` pe măsură ce
+> se joacă — 22, 24, 25 oct. Creșterea se reia, nu se recuperează instantaneu.
+> Orice cifră viitoare se citește din `challenger_evaluations`, nu se
+> extrapolează de aici.
 
 > **🔴 CORECȚIE, în aceeași zi (20 oct, seara) — estimarea „23-24 oct" era
 > prea optimistă, și cifra pe care o citam era greșită.** Scrisesem că
