@@ -922,8 +922,31 @@ ORDER BY n_matches_evaluated DESC LIMIT 5;
 | 255 (18 oct) | +1,57pp | nu | nu | **DA** |
 | 290 (19 oct) | +2,07pp | nu | **DA** | **DA** |
 | **301 (20 oct)** | **+2,33pp** | nu | **DA** | **DA** |
+| **310 (21 oct)** | — | nu | — | — |
 
 Ritm ~27 meciuri/zi.
+
+> **🔴 RITMUL S-A RUPT, și nu din cauza Challenger-ului — 2026-10-21.**
+> Creșterea de la 301 la 310 e de **9**, nu 27. Cauza nu e la model: etapa
+> „Challenger Shadow Batch" a murit în fiecare rulare de noapte de la **17
+> octombrie** (nume de fișier de cache peste 255 de octeți — vezi `CLAUDE.md`
+> §Goluri). Deci nu se mai loghează predicții pentru meciuri noi, iar `n`
+> crește doar din **rezerva** de meciuri logate înainte de 17 oct, care abia
+> acum se joacă.
+>
+> **Rezerva, măsurată**: 90 de meciuri `blend_v1` logate și nejucate, cu grosul
+> până pe **24 oct** (orizontul de 7 zile de la 17). Deci, **fără reparație**,
+> `n` ajunge la ~400 pe 26 oct și apoi **îngheață** — ținta lui #8 nu se mai
+> atinge niciodată prin creștere naturală.
+>
+> **Cu reparația** (aplicată 21 oct), cele **122** de meciuri din fereastra
+> următoare care n-au rând `treatment` reintră în flux pe măsură ce se joacă,
+> iar `n` își reia creșterea. **Deci reparația cache-ului nu corectează o
+> proiecție — ea deblochează decizia #8.**
+>
+> De aceea proiecția „~23 oct" nu se recalculează aici: depinde de confirmarea
+> că batch-ul chiar scrie din nou. Se măsoară la prima rulare de după
+> reparație, nu se estimează.
 
 > **🔴 CORECȚIE, în aceeași zi (20 oct, seara) — estimarea „23-24 oct" era
 > prea optimistă, și cifra pe care o citam era greșită.** Scrisesem că
@@ -1010,11 +1033,31 @@ slot. Deci checkout-ul de azi se face pe `main`-ul de la ~07:20, cu ADR-079
 inclus. **Dacă vreodată asta se schimbă (evenimentul creat la slot), prima
 rulare cu ADR-079 ar fi cea de mâine** — de verificat `head_sha`, nu presupus.
 
+> # ✅ VERIFICAT — rularea a avut loc: `night_sync` **39561482397** (run 93, 21 oct 07:22→07:57, `success`, pe `bb2501c`). ADR-079 trece.
+>
+> | # | Rezultat măsurat |
+> |---|---|
+> | 1 | **#6 → `orphaned`**, `resolved_by = 'sweep-adr-026'`, `resolved_at = 2026-10-21 07:57:10` ✅ |
+> | 2 | **#8 rămâne `pending`**, iar `max(id)` în `decision_feed` e tot **8** — nicio #9 ✅ |
+> | 3 | `automation_runs` **id 1225** (`blend_v1\|all`): `expiry_skipped_trending = true`, `trend_significant_metrics = 2` ✅ |
+> | 4 | nicio propunere nouă → neexercitat, rămâne de verificat la prima propunere reală |
+> | 5 | neverificat în aplicație |
+>
+> **🔴 O IMPRECIZIE ÎN CHECKLIST-UL DE MAI JOS, găsită verificând.**
+> Verificarea 1 cere `summary.stale_orphaned = 1` din `automation_runs`.
+> **Câmpul nu e acolo** — `continuous_learning.run_cycle()` îl pune în dicționarul
+> întors și într-un `logger.warning`, nimic nu-l persistă (`summary ? 'stale_orphaned'`
+> → zero rânduri, în toată tabela). Dovada din bază e cea din rândul 1 de mai sus,
+> **mai tare decât cea cerută**: perechea `resolved_by` + `resolved_at` pe decizia
+> însăși. Un checklist care trimite la un câmp inexistent te face să cauți o
+> regresie inexistentă — aceeași clasă ca o comandă de verificare cu ieșire
+> greșită (precedentul `grep -c BASELINE_SHADOW_CONTROL`, D-1).
+
 ### Ce se verifică, exact
 
 | # | Verificare | Ce dovedește | Dacă nu apare |
 |---|---|---|---|
-| 1 | `summary.stale_orphaned = 1`, iar **#6** trece în `orphaned` cu `resolved_by = 'sweep-adr-026'` și `resolved_at` populat | §3.2 — sweep-ul e cablat **și** își datează rezolvarea | dacă `resolved_at` e NULL, defectul reparat la review s-a întors |
+| 1 | ~~`summary.stale_orphaned = 1`~~ (câmpul NU se persistă — vezi nota), iar **#6** trece în `orphaned` cu `resolved_by = 'sweep-adr-026'` și `resolved_at` populat | §3.2 — sweep-ul e cablat **și** își datează rezolvarea | dacă `resolved_at` e NULL, defectul reparat la review s-a întors |
 | 2 | **#8** rămâne `pending`; **zero** decizii noi pe `blend_v1\|all` | §4.1 + §4.2 — nimic nu se stivuiește, nimic nu se repropune | o decizie #9 = regula de trend nu s-a aplicat |
 | 3 | `summary.expiry_skipped_trending = true` și `trend_significant_metrics = 2` | §4.2 — suprimarea e un **fapt consemnat**, nu absența unui fapt | tăcerea e exact defectul ADR-057 |
 | 4 | orice propunere NOUĂ are `decision_kind` în `evidence` | §4.3 | absența = ecranul ar arăta `FEL NECUNOSCUT` |

@@ -4,11 +4,54 @@ FOOTBALL ORACLE — Cache Manager v1.0
 ================================================================================
 """
 from __future__ import annotations
-import json, logging, os
+import hashlib, json, logging, os
 from datetime import datetime, timezone
 from pathlib import Path
 
 logger = logging.getLogger("FootballOracle.Cache")
+
+# [ADAUGAT 2026-10-21] Limita de nume de fisier pe ext4/overlayfs: 255 de
+# OCTETI, nu caractere — distinctia conteaza, un nume cu diacritice atinge
+# plafonul mai repede decat pare.
+#
+# DE CE EXISTA ASTA. `oracle_api.get_matches_for_week()` isi construieste
+# cheia concatenand numele tuturor competitiilor urmarite. Pe 17 octombrie,
+# adaugarea a trei ligi (Austria, Elvetia, Danemarca) a dus numele de la 249
+# la 304 octeti — era la SASE octeti de plafon. Efectul nu a fost un cache
+# ratat, ci o EXCEPTIE in apelant: `Path.exists()` pe Python 3.11 arunca
+# `ENAMETOOLONG`, fiindca `pathlib` ignora doar errno (2, 20, 9, 40) — 36 nu
+# e printre ele. Etapa "Challenger Shadow Batch" a murit patru nopti la rand,
+# iar `night_sync` a raportat verde de fiecare data.
+#
+# Pe Python 3.12+ acelasi cod NU arunca (`exists()` inghite orice OSError),
+# deci aplicatia de pe Streamlit Cloud a mers mai departe, fara cache L1, in
+# timp ce runnerul GitHub (pinned 3.11) cadea. Acelasi cod, doua
+# comportamente, dupa versiunea interpretorului — motivul pentru care
+# defectul a fost invizibil din aplicatie.
+#
+# REGULA, de aici inainte: un cache nu are voie sa rupa apelantul. Scurtarea
+# de mai jos nu DEZACTIVEAZA cache-ul pentru cheile lungi (un `try/except` ar
+# fi facut asta) — il pastreaza functional, cu un nume marginit.
+_LIMITA_NUME_FISIER = 255
+
+
+def _scurteaza_nume(safe_key: str) -> str:
+    """Nume de fisier marginit pentru o cheie oricat de lunga.
+
+    Amprenta se calculeaza peste cheia INTREAGA, niciodata peste prefixul
+    trunchiat. Altfel doua chei care difera doar dupa punctul de tai ar primi
+    acelasi nume si ar citi una raspunsul celeilalte — o coliziune de cache
+    silentioasa, mult mai rea decat excepția pe care reparam.
+
+    Prefixul lizibil se pastreaza deliberat: un fisier din `cache/` trebuie sa
+    poata fi recunoscut cu ochiul, nu doar de cod.
+    """
+    amprenta = hashlib.sha256(safe_key.encode("utf-8")).hexdigest()[:16]
+    rezerva = len(amprenta) + len("~") + len(".json")
+    prefix = safe_key.encode("utf-8")[: _LIMITA_NUME_FISIER - rezerva]
+    # `ignore` taie un caracter multi-octet rupt la jumatate; cheia completa
+    # rAmane reprezentata de amprenta, deci nu se pierde nicio distinctie.
+    return f"{prefix.decode('utf-8', 'ignore')}~{amprenta}.json"
 
 CATEGORY_TTL: dict[str, float] = {
     "seasons": 24.0, "form": 6.0, "h2h": 48.0,
@@ -52,7 +95,13 @@ class CacheManager:
 
     def _path(self, category, key):
         safe_key = key.replace("/","_").replace("\\","_").replace(":","_").replace(" ","_").replace("|","_")
-        return self.base / category / f"{safe_key}.json"
+        nume = f"{safe_key}.json"
+        # Punct unic de acces la disc al acestei clase (verificat prin AST in
+        # tests/test_cache_key_length_guard.py) — deci marginirea de aici
+        # acopera get/set/invalidate/get_age_hours/exists, toate deodata.
+        if len(nume.encode("utf-8")) > _LIMITA_NUME_FISIER:
+            nume = _scurteaza_nume(safe_key)
+        return self.base / category / nume
 
     def _is_fresh(self, path, category):
         if not path.exists(): return False
