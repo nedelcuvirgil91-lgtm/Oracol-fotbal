@@ -2,13 +2,19 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-10-21**. Ultimul element adăugat: **§8 — prima rulare
-cu ADR-079 (~07:20 UTC), cu lista exactă de verificat** și ce e comportament
-proiectat, nu regresie.
+Ultima actualizare: **2026-10-22**. Ultimele elemente adăugate: **§12 — planul
+ADR-081 pentru LUNI 26 oct** (migrare → merge, în ordinea asta, cu motivul
+tehnic) și **§13 — prima declanșare în producție a detectorului de drift
+ADR-078**.
 
-**Trei elemente deschise**: **§8** (azi, ~07:20 UTC — prima rulare cu ADR-079),
-**§7** (decizia #8, **~26-27 oct** — nu 23, vezi corecția din §7), **§9**
-(supersedarea celor 30 de rânduri `openfootball` — **fără termen, te așteaptă**).
+**Elemente deschise, în ordinea termenului:**
+
+| § | Ce | Termen |
+|---|---|---|
+| **§13** | 🔴 `Sabah FC` vs `Sabah Baku` — același club, două identități, **lanț ELO despicat pe un meci VIITOR** | **înainte de 4 noiembrie** (ferm) |
+| **§12** | ADR-081 — migrarea 058, apoi merge-ul `81006b0` | **luni 26 oct** |
+| **§7** | Decizia #8 (expirare Challenger) | ~26-27 oct |
+| **§9** | Supersedarea celor 30 de rânduri `openfootball` | fără termen, te așteaptă |
 
 ---
 
@@ -1449,3 +1455,170 @@ deliberat.**
 
 `xgboost_v1/e638c1dc` a trecut `monitoring` → **`rejected`** (n = 677).
 `xgboost_v1/dda4f7f3` e la n = 157, prag 200 — `insufficient_data`, normal.
+
+---
+
+## 12. 📅 **LUNI, 26 OCTOMBRIE** — planul ADR-081, în doi pași separați, în ordinea asta
+
+**Scris pe 22 oct, la cererea explicită a proprietarului produsului**, ca să nu
+se reia contextul de la zero. Codul e **gata, testat, împins pe branch** —
+`81006b0` pe `claude/continua-faza-1-adr5-o52jat`. `main` e NEATINS
+(`fc44abe`), deliberat.
+
+### Ce s-a făcut deja (nimic de refăcut luni)
+
+| Element | Stare |
+|---|---|
+| `docs/00_GOVERNANCE/ADR-081-provider-error-body-persistence.md` | **ACCEPTED**, aprobat explicit 22 oct |
+| `database/migrations/058_provider_call_log_error_body.sql` | scris, **NEAPLICAT** |
+| Cod (`supabase_client.py`, `request_manager.py`, `soccerfootballinfo_client.py`) | comis pe branch |
+| `tests/test_provider_error_body.py` | 27 de teste |
+| `pytest tests/` | **3855 passed, 2 skipped** (baseline 3828 + 27, aritmetica se închide exact) |
+| Calea de predicție | **neatinsă**, `git diff` GOL pe cele 6 fișiere |
+| Mutații | **7, toate prinse** |
+
+### Pasul 1 — MIGRAREA (prima, nu a doua)
+
+```sql
+ALTER TABLE provider_call_log
+    ADD COLUMN IF NOT EXISTS error_body text;
+
+COMMENT ON COLUMN provider_call_log.error_body IS
+    'ADR-081: corpul raspunsului, DOAR pe esec, trunchiat la 400 de caractere. '
+    'NULL pe succes, prin garda din record_provider_call(). Cheia API nu poate '
+    'ajunge aici: circula exclusiv in header-ul de CERERE.';
+```
+
+**De arătat și confirmat explicit înainte de rulare** (North Star #6,
+`supabase-safety`). Starea măsurată pe 22 oct, de recontrolat înainte:
+`provider_call_log` = **9 coloane** (`error_body` absentă), **7434 rânduri,
+2688 kB**.
+
+**De ce scriere directă și nu `create_branch`**: `ADD COLUMN` nullable **fără
+`DEFAULT`** e operație de catalog în Postgres 11+ — fără rescrierea tabelei,
+lacăt ținut milisecunde, reversibil cu `DROP COLUMN`.
+
+**Garda `tests/test_migration_grants.py` (pragul 058) NU i se aplică** —
+verificat explicit: `_RE_CREATE_TABLE.search("ALTER TABLE …")` → `False`.
+
+### Pasul 2 — MERGE-UL (abia după migrare)
+
+`81006b0` → `main`, fast-forward, cu `pytest tests/` verde pe `main` **înainte**
+de push.
+
+**ORDINEA NU E NEGOCIABILĂ, și motivul e tehnic**: invers,
+`record_provider_call()` ar trimite un `INSERT` cu o coloană inexistentă,
+PostgREST ar respinge **tot rândul**, iar eșecul e înghițit de
+`except Exception: logger.debug(...)` → scrierea în `provider_call_log` s-ar
+opri **tăcut, pentru toți providerii**. Exact clasa de defect pe care ADR-ul o
+repară. (La D-13 Clasa B, pe 20 oct, ordinea era inversă — **regula nu e „întâi
+codul" sau „întâi baza", e „întâi precondiția"**.)
+
+### Întrebarea pusă pe 22 oct: „dacă se opresc creditele la mijloc, e Oracle afectat?"
+
+**Nu, în niciuna dintre stări** — și prin construcție, nu din noroc:
+
+| Oprire… | Bază | `main` | Oracle |
+|---|---|---|---|
+| înainte de tot | fără coloană | cod vechi | neatins |
+| **după migrare, înainte de merge** | coloană nullable, nimeni nu scrie | cod vechi | **neatins** — `INSERT`-ul vechi omite cheia → `NULL` |
+| după ambele | consistent | cod nou | neatins (schimbare aditivă) |
+
+Verificat, nu presupus: (a) `soccerfootballinfo` **nu e pe calea de servire** —
+zero potriviri în `oracle_engine.py`/`app.py`/`oracle_api.py`; (b) ambii
+apelanți direcți ai lui `record_provider_call` (`oracle_api.py:329`,
+`football_providers.py:242`) îl învelesc în `try/except Exception: pass`, iar
+`INSERT`-ul în `provider_call_log` are propriul `try/except` — deci nici ordinea
+greșită n-ar rupe predicțiile, ar opri doar observabilitatea; (c) `git merge` +
+`push` sunt **atomice pe referință**, deci decalajul care ar da `TypeError`
+(client SFI nou + `request_manager` vechi) e structural imposibil dintr-o
+întrerupere.
+
+### Pasul 3 — verificarea, la prima rulare de noapte de după merge
+
+```sql
+SELECT success, count(*), count(error_body) AS cu_corp
+FROM provider_call_log
+WHERE provider = 'soccerfootballinfo' AND called_at >= now() - interval '1 day'
+GROUP BY 1;
+```
+
+Așteptat: `error_body` **populat** pe `success = false`, **NULL** pe
+`success = true`. Corpul deblochează **ADR-077** (ruta SFI), deschis din 17 oct
+și blocat exact de absența motivului refuzului.
+
+---
+
+## 13. ✅ **22 oct — „Data Health Check" roșu: VERIFICAT, nicio urgență, dar o constatare NOUĂ și reală**
+
+Rularea **39783772195** (22 oct, 13:05 UTC, 1m25s) → `failure`. **Nu e o
+eroare**: scriptul iese cu `exit 1` la ORICE constatare, prin design (clasa
+documentată „roșu-mereu te antrenează să ignori"). Raport: **„Clase cu
+constatări: 3/9"**.
+
+**Care 3 — citit din cod, nu ghicit** (`scripts/check_data_health.py`, cele 9
+incrementări ale lui `findings`): clasele **4, 8, 9**. Clasa 1 **NU** a contat —
+`stale_noi` e gol, adică **„NOI, în competiții ACTIVE: 0"**.
+
+### Clasa 4 — Champions League fără meci în 7 zile: **PAUZĂ REALĂ, benign**
+
+Verificat în date: următoarea etapă UCL e **3-4 noiembrie, 9+9 = 18 meciuri**,
+deja descoperite. Azi + 7 zile = 29 oct. Deci absența e corectă, iar faptul că
+cele 18 sunt deja în bază dovedește că Discovery funcționează.
+
+### Clasa 9 — 4 rânduri supersedate fără motiv: **NESCHIMBAT, deja pe listă**
+
+Aceleași 4 (`130978`, `132010`, `132052`, `132060`), cunoscute, în ADR-075 §8.
+Nimic nou.
+
+### 🔴 Clasa 8 — **PRIMA OARĂ când detectorul de drift ADR-078 se declanșează în producție.** Și a prins ceva real, PROSPECTIV.
+
+Două id-uri Flashscore sub mai multe nume — dar **consecințele sunt complet
+diferite**, și asta e tot ce contează:
+
+**(a) `lIDaZJTc` → `Jagiellonia` / `Jagiellonia (POL)` — INOFENSIV, deja absorbit.**
+`team_slug` e **identic** (`jagiellonia`) pe ambele, iar `normalize_team_name`
+dezbracă sufixul: `'Jagiellonia (POL)'` → `'Jagiellonia'`. În `match_history`:
+**134 de rânduri sub `Jagiellonia`, ZERO sub forma cu sufix.** Deci driftul e
+real la captare și **nul la stocare**. Nimic de făcut.
+
+**(b) `fNGcxbyr` → `Sabah Baku` / `Sabah FC` — ACESTA E REAL, și are termen.**
+Aici `team_slug` **s-a schimbat și el** (`sabah-baku` → `sabah-fc`), deci nu e
+decorație de sufix: **Flashscore a redenumit clubul.** Măsurat în
+`match_history`:
+
+| Etichetă | Rânduri live | Cu rezultat | Interval | ELO |
+|---|---:|---:|---|---:|
+| `Sabah Baku` | **9** | 9 | 14 iul → 20 oct | lanț 1516→…→**1579** |
+| `Sabah FC` | **1** | 0 | **4 nov 2026** (Viking – Sabah FC, UCL) | — |
+
+`normalize_team_name('Sabah FC')` → **`'Sabah FC'`**, deci **nu** se rezolvă la
+forma canonică. Consecința, pe meciul din 4 noiembrie:
+`get_latest_team_elo("Sabah FC")` nu găsește niciun rând → **ELO-ul real 1579 e
+invizibil**; forma Level DB cere 3 meciuri sub acel nume → 0 → eșuează (Level
+FS2 ar putea salva, ca la Clasa B din D-13).
+
+**De ce e o veste BUNĂ, nu una rea**: e exact clasa D-13 („un club, două
+identități"), dar prinsă **cu 13 zile înainte de meci**, nu prin arheologie
+după luni de lanț despicat. ADR-078 Faza 0 a fost construit exact pentru asta
+și **și-a dovedit valoarea la prima declanșare**. Confirmă și corecția mea din
+19 oct („harta va prinde drift mai repede decât am estimat") — a prins-o în 3
+zile.
+
+**⏳ DECIZIE CERUTĂ, cu TERMEN FERM: înainte de 4 noiembrie.**
+Reparația e tiparul deja executat de două ori (D-13 Faza 1 și Clasa B): numele
+canonic rămâne `Sabah Baku` (9 rânduri, lanțul ELO), `Sabah FC` devine
+**alias** în `TEAM_ALIASES`, apoi backfill pe **1 singur rând**. Stratul de
+alias există exact ca forma unui provider să nu dicteze vocabularul stocat
+(ADR-058). Ordinea: **merge ÎNTÂI, backfill după** — altfel producția ar
+recrea rândul orfan peste backfill (precedentul Clasa B, 20 oct).
+**NEFĂCUT** — schimbă vocabularul, deci cere aprobare explicită.
+
+### Observație de metodă, consemnată
+
+Detectorul raportează „2 drifturi" fără să distingă **driftul cu consecință**
+de cel **deja absorbit de resolver**. Nu e defect — e exact granița dintre
+„captăm eticheta brută" (decizie corectă a ADR-078) și „ce ajunge stocat". Dar
+înseamnă că fiecare declanșare a clasei 8 cere verificarea în `match_history`
+înainte de orice acțiune, nu doar citirea raportului. Azi: 2 raportate, **1
+real**.
