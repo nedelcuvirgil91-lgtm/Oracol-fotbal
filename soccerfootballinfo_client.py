@@ -135,6 +135,7 @@ class SoccerFootballInfoClient:
             response_headers = None
             status_code = None
             caught_exc = None
+            corp_eroare = None
             try:
                 session = self._get_session()
                 resp = session.get(f"{BASE_URL}/{path}", headers=headers, params=params, timeout=12)
@@ -144,8 +145,14 @@ class SoccerFootballInfoClient:
                 if success:
                     data = resp.json()
                 else:
+                    # [ADR-081] Corpul se calculeaza O SINGURA DATA si se
+                    # foloseste in AMBELE locuri: log-ul (citibil doar daca
+                    # prinzi coada rularii) si `provider_call_log.error_body`
+                    # (interogabil oricand). Doua apeluri separate la
+                    # `_corp_diagnostic` ar putea divergea daca unul se muta.
+                    corp_eroare = _corp_diagnostic(resp)
                     logger.warning("[SoccerFootballInfo] HTTP %s pentru %s — corp: %s",
-                                   resp.status_code, path, _corp_diagnostic(resp))
+                                   resp.status_code, path, corp_eroare)
             except Exception as exc:
                 logger.error("[SoccerFootballInfo] Eroare request %s: %s", path, exc)
                 caught_exc = exc
@@ -158,8 +165,12 @@ class SoccerFootballInfoClient:
             # ADR-041 Faza 1 — punct unic de scriere pentru cod NOU de Sync
             # Layer. [ADAUGAT ADR-041 Faza 2, Sprint 1.1 #3] status_code/exc
             # -- clasificate de RequestManager.record_result() insusi.
+            # [ADR-081] `error_body` — corpul raspunsului esuat devine
+            # INTEROGABIL, nu doar logat. Pe succes e `None` aici si forțat la
+            # NULL si in calea de scriere (garda nu sta in apelant).
             self._request_manager.record_result(PROVIDER_ID, path, success, latency_ms,
-                                                  status_code=status_code, exc=caught_exc)
+                                                  status_code=status_code, exc=caught_exc,
+                                                  error_body=corp_eroare)
 
             if success and data is not None:
                 self._cache.set(cache_category, cache_key, data, provider=PROVIDER_ID)

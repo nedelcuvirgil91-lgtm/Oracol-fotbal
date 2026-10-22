@@ -37,6 +37,7 @@ class _FakeRequestManager:
     def __init__(self, should_request=True):
         self._should_request = should_request
         self.recorded_results: list = []
+        self.recorded_error_bodies: list = []
 
     def get_ram(self, provider, category, key):
         return None
@@ -56,8 +57,13 @@ class _FakeRequestManager:
     def record_response_headers(self, provider, headers):
         pass
 
-    def record_result(self, provider, endpoint, success, latency_ms, status_code=None, exc=None):
+    # [ADR-081] `error_body` adaugat EXPLICIT, nu prin `**kw` — falsul rămâne
+    # strict, deci o largire viitoare a semnaturii cade aici. Si a cazut:
+    # adaugarea parametrului a rupt 7 teste, ceea ce e comportamentul corect.
+    def record_result(self, provider, endpoint, success, latency_ms, status_code=None,
+                      exc=None, error_body=None):
         self.recorded_results.append((provider, endpoint, success, latency_ms, status_code, exc))
+        self.recorded_error_bodies.append(error_body)
 
 
 def _client(healthy=True, cache_store=None, should_request=True):

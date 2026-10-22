@@ -97,14 +97,20 @@ def test_record_result_calls_supabase_record_provider_call(monkeypatch):
     orice adaptor nou de Sync Layer care trece prin RequestManager."""
     calls = []
 
-    def _fake_record(provider, endpoint, success, latency_ms, http_status=None, failure_reason=None):
-        calls.append((provider, endpoint, success, latency_ms, http_status, failure_reason))
+    # [ADR-081] `error_body` adaugat explicit, NU prin `**kw`: falsul rămâne
+    # strict, deci o largire viitoare incompatibila a semnaturii reale cade
+    # aici, zgomotos. Cu `**kw` ar fi trecut, iar `record_result` inghite
+    # `TypeError` prin `except Exception` — scrierea s-ar opri tacut.
+    def _fake_record(provider, endpoint, success, latency_ms, http_status=None,
+                     failure_reason=None, error_body=None):
+        calls.append((provider, endpoint, success, latency_ms, http_status,
+                      failure_reason, error_body))
         return True
 
     monkeypatch.setattr("supabase_client.record_provider_call", _fake_record)
     rm = RequestManager()
     rm.record_result("soccerfootballinfo", "matches/view/full", True, 123.4)
-    assert calls == [("soccerfootballinfo", "matches/view/full", True, 123.4, None, None)]
+    assert calls == [("soccerfootballinfo", "matches/view/full", True, 123.4, None, None, None)]
 
 
 def test_record_result_never_raises_when_supabase_unavailable(monkeypatch):
@@ -121,7 +127,8 @@ def test_record_result_classifies_failure_status_code(monkeypatch):
     (fara exceptie) -- clasificat prin punctul unic reutilizat."""
     calls = []
 
-    def _fake_record(provider, endpoint, success, latency_ms, http_status=None, failure_reason=None):
+    def _fake_record(provider, endpoint, success, latency_ms, http_status=None,
+                     failure_reason=None, error_body=None):
         calls.append((http_status, failure_reason))
 
     monkeypatch.setattr("supabase_client.record_provider_call", _fake_record)
@@ -143,7 +150,8 @@ def test_record_result_does_not_classify_on_success(monkeypatch):
     """Succes -- failure_reason ramane None, chiar daca status_code e pasat."""
     calls = []
 
-    def _fake_record(provider, endpoint, success, latency_ms, http_status=None, failure_reason=None):
+    def _fake_record(provider, endpoint, success, latency_ms, http_status=None,
+                     failure_reason=None, error_body=None):
         calls.append((http_status, failure_reason))
 
     monkeypatch.setattr("supabase_client.record_provider_call", _fake_record)

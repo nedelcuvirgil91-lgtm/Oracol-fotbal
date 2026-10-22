@@ -112,6 +112,7 @@ class RequestManager:
     def record_result(
         self, provider: str, endpoint: str, success: bool, latency_ms: float,
         status_code: int | None = None, exc: Exception | None = None,
+        error_body: str | None = None,
     ) -> None:
         """[ADAUGAT] ADR-041 Faza 1 — punct unic de scriere in provider_metrics
         pentru orice apel care trece prin RequestManager. oracle_api.py si
@@ -135,7 +136,8 @@ class RequestManager:
                 status_code, failure_reason = classify_failure(status_code, exc=exc)
             import supabase_client as _sb
             _sb.record_provider_call(provider, endpoint, success, latency_ms,
-                                      http_status=status_code, failure_reason=failure_reason)
+                                      http_status=status_code, failure_reason=failure_reason,
+                                      error_body=error_body)
         except Exception:
             pass
 

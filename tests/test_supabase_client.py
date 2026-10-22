@@ -229,10 +229,14 @@ def test_record_provider_call_inserts_new_row_and_writes_call_log():
     call_log_inserts = [entry for entry in client.log if entry[0] == "provider_call_log" and entry[1] == "insert"]
     assert len(call_log_inserts) == 1
     payload = call_log_inserts[0][2]
+    # [ADR-081] `error_body` face parte din contractul de scriere de acum.
+    # Egalitatea EXACTA e deliberata: a prins largirea contractului la
+    # adaugarea coloanei, exact rolul ei. Aici dovedeste si garda de succes —
+    # un apel REUSIT scrie NULL, nu lipsa cheii.
     assert payload == {
         "provider": "sportapi", "endpoint": "fixtures", "success": True,
         "http_status": 200, "failure_reason": None, "cache_hit": True,
-        "latency_ms": 120.0,
+        "latency_ms": 120.0, "error_body": None,
     }
 
 

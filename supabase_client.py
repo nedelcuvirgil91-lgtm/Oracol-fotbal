@@ -1485,10 +1485,35 @@ def set_provider_usage(provider: str, api_key_label: str, month: str, used: int,
 # cache_hits/cache_misses ar necesita instrumentarea separata a
 # cache_manager.py (CacheManager.get/.set) - ramane follow-up, nu ascuns.
 
+# [ADR-081] Al DOILEA plafon pentru corpul de eroare, independent de cel din
+# `_corp_diagnostic()` (tot 400). Calea de scriere nu are voie sa aiba incredere
+# in apelant: un adaptor viitor care paseaza un HTML de eroare de kilobytes nu
+# trebuie sa poata umfla tabela. Doua plafoane, doi proprietari diferiti.
+_LUNGIME_MAXIMA_ERROR_BODY = 400
+
+
+def _error_body_de_scris(success: bool, error_body: str | None) -> str | None:
+    """[ADR-081] Ce ajunge efectiv in coloana `error_body`.
+
+    DOUA GARZI, amandoua in calea de SCRIERE, nu in apelant:
+      1. pe SUCCES se intoarce intotdeauna None, oricat ar pasa apelantul —
+         altfel un apelant neatent ar umple tabela cu corpuri de raspunsuri
+         reusite (volum, si fara nicio valoare de diagnostic);
+      2. plafon de lungime propriu, vezi `_LUNGIME_MAXIMA_ERROR_BODY`.
+
+    Functie PURA, deci testabila fara Supabase."""
+    if success or not error_body:
+        return None
+    text = str(error_body)
+    if len(text) > _LUNGIME_MAXIMA_ERROR_BODY:
+        return text[:_LUNGIME_MAXIMA_ERROR_BODY]
+    return text
+
+
 def record_provider_call(
     provider: str, endpoint: str, success: bool, latency_ms: float,
     http_status: int | None = None, failure_reason: str | None = None,
-    cache_hit: bool = False,
+    cache_hit: bool = False, error_body: str | None = None,
 ) -> bool:
     """Read-then-write (2 round-trip-uri) - acceptabil la volumul actual de
     request-uri (zeci-sute, nu mii/secunda), consistent cu restul proiectului
@@ -1550,6 +1575,7 @@ def record_provider_call(
             "provider": provider, "endpoint": endpoint, "success": success,
             "http_status": http_status, "failure_reason": failure_reason,
             "cache_hit": cache_hit, "latency_ms": latency_ms,
+            "error_body": _error_body_de_scris(success, error_body),
         }).execute()
     except Exception as exc:
         logger.debug("[Supabase] provider_call_log insert failed: %s", exc)
