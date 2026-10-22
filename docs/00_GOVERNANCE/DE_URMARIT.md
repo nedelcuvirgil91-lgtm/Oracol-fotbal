@@ -969,6 +969,45 @@ Ritm ~27 meciuri/zi.
 > Orice cifră viitoare se citește din `challenger_evaluations`, nu se
 > extrapolează de aici.
 
+> **🔴 ATRIBUIREA CAUZALĂ DE MAI SUS E INFIRMATĂ — măsurat 2026-10-22.**
+> Blocul precedent spune că scăderea la **9/zi** era *cauzată* de pana de
+> batch, și că ritmul adevărat ar fi ~27/zi. **Ambele sunt greșite.** Seria
+> completă, citită azi din `challenger_evaluations`:
+>
+> | zi | 13 | 14 | 15 | 16 | 17 | **18** | **19** | 20 | 21 | **22** |
+> |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+> | +n | 12 | 9 | 22 | 18 | 13 | **49** | **35** | 11 | 9 | **11** |
+>
+> Pana a ținut **17-21 oct** — exact fereastra care conține **cele mai mari
+> două creșteri din toată seria**. Iar prima zi completă DUPĂ reparație dă
+> **+11**, nu +27.
+>
+> **Cauza reală, măsurată, nu dedusă**: `n` urmează meciurile jucate în ziua
+> precedentă, și nimic altceva. Meciuri cu rând `treatment` care au căpătat
+> rezultat, pe zi de joc, contra creșterii din ziua următoare:
+>
+> | jucate | 45 (Sâ 17) | 41 (Du 18) | 10 (Lu 19) | 9 (Ma 20) | 11 (Mi 21) |
+> |---|---:|---:|---:|---:|---:|
+> | **+n a doua zi** | **+49** | **+35** | **+11** | **+9** | **+11** |
+>
+> Potrivirea e aproape exactă. „27/zi" era **media peste o fereastră care
+> conținea un weekend**, nu un ritm staționar — exact clasa de eroare în care
+> o medie e citită ca rată.
+>
+> **Ce rămâne VALABIL din blocul precedent**, ca să nu fie aruncat împreună cu
+> ce e greșit: pana a existat, rezerva a existat, reparația era necesară, iar
+> cele 122 de meciuri chiar au fost recuperate integral. Fără reparație, `n`
+> **ar fi** înghețat când rezerva se epuiza. Ce se infirmă e strict
+> **atribuirea creșterii OBSERVATE** penei — nu necesitatea reparației.
+>
+> **Consecință practică**: nicio proiecție pe `n` nu se face cu o rată medie.
+> Se face pe **calendarul meciurilor**, care e cunoscut dinainte din
+> `match_history`. Un weekend valorează cât patru zile de lucru.
+>
+> **De ce a scăpat**: aveam o explicație plauzibilă și un defect real, găsit în
+> aceeași zi, care o susținea. Două fapte adevărate lipite într-o cauzalitate
+> care nu fusese testată. Testul costa o interogare.
+
 > **🔴 CORECȚIE, în aceeași zi (20 oct, seara) — estimarea „23-24 oct" era
 > prea optimistă, și cifra pe care o citam era greșită.** Scrisesem că
 > `8ac89c70` „a trecut toate trei la n=383". **Fals** — a trecut la **n=207**,
