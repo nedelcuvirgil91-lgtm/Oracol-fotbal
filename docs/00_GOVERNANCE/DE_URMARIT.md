@@ -11,7 +11,7 @@ ADR-078**.
 
 | § | Ce | Termen |
 |---|---|---|
-| **§13** | 🔴 `Sabah FC` vs `Sabah Baku` — același club, două identități, **lanț ELO despicat pe un meci VIITOR** | **înainte de 4 noiembrie** (ferm) |
+| ~~**§13**~~ | ✅ **EXECUTAT 22 oct** — `Sabah FC` unit cu `Sabah Baku`, cod pe `main` + backfill pe 11 rânduri | închis |
 | **§12** | ADR-081 — migrarea 058, apoi merge-ul `81006b0` | **luni 26 oct** |
 | **§7** | Decizia #8 (expirare Challenger) | ~26-27 oct |
 | **§9** | Supersedarea celor 30 de rânduri `openfootball` | fără termen, te așteaptă |
@@ -1604,6 +1604,60 @@ după luni de lanț despicat. ADR-078 Faza 0 a fost construit exact pentru asta
 și **și-a dovedit valoarea la prima declanșare**. Confirmă și corecția mea din
 19 oct („harta va prinde drift mai repede decât am estimat") — a prins-o în 3
 zile.
+
+**✅ EXECUTATĂ 2026-10-22, aprobată explicit — cod pe `main` (`78667a2`) + backfill.**
+
+Reparația e **o linie**: `"Sabah Baku": []` → `["Sabah FC"]` (`mappings.py`).
+Canonic rămâne `Sabah Baku`, **nu** forma nouă a providerului — acolo e lanțul
+ELO. 9 teste noi, 5 mutații. `pytest tests/` pe `main` ÎNAINTE de push:
+**3837 passed, 2 skipped** (3828 + 9, exact). Calea de predicție **neatinsă**.
+
+**Previne recidiva, verificat**: toți cei trei scriitori atinși normalizează
+prin `normalize_team_name` (`_normalize_team_fields`,
+`_normalize_context_team_fields` la `queries.py:2392`,
+`upsert_standings_snapshot` la `queries.py:2451`).
+
+**Raza reală: 11 rânduri, 3 tabele** — nu „1 rând", cum anunțasem măsurând doar
+`match_history`. `flashscore_match_context` 9 (redenumire) ·
+`flashscore_standings_snapshot` 1 (**ȘTERGERE**, nu redenumire: cheia e
+`UNIQUE(competition, team)`, geamănul canonic exista deja, iar cele două
+rânduri erau **identice pe fiecare coloană** în afară de `id` și `captured_at`).
+
+**Efect măsurat**: 0 rânduri rămase cu `Sabah FC` pe toate tabelele · 0 parțial
+redenumite · lanț canonic **10 meciuri** · **20** de rânduri de formă vizibile
+lui Level FS2 (15 + 5, unificate) · 1 rând de clasament · 0 duplicate pe cheia
+naturală. **ELO-ul 1579 e acum vizibil** la predicția din 4 noiembrie — exact
+cifra care era invizibilă.
+
+### 🔴 O EROARE A MEA, în chiar backfill-ul ăsta — consemnată, nu ascunsă
+
+Rezultatul a fost `1 · 7 · 2 · **0** · 1`, prezisesem `1 · 6 · 2 · **5** · 1`.
+Cele `7` vs `6` erau o numărătoare greșită de-a mea, inofensivă. **`0` în loc
+de `5` nu era.**
+
+**Cauza**: în PostgreSQL, CTE-urile care modifică date dintr-o singură
+instrucțiune văd toate **același snapshot**, iar **un rând nu poate fi
+modificat de două ori în aceeași instrucțiune** — a doua modificare e **sărită
+tăcut**. Cele 5 rânduri cu `subject_team = 'Sabah FC'` erau exact printre cele
+deja atinse de CTE-urile pe `home_team`/`away_team`.
+
+**Am ales instrucțiunea atomică ca să fie sigură, și tocmai ea a produs starea
+parțială pe care o semnalasem ca periculoasă cu câteva minute înainte** —
+`home`/`away` redenumite, `subject_team` nu, adică exact configurația în care
+`startswith` sare rândurile tăcut. Reparat printr-un `UPDATE` separat, 5
+rânduri, verificat după.
+
+**De ce tiparul D-13 Clasa B era sigur și ăsta nu**: acolo CTE-urile atingeau
+gazdă și oaspete, iar un rând e **ori** una, **ori** alta — mulțimi disjuncte.
+Aici `subject_team` coexistă cu ele în **același rând**. Regula permanentă e
+acum în `CLAUDE.md` §Regulile bazelor de date.
+
+**Ce a făcut defectul vizibil**: compararea numărului de rânduri raportat cu
+cel **prezis înainte**. Fără predicție, `0` ar fi trecut ca „s-a executat".
+
+---
+
+**Textul de mai jos descrie decizia ÎNAINTE de execuție**, păstrat ca istoric.
 
 **⏳ DECIZIE CERUTĂ, cu TERMEN FERM: înainte de 4 noiembrie.**
 Reparația e tiparul deja executat de două ori (D-13 Faza 1 și Clasa B): numele
