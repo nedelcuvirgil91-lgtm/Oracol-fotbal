@@ -525,7 +525,24 @@ TEAM_ALIASES: dict[str, list[str]] = {
     "Rijeka":           [],
     "Royale Union SG":  [],
     "SK Rapid":         [],
-    "Sabah Baku":       [],
+    # [2026-10-22] `Sabah FC` adaugat ca ALIAS, nu ca intrare canonica noua.
+    # Flashscore a REDENUMIT clubul: acelasi id stabil `fNGcxbyr`, dar slug-ul
+    # s-a schimbat `sabah-baku` -> `sabah-fc`, deci NU e decoratie de sufix de
+    # tara (ca `Jagiellonia (POL)`), e o redenumire reala la provider.
+    # Prins PROSPECTIV de detectorul ADR-078, la prima lui declansare in
+    # productie, cu 13 zile inainte de meciul Viking - Sabah, UCL, 4 nov.
+    #
+    # Canonic ramane `Sabah Baku`, NU forma noua a providerului: acolo e
+    # lantul ELO (9 meciuri, pana la 1579). Stratul de alias exista exact ca
+    # forma unui provider sa nu dicteze vocabularul stocat (ADR-058).
+    #
+    # ⚠️ OMONIM REAL, de retinut inainte de orice extindere: exista si un
+    # `Sabah FC` in MALAYSIA, club complet diferit. Malaysia Super League NU e
+    # urmarita azi, deci riscul e zero acum — dar daca se adauga vreodata,
+    # aliasul asta ar rezolva TACIT clubul malaezian la cel azer. Acelasi
+    # tipar ca `Zalgiris` (Vilnius) vs `Kauno Zalgiris`. Garda dedicata:
+    # `tests/test_sabah_identity.py`.
+    "Sabah Baku":       ["Sabah FC"],
     # "Salzburg": [] — SCOASA 2026-10-17, mutata mai sus cu lista ei de alias
     # (`Red Bull Salzburg` si celelalte). NU o reintroduce aici: Python
     # pastreaza ULTIMA definitie a unei chei duplicate, deci o reintroducere
