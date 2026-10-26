@@ -12,7 +12,8 @@ ADR-078**.
 | § | Ce | Termen |
 |---|---|---|
 | ~~**§13**~~ | ✅ **EXECUTAT 22 oct** — `Sabah FC` unit cu `Sabah Baku`, cod pe `main` + backfill pe 11 rânduri | închis |
-| **§12** | ADR-081 — migrarea 058, apoi merge-ul `81006b0` | **luni 26 oct** |
+| ~~**§12**~~ | ✅ **EXECUTAT 26 oct** — ADR-081 complet: migrarea 058 aplicată + merge (`01ebd91`). Deblochează ADR-077 la prima rulare de noapte | închis |
+| **§14** | 🔴 **NOU** — verdictul de promovare oscilează lângă prag: 2 Challengeri au trecut poarta pe 23 oct și au recăzut pe 25, la **același weekend** | de adus în discuție |
 | **§7** | Decizia #8 (expirare Challenger) | ~26-27 oct |
 | **§9** | Supersedarea celor 30 de rânduri `openfootball` | fără termen, te așteaptă |
 
@@ -1458,7 +1459,41 @@ deliberat.**
 
 ---
 
-## 12. 📅 **LUNI, 26 OCTOMBRIE** — planul ADR-081, în doi pași separați, în ordinea asta
+## 12. ✅ **EXECUTAT LUNI, 26 OCTOMBRIE** — ADR-081 e complet: migrare + merge
+
+**Pasul 1 — migrarea 058**, aplicată cu confirmare explicită. Verificat după:
+**9 → 10 coloane**, `error_body` `text` · nullable · **fără default**, **0 rânduri
+atinse** (nimic rescris retroactiv), 3689 de rânduri total neschimbat.
+
+**Pasul 2 — merge**, aprobat explicit, `78667a2` → **`01ebd91`**, fast-forward
+curat. `pytest tests/` pe `main` ÎNAINTE de push: **3864 passed, 2 skipped**.
+Calea de predicție **neatinsă** — `git diff --stat` GOL pe cele 6 fișiere.
+Verificat după push: `error_body` apare de **6 ori** în `supabase_client.py` pe
+`main`, iar `tests/test_provider_error_body.py` există.
+
+**Ordinea a fost respectată** (migrare ÎNTÂI): între cei doi pași baza a avut
+coloana fără ca vreun cod să scrie în ea — stare inofensivă prin construcție,
+fiindcă `INSERT`-ul vechi omite cheia, iar coloana e nullable.
+
+**RĂMÂNE DE VERIFICAT, la prima rulare de noapte de după:**
+
+```sql
+SELECT success, count(*), count(error_body) AS cu_corp
+FROM provider_call_log
+WHERE provider = 'soccerfootballinfo' AND called_at >= now() - interval '1 day'
+GROUP BY 1;
+```
+
+Așteptat: corp populat pe `success = false`, **NULL** pe `success = true`. SFI
+eșuează ~11 ori pe zi (măsurat 26 oct: **34 de apeluri / 0 reușite** în 3 zile),
+deci motivul refuzului intră singur. **Asta deblochează ADR-077**, oprit din 17
+oct exact fiindcă motivul nu putea fi citit.
+
+---
+
+**Textul de mai jos e planul, păstrat ca istoric al deciziei.**
+
+### Planul original — ADR-081, în doi pași separați, în ordinea asta
 
 **Scris pe 22 oct, la cererea explicită a proprietarului produsului**, ca să nu
 se reia contextul de la zero. Codul e **gata, testat, împins pe branch** —
@@ -1676,3 +1711,57 @@ de cel **deja absorbit de resolver**. Nu e defect — e exact granița dintre
 înseamnă că fiecare declanșare a clasei 8 cere verificarea în `match_history`
 înainte de orice acțiune, nu doar citirea raportului. Azi: 2 raportate, **1
 real**.
+
+
+---
+
+## 14. 🔴 **NOU, 26 oct** — verdictul de promovare oscilează lângă prag, iar ADR-079 e singurul lucru care a oprit consecința
+
+**Găsit verificând un reminder programat**, nu dintr-un simptom. Trei decizii
+retrase automat între 23 și 25 octombrie:
+
+| # | Fel | Țintă | n | Creată | Retrasă — motiv |
+|---|---|---|---:|---|---|
+| **8** | expirare | `blend_v1/174e7e17` | 301 | 20 oct | 23 oct — *„producătorul propune acum `promotion`"* |
+| **10** | promovare | `blend_v1/174e7e17` | 357 | 23 oct | 25 oct — *„verdictul curent justifică `expiry`"* |
+| **11** | promovare | `xgboost_v1/dda4f7f3` | 204 | 23 oct | 25 oct — idem |
+
+**Felul deciziei a oscilat de două ori în cinci zile**, pe aceeași țintă.
+
+### Riscul s-a materializat în direcția OPUSĂ celei anticipate
+
+`CLAUDE.md` scria că „singurul lucru care ține riscul închis azi e că decizia #8
+e `pending`, nu `approved`" — adică se temea de o **expirare** executată ca
+**promovare**. Pericolul real a fost invers: **două propuneri de PROMOVARE a
+căror premisă a dispărut în 48 de ore.** Aprobate pe 23-24 oct și comise pe 25,
+ar fi promovat un campion pe o premisă evaporată. Mecanismul de retragere din
+ADR-079 (§4.1, §4.1.1) le-a oprit. **Nu e nimic de aprobat** — toate trei sunt
+`withdrawn` și niciuna nu poate executa.
+
+### Cauza, măsurată
+
+Ambii Challengeri au recăzut **în aceeași zi**, la **același increment de +61 de
+meciuri** — adică un singur weekend. Seria pentru `dda4f7f3` (xgboost_v1):
+
+| Zi | n | Δ acuratețe | Brier semn. | Log-loss semn. | Acuratețe semn. | Verdict |
+|---|---:|---:|---|---|---|---|
+| 23 oct | 204 | +8,33pp | ✅ | ✅ | ✅ | **candidate** |
+| 24 oct | 217 | +8,29pp | ✅ | ✅ | ✅ | **candidate** |
+| 25 oct | 278 | **+6,83pp** | ❌ | ✅ | ✅ | monitoring |
+
+**Punctele au rămas mari** (acuratețe 0,4928 → 0,5612, Brier −0,0237, log-loss
+−0,0359). S-a pierdut **doar semnificația pe Brier** — două din trei. Poarta cere
+toate trei simultan (North Star #2) și a funcționat exact cum trebuie.
+
+### Ce înseamnă, și ce NU înseamnă
+
+**NU** înseamnă că modelul s-a înrăutățit — deltele sunt în continuare
+substanțiale, iar `xgboost_v1` e familia care pierdea sistematic contra Oracle.
+**Înseamnă** că verdictul e instabil lângă prag: *o citire făcută într-o zi
+anume nu e o proprietate a modelului, e o proprietate a zilei.* Același tipar ca
+la decizia #8 pe 20 oct („2 din 3 metrici semnificative"), repetat.
+
+**Consecință de metodă**: nicio promovare nu se judecă pe instantaneul unei
+singure zile. Dacă subiectul se redeschide, întrebarea corectă e „de câte zile
+consecutive e 3/3?", nu „e 3/3 azi?". **Nefăcut nimic** — e o observație, nu o
+propunere de schimbare a porții.
