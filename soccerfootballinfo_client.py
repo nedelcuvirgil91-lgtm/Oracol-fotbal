@@ -181,11 +181,28 @@ class SoccerFootballInfoClient:
             self._request_manager.release_inflight(PROVIDER_ID, cache_category, cache_key)
 
     def get_matches_for_day(self, date_iso: str) -> dict | None:
-        """`date_iso`: "YYYY-MM-DD". Un singur apel — toate meciurile globale
-        din acea zi (confirmat live). NU conține xG/lineup (vezi docstring-ul
-        modulului) — folosit strict pentru rezoluția match_id (vezi
-        `soccerfootballinfo_event_resolver.py`)."""
-        compact = date_iso.replace("-", "")
+        """`date_iso`: "YYYY-MM-DD" SAU "YYYY-MM-DDTHH:MM:SS". Un singur apel —
+        toate meciurile globale din acea zi (confirmat live). NU conține
+        xG/lineup (vezi docstring-ul modulului) — folosit strict pentru
+        rezoluția match_id (vezi `soccerfootballinfo_event_resolver.py`).
+
+        [REPARAT 2026-10-26] `[:10]` NU e defensivă, e obligatoriu.
+        `match_history.kickoff_date` e `text` și ține DOUĂ forme — 57.366
+        rânduri `YYYY-MM-DD` și 2.390 `YYYY-MM-DDTHH:MM:SS` — iar apelantul
+        (`soccerfootballinfo_event_resolver.resolve()`) pasează valoarea brută
+        din bază. Fără tăiere, forma lungă producea `d=20260714T15:00:00`, pe
+        care providerul îl respinge cu `{"code":8,"message":"Wrong d param"}`.
+
+        Defectul s-a activat FĂRĂ niciun commit: pe 9 oct mai existau 3 rânduri
+        cu forma scurtă în fereastra de 2 zile a resolverului, pe 10 oct zero.
+        Ultimul succes 10 oct 08:20:04, primul 400 pe 11 oct 08:37:03, apoi
+        100% eșec. Declanșatorul e o proprietate a DATELOR, nu a codului — de
+        aceea `git log` părea să disculpe reparația la noi.
+
+        `[:10]` e idiomul deja folosit în 19 locuri din proiect pentru exact
+        aceeași normalizare; garda `tests/test_date_param_truncation.py` impune
+        invariantul, ca a treia instanță să nu mai aștepte să fie descoperită."""
+        compact = date_iso[:10].replace("-", "")
         return self._get("matches/day/full/", {"d": compact}, "soccerfootballinfo_day_full", compact)
 
     def get_match_detail(self, match_id: str) -> dict | None:

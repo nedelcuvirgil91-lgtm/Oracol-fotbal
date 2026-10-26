@@ -673,7 +673,16 @@ class FootballOracleAPI:
         if cached is not None:
             data = cached
         else:
-            date_fmt = kickoff_date.replace("-", "")
+            # [REPARAT 2026-10-26] A DOUA instanță a aceleiași clase, găsită
+            # căutând clasa, nu cazul. `kickoff_date` vine brut din
+            # `match_history`, care ține două forme (`YYYY-MM-DD` și
+            # `YYYY-MM-DDTHH:MM:SS`); fără `[:10]`, forma lungă ar trimite
+            # `date=20260714T15:00:00`. Aici defectul e LATENT — FreeLF
+            # răspunde oricum 401/429 la fiecare apel — deci s-ar fi
+            # manifestat exact în ziua în care cota se reface, arătând ca un
+            # defect nou. Vezi `soccerfootballinfo_client.get_matches_for_day`
+            # pentru instanța activă și cronologia completă.
+            date_fmt = kickoff_date[:10].replace("-", "")
             data = self._free_lf_get("football-get-matches-by-date", params={"date": date_fmt})
             self._cset(cache_key, data or {})
         if not data:
