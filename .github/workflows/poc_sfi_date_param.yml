@@ -1,0 +1,42 @@
+name: Football Oracle — Sondă SFI (formatul parametrului `d`)
+
+# POC TEMPORAR. Se șterge, împreună cu `sync/_poc_sfi_date_param_temp.py`, după
+# închiderea investigației — dovada rămâne în istoricul rulărilor + CHANGELOG.
+#
+# Doar `workflow_dispatch`: NICIUN cron. Nu atinge niciun workflow existent.
+# Consumă CEL MULT 6 apeluri din cota lunară SFI (200/lună, 129 consumate),
+# plafon impus în cod, nu prin disciplină.
+#
+# Secretul pasat e cel EXISTENT (`RAPIDAPI_KEY_FREELIVEFOOTBALL`) — același cont
+# RapidAPI autentifică ambele subscripții, vezi comentariul din `key_manager.py`
+# de lângă `_ENV_KEY_OVERRIDES`. Nu se adaugă, nu se înlocuiește niciun secret.
+#
+# Fără SUPABASE_*: sonda nu scrie nimic nicăieri, iar absența credențialelor e
+# garanția structurală a asta, nu o promisiune din docstring.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sonda:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Rulează sonda (max 6 apeluri, se oprește la primul succes)
+        env:
+          RAPIDAPI_KEY_FREELIVEFOOTBALL: ${{ secrets.RAPIDAPI_KEY_FREELIVEFOOTBALL }}
+        run: |
+          python sync/_poc_sfi_date_param_temp.py
