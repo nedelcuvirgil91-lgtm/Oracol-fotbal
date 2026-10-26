@@ -13,7 +13,8 @@ ADR-078**.
 |---|---|---|
 | ~~**§13**~~ | ✅ **EXECUTAT 22 oct** — `Sabah FC` unit cu `Sabah Baku`, cod pe `main` + backfill pe 11 rânduri | închis |
 | ~~**§12**~~ | ✅ **EXECUTAT 26 oct** — ADR-081 complet: migrarea 058 aplicată + merge (`01ebd91`). Deblochează ADR-077 la prima rulare de noapte | închis |
-| **§14** | 🔴 **NOU** — verdictul de promovare oscilează lângă prag: 2 Challengeri au trecut poarta pe 23 oct și au recăzut pe 25, la **același weekend** | de adus în discuție |
+| **§15** | 📊 **MĂSURAT 26 oct** — XGBoost bate Oracle-ul servit cu **+5,76pp**, larg (9 ligi din 10 nenule) și fără scurgere. **Declanșatorul de reluare cere decizie** | 3/3 × 10 zile · n ≥ 500 (azi: 2 zile, n=278) |
+| **§14** | Verdictul oscilează lângă prag — miza **reîncadrată** de §15: promovarea nu schimbă nimic servit | informativ |
 | **§7** | Decizia #8 (expirare Challenger) | ~26-27 oct |
 | **§9** | Supersedarea celor 30 de rânduri `openfootball` | fără termen, te așteaptă |
 
@@ -1765,3 +1766,143 @@ la decizia #8 pe 20 oct („2 din 3 metrici semnificative"), repetat.
 singure zile. Dacă subiectul se redeschide, întrebarea corectă e „de câte zile
 consecutive e 3/3?", nu „e 3/3 azi?". **Nefăcut nimic** — e o observație, nu o
 propunere de schimbare a porții.
+
+
+---
+
+## 15. 📊 **MĂSURAT 2026-10-26** — Challengerul XGBoost bate Oracle-ul servit cu +5,76pp, larg și fără scurgere. Dar nu ajunge nicăieri.
+
+**De ce s-a măsurat**: întrebare de arhitect — „care e următorul pas?". Răspunsul
+cerea să știm dacă avantajul semnalat în §14 e real sau zgomot lângă prag.
+Strict read-only, nicio scriere.
+
+### Verificarea care ar fi invalidat totul: TRECUTĂ
+
+`dda4f7f3` antrenat **14 oct 05:31**; cel mai vechi meci din comparație începe
+**14 oct 16:45**, cu 11 ore mai târziu. **Zero meciuri jucate înainte de
+antrenare.** Fără scurgere temporală (North Star #7). Verificarea asta s-a făcut
+ÎNAINTE de a raporta rezultatul pozitiv, nu după.
+
+### `xgboost_v1 / dda4f7f3` contra Oracle-ului SERVIT (rândul `control`), n = 330
+
+| | Oracle | XGBoost | Δ |
+|---|---:|---:|---:|
+| Acuratețe | 0,4970 | **0,5545** | **+5,76pp** |
+| Brier | — | — | **−0,0242** |
+
+**Avantajul e LARG, nu o ligă norocoasă** — ăsta e punctul decisiv, și e exact
+partiția care la reperul extern (14 oct) răsturnase concluzia agregată:
+
+| Ligă | n | Oracle | XGBoost | Δ pp | Δ Brier |
+|---|---:|---:|---:|---:|---:|
+| Ligue 1 | 17 | 0,353 | 0,588 | **+23,53** | −0,0714 |
+| Bundesliga | 18 | 0,333 | 0,500 | **+16,67** | −0,0295 |
+| Europa League | 36 | 0,444 | 0,583 | **+13,89** | −0,0937 |
+| Champions League | 27 | 0,593 | 0,704 | **+11,11** | −0,0807 |
+| Premier League | 20 | 0,350 | 0,450 | +10,00 | −0,0363 |
+| Romania SuperLiga | 15 | 0,467 | 0,533 | +6,67 | −0,0580 |
+| MLS | 45 | 0,422 | 0,489 | +6,67 | −0,0190 |
+| Conference League | 18 | 0,500 | 0,556 | +5,56 | −0,0249 |
+| Ekstraklasa | 18 | 0,444 | 0,500 | +5,56 | −0,0199 |
+| Super Lig | 15 | 0,800 | 0,800 | 0,00 | +0,0814 |
+| Eredivisie | 17 | 0,529 | 0,529 | 0,00 | +0,0210 |
+| Serie A | 19 | 0,632 | 0,632 | 0,00 | +0,0142 |
+| La Liga | 19 | 0,526 | 0,526 | 0,00 | −0,0184 |
+| Scottish Premiership | 12 | 0,667 | 0,583 | −8,33 | −0,0023 |
+
+**9 pozitive · 4 exact zero · 1 negativă** (cea mai mică, n=12). Brier: **11 din
+14** favorizează XGBoost. Cele mai mari trei eșantioane — MLS, Europa League,
+Champions League — sunt **toate** pozitive. Semnul e consistent exact unde Oracle
+e slab.
+
+### `blend_v1 / 174e7e17` e net mai SLAB — și asta inversează ordinea presupusă
+
+Aceeași analiză, n ≥ 12 pe 16 ligi: **8 pozitive · 3 zero · 5 negative** pe
+acuratețe; Brier 11 din 16. Deltele variază ±11pp la n=18 — **două meciuri**.
+
+Dar seria de semnificație spune altceva, și e utilă:
+
+| Zi | n | Semnificative | Care | Verdict |
+|---|---:|---:|---|---|
+| 17 oct | 204/206 | 0/3 | `---` | monitoring |
+| 18 oct | 255 | 1/3 | `--L` | monitoring |
+| 19-22 oct | 290→321 | **2/3** | `-BL` | monitoring |
+| 23 oct | 357 | **3/3** | `ABL` | **candidate** |
+| 24 oct | 370 | **3/3** | `ABL` | **candidate** |
+| 25 oct | 431 | 2/3 | `-BL` | monitoring |
+
+**Brier + log-loss sunt semnificative neîntrerupt din 19 oct — 7 zile.** Doar
+**acuratețea** oscilează, exact metrica pe care `CLAUDE.md` o documentează ca
+plafonată structural (~76%; favoritul casei nu e niciodată remiza).
+
+**Cei doi Challengeri au metrici slabe OPUSE**: la blend cade acuratețea, la
+XGBoost cade Brier (25 oct: `A-L`). Nu e zgomot corelat — sunt modele genuin
+diferite, iar asta întărește, nu slăbește, citirea.
+
+**Inversarea**: `blend_v1` ARE campion activ din 23 august (`8ac89c70`);
+`xgboost_v1` **n-a avut niciodată** campion. Cel fără campion e cel mai puternic
+dintre cei doi.
+
+### 🔴 Constatarea arhitecturală: promovarea e DECONECTATĂ de consecință
+
+Lanț verificat verigă cu verigă, nu presupus:
+
+| Verigă | Constatare |
+|---|---|
+| `_resolve_champion()` → `load_champion_or_none("xgboost_v1","all")` | **niciun campion `xgboost_v1`** în `model_champions` |
+| deci `ml_source` în producție | **`"local"`** — artefact antrenat local. Codul o documentează el însuși (`oracle_engine.py:2504`) |
+| ieșirea ML vs. probabilitățile servite | **read-only** — „nu modifică `ph`/`pd_`/`pa` primite" |
+| `blend_engine_prediction` | „câmp izolat, **fără alt cititor**" |
+| radarul de value bets | `EXPERIMENT_GROUP = "control"` → citește **predicția Oracle servită** |
+
+**Nicio promovare, azi, nu schimbă o singură probabilitate servită.** Mașinăria
+Champion/Challenger e completă și funcțională — ADR-079 a dovedit-o cu trei
+retrageri — dar sistemul poate **demonstra** că există un motor mai bun și
+**n-are cale** să-l pună în față.
+
+Nu e defect: ADR-051 spune explicit că niciun motor nu e primar prin
+construcție. E un gol între viziune și implementare, numit aici ca să nu fie
+redescoperit.
+
+**Corecție la §14**: acolo am prezentat oscilația ca risc important („ar fi
+promovat un campion pe o premisă evaporată"). **Miza e mult mai mică.** O
+promovare ar fi mutat `ml_source` din „local" în „champion" — un model guvernat
+în locul unuia neguvernat, în spatele unei suprafețe de **afișare**. ADR-079 a
+funcționat corect, dar ce a oprit era igienă de guvernanță.
+
+### Ce NU spune măsurătoarea
+
+- **11 zile, 3 zile cu verdict** pentru XGBoost. Testul propriu al sistemului
+  (paired bootstrap la nivel de MECI, mai riguros decât mediile mele pe ligă) a
+  dat **2/3** pe 25 oct.
+- Deltele per ligă sunt zgomotoase individual (n = 12-45). **Tiparul** e
+  semnalul, nu vreo ligă anume.
+- Nu spune nimic despre value betting: radarul citește Oracle.
+
+### ⏳ DECIZIE CERUTĂ — declanșatorul, de stabilit ACUM, nu în ziua cifrei bune
+
+**Recomandarea mea: NU se construiește calea de servire acum.** Dovada e
+promițătoare dar subțire, iar deschiderea căii de predicție e cel mai riscant
+lucru din proiect.
+
+**Dar declanșatorul se scrie acum**, cât nimeni nu e sub presiune — ca decizia
+să nu se ia într-o zi în care cifra arată bine. Propunere, de discutat:
+
+> `xgboost_v1` la **3/3 timp de 10 zile consecutive** ȘI **n ≥ 500**.
+
+**De ce 10 zile**: acoperă două weekenduri. Weekendul s-a dovedit de două ori
+factorul care mută verdictul (23→25 oct, ambii Challengeri, același increment de
++61 de meciuri). **De ce n ≥ 500**: sub atât, o singură rundă poate inversa
+semnul, demonstrat.
+
+**Starea azi: 2 zile consecutive, n = 278.** Se acumulează singur — nimic de
+făcut până atunci.
+
+### Ce ar schimba decizia
+
+- Dacă XGBoost atinge declanșatorul → se deschide discuția despre un **ADR
+  dedicat** pentru calea de servire. Nu înainte.
+- Dacă recade sub 2/3 și rămâne acolo → întrebarea se închide, iar §15 rămâne ca
+  dovadă că a fost măsurată, nu presupusă.
+- Dacă blend-ul atinge 3/3 stabil **înaintea** XGBoost → se compară direct cei
+  doi, nu fiecare contra Oracle.
