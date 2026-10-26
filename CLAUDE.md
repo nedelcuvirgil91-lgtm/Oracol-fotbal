@@ -516,11 +516,25 @@ XGBoost / 431 blend. **Deci 10 zile de la următoarea zi 3/3, nu 8.**
 **Abia la declanșare** se deschide discuția despre un **ADR dedicat** pentru
 calea de servire — nu înainte. Nimic nu pornește automat (ADR-002).
 
-**⚠️ NIMIC nu verifică automat declanșatorul.** Trăiește într-un document, exact
-ca ADR-057, care a costat **14 zile fără nicio antrenare**. Interogarea e în
-`DE_URMARIT` §15 și rulează în secunde, dar **cineva trebuie s-o ruleze**.
-Cablarea (clasa 10 în `check_data_health`) e mică și cunoscută — **NEfăcută
-deliberat**, e cod nou și cere decizie proprie.
+**✅ CABLAT — clasa 10 în `check_data_health` (2026-10-26, aprobat explicit).**
+Declanșatorul NU mai trăiește doar într-un document, ca ADR-057, care a costat
+**14 zile fără nicio antrenare** fiindcă nimeni nu s-a uitat când condiția lui
+s-a împlinit.
+
+**Semantică inversă față de celelalte nouă clase, deliberat**: aici o constatare
+NU e un defect, e o veste bună care cere decizie umană — raportul o spune
+explicit, ca nimeni să nu „repare" un declanșator atins. Seria se **afișează
+mereu** (0 → 7 → 10 se vede acumulând, ca avertisment din timp), dar se
+**numără constatare DOAR la declanșare**; altfel clasa ar fi roșie în fiecare zi
+în care un Challenger e la 3/3 de câteva zile, adică exact boala
+„roșu-mereu te antrenează să ignori" pe care `check_data_health` o are deja
+documentată despre el însuși.
+
+Toată judecata stă într-o funcție **pură** (`serie_3_din_3`), testabilă fără
+Supabase și fără o rulare de noapte. **24 de teste, 11 mutații, toate prinse.**
+Verificat end-to-end pe **date reale de producție**: funcția pură reproduce
+exact rezultatul unei interogări SQL independente, inclusiv ziua dublă din 17
+oct.
 
 ---
 

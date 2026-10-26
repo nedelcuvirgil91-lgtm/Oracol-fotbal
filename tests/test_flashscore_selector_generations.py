@@ -298,7 +298,12 @@ def test_clasa_7_e_cablata_in_check_data_health():
     # [ACTUALIZAT 2026-10-20, ADR-075 §8: 8 -> 9, clasa „supersedare
     # fara motiv". Garda a cazut din nou la adaugarea clasei, exact cum
     # trebuia — a treia data consecutiv ca mecanismul si-a facut treaba.]
-    assert "findings}/9" in sursa, "sumarul nu numără clasa 7"
+    # [ÎNTĂRITĂ 2026-10-26] Ancora era `"findings}/9"` — numărul TOTAL de
+    # clase. O gardă pentru clasa 7 nu are ce căuta legată de câte clase
+    # există: a căzut la adăugarea clasei 10, fără ca nimic al ei să se fi
+    # stricat. Verifică acum invariantul — numitorul din sumar e egal cu
+    # numărul de clase chiar tipărite în raport.
+    _asigura_sumar_consistent(sursa)
 
 
 def test_clasa_7_incrementeaza_findings():
@@ -340,3 +345,21 @@ def test_cascada_nu_amesteca_doua_generatii():
         '<span data-testid="wcl-simple-text-01">nou</span></div>', "html.parser")
     gasite = nz._select_first_testid(sup, nz._TEXT_TESTIDS)
     assert [g.get_text(strip=True) for g in gasite] == ["vechi"]
+
+
+def _asigura_sumar_consistent(sursa: str) -> None:
+    """Numitorul din linia de sumar = numărul de clase tipărite în raport.
+
+    Invariant, nu listă: o clasă nouă adăugată fără actualizarea sumarului
+    cade aici, iar o gardă existentă NU mai cade doar fiindcă s-a adăugat o
+    clasă. Exact distincția pe care proiectul o cere („verifică invariantul,
+    nu lista, care se învechește")."""
+    import re as _re
+    clase = _re.findall(r'print\(\s*f?"\s{2}(\d+)\.', sursa)
+    sumar = _re.search(r"findings\}/(\d+)", sursa)
+    assert sumar, "linia de sumar lipsește din raport"
+    assert clase, "nicio clasă tipărită în raport"
+    assert int(sumar.group(1)) == len(set(clase)), (
+        f"sumarul numără {sumar.group(1)} clase, dar raportul tipărește "
+        f"{len(set(clase))}: {sorted(set(clase), key=int)}"
+    )

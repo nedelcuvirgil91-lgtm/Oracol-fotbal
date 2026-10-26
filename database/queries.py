@@ -2641,6 +2641,62 @@ def get_supersede_without_reason(limit_examples: int = 15) -> tuple[int | None, 
     return int(total), list(res.data or [])
 
 
+def get_challenger_significance_days(days_back: int = 60) -> list[dict] | None:
+    """[D-15 / DE_URMARIT §15] Randurile de evaluare necesare declansatorului
+    de servire — STRICT READ-ONLY, niciun efect secundar.
+
+    Intoarce randuri brute; CALCULUL seriei se face in afara, intr-o functie
+    PURA (`scripts/check_data_health.serie_3_din_3`), ca sa fie testabil fara
+    Supabase. Separarea e deliberata: tot ce e judecata se testeaza, tot ce e
+    I/O ramane subtire.
+
+    `None` la eroare = NECUNOSCUT, niciodata lista goala (Regula #8) — un `[]`
+    intors pe eroare ar arata identic cu „niciun challenger evaluat", adica
+    exact cu starea in care declansatorul nu poate fi atins.
+
+    PAGINAT keyset pe `id`. Nu e exces de zel: plafonul implicit PostgREST de
+    1000 e clasa de defect cu PATRU instante documentate in acest proiect
+    (`get_training_data`, `get_shadow_predictions`, `get_distinct_experiments`,
+    `_count_finished_matches`). `challenger_evaluations` creste cu ~2 randuri
+    pe zi si va trece pragul; atunci seria ar fi calculata pe un subset ales de
+    baza de date, iar un declansator care se bazeaza pe ULTIMELE zile e exact
+    tipul de interogare pe care trunchierea il strica tacit.
+
+    Familiile de test se EXCLUD aici, la sursa — cele 5 artefacte
+    `gate_validation_test` din 14 iulie (n = 250). Fara filtru nu ar declansa
+    azi, dar suprafata de fals pozitiv se inchide explicit, nu prin noroc."""
+    client = get_client()
+    if client is None:
+        return None
+    prag = (datetime.now(timezone.utc) - timedelta(days=max(1, int(days_back)))).date().isoformat()
+    randuri: list[dict] = []
+    ultim_id = 0
+    try:
+        while True:
+            res = (
+                client.table("challenger_evaluations")
+                .select("id,training_run_id,algorithm_family,evaluated_at,"
+                        "n_matches_evaluated,accuracy_significant,"
+                        "brier_significant,logloss_significant,verdict")
+                .neq("verdict", "insufficient_data")
+                .gte("evaluated_at", prag)
+                .gt("id", ultim_id)
+                .order("id")
+                .limit(_PAGE_SIZE)
+                .execute()
+            )
+            pagina = res.data or []
+            randuri.extend(pagina)
+            if len(pagina) < _PAGE_SIZE:
+                break
+            ultim_id = pagina[-1]["id"]
+    except Exception as exc:
+        logger.error("[Queries] get_challenger_significance_days failed: %s", exc)
+        return None
+    return [r for r in randuri
+            if "gate_validation" not in (r.get("algorithm_family") or "")]
+
+
 def upsert_match_events(match_id: int, events: list[dict], season: str | None = None) -> bool:
     """`match_events` (migratia 032/033/039) - timeline complet (goluri/
     cartonase/schimbari/VAR), nu doar substitutii. `on_conflict` pe cheia

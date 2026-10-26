@@ -227,6 +227,105 @@ def find_home_away_inversions(rows: list[dict], min_dovezi: int = 2) -> tuple[li
     return candidati, judecabile
 
 
+# ════════════════════════════════════════════════════════════════════════════
+# CLASA 10 — declansatorul de servire (D-15, aprobat 2026-10-26)
+#
+# Praguri ca CONSTANTE, nu literale imprastiate: daca proprietarul produsului
+# schimba declansatorul, se schimba intr-un loc si garda il citeste de acolo.
+_PRAG_ZILE_3_DIN_3 = 10
+_PRAG_N_DECLANSATOR = 500
+# Zile de evaluare LIPSA tolerate in interiorul seriei. Peste atat, seria e
+# SUSPECTA si nu declanseaza: altfel o pana prelungita de `night_sync` ar putea
+# „conserva" o serie buna peste o perioada in care nu ne-am uitat deloc.
+_MAX_ZILE_LIPSA_IN_SERIE = 2
+
+
+def serie_3_din_3(randuri: list[dict]) -> list[dict]:
+    """[D-15] Starea declansatorului, per Challenger. Functie PURA — nicio
+    citire, niciun I/O, deci testabila fara Supabase si fara o rulare de noapte.
+
+    Conventiile sunt cele APROBATE pe 2026-10-26 (DE_URMARIT §15), si fiecare
+    exista fiindca un declansator care se poate interpreta SE VA interpreta
+    exact in ziua in care e in joc:
+
+      1. o „zi" = o data UTC cu cel putin o evaluare cu verdict; daca o data are
+         MAI MULTE randuri (s-a intamplat: 17 oct, `174e7e17`), conteaza ULTIMA
+         (cel mai mare `evaluated_at`);
+      2. zilele LIPSA sunt NEUTRE — nu conteaza si nu reseteaza. Daca
+         `night_sync` a esuat, modelul nu s-a inrautatit, doar nu ne-am uitat.
+         DAR peste `_MAX_ZILE_LIPSA_IN_SERIE` goluri calendaristice in
+         interiorul seriei, aceasta e marcata `suspecta` si NU declanseaza;
+      3. orice zi sub 3/3 RESETEAZA seria la zero — nu se cumuleaza;
+      4. `n` se cere pe ULTIMA zi a seriei (`n` creste monoton, deci acolo e
+         constrangerea care leaga).
+
+    Seria se numara de la ziua cea mai RECENTA inapoi. Distinctia nu e
+    academica: pe 26 oct `dda4f7f3` avusese doua zile 3/3 (23-24 oct), dar 25
+    oct le rupsese — seria CURENTA era 0, nu 2. Raportasem gresit „2 zile"
+    tocmai citind „au existat doua zile" in loc de „seria curenta are doua"."""
+    pe_challenger: dict[tuple[str, str], dict[date, dict]] = defaultdict(dict)
+    for r in randuri:
+        cheie = (r.get("algorithm_family") or "?", r.get("training_run_id") or "?")
+        brut = r.get("evaluated_at") or ""
+        try:
+            zi = datetime.fromisoformat(str(brut).replace("Z", "+00:00")).date()
+        except ValueError:
+            continue
+        anterior = pe_challenger[cheie].get(zi)
+        # Conventia 1 — la mai multe randuri pe aceeasi zi, castiga ULTIMUL.
+        if anterior is None or str(brut) > str(anterior.get("evaluated_at") or ""):
+            pe_challenger[cheie][zi] = r
+
+    iesire: list[dict] = []
+    for (familie, run_id), pe_zi in pe_challenger.items():
+        zile = sorted(pe_zi.keys(), reverse=True)
+        if not zile:
+            continue
+        ultima = pe_zi[zile[0]]
+        sem_ultima = _semnificative(ultima)
+
+        serie = 0
+        for zi in zile:
+            if _semnificative(pe_zi[zi]) < 3:
+                break          # conventia 3 — reseteaza
+            serie += 1
+
+        # Conventia 2 — goluri calendaristice in interiorul seriei.
+        lipsa = 0
+        if serie >= 2:
+            intindere = (zile[0] - zile[serie - 1]).days + 1
+            lipsa = intindere - serie
+        suspecta = lipsa > _MAX_ZILE_LIPSA_IN_SERIE
+
+        n_curent = ultima.get("n_matches_evaluated") or 0
+        iesire.append({
+            "algorithm_family": familie,
+            "training_run_id": run_id,
+            "ultima_zi": zile[0],
+            "sem_ultima_zi": sem_ultima,
+            "n_curent": int(n_curent),
+            "serie": serie,
+            "zile_lipsa": lipsa,
+            "suspecta": suspecta,
+            # Conventia 4 — `n` pe ULTIMA zi a seriei.
+            "declansat": (serie >= _PRAG_ZILE_3_DIN_3
+                          and int(n_curent) >= _PRAG_N_DECLANSATOR
+                          and not suspecta),
+        })
+    iesire.sort(key=lambda d: (-d["serie"], -d["n_curent"]))
+    return iesire
+
+
+def _semnificative(rand: dict) -> int:
+    """Cate dintre cele TREI metrici sunt semnificative simultan. Un camp
+    lipsa/NULL conteaza ca NEsemnificativ — niciodata aproximat in favoarea
+    declansarii (Regula #8, si directia conservatoare e cea corecta aici:
+    greseala ieftina e sa NU declansezi, nu sa declansezi degeaba)."""
+    return sum(1 for cheie in ("accuracy_significant", "brier_significant",
+                               "logloss_significant")
+               if rand.get(cheie) is True)
+
+
 def _fetch_all(client, table: str, columns: str, apply_filters) -> list[dict]:
     """Paginare cu `.order("id")` EXPLICIT inainte de `.range()` — fara
     ORDER BY, PostgREST/Postgres nu garanteaza ordine stabila intre cereri
@@ -255,7 +354,8 @@ def main() -> int:
         print("EROARE: Supabase indisponibil (SUPABASE_URL / SUPABASE_SECRET_KEY).")
         return 1
 
-    from database.queries import (get_client, get_supersede_without_reason,
+    from database.queries import (get_challenger_significance_days, get_client,
+                                 get_supersede_without_reason,
                                  get_team_identity_drift)
     from providers.flashscore.discovery import FLASHSCORE_TRACKED_COMPETITIONS
 
@@ -664,7 +764,57 @@ def main() -> int:
         findings += 1
     print(BAR)
 
-    print(f"  Clase cu constatări: {findings}/9")
+    # ════════════════════════════════════════════════════════════════════
+    # CLASA 10 — declanșatorul de servire (D-15, aprobat 2026-10-26)
+    #
+    # DE CE EXISTĂ. `xgboost_v1/dda4f7f3` bate Oracle-ul SERVIT cu +5,76pp
+    # acuratețe și −0,0242 Brier (n = 330, 9 ligi din 10 nenule, fără scurgere
+    # temporală — `DE_URMARIT` §15). Declanșatorul aprobat deschide discuția
+    # despre un ADR pentru calea de servire: 3/3 pe 10 zile consecutive ȘI
+    # n ≥ 500.
+    #
+    # DE CE E CABLAT AICI și nu lăsat în document. ADR-057 a trăit exact așa —
+    # un declanșator scris într-un document — iar condiția lui s-a împlinit pe
+    # 23 august și a fost descoperită pe 6 septembrie: 14 zile fără nicio
+    # antrenare, găsite dintr-o întrebare întâmplătoare. Clasa asta e reparația
+    # acelei clase de eșec, nu a unui defect de date.
+    #
+    # SEMANTICĂ INVERSĂ FAȚĂ DE CELELALTE NOUĂ, deliberat: aici o constatare NU
+    # e un defect — e o veste bună care cere decizie umană. Raportul o spune
+    # explicit, ca nimeni să nu „repare" un declanșator atins.
+    #
+    # PRAGUL: seria se AFIȘEAZĂ mereu (deci 0 → 7 → 10 se vede acumulând, ca
+    # avertisment din timp), dar se NUMĂRĂ constatare DOAR la declanșare. Altfel
+    # clasa ar fi roșie în fiecare zi în care un Challenger e la 3/3 de câteva
+    # zile — exact boala „roșu-mereu te antrenează să ignori" pe care acest
+    # proiect o are deja documentată la `check_data_health` însuși.
+    print("  10. DECLANȘATOR DE SERVIRE (D-15) — 3/3 × "
+          f"{_PRAG_ZILE_3_DIN_3} zile ȘI n ≥ {_PRAG_N_DECLANSATOR}")
+    randuri_sem = get_challenger_significance_days()
+    if randuri_sem is None:
+        print("     [ATENȚIE] interogarea nu a putut fi făcută — se raportează "
+              "ca NECUNOSCUTĂ, nu ca neatinsă (Regula #8).")
+    else:
+        stari = serie_3_din_3(randuri_sem)
+        if not stari:
+            print("     (niciun Challenger cu verdict în fereastră)")
+        for s in stari:
+            eticheta = f"{s['algorithm_family']}/{s['training_run_id'][:8]}"
+            semn = "*** DECLANȘAT ***" if s["declansat"] else ""
+            suspect = "  ⚠️ serie SUSPECTĂ (zile lipsă: " \
+                      f"{s['zile_lipsa']})" if s["suspecta"] else ""
+            print(f"     {eticheta:28} serie 3/3 = {s['serie']:>2} · "
+                  f"azi {s['sem_ultima_zi']}/3 · n = {s['n_curent']:>4} "
+                  f"({s['ultima_zi']}){semn}{suspect}")
+        declansati = [s for s in stari if s["declansat"]]
+        if declansati:
+            print("     ⛔ DECLANȘATOR ATINS — NU e un defect. Cere decizie "
+                  "umană: se deschide discuția despre un ADR pentru calea de "
+                  "servire (D-15). Nimic nu pornește automat (ADR-002).")
+            findings += 1
+    print(BAR)
+
+    print(f"  Clase cu constatări: {findings}/10")
     print("  Verificare încheiată. ZERO scriere efectuată.")
     print(BAR)
     return 1 if findings else 0

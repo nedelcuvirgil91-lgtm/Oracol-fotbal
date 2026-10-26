@@ -351,4 +351,25 @@ def test_clasa_6_e_chiar_cablata_in_raport():
     # [ACTUALIZAT 2026-10-20, ADR-075 §8: 8 -> 9, clasa „supersedare
     # fara motiv". Garda a cazut din nou la adaugarea clasei, exact cum
     # trebuia — a treia data consecutiv ca mecanismul si-a facut treaba.]
-    assert "findings}/9" in sursa, "sumarul nu numara toate clasele"
+    # [ÎNTĂRITĂ 2026-10-26] vezi nota identică din
+    # tests/test_flashscore_selector_generations.py — ancora pe numărul total
+    # de clase face garda clasei 6 fragilă la adăugarea oricărei alte clase.
+    _asigura_sumar_consistent(sursa)
+
+
+def _asigura_sumar_consistent(sursa: str) -> None:
+    """Numitorul din linia de sumar = numărul de clase tipărite în raport.
+
+    Invariant, nu listă: o clasă nouă adăugată fără actualizarea sumarului
+    cade aici, iar o gardă existentă NU mai cade doar fiindcă s-a adăugat o
+    clasă. Exact distincția pe care proiectul o cere („verifică invariantul,
+    nu lista, care se învechește")."""
+    import re as _re
+    clase = _re.findall(r'print\(\s*f?"\s{2}(\d+)\.', sursa)
+    sumar = _re.search(r"findings\}/(\d+)", sursa)
+    assert sumar, "linia de sumar lipsește din raport"
+    assert clase, "nicio clasă tipărită în raport"
+    assert int(sumar.group(1)) == len(set(clase)), (
+        f"sumarul numără {sumar.group(1)} clase, dar raportul tipărește "
+        f"{len(set(clase))}: {sorted(set(clase), key=int)}"
+    )

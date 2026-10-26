@@ -1965,16 +1965,49 @@ Cifra greșită venea din citirea seriei ca „au existat 2 zile 3/3" în loc de
 „seria CURENTĂ are 2 zile" — exact clasa de eroare pe care convenția 3 de mai sus
 o face acum imposibilă.
 
-#### ⚠️ NIMIC nu verifică asta automat — și precedentul e scump
+#### ✅ CABLAT — clasa 10 în `check_data_health` (26 oct, aprobat explicit)
 
-Declanșatorul trăiește într-un document, ca ADR-057, care **a costat 14 zile
-fără nicio antrenare** fiindcă nimeni nu s-a uitat când condiția lui s-a
-împlinit. Interogarea de mai sus e ieftină, dar **cineva trebuie s-o ruleze**.
+Declanșatorul **nu mai trăiește doar într-un document**, ca ADR-057 — care a
+costat 14 zile fără nicio antrenare fiindcă nimeni nu s-a uitat când condiția
+lui s-a împlinit. Interogarea de mai sus rămâne valabilă pentru verificări
+manuale; clasa 10 o face în fiecare rulare.
 
-Opțiunea de cablare (clasa 10 în `check_data_health`, prag zero absolut, ca
-restul) e mică și cunoscută — **NEfăcută deliberat**, fiindcă e cod nou și cere
-decizie proprie. Dacă declanșatorul contează, merită cablat; dacă nu se
-cablează, se acceptă explicit că verificarea e manuală.
+**Semantică inversă față de celelalte nouă, deliberat**: o constatare aici NU e
+un defect, e o veste bună care cere decizie umană. Raportul o spune explicit, ca
+nimeni să nu „repare" un declanșator atins.
+
+**Seria se afișează MEREU** (0 → 7 → 10 se vede acumulând, avertisment din
+timp), dar se **numără constatare DOAR la declanșare** — altfel clasa ar fi
+roșie în fiecare zi în care un Challenger e la 3/3 de câteva zile, adică exact
+boala „roșu-mereu te antrenează să ignori" pe care acest script o are deja
+documentată despre el însuși.
+
+Toată judecata e într-o funcție **pură** (`serie_3_din_3`), testabilă fără
+Supabase. **24 de teste, 11 mutații, toate prinse** — printre ele: convenția 3
+ștearsă · convenția 1 inversată · `n` citit pe prima zi · garda de serie
+suspectă scoasă · pragul `n` ignorat · câmp lipsă tratat ca semnificativ ·
+pragul coborât tăcit · paginarea scoasă · eroare → `[]` în loc de `None` ·
+filtrul de familii de test scos · constatarea numărată mereu.
+
+**Verificat end-to-end pe date REALE de producție**: funcția pură reproduce
+exact rezultatul unei interogări SQL independente (serie 0 / 0), inclusiv ziua
+dublă din 17 oct.
+
+**🔴 Două mutații au trecut prima dată, ambele din clase deja documentate:**
+- *Filtrul de familii de test scos* — garda căuta `"gate_validation"` ca TEXT în
+  fișier, iar șirul **supraviețuia în propriul docstring** care explică filtrul.
+  **A cincea instanță a clasei `pipefail`.** Reparată: se citește corpul funcției
+  prin AST, **fără** docstring.
+- *Paginarea scoasă* — garda cerea ca `_PAGE_SIZE` și un `while` să EXISTE, iar
+  `_PAGE_SIZE` supraviețuia în comparația de oprire. **Verifica cele două capete
+  și nu firul dintre ele**, exact ca mutația M5 de la raportul `night_sync`.
+  Reparată: se cere un apel `.limit()` cu chiar acea constantă ca argument.
+
+**Colateral, două gărzi EXISTENTE au fost întărite**: cele ale claselor 6 și 7
+ancorau pe `"findings}/9"` — numărul TOTAL de clase — deci au căzut la adăugarea
+clasei 10, fără ca nimic al lor să se fi stricat. Acum verifică invariantul
+(numitorul din sumar = numărul de clase chiar tipărite), deci nu mai cad la
+următoarea clasă adăugată.
 
 ### Ce ar schimba decizia
 
