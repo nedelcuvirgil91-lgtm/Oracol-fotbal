@@ -468,6 +468,62 @@ Evidența din acest document dă **35 → 36** la activarea ADR-072 (14 oct) și
 >
 > **Reparație recomandată: varianta 1+2, NU tabela de audit — încă.** (1) orice scriere viitoare de config include `updated_at = now()`; (2) nota activării consemnează chei + `md5(data − cheia_nouă)` + `updated_at`, deci devine autodatată. Costă o clauză și zero schemă, și recuperează exact proprietatea pierdută. Tabela cu trigger răspunde la altă întrebare („ce s-a schimbat între două date"), apărută o singură dată. **Se acceptă explicit că cheia a 38-a nu va fi niciodată numită** — lanțul se re-ancorează, nu se reconstituie. Detalii: `PLAN_DECIZII_DESCHISE_2026-10-20.md` §4.
 
+### D-15. Un motor dovedit mai bun nu are cale să ajungă la servire — declanșator APROBAT 2026-10-26
+
+**Măsurat 26 oct, read-only** (`DE_URMARIT.md` §15, cu tabele pe ligă și
+interogarea de verificare): `xgboost_v1/dda4f7f3` bate Oracle-ul **servit**
+(rândul `control`) cu **+5,76pp acuratețe** (0,4970 → 0,5545) și **−0,0242
+Brier**, pe n = 330. Avantajul e **larg**: din 14 ligi cu n ≥ 12, **9 pozitive,
+4 exact zero, 1 negativă** (cea mai mică, n=12); Brier favorizează XGBoost în
+**11 din 14**; cele mai mari trei eșantioane (MLS, Europa League, Champions
+League) sunt toate pozitive.
+
+**Fără scurgere temporală, verificat ÎNAINTE de a raporta pozitivul** (North
+Star #7): model antrenat 14 oct 05:31, cel mai vechi meci din comparație începe
+11 ore mai târziu, **zero** meciuri jucate înainte de antrenare.
+
+**Inversare față de ordinea presupusă**: `blend_v1` are campion activ din 23
+august; `xgboost_v1` **n-a avut niciodată** campion — iar cel fără campion e cel
+mai puternic dintre cei doi.
+
+**🔴 CONSTATAREA CARE ORDONEAZĂ TOTUL — lanț verificat verigă cu verigă:**
+`_resolve_champion("xgboost_v1","all")` nu găsește niciun campion →
+`ml_source = "local"` (artefact neguvernat; codul o documentează el însuși,
+`oracle_engine.py:2504`) → ieșirea ML e **read-only** față de `ph`/`pd_`/`pa` →
+`blend_engine_prediction` e „câmp izolat, **fără alt cititor**" → radarul de
+value bets citește `EXPERIMENT_GROUP = "control"`, adică **predicția Oracle**.
+
+**Nicio promovare, azi, nu schimbă o singură probabilitate servită.** Mașinăria
+Champion/Challenger e completă și funcțională — ADR-079 a dovedit-o cu trei
+retrageri între 23 și 25 oct — dar sistemul poate **demonstra** că există un
+motor mai bun și **n-are cale** să-l pună în față. Nu e defect (ADR-051 spune
+explicit că niciun motor nu e primar prin construcție); e golul dintre viziune
+și implementare, numit aici ca să nu fie redescoperit.
+
+**DECLANȘATOR APROBAT EXPLICIT (2026-10-26)**, cu convențiile fixate înainte să
+conteze (`DE_URMARIT` §15 le detaliază: ce e o „zi", zile lipsă neutre, orice zi
+sub 3/3 resetează, `n` pe ultima zi, familiile de test excluse):
+
+> **3/3 timp de 10 zile de evaluare consecutive ȘI `n` ≥ 500.**
+
+10 zile fiindcă acoperă **două weekenduri** — weekendul a mutat verdictul de
+două ori, ambii Challengeri, același increment de +61 de meciuri. `n` ≥ 500
+fiindcă sub atât o singură rundă poate inversa semnul, demonstrat.
+
+**Starea la aprobare: serie = 0 pentru amândoi** (25 oct a rupt-o), `n` = 278
+XGBoost / 431 blend. **Deci 10 zile de la următoarea zi 3/3, nu 8.**
+
+**Abia la declanșare** se deschide discuția despre un **ADR dedicat** pentru
+calea de servire — nu înainte. Nimic nu pornește automat (ADR-002).
+
+**⚠️ NIMIC nu verifică automat declanșatorul.** Trăiește într-un document, exact
+ca ADR-057, care a costat **14 zile fără nicio antrenare**. Interogarea e în
+`DE_URMARIT` §15 și rulează în secunde, dar **cineva trebuie s-o ruleze**.
+Cablarea (clasa 10 în `check_data_health`) e mică și cunoscută — **NEfăcută
+deliberat**, e cod nou și cere decizie proprie.
+
+---
+
 ## Reperul extern — cât de bun e Oracle, de fapt (măsurat prima dată 2026-10-14)
 
 **Până azi, Oracle fusese comparat doar cu el însuși și cu propriii Challengeri.** Nu exista nicio măsurătoare contra unui reper din afară. Acum există, pe **986 de meciuri terminate**, cu predicția SERVITĂ (rândul `control`) contra favoritului caselor de pariuri (cote medii de închidere din `odds_history`, cel mai mic preț = favorit), pe **exact același set de meciuri**:

@@ -13,7 +13,7 @@ ADR-078**.
 |---|---|---|
 | ~~**§13**~~ | ✅ **EXECUTAT 22 oct** — `Sabah FC` unit cu `Sabah Baku`, cod pe `main` + backfill pe 11 rânduri | închis |
 | ~~**§12**~~ | ✅ **EXECUTAT 26 oct** — ADR-081 complet: migrarea 058 aplicată + merge (`01ebd91`). Deblochează ADR-077 la prima rulare de noapte | închis |
-| **§15** | 📊 **MĂSURAT 26 oct** — XGBoost bate Oracle-ul servit cu **+5,76pp**, larg (9 ligi din 10 nenule) și fără scurgere. **Declanșatorul de reluare cere decizie** | 3/3 × 10 zile · n ≥ 500 (azi: 2 zile, n=278) |
+| **§15** | 📊 **MĂSURAT 26 oct** — XGBoost bate Oracle-ul servit cu **+5,76pp**, larg și fără scurgere. **Declanșator APROBAT**: 3/3 × 10 zile consecutive · n ≥ 500 | serie azi: **0** (25 oct a rupt-o) · n=278 |
 | **§14** | Verdictul oscilează lângă prag — miza **reîncadrată** de §15: promovarea nu schimbă nimic servit | informativ |
 | **§7** | Decizia #8 (expirare Challenger) | ~26-27 oct |
 | **§9** | Supersedarea celor 30 de rânduri `openfootball` | fără termen, te așteaptă |
@@ -1879,24 +1879,102 @@ funcționat corect, dar ce a oprit era igienă de guvernanță.
   semnalul, nu vreo ligă anume.
 - Nu spune nimic despre value betting: radarul citește Oracle.
 
-### ⏳ DECIZIE CERUTĂ — declanșatorul, de stabilit ACUM, nu în ziua cifrei bune
+### ✅ DECLANȘATOR APROBAT (2026-10-26) — și de ce e scris cu convenții, nu doar cu o cifră
 
 **Recomandarea mea: NU se construiește calea de servire acum.** Dovada e
 promițătoare dar subțire, iar deschiderea căii de predicție e cel mai riscant
 lucru din proiect.
 
-**Dar declanșatorul se scrie acum**, cât nimeni nu e sub presiune — ca decizia
-să nu se ia într-o zi în care cifra arată bine. Propunere, de discutat:
+**Declanșatorul s-a scris acum**, cât nimeni nu e sub presiune — ca decizia să
+nu se ia într-o zi în care cifra arată bine. **Aprobat explicit de proprietarul
+produsului, 2026-10-26:**
 
-> `xgboost_v1` la **3/3 timp de 10 zile consecutive** ȘI **n ≥ 500**.
+> **3/3 timp de 10 zile de evaluare consecutive ȘI `n` ≥ 500**, pentru orice
+> Challenger de familie reală.
 
 **De ce 10 zile**: acoperă două weekenduri. Weekendul s-a dovedit de două ori
-factorul care mută verdictul (23→25 oct, ambii Challengeri, același increment de
-+61 de meciuri). **De ce n ≥ 500**: sub atât, o singură rundă poate inversa
-semnul, demonstrat.
+factorul care mută verdictul (23→25 oct, ambii Challengeri, exact același
+increment de +61 de meciuri). **De ce n ≥ 500**: sub atât, o singură rundă poate
+inversa semnul — demonstrat, nu presupus.
 
-**Starea azi: 2 zile consecutive, n = 278.** Se acumulează singur — nimic de
-făcut până atunci.
+#### Convențiile, fixate înainte să conteze
+
+Un declanșator care se poate interpreta **se va** interpreta exact în ziua în
+care e în joc. Cele patru cazuri de graniță, decise acum:
+
+1. **O „zi"** = o dată UTC cu cel puțin o evaluare cu verdict (≠
+   `insufficient_data`). Dacă o dată are **mai multe** rânduri (s-a întâmplat:
+   17 oct, `174e7e17`, două evaluări), contează **ultima**.
+2. **Zilele LIPSĂ sunt NEUTRE** — nu contează și nu resetează. Rațiunea: dacă
+   `night_sync` a eșuat, modelul nu s-a înrăutățit, doar nu ne-am uitat. *Dar*:
+   dacă lipsesc peste 2 zile în fereastră, seria e suspectă și se reia — altfel
+   o pană ar putea „conserva" o serie.
+3. **Orice zi sub 3/3 RESETEAZĂ seria la zero.** Nu se cumulează.
+4. **`n` ≥ 500 se cere pe ULTIMA zi** a seriei (`n` crește monoton, deci acolo e
+   constrângerea care leagă).
+5. **Familiile de test se EXCLUD** (`gate_validation_test` — 5 artefacte din 14
+   iulie, cu `n` = 250). Fără filtru, interogarea le-ar include; nu pot declanșa
+   azi, dar suprafața de fals pozitiv se închide explicit, nu prin noroc.
+
+#### Interogarea de verificare — rulează în secunde, zero cod nou
+
+```sql
+WITH zile AS (
+  SELECT DISTINCT ON (training_run_id, evaluated_at::date)
+         training_run_id, algorithm_family, evaluated_at::date AS zi,
+         n_matches_evaluated AS n,
+         (accuracy_significant::int + brier_significant::int + logloss_significant::int) AS sem
+  FROM challenger_evaluations
+  WHERE verdict <> 'insufficient_data'
+    AND algorithm_family NOT LIKE '%gate_validation%'
+  ORDER BY training_run_id, evaluated_at::date, evaluated_at DESC
+), pasi AS (
+  SELECT *, row_number() OVER (PARTITION BY training_run_id ORDER BY zi DESC) AS pas FROM zile
+), rupere AS (
+  SELECT training_run_id, algorithm_family,
+         min(pas) FILTER (WHERE sem < 3) AS prima_rupere,
+         count(*) AS total_zile,
+         max(n)   FILTER (WHERE pas = 1) AS n_curent,
+         max(sem) FILTER (WHERE pas = 1) AS sem_ultima_zi,
+         max(zi) AS ultima_zi
+  FROM pasi GROUP BY 1,2
+)
+SELECT algorithm_family||'/'||left(training_run_id,8) AS challenger, ultima_zi,
+       sem_ultima_zi AS sem_azi, n_curent,
+       coalesce(prima_rupere - 1, total_zile) AS serie_3_din_3,
+       CASE WHEN coalesce(prima_rupere - 1, total_zile) >= 10 AND n_curent >= 500
+            THEN '*** DECLANSAT ***' ELSE 'nu' END AS declansat
+FROM rupere WHERE ultima_zi >= current_date - 7 ORDER BY 5 DESC, 4 DESC;
+```
+
+#### 🔴 Starea reală: serie = 0, NU 2 — corecție la ce scrisesem
+
+Rulată pe 26 oct:
+
+| Challenger | ultima zi | sem azi | n | **serie 3/3** | declanșat |
+|---|---|---:|---:|---:|---|
+| `blend_v1/174e7e17` | 25 oct | 2/3 | 431 | **0** | nu |
+| `xgboost_v1/dda4f7f3` | 25 oct | 2/3 | 278 | **0** | nu |
+
+**Spusesem „azi: 2 zile consecutive". E greșit.** 23 și 24 oct au fost într-adevăr
+3/3, dar **25 oct a rupt seria**, iar seria se numără de la ziua cea mai recentă
+înapoi. Consecința practică nu e cosmetică: nu suntem la 8 zile de prag, ci la
+**10 zile de la următoarea zi 3/3**, oricând ar veni aceea.
+
+Cifra greșită venea din citirea seriei ca „au existat 2 zile 3/3" în loc de
+„seria CURENTĂ are 2 zile" — exact clasa de eroare pe care convenția 3 de mai sus
+o face acum imposibilă.
+
+#### ⚠️ NIMIC nu verifică asta automat — și precedentul e scump
+
+Declanșatorul trăiește într-un document, ca ADR-057, care **a costat 14 zile
+fără nicio antrenare** fiindcă nimeni nu s-a uitat când condiția lui s-a
+împlinit. Interogarea de mai sus e ieftină, dar **cineva trebuie s-o ruleze**.
+
+Opțiunea de cablare (clasa 10 în `check_data_health`, prag zero absolut, ca
+restul) e mică și cunoscută — **NEfăcută deliberat**, fiindcă e cod nou și cere
+decizie proprie. Dacă declanșatorul contează, merită cablat; dacă nu se
+cablează, se acceptă explicit că verificarea e manuală.
 
 ### Ce ar schimba decizia
 
