@@ -109,8 +109,61 @@ def test_nu_importa_module_care_scriu_sau_construiesc_motorul():
 
 
 def test_nu_scrie_pe_disc_si_nu_citeste_steluta():
-    for interzis in ('select("*")', "write_text", "to_csv", "open(", "Path("):
+    """[CORECTAT 2026-10-27] Prima versiune interzicea și `Path(` și `open(`,
+    ca proxy pentru „scrie pe disc". Era PREA LARG, și a costat: `Path(` e pur
+    manipulare de cale, iar `sys.path.insert(0, str(Path(__file__)...))` e
+    idiomul folosit de toate celelalte scripturi din folder. Garda ar fi
+    blocat exact reparația corectă a primei rulări eșuate — iar o gardă care
+    interzice singura soluție validă se ocolește prin excepție, nu se respectă.
+
+    Proprietatea reală e „nu SCRIE", nu „nu atinge căi". Verificată acum pe
+    operații de scriere, plus `open()` doar în mod de scriere (prin AST, ca să
+    nu fie confundat un `open()` de citire)."""
+    for interzis in ('select("*")', "write_text", "write_bytes", "to_csv",
+                     "mkdir", "makedirs", "unlink", "rmtree", "shutil"):
         assert interzis not in SURSA, f"scriptul nu are voie să folosească {interzis}"
+
+    scrieri_open = []
+    for nod in ast.walk(ARBORE):
+        if not (isinstance(nod, ast.Call) and isinstance(nod.func, ast.Name)
+                and nod.func.id == "open"):
+            continue
+        moduri = [a.value for a in nod.args[1:2] if isinstance(a, ast.Constant)]
+        moduri += [k.value.value for k in nod.keywords
+                   if k.arg == "mode" and isinstance(k.value, ast.Constant)]
+        if any(c in m for m in moduri for c in "wax+") or not moduri:
+            scrieri_open.append(f"open() la linia {nod.lineno}")
+    assert scrieri_open == [], scrieri_open
+
+
+def test_scriptul_RULEAZA_ca_in_workflow_fara_sa_cada_pe_import():
+    """GARDA CARE LIPSEA, și care a costat o rulare.
+
+    Rularea 40517516913 a eșuat în 0 secunde cu `ModuleNotFoundError: No module
+    named 'supabase_client'`: pornit ca `python scripts/<fisier>.py`,
+    `sys.path[0]` e `scripts/`, nu rădăcina. Toate testele de mai sus treceau,
+    fiindcă ele IMPORTĂ modulul din rădăcină — exercitau cele două capete și nu
+    firul dintre ele, aceeași clasă ca mutația M5 de la `night_sync`.
+
+    Aici scriptul se pornește EXACT ca în workflow, ca subproces, fără
+    credențiale. Trebuie să iasă cu codul 1 și mesajul de indisponibilitate —
+    NU cu un traceback. Un `ModuleNotFoundError` reapărut cade aici, nu în
+    producție."""
+    import subprocess
+    import os
+
+    mediu = {k: v for k, v in os.environ.items()
+             if k not in ("SUPABASE_URL", "SUPABASE_SECRET_KEY")}
+    # `cwd` = rădăcina, ca în workflow (`python scripts/...`), fără PYTHONPATH:
+    # bootstrap-ul din script e singurul lucru care face importul să reușească.
+    mediu.pop("PYTHONPATH", None)
+    r = subprocess.run([__import__("sys").executable, "scripts/" + SCRIPT.name],
+                       cwd=str(SCRIPT.parent.parent), env=mediu,
+                       capture_output=True, text=True, timeout=120)
+    assert "ModuleNotFoundError" not in r.stderr, r.stderr[-800:]
+    assert "Traceback" not in r.stderr, r.stderr[-800:]
+    assert "Supabase indisponibil" in r.stdout, (r.stdout[-400:], r.stderr[-400:])
+    assert r.returncode == 1
 
 
 def test_atinge_doar_cele_doua_tabele_declarate():

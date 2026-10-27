@@ -82,6 +82,14 @@ from __future__ import annotations
 
 import math
 import sys
+from pathlib import Path
+
+# Rulat ca `python scripts/replay_champion_on_persisted_inputs.py`, `sys.path[0]`
+# e `scripts/`, nu rădăcina — deci `import supabase_client` cade cu
+# ModuleNotFoundError. Idiomul de mai jos e cel folosit de toate celelalte
+# scripturi din folder (`ablation_*`, `check_*`, `analyze_*`, `audit_*`).
+# Prima rulare (40517516913) a eșuat în 0 secunde exact pe asta.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 MARTOR = "174e7e17-347e-498e-912f-893a855f742b"   # Challenger blend_v1 ACTIV
 CAMPION = "8ac89c70-8727-459f-aa42-08a2edd16431"  # campionul promovat 23 aug
