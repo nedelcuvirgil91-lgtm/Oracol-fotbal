@@ -333,6 +333,58 @@ redenumit". Instrumentul e ieftin (`match_statistics_extended` e deja EAV).
 
 **De reluat ~2 noiembrie.**
 
+### 3.3 Decuplarea înregistrării de servire de existența unui Challenger — ADR propriu
+
+**Declanșator: DUPĂ ce ADR-082 §6.3 trece cu divergență zero.** Nu înainte, și
+motivul e de metodă, nu de prudență — vezi mai jos.
+
+**Golul, verificat în cod (2026-10-27)**: `oracle_engine._serving_record_if_enabled()`
+are **exact două apeluri** (liniile 2392 și 2428), ambele în hook-urile de
+Challenger, iar ambele adaptoare ies imediat dacă nu există Challenger activ.
+
+> **Fără Challenger activ, ADR-073 nu persistă nicio înregistrare de servire.**
+
+Fragilitatea e **preexistentă** ADR-082 — e adevărată azi — și anticipată de
+`CLAUDE.md` D-2: *„ar rezolva și gaura de acoperire din ADR-072 D2, dacă
+scrierea rândului `control` se decuplează de existența unui Challenger"*.
+
+**De ce merită ADR propriu, nu un apendice la 082**: decuplarea închide **două**
+goluri, nu unul. Al doilea e ADR-072 D2 — `flashscore_team_dna` are **0 rânduri
+`control` din 989**, deci e singurul `candidate_for_promotion` pe care poarta
+ADR-072 nu îl poate verifica. Schimbare de contract cu beneficiar propriu.
+
+**Expunerea de azi e mărginită la o noapte, măsurat — nu nedefinit:**
+
+| Măsurătoare | Valoare |
+|---|---|
+Challengeri activi | `174e7e17` + `dda4f7f3`, ambii `SUCCEEDED` |
+Propuneri de expirare `pending` | deciziile **#12** și **#13**, expiră **2 nov** |
+Condiția Fazei B (`_phase_b_train_new:555-562`) | `n_new >= 30`, numărat de la `created_at` al ultimului Challenger (**20 sept** pentru `174e7e17`) → sute de meciuri, prag depășit **cu certitudine** |
+Ritm măsurat | **23,7** meciuri terminate/zi |
+Momentul antrenării înlocuitorului | rularea **următoare** (`active_count` se citește la intrare — D-1, `automation_runs` id=1084) |
+**Gol efectiv** | **o noapte · ~22 fixture-uri nereluabile din ~660/lună = 3,3%** |
+
+Iar Faza 3 le **numără și le raportează** explicit (`fără înregistrare
+ADR-073`), nu le sare tăcut.
+
+**Scenariul blocant NU e cel intuitiv.** Un Challenger blocat (tiparul ADR-057)
+e un Challenger **activ**, deci înregistrarea continuă să se scrie — acel caz e
+*sigur*. Periculos e „nicio familie fără Challenger activ, pentru mult timp",
+care cere expirare **plus** eșecul repetat al Fazei B — exclus de cifrele de mai
+sus.
+
+**Singura condiție care ar face-o imperativă**: o decizie de a retrage complet
+Challengerii (de pildă după un V1 pe calea de servire, când ar părea
+redundanți). Atunci ADR-073 s-ar opri definitiv, iar banda ADR-082 ar deveni
+permanent neverificabilă.
+
+**De ce NU se face în timpul ADR-082**: Faza 3 are un singur criteriu —
+divergență zero între banda scrisă live și relurea pe intrările persistate.
+Decuplarea ar schimba **cum se persistă chiar acele intrări**. O divergență
+nenulă ar avea atunci **două cauze candidate**, exact ambiguitatea pe care
+martorul de control există ca să o elimine. Nu se schimbă ce măsori, în timpul
+măsurătorii.
+
 ---
 
 ## 4. TIER 3 — calitatea predicțiilor
