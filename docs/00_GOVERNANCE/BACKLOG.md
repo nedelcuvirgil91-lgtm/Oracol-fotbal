@@ -28,7 +28,7 @@ Nimic din lista asta nu avansează fără tine. Ordinea e după cât costă amâ
 | **1.1** | **ADR-079** — ciclul de viață al unei decizii T3a (toate trei fețele din §2) | ✅ **ÎNCHIS 21 oct** — ACCEPTED (revizia 2), implementat, pe `main` (`e849088`) | **Cel mai mare risc deschis azi**: o aprobare de expirare se poate executa ca **promovare** de campion, fără ca nimeni să fi aprobat o promovare (§4.1 din ADR). Fereastra e de ordinul a 3 zile. |
 | **1.1bis** | **`decision_feed` #8** — expirarea `blend_v1/174e7e17` | ✅ **ÎNCHIS 23 oct** — `withdrawn` de mecanismul ADR-079, exact cum s-a prezis | ⚠️ **Recomandarea mea de pe 20 oct dimineața era GREȘITĂ.** Ținta nu e înțepenită: 2 din 3 metrici semnificative, Δ acuratețe urcă monoton 0,98 → 2,33pp în 4 zile. Se rezolvă singură ~23 oct. `DE_URMARIT.md` §7. |
 | **1.2** | **D-6 — două tabele de backup** | restante de **~30 de zile** peste termenul propriu | Mic, dar una (ADR-069, 72 kB) e singura tabelă din 62 **fără RLS**. Decizia e „se păstrează" / „se șterg"; dacă se păstrează, merită RLS. |
-| **1.3** | **ADR-077** — criteriul de rutare SFI | propunere, recomandarea s-a **inversat** la măsurare | Zero cost acum (criteriul inert nu face rău). Dar ADR-ul stă deschis cu o recomandare greșită scrisă în el. |
+| **1.3** | **ADR-077** — criteriul de rutare SFI | ✅ **ÎNCHIS 27 oct** — ACCEPTED și implementat, varianta (ii) | **Premisa de volum s-a evaporat între propunere și execuție**: remăsurat, golul e **8 meciuri, nu 653** (reparația ADR-076 + recuperarea D-B l-au închis; acoperire 99,0%). Deci urgența a dispărut, dar **costul care bloca decizia a dispărut cu ea** (~2/săptămână în loc de ~95), iar argumentul rămas e altul: proxy-ul e doar *accidental* aliniat din nou, și redevine orb la următoarea rupere a extragerii Flashscore. Lărgirea e un **detector**, nu un umplător. Vezi §1.3bis |
 | **1.4** | **ADR-075** — `CHECK` care face imposibilă supersedarea fără motiv | propunere | Mic. Monitorul prinde deja clasa (clasa 9, activă). |
 | **1.5** | **D-14** — tabelă de audit `model_config` | decizie cerută | **Recomandarea mea: NU acum.** Reparația aplicată (skill + gardă) recuperează ce s-a pierdut. |
 | **1.6** | **Punctul 5** — clasa de duplicate `openfootball` | ✅ **ÎNCHIS 21 oct** — măsurat, reparat în cod, cele 30 supersedate (run `39545095203`). Vezi §1.6bis | Golul era **exact 30 de rânduri**, nu 1893. Cauza: un defect de 1 linie în `normalize_team_name`. Nimic de decis. |
@@ -36,6 +36,36 @@ Nimic din lista asta nu avansează fără tine. Ordinea e după cât costă amâ
 | **1.11** | **`ARCHITECTURE_STATE.md`** + **`CHANGELOG.md`** — se reînvie cu un mecanism, sau se retrogradează formal la instantaneu istoric | ✅ **ÎNCHIS 27 oct** — `ADR-083` ACCEPTED, varianta „istoric" aplicată. Vezi §1.11 | Documentul pe care `CLAUDE.md` îl declara „sursa de adevăr **actualizată**" e atins ultima dată pe **6 sept**: 143 de commit-uri, **25 de ADR-uri** și **4 activări de flag** neconsemnate, deși propria lui regulă de întreținere le cerea în același commit. **Recomandarea mea: varianta 2 (istoric)** — două surse de adevăr declarate, una moartă, e mai rău decât una. Vezi §1.11. |
 | **1.8** | **Radarul vedea 15 competiții din 20** | ✅ **ÎNCHIS 21 oct** — fără nicio linie de cod nouă. Vezi §1.8bis | Cauza nu era la cote. Nimic de decis. |
 | **1.9** | **`experiment_registry` contrazicea `model_champions`** | ✅ **ÎNCHIS 21 oct** — `ADR-080` ACCEPTED, implementat și backfill executat. Vezi §1.9bis | Riscul operațional era **ZERO**, verificat pe trei căi. Nimic de decis. |
+
+### ✅ §1.3bis — 27 oct: ADR-077 implementat, dar premisa lui dispăruse între propunere și execuție
+
+**Întrebarea care a pornit-o**: „nu îmi amintesc problema. Trebuie făcut acum?" Răspunsul corect s-a dovedit **nu** — și tocmai de aceea merita făcut.
+
+**Problema, pe scurt**: criteriul care decide ce meciuri primesc providerii de rezervă era `referee IS NULL`. Corect la ADR-041, când Soccer Football Info era singurul scriitor al câmpului. **ADR-044/045 a adus Flashscore ca al doilea scriitor** și nimeni nu a revizitat proxy-ul — deci criteriul a început să întoarcă 0 pe orice fereastră. Clasa: *un ADR a invalidat tacit precondiția altui ADR*. Așa a trecut neobservată pana de 39 de zile a extragerii Flashscore (ADR-076): arbitrul continua să fie scris impecabil.
+
+**Remăsurat 27 oct, exact tabelul din ADR §1:**
+
+| Fereastră | `referee IS NULL` | `home_shots IS NULL` | total terminate |
+|---|---:|---:|---:|
+| 7 zile | 2 *(era 0)* | **2** *(era 95)* | 199 |
+| 14 zile | 2 *(era 0)* | **2** *(era 229)* | 390 |
+| 60 zile | 2 *(era 0)* | **8** *(era 653)* | 1218 |
+
+**653 → 8.** Nu prin acest ADR: reparația ADR-076 plus recuperarea restanței D-B au închis golul. Acoperirea e **197/199 = 99,0%**.
+
+**Cele 8 se despart curat**, și distincția e tot argumentul: **2 de ieri** (fără arbitru încă) sunt latență, pe care criteriul VECHI le prinde corect; **6 MLS din 9-13 septembrie** au arbitru scris și statistici lipsă — exact clasa pe care criteriul vechi nu o poate vedea **niciodată**.
+
+**De ce s-a făcut totuși, și nu e o contradicție**: proxy-ul nu e *corect*, e doar **din nou aliniat prin accident** — funcționează fiindcă Flashscore scrie acum arbitrul și statisticile împreună. Când extragerea lui se rupe (s-a rupt de două ori), scrie arbitrul și ratează statisticile, criteriul redevine 0, și mergem orbi. **Lărgirea la coloana-țintă e un detector, nu un umplător.** O coloană-țintă nu poate minți despre propria absență; un martor poate oricând căpăta al doilea scriitor.
+
+**Și decizia a devenit MAI UȘOARĂ, nu mai grea**: costul care o bloca — „SFI trece de la 0 la ~95 meciuri/săptămână, cu rată de succes nemăsurată" — s-a prăbușit la ~2/săptămână. Pe atât, rata reală de succes a SFI, nemăsurată din august, devine ceva ce se **observă în siguranță**. Etapizarea cu `limit=20` cerută de ADR §2.1 a devenit inutilă: volumul natural *este* eșantionul mic.
+
+**Implementat**: 3 schimbări (parametru nou `target_missing` în stratul de date, apelantul comutat, chunk-uire la 500 — a cincea instanță a plafonului PostgREST, preventiv). Modul vechi **neatins**, contractul e public. **13 teste, 6 mutații, toate prinse.** Garda pe apelant e AST, nu text: comentariul care explică reparația conține chiar `require_referee`, deci o verificare textuală ar da fals pozitiv pe codul corect — a șasea instanță a clasei `pipefail`.
+
+**Un defect în propriile teste, găsit prin mutație**: „întoarce parțialul la eroare" a **trecut** prima dată, fiindcă falsul meu nu întorcea date — parțialul era indistinct de setul gol. Verde, și nu testa nimic. Detalii: ADR-077 §5.1.
+
+**Eroarea mea, consemnată**: cu o oră înainte spusesem că ADR-077 „are acum dovada care îi lipsea, deci e următoarea decizie reală". Dovada aceea era doar HTTP 200 de la SFI. **Nu remăsurasem golul**, deci purtasem cifrele din 19 oct ca fiind curente — a doua instanță în aceeași zi a clasei „o intrare de listă e o ipoteză, nu un fapt" (prima: Sabah, în reminder).
+
+**Rămâne de citit la prima rulare**: cele 2 meciuri intră efectiv în listă, SFI e apelat, și rata lui de succes devine măsurabilă. Cele **6 MLS din septembrie NU** se recuperează singure — sincronizarea zilnică rulează cu `days_back=2`. Recuperarea lor e o decizie separată.
 
 ### 🔴 §1.11 — 27 oct: documentul pe care îl declarăm „sursa de adevăr" e mort de 51 de zile
 

@@ -489,6 +489,7 @@ def get_finished_matches_missing_stats(
     league: str | None = None,
     require_referee: bool = False,
     include_id: bool = False,
+    target_missing: bool = False,
 ) -> list[dict]:
     """
     [ADAUGAT Sprint 1 — Match Statistics] Meciuri deja ÎNCHEIATE
@@ -516,6 +517,39 @@ def get_finished_matches_missing_stats(
     de FreeLF (owner diferit, COALESCE-only, ADR-036) tot trebuie procesat
     de Soccer Football Info dacă `referee` încă lipsește.
 
+    ⚠️ `require_referee` NU MAI E CORECT, și afirmația de mai sus e păstrată
+    ca istoric. Era adevărată la ADR-041, când Soccer Football Info era
+    singurul scriitor al lui `referee`. **ADR-044/045 a adus Flashscore ca al
+    doilea scriitor** (`providers/flashscore/normalizer.py:533`), deci
+    `referee` populat înseamnă acum "un provider a atins meciul", nu "datele
+    bogate există". Măsurat 19 oct: criteriul întorcea **0 meciuri pe orice
+    fereastră** (7/14/60 zile) în timp ce 95/229/653 chiar aveau statistici
+    lipsă — plasa de siguranță era cablată și nu se putea declanșa niciodată.
+    Așa a trecut neobservată pana de 39 de zile a extragerii Flashscore
+    (ADR-076): arbitrul continua să fie scris impecabil.
+
+    `target_missing` [ADAUGAT ADR-077, varianta (ii)] — implicit `False`,
+    comportament NESCHIMBAT pentru apelanții existenți. Când e `True`,
+    "lipsesc datele" se citește din **coloana ȚINTĂ** (`home_shots IS NULL`),
+    nu dintr-un câmp-martor.
+
+    DE CE o coloană-țintă și nu un alt martor: un martor poate oricând căpăta
+    al doilea scriitor — exact ce s-a întâmplat aici. **O coloană-țintă nu
+    poate minți despre propria absență.** Varianta "găsim un câmp pe care doar
+    SFI îl scrie" ar reface același aranjament fragil și ar cere, la fiecare
+    ADR viitor care adaugă un scriitor, ca cineva să-și amintească de ADR-077.
+
+    `home_shots` și nu `home_possession` (identice ca cifre pe toate cele trei
+    ferestre) sau `home_xg_actual` (mai larg cu 22 de meciuri la 60 de zile):
+    `home_shots` e cel mai larg câmp comun celor doi provideri și nu cere SFI
+    pentru meciuri unde golul e structural la sursă (tipic calificări de cupă,
+    unde Flashscore nu publică xG).
+
+    **PRECEDENȚĂ, explicită și testată**: `target_missing` câștigă peste
+    `require_referee`. A le pasa pe amândouă e o eroare de apelant; nu se
+    aruncă excepție (funcția nu aruncă niciodată, prin contract), dar modul
+    corect e cel aplicat.
+
     `include_id` [ADAUGAT Pasul 1 Master Repair Plan, ADR-045] — implicit
     False, comportament NESCHIMBAT pentru apelanții existenți. Adaugă `id`
     la coloanele selectate, necesar exclusiv pentru
@@ -540,7 +574,15 @@ def get_finished_matches_missing_stats(
             .is_("superseded_by", "null")
             .gte("kickoff_date", date_from)
         )
-        query = query.is_("referee", "null") if require_referee else query.is_("home_possession", "null")
+        # Ordinea contează și e parte din contract (vezi docstring, §PRECEDENȚĂ):
+        # `target_missing` (ADR-077, coloana-țintă) întâi, fiindcă e singurul
+        # criteriu care nu poate fi invalidat de un scriitor nou.
+        if target_missing:
+            query = query.is_("home_shots", "null")
+        elif require_referee:
+            query = query.is_("referee", "null")
+        else:
+            query = query.is_("home_possession", "null")
         if date_to is not None:
             query = query.lte("kickoff_date", date_to)
         if league is not None:
@@ -2824,17 +2866,35 @@ def get_match_ids_with_complete_flashscore_stats(match_ids: list[int]) -> set[in
     client = get_client()
     if client is None or not match_ids:
         return set()
+    # [ADR-077 §2.2] Chunk-uire obligatorie. Sub criteriul vechi
+    # (`referee IS NULL`) lista de intrare era mereu GOALĂ, deci un singur
+    # `.in_(…)` nu putea atinge niciodată plafonul PostgREST de 1000. Sub
+    # criteriul nou lista devine nevidă și poate crește, deci intră în zona de
+    # risc — a cincea instanță a unei clase deja reparată de patru ori în
+    # proiect (`get_training_data`, `get_shadow_predictions`,
+    # `get_distinct_experiments`, citirea din `match_history`).
+    # Reparată PREVENTIV, nu după ce taie tăcut un rezultat.
+    CHUNK = 500
+    gasite: set[int] = set()
     try:
-        res = (
-            client.table("flashscore_data_completeness")
-            .select("match_id")
-            .in_("match_id", match_ids)
-            .eq("has_stats", True)
-            .execute()
-        )
-        return {r["match_id"] for r in (res.data or []) if r.get("match_id") is not None}
+        for i in range(0, len(match_ids), CHUNK):
+            bucata = match_ids[i:i + CHUNK]
+            res = (
+                client.table("flashscore_data_completeness")
+                .select("match_id")
+                .in_("match_id", bucata)
+                .eq("has_stats", True)
+                .execute()
+            )
+            gasite.update(
+                r["match_id"] for r in (res.data or []) if r.get("match_id") is not None
+            )
+        return gasite
     except Exception as exc:
         logger.warning("[Queries] get_match_ids_with_complete_flashscore_stats failed: %s", exc)
+        # Setul GOL, nu cel parțial: un parțial ar face ca meciuri pe care
+        # Flashscore le-a acoperit deja să fie trimise la providerii de
+        # rezervă — adică exact risipa pe care Single Owner (ADR-045) previne.
         return set()
 
 

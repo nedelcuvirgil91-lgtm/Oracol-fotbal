@@ -116,7 +116,12 @@ def _matches_missing_stats(days_back: int = 2) -> list[dict]:
         get_finished_matches_missing_stats,
         get_match_ids_with_complete_flashscore_stats,
     )
-    matches = get_finished_matches_missing_stats(days_back=days_back, require_referee=True, include_id=True)
+    # [ADR-077] `target_missing=True` în loc de `require_referee=True`.
+    # Criteriul vechi (`referee IS NULL`) întorcea 0 meciuri pe orice fereastră
+    # de când Flashscore a devenit al doilea scriitor al câmpului-martor, deci
+    # providerii de rezervă nu primeau niciodată nimic — iar pana de 39 de zile
+    # a extragerii Flashscore (ADR-076) a trecut neobservată tocmai de aceea.
+    matches = get_finished_matches_missing_stats(days_back=days_back, target_missing=True, include_id=True)
     if not matches:
         return matches
     match_ids = [m["id"] for m in matches if m.get("id") is not None]

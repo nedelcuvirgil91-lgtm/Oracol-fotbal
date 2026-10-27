@@ -53,21 +53,35 @@ def _clear_adapter_cache():
 
 
 def test_matches_missing_stats_delegates_to_query(monkeypatch):
-    """[REPARAT Sprint 3, Prioritatea 1] `require_referee=True` — vezi
-    docstring-ul `_matches_missing_stats()`: fără el, un meci deja completat
-    de FreeLF cu possession+xG dispărea permanent din rezultat, iar Soccer
-    Football Info nu mai apuca să încerce restul câmpurilor."""
+    """[ACTUALIZAT ADR-077] Apelantul cere acum `target_missing=True`, nu
+    `require_referee=True`.
+
+    Motivul ORIGINAL, păstrat fiindcă era corect la Sprint 3: „fără
+    `require_referee=True`, un meci deja completat de FreeLF cu possession+xG
+    dispărea permanent din rezultat, iar Soccer Football Info nu mai apuca să
+    încerce restul câmpurilor."
+
+    De ce nu mai e suficient: `referee` a căpătat un **al doilea scriitor**
+    (Flashscore, ADR-044/045), deci criteriul a început să întoarcă 0 meciuri
+    pe orice fereastră — măsurat 19 oct: 0 contra 95/229/653 care chiar aveau
+    statistici lipsă. `target_missing` citește coloana-ȚINTĂ (`home_shots`),
+    care nu poate minți despre propria absență. Preocuparea originală rămâne
+    acoperită: `home_shots` e disjunct de `home_possession`, deci un meci
+    completat de FreeLF rămâne în listă pentru Soccer Football Info."""
     rows = [dict(_MATCH, id=1)]
     calls = []
     monkeypatch.setattr(
         "database.queries.get_finished_matches_missing_stats",
-        lambda days_back, require_referee=False, include_id=False:
-            (calls.append((days_back, require_referee, include_id)), rows)[1],
+        lambda days_back, require_referee=False, include_id=False, target_missing=False:
+            (calls.append((days_back, require_referee, include_id, target_missing)), rows)[1],
     )
     monkeypatch.setattr("database.queries.get_match_ids_with_complete_flashscore_stats", lambda match_ids: set())
     result = sync_match_statistics._matches_missing_stats(days_back=3)
     assert result == rows
-    assert calls == [(3, True, True)]
+    assert calls == [(3, False, True, True)], (
+        "apelantul nu mai cere modul ADR-077 — providerii de rezervă redevin "
+        "inerți, exact starea care a mascat pana de 39 de zile"
+    )
 
 
 def test_matches_missing_stats_excludes_matches_already_complete_in_flashscore(monkeypatch):
@@ -79,7 +93,7 @@ def test_matches_missing_stats_excludes_matches_already_complete_in_flashscore(m
     rows = [dict(_MATCH, id=1), dict(_MATCH, id=2, home_team="Liverpool")]
     monkeypatch.setattr(
         "database.queries.get_finished_matches_missing_stats",
-        lambda days_back, require_referee=False, include_id=False: rows,
+        lambda days_back, require_referee=False, include_id=False, target_missing=False: rows,
     )
     monkeypatch.setattr("database.queries.get_match_ids_with_complete_flashscore_stats", lambda match_ids: {1})
     result = sync_match_statistics._matches_missing_stats(days_back=3)
