@@ -292,9 +292,142 @@ nu l-a activat între timp.
 
 ---
 
-## Ce rămâne de făcut înainte de activare
+## ACTIVAREA — executată 2026-10-27 18:30:18 UTC, aprobată explicit
 
-**Rămâne un singur pas**, iar el devine executabil abia **după** activare:
+SQL rulat, exact cel arătat înainte (North Star #6):
+
+```sql
+UPDATE model_config
+SET data = data || '{"champion_shadow_logging_enabled": true}'::jsonb,
+    updated_at = now()
+WHERE id = 1;
+```
+
+| | înainte (18:30:09) | **după** (18:31:00) |
+|---|---|---|
+flag | absent | **`true`**, tip **`boolean`** (nu șirul `"true"`) |
+chei | 39 | **40** |
+`md5(data − cheia_nouă)` | `6c6b76dc…254e` | **`6c6b76dc…254e` — IDENTICĂ** |
+`updated_at` | 2026-09-06 11:29:08 | **2026-10-27 18:30:18** |
+
+Amprenta identică dovedește **exact o cheie adăugată, zero chei existente
+atinse** — inclusiv `blend_v1_champion_display_enabled`, de care banda depinde.
+
+**`updated_at` e re-ancorat.** Era înghețat la 6 septembrie fiindcă toate
+activările anterioare (ADR-072, ADR-073, ADR-078) au fost `UPDATE … SET data =
+…` fără el — exact lanțul rupt din **D-14**, acum reparat.
+
+**Reversibilitate**: `data - 'champion_shadow_logging_enabled'`. Rândurile deja
+scrise nu se șterg, prin regulă.
+
+---
+
+## V7 (= ADR-082 §6.2) — banda a apărut corect: **PASS**
+
+**Rularea**: `night_sync` **40560921927** (run 103), `main` @ `53f60bf`,
+18:32:31 → 19:27:36 UTC, **53,8 min**. Audit `automation_runs` **id 1359**,
+`status = completed`, **9 etape, 9 reușite, 0 eșuate, `critice_esuate = []`**.
+
+Rânduri scrise după linia de bază (`prediction_time > 18:32:20`):
+
+| Grup | rânduri | versiuni | cu `feature_metadata` |
+|---|---:|---|---:|
+**`champion`** | **179** | **`8ac89c70`** ✅ | **0** ✅ |
+`control` | 358 | `174e7e17` + `8ac89c70` | **179** |
+`treatment` | 179 | `174e7e17` | 0 |
+
+Aritmetica se închide: 179 bandă + 179 control-bandă + 179 control-challenger +
+179 treatment-challenger. Iar `cu_ADR073 = 179` pe `control` confirmă că
+**doar** rândurile Challengerului poartă înregistrarea — decizia §2.1, nu o a
+treia copie.
+
+Grupurile din tabelă: **`champion, control, treatment`**.
+
+### V1 pe date reale — bijecție, verificată în AMBELE direcții
+
+```
+banda                        179
+control_banda (scris acum)   179
+banda_fara_control             0   ✅
+control_fara_banda             0   ✅
+banda_cu_feature_metadata      0   ✅
+```
+
+„Fiecare bandă are un control" ar fi trecut și cu rânduri `control` orfane.
+Bijecția exclude și acel caz.
+
+### Istoricul din august — NEATINS (North Star #9)
+
+```
+treatment istoric pe 8ac89c70            394   (neschimbat)
+ultima scriere a lor            2026-08-23 09:23:17   (neschimbată)
+```
+
+### Volumul real vs proiecția V3
+
+| | proiectat | **măsurat** |
+|---|---:|---:|
+octeți/rând | 785 | **767** (−2,3%) |
+pe lună | 1,04 MB | **~0,97 MB** |
+
+358 de rânduri / 179 de fixture-uri / 268,3 kB în această rulare.
+
+---
+
+## V8 (= ADR-082 §6.3) — martorul de control al benzii: **PASS, divergență ZERO**
+
+**Rularea**: `replay_champion_on_persisted_inputs` **40569722810**, `main` @
+`53f60bf`, 19:31:17 → 19:31:33 UTC, concluzie **`success`**.
+
+```
+### FAZA 3 — martorul de control AL BENZII (blend_v1/8ac89c70)
+  rânduri de bandă             : 179
+  rânduri `control` ale benzii : 573
+  reluate: 179 · fără înregistrare ADR-073: 0 · relure eșuată: 0
+  divergență maximă : 0.000e+00
+  divergență medie  : 0.000e+00
+  peste toleranța 1e-06: 0 / 179
+  ✅ martorul benzii trece — scrierea live coincide cu relurea.
+```
+
+> **Criteriul ADR-082 §6.3 e îndeplinit exact, nu „în toleranță":
+> `0.000e+00` pe 179 din 179.** Scrierea live a adaptorului coincide bit cu
+> bit cu relurea pe aceleași intrări persistate.
+
+### O cifră care arată ca o anomalie și nu e — verificată, nu presupusă
+
+`573` rânduri `control` pe campion, față de `179` de bandă. Descompunerea:
+
+```
+394  istorice (4 aug – 23 aug, scrise când 8ac89c70 era Challenger)
+179  scrise acum de bandă
+───
+573
+```
+
+Prima scriere `control` pe acea versiune e **4 august**, ultima **27 octombrie
+19:27:06**. Deci **seria `control` a campionului s-a RELUAT după un gol de 65
+de zile** — exact ce anticipa §2.1 ca motiv pentru a scrie rândul pereche.
+Cele 394 de intrări în plus sunt inofensive: fiecare rând de bandă își
+găsește perechea, iar verificarea de bijecție a trecut.
+
+### Lanțul de măsurare e acum închis și autoconsistent
+
+În aceeași rulare: **Faza 1** a reprodus `0.000e+00` pe 512/512 (metoda),
+**Faza 2** a dat exact cifrele rulărilor anterioare (campion Brier 0,5960
+`t`=3,07), iar **Faza 3** `0.000e+00` pe 179/179 (scriitorul). Deci relurea
+reproduce logarea live a Challengerului, **și** scrierea nouă a benzii — două
+afirmații independente, ambele exacte.
+
+---
+
+## Ce rămâne de făcut
+
+**Toate verificările cerute de ADR-082 §6 sunt executate și PASS.** Nu mai
+există pas blocant înainte de activare, fiindcă activarea e deja făcută și
+validată.
+
+Istoric, textul de mai jos descria singurul pas rămas **înainte** de activare:
 
 **ADR-082 §6.3 — martorul de control al benzii.** Banda live trebuie să
 coincidă cu relurea din `scripts/replay_champion_on_persisted_inputs.py`,
