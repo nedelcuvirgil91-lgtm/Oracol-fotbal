@@ -99,11 +99,39 @@ def evaluate_champion_health(algorithm_family: str, league_scope: str) -> Champi
         # indiferent de date). (reason_code, msg) sau None.
         structural = _structural_probe(training_run_id, champion.get("algorithm_version"))
 
-        # Fereastra scorabilă (predicții servite rezolvate, cronologic determinist).
-        since_date = _date_only(champion.get("promoted_at"))
-        rows = sb.get_champion_served_outcomes(algorithm_family, league_scope, since_date)
+        # [ADR-082] Fereastra scorabilă = predicțiile PROPRII ale campionului,
+        # din banda `experiment_group='champion'`. ÎNLOCUIEȘTE
+        # `get_champion_served_outcomes(…, since_date)`, care citea
+        # `match_history.prob_*_pred` — ieșirea Poisson a lui Oracle — și deci
+        # raporta sănătatea lui Oracle sub numele campionului.
+        #
+        # ADR-037 §9 acceptase aproximarea temporală (`since_date` =
+        # `promoted_at`) explicit, *„fiindcă `prob_*_pred` nu poartă identitatea
+        # modelului servitor"*. Era corectă sub premisa că campionul SERVEȘTE;
+        # ADR-051/052 a desființat premisa, iar aproximarea a devenit atribuire
+        # greșită. Măsurat: 963 din 1135 de meciuri ale ferestrei vechi nu aveau
+        # nicio predicție a campionului (84,8%).
+        #
+        # `since_date` DISPARE ca parametru, și asta e miezul reparației: banda
+        # nu are nevoie de o fereastră temporală, fiindcă fiecare rând din ea
+        # ESTE o predicție a campionului. Filtrarea pe dată era proteza care
+        # ținea locul identității modelului.
+        #
+        # NEFLAGAT, deliberat (ADR-082 §2.4): gardianul e dormant — zero rânduri
+        # în `champion_health_evaluations`, ambele flaguri ADR-037 R4 absente —
+        # deci nu există „comportament curent" de păstrat în spatele unui flag,
+        # există o citire dovedit greșită într-o componentă care n-a rulat
+        # niciodată. Un flag ar fi lăsat vie exact calea care minte.
+        rows = sb.get_champion_lane_outcomes(
+            algorithm_family, league_scope, training_run_id)
         n = len(rows)
-        window_end = rows[-1].get("kickoff_date") if n else None
+        # `window_end` e `DATE NOT NULL` în schemă (migrarea 015, linia 40), iar
+        # `kickoff_date` e TEXT și ține DOUĂ forme — `YYYY-MM-DD` și
+        # `YYYY-MM-DDTHH:MM:SS` (57.366 vs 2.390 de rânduri măsurate). Forma
+        # lungă s-ar fi scris până acum prin cast implicit, dar aceeași clasă de
+        # ambiguitate a produs defectul `Wrong d param`, care a ținut
+        # Soccer Football Info mort 15 zile. Se normalizează explicit.
+        window_end = _date_only(rows[-1].get("kickoff_date")) if n else None
 
         # Baseline (din verdictul de promovare, dacă există).
         baseline = _load_baseline(sb, training_run_id)

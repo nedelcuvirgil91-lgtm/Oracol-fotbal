@@ -28,6 +28,15 @@ logger = logging.getLogger("FootballOracle.Supabase")
 _client = None
 _client_error: str | None = None
 
+# [ADR-082] Valoarea de grup a benzii campionului promovat, în
+# `shadow_predictions`. Definită AICI, în stratul de date, și importată în sus
+# de `learning_core/champion_shadow.py` — nu invers. Un import
+# `supabase_client` → `learning_core` ar fi o dependință „în sus"
+# (North Star #10), iar unul către `shadow_testing` ar fi circular (acela
+# importă `supabase_client`). Două șiruri scrise de mână, în scriitor și în
+# cititor, ar putea divergea — clasa de defect plătită deja la `_PAGE_SIZE`.
+EXPERIMENT_GROUP_CHAMPION = "champion"
+
 # „Max Rows" al PostgREST — plafonul pe care serverul îl aplică SINGUR, chiar
 # dacă apelantul nu cere niciun `.limit()`. Numit aici ca testele să se lege de
 # el, nu de un 1000 scris de mână în două locuri care pot divergea.
@@ -1132,6 +1141,134 @@ def get_champion_served_outcomes(
     # `fixture_id` în colaționarea bazei. NU adăuga o cheie secundară.
     rows.sort(key=lambda r: r.get("kickoff_date") or "")
     return rows
+
+
+def get_champion_lane_outcomes(
+    algorithm_family: str, league_scope: str, training_run_id: str,
+) -> list[dict]:
+    """[ADR-082] Predicțiile PROPRII ale campionului, deja rezolvate — substratul
+    CORECT al evaluării de sănătate (R2.4), care îl înlocuiește pe
+    `get_champion_served_outcomes()`.
+
+    DE CE EXISTĂ: funcția veche citea `match_history.prob_*_pred`, adică ieșirea
+    Poisson a lui Oracle (singurul scriitor al probabilității servite e
+    `oracle_engine.py:2095`). ADR-037 §9 acceptase explicit aproximarea
+    temporală — *„fiindcă `prob_*_pred` nu poartă identitatea modelului
+    servitor"* — valabilă **sub premisa că campionul servește**. ADR-051/052 a
+    desființat premisa, iar aproximarea a devenit atribuire greșită: din 1135 de
+    meciuri ale ferestrei, 963 (84,8%) nu aveau nicio predicție a campionului,
+    iar eroarea de substituție (0,0253 Brier) consuma 40,6% din bugetul de
+    degradare de 0,0623, înainte de orice degradare reală.
+
+    FORMA RÂNDULUI e DELIBERAT IDENTICĂ celei vechi — `prob_home_pred`,
+    `prob_draw_pred`, `prob_away_pred`, `actual_result`, `kickoff_date`,
+    `fixture_id`. `champion_guardian._live_metrics()`, `_mean_brier()`,
+    `_stability()` și `_row_degraded()` citesc exact acele chei, deci rămân
+    NEATINSE. Se schimbă ce se măsoară, nu cum. Numele coloanelor sunt
+    păstrate chiar dacă valorile nu mai vin din `match_history`: a le redenumi
+    ar obliga la modificarea a patru funcții de calcul pentru zero câștig, iar
+    fiecare modificare acolo e o șansă de a strica o metrică.
+
+    DOUĂ CITIRI, nu un join: `shadow_predictions` nu are `actual_result`, iar
+    PostgREST nu face join între tabele fără o relație declarată. Se citește
+    banda, apoi rezultatele pentru acele `fixture_id`, pe bucăți — tiparul deja
+    folosit de `shadow_testing._match_history_rows_for()`.
+
+    ORDINE cronologică deterministă, cerută de dimensiunea „trend" care împarte
+    fereastra 50/50: `(kickoff_date, fixture_id)`. Preluarea merge pe cheia de
+    cursor, iar ordinea finală se reface printr-o sortare STABILĂ pe
+    `kickoff_date` singur — exact motivul documentat în
+    `get_champion_served_outcomes()`: o cheie secundară scrisă explicit ar
+    departaja pe OCTEȚI, iar colaționarea bazei e `en_US.UTF-8` (măsurat: 295
+    de poziții diferite din 256 de perechi din aceeași zi).
+
+    LA EROARE se întoarce lista GOALĂ, niciodată setul parțial: o fereastră
+    incompletă ar produce un verdict de sănătate fals, indistingibil de unul
+    corect (lecția ADR-080, aplicată deja la P6.0-c).
+
+    `league_scope` e primit pentru simetrie de semnătură și trasabilitate în
+    log, dar NU filtrează: banda e scrisă per campion, iar `training_run_id`
+    identifică deja unic modelul — un filtru pe ligă ar putea doar să ascundă
+    rânduri care îi aparțin. READ-ONLY."""
+    client = get_client()
+    if client is None:
+        return []
+    banda: list[dict] = []
+    cursor: str | None = None
+    try:
+        while True:
+            q = (
+                client.table("shadow_predictions")
+                .select("fixture_id,prob_home,prob_draw,prob_away")
+                .eq("experiment_name", algorithm_family)
+                .eq("experiment_version", training_run_id)
+                .eq("experiment_group", EXPERIMENT_GROUP_CHAMPION)
+                .eq("processing_stage", "final")
+                .is_("invalidated_at", "null")
+            )
+            if cursor is not None:
+                q = q.gt("fixture_id", cursor)
+            page = (q.order("fixture_id", desc=False)
+                     .limit(_PAGE_SIZE).execute()).data or []
+            banda.extend(page)
+            if len(page) < _PAGE_SIZE:
+                break
+            cursor = page[-1]["fixture_id"]
+
+        if not banda:
+            return []
+
+        probabilitati = {r["fixture_id"]: r for r in banda
+                         if all(r.get(k) is not None
+                                for k in ("prob_home", "prob_draw", "prob_away"))}
+        ids = sorted(probabilitati)
+        rezultate: dict[str, dict] = {}
+        for start in range(0, len(ids), 500):
+            bucata = ids[start:start + 500]
+            cursor = None
+            while True:
+                q = (
+                    client.table("match_history")
+                    .select("fixture_id,home_team,away_team,league,kickoff_date,actual_result")
+                    .in_("fixture_id", bucata)
+                    .not_.is_("actual_result", "null")
+                )
+                if cursor is not None:
+                    q = q.gt("fixture_id", cursor)
+                page = (q.order("fixture_id", desc=False)
+                         .limit(_PAGE_SIZE).execute()).data or []
+                for r in page:
+                    rezultate[r["fixture_id"]] = r
+                if len(page) < _PAGE_SIZE:
+                    break
+                cursor = page[-1]["fixture_id"]
+    except Exception as exc:
+        logger.warning("[Supabase] get_champion_lane_outcomes failed pentru %s/%s/%s "
+                        "(se întoarce lista GOALĂ, niciodată parțialul: o fereastră "
+                        "incompletă ar produce un verdict de sănătate fals): %s",
+                        algorithm_family, league_scope, training_run_id, exc)
+        return []
+
+    randuri = []
+    for fid, p in probabilitati.items():
+        m = rezultate.get(fid)
+        if m is None or not m.get("kickoff_date"):
+            continue
+        randuri.append({
+            "fixture_id": fid,
+            "home_team": m.get("home_team"), "away_team": m.get("away_team"),
+            "league": m.get("league"), "kickoff_date": m["kickoff_date"],
+            "prob_home_pred": p["prob_home"],
+            "prob_draw_pred": p["prob_draw"],
+            "prob_away_pred": p["prob_away"],
+            "actual_result": m["actual_result"],
+        })
+    # Sortare STABILĂ pe `kickoff_date` SINGUR — NU adăuga o cheie secundară.
+    # Vezi nota „ORDINE" din docstring: departajarea vine din ordinea de
+    # preluare (`fixture_id` în colaționarea bazei), pe care concatenarea
+    # paginilor o păstrează; o cheie scrisă explicit ar departaja pe octeți.
+    randuri.sort(key=lambda r: r.get("kickoff_date") or "")
+    return randuri
 
 
 def record_champion_health_evaluation(

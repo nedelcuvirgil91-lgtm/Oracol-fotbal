@@ -119,6 +119,14 @@ def test_guardian_has_only_known_importers():
     SKIP = {
         "champion_guardian.py", "test_champion_guardian.py", "test_champion_guardian_ownership.py",
         "continuous_learning.py", "test_continuous_learning_rollback.py",
+        # [ADAUGAT — ADR-082] Verificarea V4 („nicio activare a Guardianului
+        # înainte ca banda să aibă suficiente rezultate"): exercită
+        # `evaluate_champion_health` pe o bandă goală și pe una sub prag, ca să
+        # dovedească structural că nu poate recomanda rollback. TEST, nu cod de
+        # producție — garda continuă să prindă orice importator REAL nou, care
+        # e lucrul pe care îl apără. Declarat explicit, cum cere docstring-ul,
+        # nu strecurat.
+        "test_champion_shadow_lane.py",
     }
     offenders = []
     for path in _iter_py_files():

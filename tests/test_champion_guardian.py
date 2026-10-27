@@ -65,7 +65,7 @@ def wired(monkeypatch):
     state = {"record_calls": []}
     monkeypatch.setattr("supabase_client.get_active_champion", lambda f, l: _champion())
     monkeypatch.setattr("learning_core.model_artifact_storage.load_model_artifact", lambda tid: _FakeModel())
-    monkeypatch.setattr("supabase_client.get_champion_served_outcomes", lambda f, l, s=None: [])
+    monkeypatch.setattr("supabase_client.get_champion_lane_outcomes", lambda f, l, s=None: [])
     monkeypatch.setattr("supabase_client.get_latest_challenger_evaluation", lambda tid: None)
     monkeypatch.setattr("supabase_client.get_recent_champion_health_evaluations", lambda tid, limit=5: [])
 
@@ -86,7 +86,7 @@ def test_no_active_champion_returns_none(wired, monkeypatch):
 
 def test_state_critical_structural_artifact_missing(wired, monkeypatch):
     monkeypatch.setattr("learning_core.model_artifact_storage.load_model_artifact", lambda tid: None)
-    monkeypatch.setattr("supabase_client.get_champion_served_outcomes",
+    monkeypatch.setattr("supabase_client.get_champion_lane_outcomes",
                         lambda f, l, s=None: _uniform_rows(40))
     r = g.evaluate_champion_health("xgboost_v1", "all")
     assert r.health_state == "critical"
@@ -100,7 +100,7 @@ def test_state_critical_structural_artifact_missing(wired, monkeypatch):
 def test_state_critical_structural_model_error(wired, monkeypatch):
     monkeypatch.setattr("learning_core.model_artifact_storage.load_model_artifact",
                         lambda tid: _FakeModel(fail=True))
-    monkeypatch.setattr("supabase_client.get_champion_served_outcomes",
+    monkeypatch.setattr("supabase_client.get_champion_lane_outcomes",
                         lambda f, l, s=None: _uniform_rows(40))
     r = g.evaluate_champion_health("xgboost_v1", "all")
     assert r.health_state == "critical"
@@ -108,7 +108,7 @@ def test_state_critical_structural_model_error(wired, monkeypatch):
 
 
 def test_state_insufficient_data_below_min(wired, monkeypatch):
-    monkeypatch.setattr("supabase_client.get_champion_served_outcomes",
+    monkeypatch.setattr("supabase_client.get_champion_lane_outcomes",
                         lambda f, l, s=None: _uniform_rows(5))  # < MIN=30
     r = g.evaluate_champion_health("xgboost_v1", "all")
     assert r.health_state == "insufficient_data"
@@ -118,7 +118,7 @@ def test_state_insufficient_data_below_min(wired, monkeypatch):
 
 
 def test_state_healthy(wired, monkeypatch):
-    monkeypatch.setattr("supabase_client.get_champion_served_outcomes",
+    monkeypatch.setattr("supabase_client.get_champion_lane_outcomes",
                         lambda f, l, s=None: _uniform_rows(40))  # constant, fără trend/instab
     r = g.evaluate_champion_health("xgboost_v1", "all")
     assert r.health_state == "healthy"
@@ -127,7 +127,7 @@ def test_state_healthy(wired, monkeypatch):
 
 
 def test_state_watch_single_trend_signal(wired, monkeypatch):
-    monkeypatch.setattr("supabase_client.get_champion_served_outcomes",
+    monkeypatch.setattr("supabase_client.get_champion_lane_outcomes",
                         lambda f, l, s=None: _trend_degraded_rows(30))
     # recent gol → o singură fereastră degradată → Watch
     r = g.evaluate_champion_health("xgboost_v1", "all")
@@ -137,7 +137,7 @@ def test_state_watch_single_trend_signal(wired, monkeypatch):
 
 
 def test_state_watch_instability_only(wired, monkeypatch):
-    monkeypatch.setattr("supabase_client.get_champion_served_outcomes",
+    monkeypatch.setattr("supabase_client.get_champion_lane_outcomes",
                         lambda f, l, s=None: _uniform_rows(40))
     monkeypatch.setattr("learning_core.champion_guardian._stability",
                         lambda rows: (0.9, True))  # instabil, dar fără degradare
@@ -147,7 +147,7 @@ def test_state_watch_instability_only(wired, monkeypatch):
 
 
 def test_state_degrading_two_consecutive(wired, monkeypatch):
-    monkeypatch.setattr("supabase_client.get_champion_served_outcomes",
+    monkeypatch.setattr("supabase_client.get_champion_lane_outcomes",
                         lambda f, l, s=None: _trend_degraded_rows(30))  # current n=30, degradat
     # fereastră anterioară DISTINCTĂ (n=20 < 30) degradată → 2 consecutive
     monkeypatch.setattr("supabase_client.get_recent_champion_health_evaluations",
@@ -215,7 +215,7 @@ def test_f1_rerun_does_not_inflate_to_degrading():
 def test_f1_rerun_end_to_end_stays_watch(wired, monkeypatch):
     """End-to-end: aceeași fereastră re-evaluată (recent conține n==current)
     rămâne Watch, NU escaladează la Degrading."""
-    monkeypatch.setattr("supabase_client.get_champion_served_outcomes",
+    monkeypatch.setattr("supabase_client.get_champion_lane_outcomes",
                         lambda f, l, s=None: _trend_degraded_rows(30))  # current n=30, degradat
     # recent = fereastra curentă însăși (n=30), degradată (re-rulare)
     monkeypatch.setattr("supabase_client.get_recent_champion_health_evaluations",
@@ -227,15 +227,15 @@ def test_f1_rerun_end_to_end_stays_watch(wired, monkeypatch):
 
 # ── 5. Erori de infrastructură (best-effort) ────────────────────────────────
 
-def test_served_outcomes_exception_returns_none(wired, monkeypatch):
+def test_lane_outcomes_exception_returns_none(wired, monkeypatch):
     def _boom(f, l, s=None):
         raise RuntimeError("Supabase down")
-    monkeypatch.setattr("supabase_client.get_champion_served_outcomes", _boom)
+    monkeypatch.setattr("supabase_client.get_champion_lane_outcomes", _boom)
     assert g.evaluate_champion_health("xgboost_v1", "all") is None
 
 
 def test_record_failure_does_not_raise(wired, monkeypatch):
-    monkeypatch.setattr("supabase_client.get_champion_served_outcomes",
+    monkeypatch.setattr("supabase_client.get_champion_lane_outcomes",
                         lambda f, l, s=None: _uniform_rows(40))
     monkeypatch.setattr("supabase_client.record_champion_health_evaluation",
                         lambda **kw: False)  # eșec de scriere
@@ -245,7 +245,7 @@ def test_record_failure_does_not_raise(wired, monkeypatch):
 
 
 def test_baseline_source_trend_only_without_verdict(wired, monkeypatch):
-    monkeypatch.setattr("supabase_client.get_champion_served_outcomes",
+    monkeypatch.setattr("supabase_client.get_champion_lane_outcomes",
                         lambda f, l, s=None: _uniform_rows(40))
     # get_latest_challenger_evaluation = None (default fixture) → trend_only
     r = g.evaluate_champion_health("xgboost_v1", "all")
@@ -253,7 +253,7 @@ def test_baseline_source_trend_only_without_verdict(wired, monkeypatch):
 
 
 def test_baseline_source_promotion_evaluation_with_verdict(wired, monkeypatch):
-    monkeypatch.setattr("supabase_client.get_champion_served_outcomes",
+    monkeypatch.setattr("supabase_client.get_champion_lane_outcomes",
                         lambda f, l, s=None: _uniform_rows(40))
     monkeypatch.setattr("supabase_client.get_latest_challenger_evaluation",
                         lambda tid: {"brier_experiment": 0.30, "logloss_experiment": 0.9,

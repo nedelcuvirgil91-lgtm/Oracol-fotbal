@@ -385,6 +385,14 @@ comportamentul lui pentru `n` mic (`_classify_champion_health`).
 
 ## 6. Verificare cerută înainte de ACTIVARE
 
+> **📋 REZULTATELE sunt documentate separat, cerute explicit de proprietarul
+> produsului (2026-10-27): `docs/00_GOVERNANCE/ADR-082_VERIFICARI_PRE_ACTIVARE.md`**
+> — V1 perechea control–champion (6 teste), V2 inventarul COMPLET al
+> consumatorilor `experiment_group` (7 atingeri, clasificate), V3 volumul real
+> măsurat (**1,04 MB/lună**), V4 ordinea de activare (devenită structurală, nu
+> procedurală), V5 verdictul gardianului înainte vs după (**marjă +20,2%**,
+> verdict `healthy` în ambele cazuri — corectare de atribuire, nu degradare).
+
 Un singur flag de activat, `champion_shadow_logging_enabled`. Schimbarea de
 sursă a gardianului nu se activează — se livrează, cu efect zero cât gardianul
 e dormant (§1.5).

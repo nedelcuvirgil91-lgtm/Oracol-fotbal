@@ -206,6 +206,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # de afișare de mai sus. Nu ia decizii, nu optimizează, nu promovează.
     # Implicit OPRIT.
     "validation_framework_enabled": False,
+    # [ADAUGAT — ADR-082] Banda de predicții a campionului PROMOVAT, în
+    # `shadow_predictions` (`experiment_group='champion'`). Flag DEDICAT,
+    # distinct de `blend_v1_champion_display_enabled` de mai sus: acela
+    # AFIȘEAZĂ predicția campionului, acesta o PERSISTĂ. Două decizii
+    # diferite — afișarea e reversibilă, persistarea acumulează rânduri.
+    #
+    # DE CE EXISTĂ: un model promovat iese din FSM-ul de Challenger, deci
+    # `log_shadow_for_active_challenger` nu-l mai loghează. Campionul
+    # `blend_v1/8ac89c70` a scris ultima dată pe 23 aug 09:23:17, cu 13
+    # minute înainte de promovarea de la 09:36:27, și zero rânduri în 65 de
+    # zile — iar Champion Guardian măsura în locul lui ieșirea lui Oracle.
+    #
+    # Nu recalculează nimic: refolosește `pred.blend_v1_champion_prediction`,
+    # deja calculat mai sus. Implicit OPRIT (North Star #3).
+    "champion_shadow_logging_enabled": False,
 }
 
 DEFAULT_WEIGHTS: dict[str, Any] = {
@@ -2204,6 +2219,16 @@ class FootballOracleEngine:
             pred, home_p, away_p, h2h, home_xg, away_xg, ph, pd, pa, mc, w_pen,
         )
 
+        # [ADAUGAT — ADR-082] Banda de predicții a campionului PROMOVAT.
+        # Rulează DUPĂ linia de mai sus, și nu e o coincidență de ordine:
+        # REFOLOSEȘTE `pred.blend_v1_champion_prediction`, nu recalculează.
+        # Un al doilea apel la predictor ar putea divergea tăcut de ce s-a
+        # afișat, iar o bandă care nu corespunde afișării e mai rea decât
+        # niciuna. Rezultatul e ignorat de apelant, exact ca la shadow
+        # logging — nu modifică `pred`, nu influențează nimic din ce se
+        # servește.
+        self._log_champion_shadow(pred, home_xg, away_xg)
+
         # [ADAUGAT — ADR-052] Validation Framework — colectare automată,
         # per meci, a ieșirilor disponibile Oracle/ML/Blend, pentru analize
         # periodice ulterioare. Flag DEDICAT (validation_framework_enabled,
@@ -2445,6 +2470,61 @@ class FootballOracleEngine:
         except Exception as exc:
             logger.debug("[BlendEngine] _get_blend_engine_prediction failed: %s", exc)
             return None
+
+    def _log_champion_shadow(
+        self, pred: MatchPrediction, home_xg: float, away_xg: float,
+    ) -> bool:
+        """[ADR-082] Persistă banda campionului PROMOVAT
+        (`experiment_group='champion'`) plus rândul `control` pereche.
+
+        Nu face nimic dacă `champion_shadow_logging_enabled=False` (implicit)
+        — return imediat, zero import, zero apel Supabase, zero cost.
+
+        NU RECALCULEAZĂ predicția campionului: o citește din
+        `pred.blend_v1_champion_prediction`, populat mai sus de
+        `_get_blend_v1_champion_prediction()`. Consecința, deliberată și
+        documentată: banda e scrisă DOAR dacă
+        `blend_v1_champion_display_enabled` e și el pornit. Nu e o
+        dependență ascunsă între flaguri, e refuzul de a avea două surse
+        pentru aceeași predicție — dacă acel flag e oprit, câmpul e `None`,
+        iar funcția iese fără să scrie, raportând `False`.
+
+        Familia și scopul se citesc din EXACT aceleași două constante pe care
+        le folosește afișarea (`_get_blend_v1_champion_prediction`):
+        `blend_v1_champion_loader._ALGORITHM_FAMILY` și
+        `ml_predictor._LEAGUE_SCOPE`. Niciun șir scris de mână aici — o
+        familie scrisă manual ar putea să nu mai coincidă cu cea afișată, iar
+        banda ar descrie un campion diferit de cel din ecran.
+
+        Nu modifică NICIODATĂ `pred`. Orice eșec e prins în adaptor, iar
+        plasa de aici acoperă doar importul și citirea câmpului (Regula #8,
+        degradare grațioasă)."""
+        if not self.config.get("champion_shadow_logging_enabled", False):
+            return False
+        bp = pred.blend_v1_champion_prediction
+        if not bp or not bp.get("available"):
+            return False
+        try:
+            from learning_core.blend_v1_champion_loader import _ALGORITHM_FAMILY
+            from learning_core.champion_shadow import log_shadow_for_active_champion
+            from ml_predictor import _LEAGUE_SCOPE
+
+            return log_shadow_for_active_champion(
+                algorithm_family=_ALGORITHM_FAMILY, league_scope=_LEAGUE_SCOPE,
+                fixture_id=pred.fixture_id,
+                champion_prob_home=bp["prob_home"],
+                champion_prob_draw=bp["prob_draw"],
+                champion_prob_away=bp["prob_away"],
+                control_prob_home=pred.prob_home_win,
+                control_prob_draw=pred.prob_draw,
+                control_prob_away=pred.prob_away_win,
+                home_xg=home_xg, away_xg=away_xg,
+                league=pred.league, home_team=pred.home_team,
+                away_team=pred.away_team, kickoff_date=pred.kickoff_date,
+            )
+        except Exception as exc:
+            logger.warning("[ChampionShadow] _log_champion_shadow eșuat: %s", exc)
+            return False
 
     def _get_blend_v1_champion_prediction(
         self, pred: MatchPrediction, home_p: TeamProfile, away_p: TeamProfile,
