@@ -28,6 +28,13 @@ logger = logging.getLogger("FootballOracle.Supabase")
 _client = None
 _client_error: str | None = None
 
+# „Max Rows" al PostgREST — plafonul pe care serverul îl aplică SINGUR, chiar
+# dacă apelantul nu cere niciun `.limit()`. Numit aici ca testele să se lege de
+# el, nu de un 1000 scris de mână în două locuri care pot divergea.
+# `get_training_data()` îl are încă local (`page_size`), deliberat neatins:
+# schimbarea lui acolo ar lărgi diff-ul fără să schimbe nimic.
+_PAGE_SIZE = 1000
+
 
 def _get_credentials() -> tuple[str | None, str | None]:
     """Citește URL + secret key din st.secrets (Streamlit Cloud) sau env vars."""
@@ -1013,28 +1020,118 @@ def get_champion_served_outcomes(
     `league_scope="all"` e SENTINEL (nu filtrează liga, ca în
     continuous_learning._count_finished_matches); altfel filtrează
     match_history.league. Listă goală = stare legitimă (ex. 0 scorabile,
-    ADR-037 Risk R-A), nu eroare (Regula #8). READ-ONLY."""
+    ADR-037 Risk R-A), nu eroare (Regula #8). READ-ONLY.
+
+    [REPARAT — P6.0-c, 2026-10-27] A CINCEA instanță a plafonului PostgREST
+    de 1000 din acest proiect, și prima la care direcția trunchierii e
+    ADVERSĂ pentru consumator. Varianta veche făcea un singur `.execute()`
+    fără paginare.
+
+    MĂSURAT ÎNAINTE de reparație, pe fereastra reală a campionului activ
+    (`blend_v1/all`, promovat 23 aug): **1135 de rânduri eligibile**, din
+    care serverul întorcea 1000 → **135 (11,9%) invizibile**. Trecerea peste
+    plafon s-a produs pe **23 octombrie** (cumulat 1006), deci defectul avea
+    4 zile la găsire.
+
+    DE CE DIRECȚIA CONTEAZĂ, spre deosebire de celelalte patru instanțe:
+    ordonarea era `kickoff_date, fixture_id` ASCENDENT, deci trunchierea
+    păstra cele mai VECHI 1000 de meciuri și arunca cele mai NOI 135. Iar
+    dimensiunea 3 a Champion Guardian („trend") împarte fereastra 50/50 și
+    compară jumătatea recentă cu cea anterioară — deci „recent" ar fi
+    însemnat *meciuri de la mijlocul lui octombrie*, nu din ultimele zile.
+    Un monitor de sănătate care, prin construcție, ignoră exact capătul care
+    ar dezvălui o degradare.
+
+    CUM: paginare keyset pe `fixture_id`, tiparul deja folosit în acest
+    fișier de `get_training_data()` — `fixture_id` e cheie UNICĂ indexată
+    (`idx_match_history_fixture`), verificat non-nulă și distinctă pe toate
+    cele 1135 de rânduri ale ferestrei, deci cursor valid. Cererea se
+    construiește ÎN buclă, nu înaintea ei (garda
+    `tests/test_pagination_builder_reuse.py` — `.range()`/`.limit()` mută
+    `self` și acumulează parametrii).
+
+    ORDINEA CONTRACTUALĂ e păstrată BYTE-CU-BYTE, dar nu pe calea evidentă.
+    Preluarea merge pe `fixture_id` (cheia de cursor), iar ordinea cronologică
+    se reface în Python, la final, printr-o sortare **STABILĂ pe
+    `kickoff_date` SINGUR**.
+
+    Varianta evidentă — `sort(key=(kickoff_date, fixture_id))`, adică exact
+    cele două chei ale ordonării vechi — e GREȘITĂ, și asta a fost **măsurat,
+    nu dedus**. Colaționarea bazei e `en_US.UTF-8`, unde ordinea literelor
+    nu e ordinea octeților: `flashscore_hGycdKve < flashscore_UHKVUvoK` în
+    Postgres (greutate de literă, h<u), dar INVERS pe octeți (`U`=0x55 <
+    `h`=0x68), cum compară Python. Măsurat pe fereastra reală de 1135 de
+    rânduri: **295 de poziții diferite**, din **256 de perechi de
+    `fixture_id` din aceeași zi** ordonate invers.
+
+    Ce NU se schimbă, verificat separat pe aceleași date: **cronologia e
+    identică** — 0 poziții diferite ordonând doar pe `kickoff_date`, și 0
+    perechi cu date DIFERITE inversate. Deci divergența era strict la
+    departajarea din interiorul unei zile.
+
+    Sortarea stabilă pe o singură cheie o elimină complet: `list.sort` e
+    stabil prin specificația limbajului, iar rândurile vin de la server în
+    ordinea `fixture_id` **a colaționării bazei** (`.order("fixture_id")`),
+    ordine pe care concatenarea paginilor o păstrează (cursorul `gt` folosește
+    aceeași colaționare). Deci în fiecare grup de aceeași zi se păstrează
+    exact ordinea veche. De aceea codul de mai jos **nu** are cheie secundară
+    — absența ei e deliberată, pinned de
+    `tests/test_champion_outcomes_pagination.py`.
+
+    LA EROARE se întoarce lista GOALĂ, nu setul parțial — deliberat DIFERIT
+    de `get_training_data()`, care întoarce parțialul. Acolo un parțial dă un
+    model mai slab dar onest; aici ar da un **verdict de sănătate fals**, pe
+    o fereastră incompletă care arată exact ca una completă. Lecția lui
+    ADR-080: un parțial e indistingibil de defectul tocmai reparat.
+
+    GOL CUNOSCUT, NEATINS (Discovery Rule): această selecție NU exclude
+    rândurile supersedate (ADR-025), în timp ce `get_training_data()` o
+    face prin `.is_("superseded_by", "null")`. Măsurat pe fereastra de azi:
+    **0 rânduri supersedate din 1135**, deci fără efect acum. Adăugarea
+    filtrului ar schimba criteriul de selecție al evaluării de sănătate, nu
+    paginarea — altă decizie, nu se strecoară aici."""
     client = get_client()
     if client is None:
         return []
+    rows: list[dict] = []
+    cursor: str | None = None
     try:
-        q = (
-            client.table("match_history")
-            .select("fixture_id,home_team,away_team,league,kickoff_date,"
-                    "prob_home_pred,prob_draw_pred,prob_away_pred,actual_result")
-            .not_.is_("prob_home_pred", "null")
-            .not_.is_("actual_result", "null")
-        )
-        if league_scope != "all":
-            q = q.eq("league", league_scope)
-        if since_date:
-            q = q.gte("kickoff_date", since_date)
-        res = q.order("kickoff_date", desc=False).order("fixture_id", desc=False).execute()
-        return res.data or []
+        while True:
+            q = (
+                client.table("match_history")
+                .select("fixture_id,home_team,away_team,league,kickoff_date,"
+                        "prob_home_pred,prob_draw_pred,prob_away_pred,actual_result")
+                .not_.is_("prob_home_pred", "null")
+                .not_.is_("actual_result", "null")
+            )
+            if league_scope != "all":
+                q = q.eq("league", league_scope)
+            if since_date:
+                q = q.gte("kickoff_date", since_date)
+            if cursor is not None:
+                q = q.gt("fixture_id", cursor)
+            page = (q.order("fixture_id", desc=False)
+                     .limit(_PAGE_SIZE).execute()).data or []
+            rows.extend(page)
+            if len(page) < _PAGE_SIZE:
+                break
+            cursor = page[-1]["fixture_id"]
     except Exception as exc:
-        logger.warning("[Supabase] get_champion_served_outcomes failed pentru %s/%s: %s",
-                        algorithm_family, league_scope, exc)
+        logger.warning("[Supabase] get_champion_served_outcomes failed pentru %s/%s "
+                        "(după %d rânduri citite — se întoarce lista GOALĂ, niciodată "
+                        "parțialul: o fereastră incompletă ar produce un verdict de "
+                        "sănătate fals): %s",
+                        algorithm_family, league_scope, len(rows), exc)
         return []
+    # Sortare STABILĂ pe `kickoff_date` SINGUR — nu pe `(kickoff_date,
+    # fixture_id)`. Vezi nota „ORDINEA CONTRACTUALĂ" din docstring: cheia
+    # secundară scrisă explicit aici ar departaja pe octeți și ar permuta
+    # ordinea din interiorul unei zile față de cea veche. Stabilitatea
+    # garantată a lui `list.sort` păstrează, în fiecare grup de aceeași zi,
+    # exact ordinea în care rândurile au venit de la server — adică ordinea
+    # `fixture_id` în colaționarea bazei. NU adăuga o cheie secundară.
+    rows.sort(key=lambda r: r.get("kickoff_date") or "")
+    return rows
 
 
 def record_champion_health_evaluation(
