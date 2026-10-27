@@ -238,16 +238,98 @@ nu se presupune.
 
 ---
 
+## V6 (= ADR-082 §6.1) — rulare de noapte cu flagul OPRIT: **PASS**
+
+**Rularea**: `night_sync` **40548644010** (run 102), `main` @ `8c955ca`,
+pornită manual 2026-10-27 17:14:12 UTC, încheiată 18:06:59 UTC, **51,7 min**.
+Rând de audit `automation_runs` **id = 1349**, `status = completed`,
+`github_run_id = 40548644010`.
+
+### Linia de bază, luată IMEDIAT înainte (17:14:01 UTC)
+
+| | înainte | **după** (18:15:42 UTC) |
+|---|---:|---:|
+`champion_shadow_logging_enabled` prezent | false | **false** |
+chei în `model_config` | 39 | **39** |
+**rânduri `experiment_group='champion'`** | 0 | **0** ✅ |
+**grupuri existente** | `control, treatment` | **`control, treatment`** ✅ |
+total rânduri | 8563 | 8563 |
+`max(id)` | 58141 | 58141 |
+`max(prediction_time)` | 27 oct 09:26:34 | **27 oct 18:06:33** |
+
+### De ce `0` dovedește ceva — factorul de confuzie, eliminat
+
+Un `0` singur nu distinge *„flagul oprește corect"* de *„etapa n-a rulat"*.
+Defalcarea pe etape din rândul de audit o separă: **9 etape, 9 reușite, 0
+eșuate, `critice_esuate = []`**, iar etapa care conține calea de scriere a
+benzii e marcată `critic` și a rulat 28 de minute:
+
+| Etapă | ok | critic | durată |
+|---|---|---|---:|
+**`[extra, ADR-056] Challenger Shadow Batch (logare predicții pe toate meciurile)`** | **true** | **true** | **1689,3 s** |
+`1-4. Discovery + API Providers + Validation + Canonical Database` | true | false | 1021,4 s |
+`5. Flashscore (Discovery + fetch/persist, Delta Sync)` | true | false | 370,1 s |
+`[extra, pre-existentă] Continuous Learning (ADR-030)` | true | false | 17,5 s |
+`10. Backup` · `9. Cleanup` · `8. Diagnostics` · `7. Oracle Data Layer` · `6. Team DNA` | true | false | 3,6 · 1,7 · 0,4 · 0,0 · 0,0 s |
+
+Aceea e etapa care apelează `log_challenger_shadow_for_week()` → buclă
+`evaluate_match(m)` → `_log_champion_shadow`. Deci **calea de scriere a fost
+parcursă, nu sărită.**
+
+### Al doilea martor: scrierea a avut loc, doar nu în bandă
+
+Capcana ADR-073 consemnată: scrierea e `upsert` pe o fereastră de 7 zile, deci
+**totalurile nu cresc** — `total_randuri` și `max(id)` sunt neschimbate, și
+asta e corect, nu suspect. Singurul semnal că etapa a scris efectiv e
+**prospețimea**: `max(prediction_time)` a avansat de la **09:26:34** la
+**18:06:33**.
+
+> Deci: etapa a rulat 28 de minute, a scris în benzile existente, iar banda
+> `champion` a rămas la **zero**. Exact ce cere §6.1.
+
+**Flagul a rămas ABSENT pe toată durata** — 39 de chei înainte și după, nimeni
+nu l-a activat între timp.
+
+---
+
 ## Ce rămâne de făcut înainte de activare
 
-Toate cele cinci verificări cerute sunt **făcute și documentate**. Rămân doi
-pași care, prin natura lor, cer o rulare reală:
+**Rămâne un singur pas**, iar el devine executabil abia **după** activare:
 
-1. **O rulare de noapte cu flagul OPRIT**, care confirmă comportament identic:
-   zero rânduri cu `experiment_group = 'champion'`. (ADR-082 §6.1)
-2. **Martorul de control după activare**: banda live trebuie să coincidă cu
-   relurea din `scripts/replay_champion_on_persisted_inputs.py`. Divergența
-   acceptată e cea deja măsurată la Faza 1 — **zero**. (ADR-082 §6.3)
+**ADR-082 §6.3 — martorul de control al benzii.** Banda live trebuie să
+coincidă cu relurea din `scripts/replay_champion_on_persisted_inputs.py`,
+**Faza 3**. Divergența acceptată e cea deja măsurată la Faza 1 — **zero**.
+
+> **Golul care bloca §6.3 e închis** (2026-10-27, `main` @ `8c955ca`): până
+> atunci scriptul **nu avea nicio linie** care să citească
+> `experiment_group='champion'` — Faza 1 compara relurea Challengerului cu
+> rândurile lui `treatment`, iar Faza 2 compara campionul cu Oracle, tipărind
+> doar agregate. Nici SQL nu putea suplini, fiindcă relurea cere inferență
+> XGBoost. Faza 3 a fost adăugată exact pentru asta.
+
+### Faza 3 pe banda goală — comportament CONFIRMAT, nu doar proiectat
+
+Rularea `replay_champion_on_persisted_inputs` **40558331466** (`main` @
+`b93b9cb`, 2026-10-27 18:16:56 → 18:17:11 UTC), concluzie **`success`**:
+
+```
+### FAZA 3 — martorul de control AL BENZII (blend_v1/8ac89c70)
+  NOT RUN: banda e goală — `champion_shadow_logging_enabled` e
+           oprit, deci nu există niciun rând scris live de comparat.
+           Starea așteptată înainte de activare, NU un eșec.
+```
+
+**Jobul e verde** — deci `NOT RUN` chiar iese cu cod 0, nu doar o pretinde.
+Un `FAIL` aici ar fi antrenat ignorarea, exact boala pe care
+`check_data_health` o are documentată despre el însuși.
+
+**Consistență, ca efect secundar util**: în aceeași rulare, Faza 1 a reprodus
+din nou `0.000e+00` pe 512/512, iar Faza 2 a dat exact cifrele de la rularea
+`40518633429` (campion Brier 0,5960 `t`=3,07 · log-loss 0,9977 `t`=3,00 ·
+acuratețe 0,5151 `t`=1,61). Rularea de noapte dintre ele nu le-a mișcat.
+
+**Activarea rămâne o decizie separată și explicită a proprietarului
+produsului.** §6.1 fiind acum documentat, precondiția ADR-082 §6 e îndeplinită.
 
 `UPDATE model_config` se arată și se confirmă explicit înainte de rulare
 (North Star #6), cu amprenta `md5(data − cheia_nouă)` înainte și după, plus
