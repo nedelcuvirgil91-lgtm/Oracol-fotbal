@@ -202,6 +202,102 @@ def test_faza_2_e_dupa_poarta_fazei_1_in_ordinea_codului():
     assert "return 2" in dupa, "poarta tipărește dar nu oprește execuția"
 
 
+def test_faza_3_vine_dupa_faza_2_si_e_separata_de_faza_1():
+    """[ADR-082 §6.3] Faza 1 validează METODA de relure (pe Challengerul
+    activ, care are rânduri live). Faza 3 validează SCRIITORUL NOU al benzii.
+    Două afirmații diferite: metoda putea fi exactă iar adaptorul tot să scrie
+    altceva. Ordinea contează — Faza 3 are nevoie ca metoda să fie deja
+    dovedită.
+
+    [CORECTAT] Prima versiune compara pozițiile TEXTUALE ale etichetelor
+    „### FAZA n" în fișier și cădea: `_faza_3` e DEFINITĂ înaintea lui `main`,
+    cum e normal în Python. Proprietatea care contează e ordinea de
+    EXECUȚIE — poziția APELULUI în `main`, nu a definiției."""
+    corp_main = SURSA[SURSA.index("def main("):]
+    f1 = corp_main.index("### FAZA 1")
+    f2 = corp_main.index("### FAZA 2")
+    apel_f3 = corp_main.index("_faza_3(client")
+    assert f1 < f2 < apel_f3, (
+        "Faza 3 nu se execută după Faza 2 — are nevoie ca metoda de relure "
+        "să fie deja dovedită de poarta Fazei 1"
+    )
+
+
+def test_faza_3_trateaza_banda_goala_ca_NOT_RUN_nu_ca_esec():
+    """Cu flagul oprit nu există rânduri de bandă. Un FAIL acolo ar fi zgomot
+    care antrenează ignorarea — exact boala pe care `check_data_health` o are
+    documentată despre el însuși. Verificat pe cod: ramura de bandă goală
+    întoarce 0, nu un cod de eroare."""
+    corp = SURSA[SURSA.index("def _faza_3"):SURSA.index("def main(")]
+    gol = corp[corp.index("if not banda:"):]
+    gol = gol[:gol.index("\n\n")]
+    assert "NOT RUN" in gol
+    assert "return 0" in gol, "banda goală nu are voie să fie un eșec"
+
+
+def test_faza_3_cere_divergenta_ZERO_nu_o_toleranta_relaxata():
+    """Criteriul de acceptare din ADR-082 §6.3. Faza 3 trebuie să folosească
+    ACEEAȘI toleranță ca Faza 1 — o toleranță proprie, mai largă, ar fi un
+    prag ajustat ca testul să treacă."""
+    corp = SURSA[SURSA.index("def _faza_3"):SURSA.index("def main(")]
+    assert "TOLERANTA" in corp, "Faza 3 nu folosește toleranța comună"
+    import re
+    assert not re.search(r"\b1e-[0-4]\b", corp), (
+        "Faza 3 pare să-și definească o toleranță proprie, mai largă"
+    )
+
+
+def test_faza_3_ia_oracle_probs_din_randul_control_AL_BENZII():
+    """Perechea exactă: rândul `control` al benzii e scris de ACELAȘI apel de
+    adaptor ca rândul de bandă. Folosirea rândului Challengerului ar fi
+    aproape identică (măsurat) dar nu ar valida perechea.
+
+    [CORECTAT prin mutația M16, care a TRECUT la prima rulare] Verificarea
+    anterioară cerea doar ca `control_banda` să apară în corp și ca `ctrl` să
+    fie indexat — iar `ctrl = inreg` (rândul Challengerului) satisfăcea
+    ambele, fiindcă `control_banda` rămâne folosit în altă parte. Numeric,
+    mutația e benignă azi (rândurile `control` sunt identice între familii,
+    măsurat pe 512 meciuri) — dar tocmai de aceea trebuie prinsă: proprietatea
+    nu are voie să se sprijine pe o coincidență măsurată.
+
+    Acum se cere atribuirea exactă."""
+    corp = SURSA[SURSA.index("def _faza_3"):SURSA.index("def main(")]
+    assert "ctrl = control_banda[fid]" in corp, (
+        "`oracle_probs` nu vine din rândul `control` AL BENZII — perechea "
+        "exactă, scrisă de același apel de adaptor, nu mai e validată"
+    )
+
+
+def test_faza_3_ia_ml_features_din_inregistrarea_ADR073_a_CHALLENGERULUI():
+    """Banda nu poartă `feature_metadata`, prin decizia ADR-082 §2.1. Deci
+    intrările vin din rândul `control` al Challengerului — singurul care le
+    are."""
+    corp = SURSA[SURSA.index("def _faza_3"):SURSA.index("def main(")]
+    assert "inregistrari" in corp and "ml_features" in corp
+    assert "control_martor" in SURSA[SURSA.index("def _faza_3"):SURSA.index("def main(")] \
+        or "control_martor" in SURSA[SURSA.index("cod_faza_3"):]
+
+
+def test_faza_3_raporteaza_perechea_incompleta_ca_EsEC():
+    """O bandă fără `control` pereche încalcă V1. Nu e „nereluabil", e defect
+    al scriitorului — deci cod de eroare, nu NOT RUN."""
+    corp = SURSA[SURSA.index("def _faza_3"):SURSA.index("def main(")]
+    assert "fara_pereche" in corp
+    assert "return 3" in corp
+
+
+def test_faza_3_nu_scrie_grupul_de_mana(SURSA=SURSA):
+    """Scriitorul, cititorul gardianului și Faza 3 trebuie să împartă o
+    singură definiție a grupului."""
+    corp = SURSA[SURSA.index("def _faza_3"):SURSA.index("def main(")]
+    assert "EXPERIMENT_GROUP_CHAMPION" in corp
+    import re
+    linii_cod = [l for l in corp.splitlines() if not l.strip().startswith("#")]
+    assert not any(re.search(r'"champion"', l) for l in linii_cod), (
+        "grupul e scris de mână în Faza 3 — poate divergea de constantă"
+    )
+
+
 def test_martorul_si_campionul_sunt_modele_DIFERITE():
     """Un martor identic cu subiectul ar face Faza 1 o tautologie."""
     assert MARTOR != CAMPION

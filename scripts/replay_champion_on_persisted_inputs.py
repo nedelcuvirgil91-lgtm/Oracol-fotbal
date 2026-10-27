@@ -245,6 +245,105 @@ def _memoizeaza_citirile() -> None:
         setattr(modul, nume, inveliti)
 
 
+def _faza_3(client, control_martor: list[dict], predict) -> int:
+    """[ADR-082 §6.3] Martorul de control AL BENZII: rândurile scrise LIVE de
+    `learning_core/champion_shadow.py` trebuie să coincidă cu relurea pe
+    aceleași intrări persistate. Criteriul de acceptare e **divergență zero**.
+
+    DE CE EXISTĂ CA FAZĂ SEPARATĂ, și nu e Faza 1 refolosită: Faza 1 validează
+    METODA de relure (pe Challengerul activ, care are rânduri live). Faza 3
+    validează SCRIITORUL NOU. Sunt două afirmații diferite — metoda putea fi
+    exactă iar adaptorul tot să scrie altceva.
+
+    DE UNDE VIN INTRĂRILE, și de ce din două rânduri diferite:
+      · `oracle_probs` — din rândul `control` AL BENZII (același
+        `training_run_id`). E scris de ACELAȘI apel de adaptor ca rândul de
+        bandă, deci e perechea exactă. Faptul că există îl validează, ca efect
+        secundar, pe V1 (perechea completă).
+      · `ml_features` — din înregistrarea ADR-073, care trăiește pe rândul
+        `control` al CHALLENGERULUI. Banda nu o poartă, prin decizia ADR-082
+        §2.1 (ar fi a treia copie, măsurat identică).
+
+    DEPENDENȚĂ DECLARATĂ: dacă nu există Challenger activ,
+    `_serving_record_if_enabled()` nu e apelat niciodată (verificat: are exact
+    două apeluri, ambele în hook-urile de Challenger), deci intrările nu se
+    persistă și meciurile din acel interval devin NEreluabile. Fragilitatea e
+    preexistentă ADR-082 și anticipată de `CLAUDE.md` D-2.
+
+    BANDĂ GOALĂ = **NOT RUN**, cod de ieșire 0, niciodată FAIL. Cu
+    `champion_shadow_logging_enabled` oprit nu există rânduri, iar un eșec
+    acolo ar fi zgomot care antrenează ignorarea — exact boala pe care
+    `check_data_health` o are documentată despre el însuși."""
+    print(f"\n### FAZA 3 — martorul de control AL BENZII ({FAMILIE}/{CAMPION[:8]})")
+
+    # Grupul se citește din constanta pe care o folosesc scriitorul
+    # (`champion_shadow`) și cititorul gardianului. Un `"champion"` scris de
+    # mână aici ar putea divergea de ele — clasa `_PAGE_SIZE`.
+    from supabase_client import EXPERIMENT_GROUP_CHAMPION
+
+    banda = _shadow(client, CAMPION, EXPERIMENT_GROUP_CHAMPION)
+    if not banda:
+        print("  NOT RUN: banda e goală — `champion_shadow_logging_enabled` e")
+        print("           oprit, deci nu există niciun rând scris live de comparat.")
+        print("           Starea așteptată înainte de activare, NU un eșec.")
+        return 0
+
+    control_banda = {r["fixture_id"]: r for r in _shadow(client, CAMPION, "control")}
+    inregistrari = {r["fixture_id"]: r for r in control_martor}
+
+    print(f"  rânduri de bandă            : {len(banda)}")
+    print(f"  rânduri `control` ale benzii : {len(control_banda)}")
+
+    fara_pereche = [r["fixture_id"] for r in banda if r["fixture_id"] not in control_banda]
+    if fara_pereche:
+        print(f"  ⛔ {len(fara_pereche)} rânduri de bandă FĂRĂ `control` pereche "
+              f"(ex. {fara_pereche[:3]}) — V1 încălcat, perechea e incompletă.")
+        return 3
+
+    difs, reluate, fara_inregistrare, esuate = [], 0, 0, 0
+    for r in banda:
+        fid = r["fixture_id"]
+        inreg = inregistrari.get(fid)
+        mlf = ((inreg or {}).get("feature_metadata") or {}).get("ml_features")
+        if not mlf:
+            fara_inregistrare += 1
+            continue
+        ctrl = control_banda[fid]
+        probs = predict(
+            oracle_probs=(float(ctrl["prob_home"]), float(ctrl["prob_draw"]),
+                          float(ctrl["prob_away"])),
+            features=mlf, training_run_id=CAMPION,
+        )
+        if probs is None:
+            esuate += 1
+            continue
+        reluate += 1
+        difs.append(max(abs(probs[0] - float(r["prob_home"])),
+                        abs(probs[1] - float(r["prob_draw"])),
+                        abs(probs[2] - float(r["prob_away"]))))
+
+    print(f"  reluate: {reluate} · fără înregistrare ADR-073: {fara_inregistrare} "
+          f"· relure eșuată: {esuate}")
+    if fara_inregistrare:
+        print("           (meciuri servite când niciun Challenger nu era activ — "
+              "vezi DEPENDENȚA din docstring; nereluabile, nu defecte)")
+    if not difs:
+        print("  NOT RUN: nicio bandă reluabilă — niciun meci are și rând de bandă,")
+        print("           și înregistrare ADR-073. Nu se trage nicio concluzie.")
+        return 0
+
+    print(f"  divergență maximă : {max(difs):.3e}")
+    print(f"  divergență medie  : {sum(difs) / len(difs):.3e}")
+    print(f"  peste toleranța {TOLERANTA:.0e}: {sum(1 for d in difs if d > TOLERANTA)} / {len(difs)}")
+    if max(difs) > TOLERANTA:
+        print("\n  ⛔ MARTORUL BENZII NU TRECE. Scriitorul live nu produce ce")
+        print("     reproduce relurea pe aceleași intrări. NU se ajustează praguri")
+        print("     și nu se rescriu date — se investighează scriitorul.")
+        return 3
+    print("  ✅ martorul benzii trece — scrierea live coincide cu relurea.")
+    return 0
+
+
 def main() -> int:
     import supabase_client as sb
     from ml_predictor import FEATURE_COLUMNS
@@ -399,10 +498,15 @@ def main() -> int:
               f"| t {m['acc_t'] if m['acc_t'] is None else round(m['acc_t'], 2)} "
               f"→ {_verdict(m['acc_model'] > m['acc_oracle'], m['acc_t'])}")
 
+    # ── FAZA 3 — martorul de control AL BENZII (ADR-082 §6.3) ──────────────
+    cod_faza_3 = _faza_3(client, control_martor, predict_with_blend_challenger)
+
     print("\n" + "=" * 78)
     print("Cifrele de mai sus NU declanșează nimic. Promovarea, retragerea sau")
     print("cablarea unei căi de servire rămân decizii umane explicite (ADR-002).")
     print("=" * 78)
+    if cod_faza_3 != 0:
+        return cod_faza_3
     return 0
 
 
