@@ -1,7 +1,12 @@
 # ADR-082 — Banda de predicții a campionului promovat, și atribuirea corectă în Champion Guardian
 
-**Status**: **PROPUNERE — cere aprobarea explicită a proprietarului produsului**
+**Status**: **ACCEPTED** (aprobat explicit de proprietarul produsului, 2026-10-27)
 **Data**: 2026-10-27
+**Notă de revizie**: aprobat după **două corecții făcute în timpul scrierii**,
+ambele marcate în text și ambele găsite verificând, nu deducând — §2.3 (un
+apelant inexistent) și §2.4 (un `CHECK` pe `baseline_source` care ar fi cerut o
+migrare). A doua a dus la o **simplificare reală**: un singur flag în loc de
+două, iar schimbarea de sursă a gardianului devine necondiționată.
 **Autor**: sesiune Claude Code, la cererea proprietarului produsului
 **Înlocuiește / amendează**: **amendează ADR-037 §9** (atribuirea temporală a
 ferestrei de sănătate), a cărei precondiție a fost invalidată tacit de
@@ -243,33 +248,65 @@ care citește banda `'champion'` a campionului activ, împerecheată cu
 > `match_history.prob_*_pred` **direct**, fără să treacă prin ea. Scrisesem
 > justificarea din tiparul D-3, nu din măsurătoare.
 
-Funcția veche se păstrează, nemodificată, dar pentru un motiv mai slab și mai
-onest: **flagul din §2.4 cere ca ambele căi să existe simultan.** Cât
-`champion_guardian_reads_champion_lane_enabled` e oprit, ea e calea vie, deci
-nu poate fi ștearsă acum.
+**Iar odată ce §2.4 a eliminat al doilea flag, funcția veche rămâne cu ZERO
+apelanți — adică devine cod mort în clipa livrării.** Nu i se inventează un
+consumator. Se consemnează ca **restanță explicită de ștergere**, nu se lasă în
+repo „pentru orice eventualitate", cum au rămas POC-ul API-Football 34 de zile
+și `_fetch_elo_ratings` până la Phase 8. Nu se șterge în acest ADR fiindcă
+ștergerea de cod mort e o decizie proprie, cu propriul audit (regula din
+`CLAUDE.md`: nicio „curățenie preventivă").
 
-**După activare și confirmare, devine cod mort cu un singur apelant dispărut.**
-Ștergerea ei e atunci o decizie de urmărire, nu parte din acest ADR — dar se
-consemnează aici ca restanță explicită, ca să nu rămână în repo „pentru
-orice eventualitate", cum au rămas POC-ul API-Football 34 de zile și
-`_fetch_elo_ratings` până la Phase 8.
+**Un fapt incomod, consemnat în loc de ascuns**: P6.0-c, merge-uit acum câteva
+ore, a paginat exact funcția pe care acest ADR o orfanizează. Nu a fost muncă
+irosită, și motivul e verificabil: la momentul reparației, funcția era
+**singura** sursă a gardianului, iar activarea ADR-037 R4 era o posibilitate
+vie — o activare înainte de ADR-082 ar fi pornit un gardian care, pe lângă
+atribuirea greșită, ar fi citit și o fereastră trunchiată la 1000 din 1135.
+Mai mult: **reparația a fost instrumentul de măsurare care a produs acest
+ADR** — cifrele 1135 / 172 / 963 au ieșit din analiza ferestrei pe care o
+reparam. Lecția de ordine rămâne însă reală: o reparație pe un consumator
+unic merită întrebarea „mai există consumatorul mâine?" înainte, nu după.
 
-`baseline_source` câștigă o valoare nouă, `'champion_lane'`, ca orice evaluare
-de sănătate să-și declare singură sursa — exact tiparul `baseline_source` din
-ADR-072, care a făcut distincția dintre cifre corecte și cifre pe baseline
-înghețat verificabilă dintr-o interogare.
+> **[CORECTAT în timpul scrierii, a doua oară]** Prima versiune spunea că
+> *„`baseline_source` câștigă o valoare nouă, `'champion_lane'`"*. **Greșit pe
+> două planuri, verificat**: (a) coloana are un `CHECK` —
+> `baseline_source IN ('promotion_evaluation','trend_only','manual_override')`,
+> migrarea 015 linia 76 — deci o valoare nouă ar cere o **migrare**, pe care
+> §0 pretindea că acest ADR n-o are; (b) `baseline_source` descrie **de unde
+> vine baseline-ul** pentru dimensiunea 2, nu de unde vine **fereastra**. Două
+> fapte diferite într-o coloană ar fi exact confuzia pe care ADR-072 a
+> rezolvat-o separând sursele.
 
-### 2.4 Două flaguri, ambele implicit OPRITE (North Star #3)
+**`baseline_source` nu se atinge. Zero migrare, confirmat.** Semantica lui
+rămâne neschimbată.
 
-| Flag | Ce pornește |
-|---|---|
-| `champion_shadow_logging_enabled` | scrierea benzii `'champion'` |
-| `champion_guardian_reads_champion_lane_enabled` | gardianul citește banda, nu `prob_*_pred` |
+### 2.4 UN flag, nu două — iar schimbarea de sursă a gardianului NU e flagată
 
-**Separate deliberat.** Primul trebuie să ruleze **singur**, câteva zile, ca
-banda să acumuleze ≥ `MIN_MATCHES_FOR_HEALTH` rânduri scorabile înainte ca
-gardianul să o citească. Activate împreună, gardianul ar raporta
-`insufficient_data` și ar părea defect.
+Varianta cu două flaguri, pe care o propusesem, exista ca să permită o comutare
+graduală a sursei. **E inutilă, și motivul e măsurat**: gardianul are **0
+rânduri** în `champion_health_evaluations` și e dormant (ambele flaguri de
+ADR-037 R4 absente). Nu există „comportament curent" de păstrat în spatele unui
+flag — există o citire dovedit greșită, într-o componentă care n-a rulat
+niciodată.
+
+| Flag | Ce pornește | Implicit |
+|---|---|---|
+| `champion_shadow_logging_enabled` | scrierea benzii `'champion'` | **False** (North Star #3) |
+
+Schimbarea sursei gardianului e **necondiționată**: citește banda, punct. Cât
+banda e goală sau sub `MIN_MATCHES_FOR_HEALTH = 30`, gardianul întoarce
+`insufficient_data` — care e **starea onestă**, nu un defect, și e deja
+comportamentul lui pentru `n` mic (`_classify_champion_health`).
+
+**Trei consecințe bune ale simplificării**, toate verificabile:
+1. Dispare riscul pe care îl semnalasem la varianta cu două flaguri —
+   „activate împreună, gardianul ar părea defect". Nu mai există ordine de
+   activare de respectat.
+2. Dispare ambiguitatea de evidență: fiecare rând care va exista vreodată în
+   `champion_health_evaluations` e scris din bandă. Nu e nevoie de un marcator
+   de sursă fiindcă nu există rânduri vechi de care să-l distingi.
+3. Un gardian activat din greșeală **nu poate** mai raporta sănătatea lui
+   Oracle sub numele campionului. Cu flag, acea cale ar fi rămas vie.
 
 ---
 
@@ -335,17 +372,22 @@ gardianul să o citească. Activate împreună, gardianul ar raporta
    înregistrarea exclusiv apelului `control`).
 5. **Inventarul consumatorilor de `experiment_group`** — orice `.eq("experiment_group", …)`
    și orice filtrare în Python, enumerate și verificate față de valoarea nouă.
-6. **Cele două flaguri sunt independente**: cu primul pornit și al doilea
-   oprit, gardianul citește în continuare sursa veche. Mutație dedicată.
+6. **Gardianul nu mai poate citi `prob_*_pred`** — gardă care cade dacă
+   vechea sursă reapare pe calea lui. Fără flag, singura protecție e structura.
 7. **Gardianul cade pe `insufficient_data`, nu pe o fereastră parțială**, când
    banda are < `MIN_MATCHES_FOR_HEALTH` rânduri. O fereastră incompletă care
    arată ca una completă e defectul reparat la P6.0-c.
+8. **`baseline_source` rămâne în mulțimea permisă de `CHECK`** — gardă care
+   cade dacă vreun cod scrie o valoare pe care baza o va respinge la rulare.
+   Altfel defectul s-ar manifesta abia la prima activare, în producție.
 
 ---
 
-## 6. Verificare cerută înainte de ACTIVARE (fiecare flag separat)
+## 6. Verificare cerută înainte de ACTIVARE
 
-**Pentru `champion_shadow_logging_enabled`:**
+Un singur flag de activat, `champion_shadow_logging_enabled`. Schimbarea de
+sursă a gardianului nu se activează — se livrează, cu efect zero cât gardianul
+e dormant (§1.5).
 
 1. O rulare de noapte cu flagul **oprit**, care confirmă comportament identic:
    zero rânduri cu `experiment_group = 'champion'`.
@@ -358,20 +400,23 @@ gardianul să o citească. Activate împreună, gardianul ar raporta
    nou nu scrie ce credem.
 4. Volumul real măsurat, nu estimat.
 
-**Pentru `champion_guardian_reads_champion_lane_enabled`**, și numai după ce
-banda are ≥ 30 de rânduri scorabile:
+**Separat, la o eventuală activare a ADR-037 R4** (decizie proprie, nu a
+acestui ADR), și numai după ce banda are ≥ 30 de rânduri scorabile:
 
-5. Prima evaluare de sănătate persistată are `baseline_source = 'champion_lane'`
-   și un `n` care corespunde numărului de rânduri din bandă, nu celor 1135 ale
-   ferestrei vechi.
+5. `n_matches_evaluated` al primei evaluări corespunde numărului de rânduri din
+   **bandă**, nu celor 1135 ale ferestrei vechi. Aceea e verificarea care
+   dovedește, dintr-o singură cifră, că atribuirea s-a corectat.
 6. Verdictul se compară explicit cu cel pe care sursa veche l-ar fi dat, pe
    aceeași zi, read-only. **Se așteaptă o diferență** — e corectarea unei
    atribuiri, nu o regresie. Aceeași notă ca la ADR-072 D2.
+7. Până atunci, orice rulare a gardianului trebuie să dea `insufficient_data`
+   **fără să persiste** — `evaluate_champion_health` scrie doar la `n >= 1`.
+   O evaluare persistată pe `n` mic ar fi primul semn că poarta nu ține.
 
-Fiecare `UPDATE model_config` se arată și se confirmă explicit înainte de
-rulare (North Star #6), cu amprenta `md5(data − cheia_nouă)` înainte și după,
-plus `updated_at = now()` — recomandarea D-14, pe care activările anterioare
-au omis-o, lăsând lanțul de amprente rupt.
+`UPDATE model_config` se arată și se confirmă explicit înainte de rulare
+(North Star #6), cu amprenta `md5(data − cheia_nouă)` înainte și după, plus
+`updated_at = now()` — recomandarea D-14, pe care activările anterioare au
+omis-o, lăsând lanțul de amprente rupt.
 
 ---
 
