@@ -22,7 +22,7 @@ Nimic din lista asta nu avansează fără tine. Ordinea e după cât costă amâ
 
 | # | Ce | Stare | Costul amânării |
 |---|---|---|---|
-| **1.0** | 🔴 **`Sabah FC` vs `Sabah Baku`** — același club Flashscore (`fNGcxbyr`), două identități | **TERMEN FERM: înainte de 4 noiembrie** | **Singura intrare din listă cu dată de meci.** `Sabah Baku` are 9 meciuri și lanț ELO până la **1579**; `Sabah FC` are **1 rând, meciul VIITOR Viking – Sabah FC (UCL, 4 nov)**. `normalize_team_name('Sabah FC')` nu se rezolvă → la predicție ELO-ul real e **invizibil**, forma Level DB eșuează. Reparația e tiparul deja executat de două ori (D-13 Faza 1 și Clasa B): alias + backfill pe **1 rând**. Prins **prospectiv** de detectorul ADR-078, la prima lui declanșare. `DE_URMARIT.md` §13. |
+| **1.0** | **`Sabah FC` vs `Sabah Baku`** — același club Flashscore (`fNGcxbyr`), două identități | ✅ **ÎNCHIS 22 oct** (`78667a2`, pe `main`) — verificat 27 oct: `normalize_team_name('Sabah FC')` → `'Sabah Baku'`, **0 rânduri orfane**, lanțul are **11 meciuri** inclusiv cel din 4 nov, 9 cu rezultat. **Rândul a stat marcat „TERMEN FERM" cinci zile după reparare** — l-am purtat mai departe fără să-l verific, exact clasa reproșată la §1.11. Consecința ar fi fost concretă: un reminder programat l-ar fi tratat ca urgent | **Singura intrare din listă cu dată de meci.** `Sabah Baku` are 9 meciuri și lanț ELO până la **1579**; `Sabah FC` are **1 rând, meciul VIITOR Viking – Sabah FC (UCL, 4 nov)**. `normalize_team_name('Sabah FC')` nu se rezolvă → la predicție ELO-ul real e **invizibil**, forma Level DB eșuează. Reparația e tiparul deja executat de două ori (D-13 Faza 1 și Clasa B): alias + backfill pe **1 rând**. Prins **prospectiv** de detectorul ADR-078, la prima lui declanșare. `DE_URMARIT.md` §13. |
 | **1.0bis** | **ADR-081** — migrarea 058 (`provider_call_log.error_body`), apoi merge-ul `81006b0` | **luni 26 oct**, cod gata și testat pe branch | Deblochează **ADR-077** (1.3), oprit din 17 oct fiindcă motivul refuzului SFI nu putea fi citit. Ordinea e obligatorie: **migrare ÎNTÂI** — invers, scrierea în `provider_call_log` s-ar opri tăcut pentru toți providerii. `DE_URMARIT.md` §12. |
 | **1.0ter** | 🔴 **`decision_feed` #13 — expirarea `xgboost_v1/dda4f7f3`** ȚINTEȘTE EXACT motorul din D-15 | `pending`, **TTL 2 noiembrie 08:28 UTC** | **Cuplaj nescris până pe 27 oct, găsit verificând starea deciziilor înainte de a programa urmărirea.** Aprobarea ei duce Challenger-ul în `REJECTED/expired`, iar Faza B antrenează un înlocuitor cu `training_run_id` NOU și **zero** rânduri în `challenger_evaluations` — deci **resetează la n=0 chiar măsurătoarea pe care declanșatorul D-15 o urmărește** (3/3 timp de 10 zile ȘI n ≥ 500). Două obiective care se bat: deblocarea antrenării familiei (ADR-057) contra păstrării artefactului pe care D-15 îl măsoară. Vezi §1.0ter. |
 | **1.1** | **ADR-079** — ciclul de viață al unei decizii T3a (toate trei fețele din §2) | ✅ **ÎNCHIS 21 oct** — ACCEPTED (revizia 2), implementat, pe `main` (`e849088`) | **Cel mai mare risc deschis azi**: o aprobare de expirare se poate executa ca **promovare** de campion, fără ca nimeni să fi aprobat o promovare (§4.1 din ADR). Fereastra e de ordinul a 3 zile. |
@@ -488,6 +488,37 @@ martorul de control există ca să o elimine. Nu se schimbă ce măsori, în tim
 măsurătorii.
 
 ---
+
+### 3.4 Odds API ca sursă de verificare — planul A–G, cu A ✅ FĂCUT
+
+**Consemnat aici pe 27 oct dintr-un motiv care e el însuși o constatare**: planul ăsta exista **doar în promptul unui reminder programat**, în niciun document din repo. Prin `ADR-083`, `BACKLOG.md` e sursă declarată vie — iar un plan care trăiește într-un declanșator e exact tiparul ADR-057, care a costat 14 zile.
+
+**✅ A — CACHE NEGATIV. FĂCUT 27 oct.** Era un defect real, confirmat în cod înainte de reparație:
+
+```
+oracle_api.py:1370   cached = self._cget(cache_key)
+oracle_api.py:1371   if cached is not None: return cached
+oracle_api.py:1385   self._cset(cache_key, {}); return {}     # la eșec total
+```
+
+`{}` nu e `None`, deci `if cached is not None` era **True**: eșecul se întorcea ca **hit valid**, servit cât ține TTL-ul categoriei — `CATEGORY_TTL["odds"] = 4.0` ore. Nu ipotetic: un workflow fără `ODDS_API_KEY` a scris **13 chei goale**.
+
+**Reparația e o distincție, nu o interdicție**: eșecul nu se mai persistă, dar **golul legitim** (providerul a răspuns cu o listă, zero evenimente) se cache-uiește în continuare, pe calea de succes — altfel am înlocuit otrăvirea cu risipă de cotă, exact resursa de protejat. Eșecul rămâne memorat **per-proces** prin `_dead_keys`, durata corectă pentru o eroare tranzitorie; cache-ul persistent nu era.
+
+**Două instanțe în plus, găsite la implementare** (`_fetch_events_odds_api`, liniile 943-944): mecanism identic, severitate mult mai mică (`events` = 0,5h TTL) și neatinse de B. Reparate odată cu prima — a lăsa două instanțe cunoscute ale unui defect pe care tocmai îl repari e cum se plătește mai târziu.
+
+**15 teste** (`tests/test_odds_negative_cache.py`), **5 mutații, toate prinse**. Cea care contează e **M5**: schimbarea semanticii de **citire** (`if cached:` în loc de `if cached is not None:`) — adică „reparația în locul greșit", care ar fi oprit cache-ul golurilor legitime pentru totdeauna. Un test dedicat documentează că `_cget` e **corect** și rămâne neatins.
+
+Calea de predicție **neatinsă**, verificat: `git diff` pe `oracle_engine.py`/`feature_engine.py`/`ml_predictor.py`/`recalibration.py`/`app.py` e GOL, iar `prob_home_win` (`oracle_engine.py:2110`) e `round(ph, 4)` din Poisson — de-vig-ul produce câmpuri `fair_*` separate, deci cotele nu pot schimba o probabilitate servită. `pytest tests/`: **4001 passed, 2 skipped** (3986 + 15, aritmetica se închide exact).
+
+**⏳ RĂMÂN, în ordine:**
+
+- **B — TTL categoria `odds` 4h → 24h.** Aprobat de proprietarul produsului („4 ore e ridicol"). **Acum e sigur de făcut**: fără A, ar fi înmulțit paguba de 6×. Taie ratările de ~6×.
+- **C — `monthly_remaining` ca slot propriu** în `rate_limit_manager`. Contorul **nu trebuie construit**: `x-requests-remaining` e deja parsat pentru `oddsapi`, pe fiecare răspuns. Dar e pus în slotul `daily_remaining`, iar cota e **lunară** — log-ul spune „cota zilnica epuizata" pentru un buget lunar.
+- **D — costul real al `/scores`** (`x-requests-remaining` înainte/după pasul `odds_recent_results`). Dacă e plătit, duplică rezultate pe care Flashscore le dă gratis, cu acoperire mai bună. **După 1 noiembrie** (reset credite): azi 500/500 consumate, deci un plafon nu se poate verifica că funcționează peste un provider deja epuizat.
+- **E — flux propriu + tabelă proprie.** ADR obligatoriu, **același cu §1.11 pct. 7** (`odds_history`, provenanță și semantică). Scoate Odds API de pe calea servirii (North Star #10).
+- **F — alocare pe MARGINE**, nu pe ligă: creditele se cheltuie unde a doua cotă ar putea RĂSTURNA verdictul radarului. Dispersie măsurată: mediană absolută 4,44%, p90 14,58%.
+- **G — eșantion ALEATOR** 30-50 meciuri/lună ≈ 10% din buget. Întrebarea reală nu e „ce preț are meciul X", e „sunt cotele Flashscore de încredere?" — iar pentru bias + dispersie un eșantion aleator **măsoară**, în timp ce o acoperire parțială doar servește prost, și nealeator.
 
 ## 4. TIER 3 — calitatea predicțiilor
 

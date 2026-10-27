@@ -940,8 +940,14 @@ class FootballOracleAPI:
                     "commenceTimeFrom": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "commenceTo": (now + timedelta(days=days_ahead)).strftime("%Y-%m-%dT%H:%M:%SZ")},
         )
-        if data is None: self._dead_keys.add(sport_key); self._cset(cache_key, []); return []
-        if not isinstance(data, list): self._cset(cache_key, []); return []
+        # [REPARAT — cache negativ, a doua si a treia instanta] Aceeasi clasa
+        # ca in `_fetch_odds`: `[]` nu e None, deci un esec se servea ca lista
+        # goala „valida". Mai mica in consecinta (`events` = 0.5h TTL, nu 4h)
+        # si neatinsa de marirea TTL-ului pe `odds` — dar identica in mecanism,
+        # deci reparata odata cu ea. Lista goala LEGITIMA se cache-uieste in
+        # continuare, mai jos, pe calea de succes.
+        if data is None: self._dead_keys.add(sport_key); return []
+        if not isinstance(data, list): return []
         league_name = SPORT_KEY_TO_LEAGUE.get(sport_key, sport_key)
         results: list[dict] = []
         for ev in data:
@@ -1382,7 +1388,24 @@ class FootballOracleAPI:
             data = self._fetch_market(sport_key, "h2h")
         if not isinstance(data, list):
             if data is None: self._dead_keys.add(sport_key)
-            self._cset(cache_key, {}); return {}
+            # [REPARAT — cache negativ] NU se scrie `{}` in cache aici.
+            # `_cget` intoarce orice valoare care nu e None ca hit valid, iar
+            # `{}` nu e None — deci un ESEC devenea un rezultat gol
+            # „legitim", servit cat tine TTL-ul categoriei (`odds` = 4h, si
+            # 24h dupa marirea aprobata). Nu e ipotetic: un workflow fara
+            # `ODDS_API_KEY` a scris 13 chei goale, orbind atatea ligi.
+            #
+            # Golul LEGITIM (API a raspuns cu o lista, zero evenimente
+            # parsate) se cache-uieste in continuare, pe calea de succes de
+            # mai jos. Distinctia e exact „am primit un raspuns valid" vs.
+            # „nu am primit nimic" — si era deja disponibila in cod, doar nu
+            # era folosita.
+            #
+            # Esecul ramane memorat PER-PROCES prin `_dead_keys` (cand `data`
+            # e None), ceea ce e durata corecta pentru o eroare tranzitorie:
+            # se uita la urmatoarea rulare, spre deosebire de cache-ul
+            # persistent care o ducea mai departe ore.
+            return {}
 
         # [ADAUGAT] btts — apel separat, best-effort, complet izolat: dacă
         # piața nu există pe planul curent, eșuează fără să afecteze h2h/
