@@ -536,6 +536,21 @@ Verificat end-to-end pe **date reale de producție**: funcția pură reproduce
 exact rezultatul unei interogări SQL independente, inclusiv ziua dublă din 17
 oct.
 
+**🔴 DECLANȘATORUL POATE FI RESETAT DE O APROBARE DE RUTINĂ (găsit 2026-10-27).**
+`decision_feed` **#13** e o propunere de **expirare** pentru exact
+`xgboost_v1/dda4f7f3`, `pending`, **TTL 2 noiembrie**. Comiterea ei eliberează
+slotul familiei, deci Faza B naște un Challenger nou cu `training_run_id` NOU și
+zero rânduri în `challenger_evaluations` — iar seria pe care declanșatorul o
+numără **repornește de la 0**, fără ca nimeni să fi atins declanșatorul.
+Verdictul oscilează deja măsurabil: 3/3 pe 23 oct, 2/3 pe 25 oct, **1/3 pe 26
+oct** (acuratețe semnificativă, Brier și log-loss nu). Cele două obiective sunt
+amândouă legitime — ADR-057 cere deblocarea antrenării familiei, D-15 cere
+păstrarea artefactului măsurat — deci e o **decizie**, nu un defect. Analiza
+completă, cu tabelul pe ambele propuneri deschise: `BACKLOG.md` §1.0ter.
+**Clasa, mai largă decât cazul**: un declanșator care urmărește o entitate
+ștergibilă are nevoie și de o condiție despre existența ei, altfel se resetează
+tăcut și arată identic cu „n-a atins pragul încă".
+
 ---
 
 ## Reperul extern — cât de bun e Oracle, de fapt (măsurat prima dată 2026-10-14)

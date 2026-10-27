@@ -24,8 +24,9 @@ Nimic din lista asta nu avansează fără tine. Ordinea e după cât costă amâ
 |---|---|---|---|
 | **1.0** | 🔴 **`Sabah FC` vs `Sabah Baku`** — același club Flashscore (`fNGcxbyr`), două identități | **TERMEN FERM: înainte de 4 noiembrie** | **Singura intrare din listă cu dată de meci.** `Sabah Baku` are 9 meciuri și lanț ELO până la **1579**; `Sabah FC` are **1 rând, meciul VIITOR Viking – Sabah FC (UCL, 4 nov)**. `normalize_team_name('Sabah FC')` nu se rezolvă → la predicție ELO-ul real e **invizibil**, forma Level DB eșuează. Reparația e tiparul deja executat de două ori (D-13 Faza 1 și Clasa B): alias + backfill pe **1 rând**. Prins **prospectiv** de detectorul ADR-078, la prima lui declanșare. `DE_URMARIT.md` §13. |
 | **1.0bis** | **ADR-081** — migrarea 058 (`provider_call_log.error_body`), apoi merge-ul `81006b0` | **luni 26 oct**, cod gata și testat pe branch | Deblochează **ADR-077** (1.3), oprit din 17 oct fiindcă motivul refuzului SFI nu putea fi citit. Ordinea e obligatorie: **migrare ÎNTÂI** — invers, scrierea în `provider_call_log` s-ar opri tăcut pentru toți providerii. `DE_URMARIT.md` §12. |
-| **1.1** | **ADR-079** — ciclul de viață al unei decizii T3a (toate trei fețele din §2) | PROPUNERE, cere aprobare | **Cel mai mare risc deschis azi**: o aprobare de expirare se poate executa ca **promovare** de campion, fără ca nimeni să fi aprobat o promovare (§4.1 din ADR). Fereastra e de ordinul a 3 zile. |
-| **1.1bis** | **`decision_feed` #8** — expirarea `blend_v1/174e7e17` | `pending`, TTL 27 oct — **NU se atinge, deliberat** | ⚠️ **Recomandarea mea de pe 20 oct dimineața era GREȘITĂ.** Ținta nu e înțepenită: 2 din 3 metrici semnificative, Δ acuratețe urcă monoton 0,98 → 2,33pp în 4 zile. Se rezolvă singură ~23 oct. `DE_URMARIT.md` §7. |
+| **1.0ter** | 🔴 **`decision_feed` #13 — expirarea `xgboost_v1/dda4f7f3`** ȚINTEȘTE EXACT motorul din D-15 | `pending`, **TTL 2 noiembrie 08:28 UTC** | **Cuplaj nescris până pe 27 oct, găsit verificând starea deciziilor înainte de a programa urmărirea.** Aprobarea ei duce Challenger-ul în `REJECTED/expired`, iar Faza B antrenează un înlocuitor cu `training_run_id` NOU și **zero** rânduri în `challenger_evaluations` — deci **resetează la n=0 chiar măsurătoarea pe care declanșatorul D-15 o urmărește** (3/3 timp de 10 zile ȘI n ≥ 500). Două obiective care se bat: deblocarea antrenării familiei (ADR-057) contra păstrării artefactului pe care D-15 îl măsoară. Vezi §1.0ter. |
+| **1.1** | **ADR-079** — ciclul de viață al unei decizii T3a (toate trei fețele din §2) | ✅ **ÎNCHIS 21 oct** — ACCEPTED (revizia 2), implementat, pe `main` (`e849088`) | **Cel mai mare risc deschis azi**: o aprobare de expirare se poate executa ca **promovare** de campion, fără ca nimeni să fi aprobat o promovare (§4.1 din ADR). Fereastra e de ordinul a 3 zile. |
+| **1.1bis** | **`decision_feed` #8** — expirarea `blend_v1/174e7e17` | ✅ **ÎNCHIS 23 oct** — `withdrawn` de mecanismul ADR-079, exact cum s-a prezis | ⚠️ **Recomandarea mea de pe 20 oct dimineața era GREȘITĂ.** Ținta nu e înțepenită: 2 din 3 metrici semnificative, Δ acuratețe urcă monoton 0,98 → 2,33pp în 4 zile. Se rezolvă singură ~23 oct. `DE_URMARIT.md` §7. |
 | **1.2** | **D-6 — două tabele de backup** | restante de **~30 de zile** peste termenul propriu | Mic, dar una (ADR-069, 72 kB) e singura tabelă din 62 **fără RLS**. Decizia e „se păstrează" / „se șterg"; dacă se păstrează, merită RLS. |
 | **1.3** | **ADR-077** — criteriul de rutare SFI | propunere, recomandarea s-a **inversat** la măsurare | Zero cost acum (criteriul inert nu face rău). Dar ADR-ul stă deschis cu o recomandare greșită scrisă în el. |
 | **1.4** | **ADR-075** — `CHECK` care face imposibilă supersedarea fără motiv | propunere | Mic. Monitorul prinde deja clasa (clasa 9, activă). |
@@ -34,6 +35,36 @@ Nimic din lista asta nu avansează fără tine. Ordinea e după cât costă amâ
 | **1.7** | **F3** — pornirea experimentului de value selection | ~**4 noiembrie** | Nimic nu pornește automat (ADR-002). |
 | **1.8** | **Radarul vedea 15 competiții din 20** | ✅ **ÎNCHIS 21 oct** — fără nicio linie de cod nouă. Vezi §1.8bis | Cauza nu era la cote. Nimic de decis. |
 | **1.9** | **`experiment_registry` contrazicea `model_champions`** | ✅ **ÎNCHIS 21 oct** — `ADR-080` ACCEPTED, implementat și backfill executat. Vezi §1.9bis | Riscul operațional era **ZERO**, verificat pe trei căi. Nimic de decis. |
+
+### 🔴 §1.0ter — 27 oct: aprobarea deciziei #13 ar reseta măsurătoarea D-15. Cuplaj nescris, TTL 2 noiembrie
+
+**Cum a ieșit la iveală**: nu dintr-un simptom, ci verificând starea deciziilor cu TTL înainte de a programa urmărirea benzii ADR-082. Întrebarea era „ce expiră și când"; răspunsul a arătat *pe ce* expiră.
+
+**Cele două propuneri deschise**, ambele `expiry`, ambele pe `baseline_source = 'shadow_control'` (deci cifre corecte, post-ADR-072), ambele cu fereastra de evaluare încheiată 26 oct:
+
+| # | Țintă | n | Acuratețe | Brier | Log-loss | Semnificative |
+|---|---|---:|---|---|---|---:|
+| **#13** | `xgboost_v1/dda4f7f3` | 347 | **true** (+5,19pp) | false | false | **1 / 3** |
+| #12 | `blend_v1/174e7e17` | 500 | false | **true** | **true** | 2 / 3 |
+
+**#13 țintește exact motorul din D-15** — cel care bate Oracle-ul SERVIT cu +5,76pp acuratețe și −0,0242 Brier (n=330, măsurat 26 oct, fără scurgere temporală).
+
+**Cuplajul**: `continuous_learning._process_pair()` rulează Faza B (antrenare nouă) exclusiv când nu există Challenger activ. Comiterea unei expirări eliberează slotul, deci la prima rulare de după se naște un Challenger `xgboost_v1` NOU, cu `training_run_id` nou și **zero** rânduri în `challenger_evaluations` — tiparul deja observat și documentat la activarea ADR-072 (D-1, nota din 14 oct).
+
+Declanșatorul D-15, aprobat explicit pe 26 oct, e **3/3 timp de 10 zile de evaluare consecutive ȘI `n` ≥ 500**. Seria se resetează la orice zi sub 3/3, iar `n` e cel de pe ultima zi. Deci:
+
+> **Aprobarea #13 nu „expiră un Challenger slab" — resetează la n=0 ceasul pe care declanșatorul D-15 îl numără.**
+
+**Ce NU e**: nu e un argument că #13 e greșită. Verdictul a oscilat măsurabil — 3/3 pe 23 oct, 2/3 pe 25 oct, **1/3 pe 26 oct** — și ADR-057 există fiindcă un Challenger blocat în `monitoring` oprește antrenarea întregii familii la nesfârșit, lucru care a costat deja 14 zile în august. Ambele obiective sunt legitime:
+
+- **deblocarea antrenării familiei** (ADR-057) → aprobă expirarea, familia primește un model proaspăt antrenat pe date mai noi;
+- **păstrarea artefactului pe care D-15 îl măsoară** → lasă-o să expire singură; ADR-079 o repropune după răcirea de 168 h, pe la **9 noiembrie**, iar între timp seria poate reporni.
+
+**Ce se pierde și ce nu, dacă se lasă să expire**: nimic din evidență — verdictele din `challenger_evaluations` sunt imuabile și rămân. Se pierde doar slotul de antrenare, încă o săptămână.
+
+**Nu recomand niciuna dintre variante fără ca proprietarul produsului să vadă cuplajul.** Aprobările din Decision Feed sunt actul OMULUI (ADR-002) — niciodată prin SQL în numele lui. Intrarea asta există ca să nu se aprobe #13 crezând că e o curățenie de rutină.
+
+**Lecție de metodă**: un declanșator cablat (D-15, clasa 10 în `check_data_health`) numără o serie pe un `training_run_id`. Nimic nu verifică azi dacă acel `training_run_id` mai există. Clasa e mai largă decât cazul: **un declanșator care urmărește o entitate ștergibilă are nevoie și de o condiție despre existența ei**, altfel se resetează tăcut și arată identic cu „n-a atins pragul încă".
 
 ### ✅ §1.8bis — 21 oct: radarul vedea 15 din 20, iar cauza NU era la cote
 
