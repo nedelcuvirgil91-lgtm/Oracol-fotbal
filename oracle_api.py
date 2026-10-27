@@ -248,10 +248,14 @@ class FootballOracleAPI:
         ("freelf_h2h_", "h2h"),
         ("freelf_lineup_", "lineups"),
         ("odds_", "odds"), ("events_", "odds"),
+        # NU se potriveste cu "odds_" de mai sus: al 5-lea caracter e 'a', nu
+        # '_'. Verificat, fiindca ordinea conteaza — `startswith` ia prima.
+        ("oddsapi_validation", "oddsapi_validation"),
     )
     _PROVIDER_PREFIXES = (
         ("freelf_", "freelivefootball"), ("espn_", "espn"),
         ("odds_", "oddsapi"), ("events_", "oddsapi"),
+        ("oddsapi_validation", "oddsapi"),
         ("standings_", "footballdata"),
     )
 
@@ -534,13 +538,66 @@ class FootballOracleAPI:
         if self._odds_keys_validated:
             return
         self._odds_keys_validated = True
+
+        # [ADAUGAT 2026-10-27] Intrerupator de circuit, nu cache de rezultat.
+        #
+        # Flagul de mai sus e PER-INSTANTA, iar o rulare de noapte creeaza mai
+        # multe `FootballOracleAPI()` (odds_persistence, weather_forecast,
+        # team_health, Challenger Shadow Batch), fiecare cu propriul `/sports`.
+        # Cand cheia e invalida, nimeni nu tinea minte eșecul intre instante:
+        # masurat 418 apeluri HTTP 401 in 8 zile, 30-113 pe zi.
+        #
+        # DISTINCTIA FATA DE DEFECTUL REPARAT IN `_fetch_odds` — conteaza, ca
+        # nimeni sa nu „repare" asta crezand ca e acelasi bug: acolo un esec era
+        # scris in cache si SERVIT CA DATE (`{}`, indistingibil de un gol
+        # legitim). Aici marcajul nu e intors niciodata ca rezultat — decide
+        # exclusiv DACA se mai incearca cererea. Un intrerupator care tine
+        # minte ca a sarit siguranta nu e o minciuna despre tensiune.
+        marcaj = self._cget(self._VALIDATION_MARKER_KEY)
+        if isinstance(marcaj, dict) and marcaj.get("ok") is False:
+            logger.info(
+                "[Validate] sarit — ultima validare a esuat recent (%s). "
+                "Se reia automat dupa expirarea marcajului.",
+                marcaj.get("at", "?"))
+            return
         self._validate_api_keys()
 
+    # Cheia marcajului. Prefix DELIBERAT diferit de "odds_"/"events_", ca sa
+    # cada pe categoria proprie `oddsapi_validation` (TTL 30 min) si sa nu fie
+    # niciodata golit impreuna cu cache-ul de cote.
+    _VALIDATION_MARKER_KEY = "oddsapi_validation_last"
+
     def _validate_api_keys(self) -> None:
+        # [ADAUGAT 2026-10-27, din auditul `ODDS_API_KEY`] Nu trimite o cerere
+        # care nu POATE reusi.
+        #
+        # `get_api_key_param()` intoarce `None` in doua situatii —
+        # `ODDS_API_KEY` absenta din mediu (`keys: []`) sau contorul lunar
+        # partajat ajuns la limita (`_get_active_key`, key_manager.py:216-226).
+        # `requests` OMITE un parametru `None`, deci cererea pleca spre
+        # `/sports` **fara `apiKey`** si primea garantat HTTP 401. Masurat:
+        # 418 astfel de apeluri in 8 zile, 30-113 pe zi.
+        #
+        # `is_available()` raspunde deja exact la intrebarea asta si acopera
+        # ambele cauze. Exista din totdeauna; nimeni nu o intreba aici.
+        if not self._key_manager.is_available("oddsapi"):
+            logger.info(
+                "[Validate] sarit — nicio cheie Odds API utilizabila "
+                "(absenta din mediu sau cota lunara atinsa). Nu se trimite o "
+                "cerere fara apiKey, care ar primi 401 garantat.")
+            return
         data = self._get(f"{ODDS_API_URL}/sports",
                          params={"apiKey": self._key_manager.get_api_key_param("oddsapi"), "all": "true"})
+        acum = datetime.now(timezone.utc).isoformat(timespec="seconds")
         if not isinstance(data, list):
-            logger.warning("[Validate] Could not fetch sport keys."); return
+            logger.warning("[Validate] Could not fetch sport keys.")
+            self._cset(self._VALIDATION_MARKER_KEY, {"ok": False, "at": acum})
+            return
+        # Succesul suprascrie marcajul, deci o cheie reparata se reia imediat,
+        # fara sa aștepte expirarea. `ok: True` NU sare validarea la instanta
+        # urmatoare — altfel `_dead_keys` n-ar mai fi populat, iar cheile moarte
+        # ar fi cerute degeaba. Marcajul suprima DOAR reincercarea dupa esec.
+        self._cset(self._VALIDATION_MARKER_KEY, {"ok": True, "at": acum})
         active = {s["key"] for s in data if not s.get("has_outrights", False)}
         self._active_sport_keys = active
         for league, sk in ODDS_SPORT_KEYS.items():

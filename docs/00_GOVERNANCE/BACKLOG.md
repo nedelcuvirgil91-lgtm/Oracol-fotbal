@@ -511,9 +511,19 @@ oracle_api.py:1385   self._cset(cache_key, {}); return {}     # la eșec total
 
 Calea de predicție **neatinsă**, verificat: `git diff` pe `oracle_engine.py`/`feature_engine.py`/`ml_predictor.py`/`recalibration.py`/`app.py` e GOL, iar `prob_home_win` (`oracle_engine.py:2110`) e `round(ph, 4)` din Poisson — de-vig-ul produce câmpuri `fair_*` separate, deci cotele nu pot schimba o probabilitate servită. `pytest tests/`: **4001 passed, 2 skipped** (3986 + 15, aritmetica se închide exact).
 
+**✅ A2 — GARDĂ DE PRECONDIȚIE + ÎNTRERUPĂTOR DE CIRCUIT. FĂCUT 27 oct**, din auditul cerut la punctul B.
+
+Măsurând dacă B merită făcut, am găsit **418 apeluri HTTP 401** către `/sports` în 8 zile, 30-113 pe zi. Cauza, verificată verigă cu verigă: `get_api_key_param()` întoarce `None` fie când `ODDS_API_KEY` lipsește din mediu (`keys: []`), fie când contorul lunar partajat atinge limita — iar **`requests` omite un parametru `None`**, deci cererea pleca **fără `apiKey`** și primea 401 garantat. Nimic nu ținea minte eșecul între instanțe.
+
+**Nu era o problemă de secrete, era o gardă lipsă**: `key_manager.is_available(provider)` exista din totdeauna, răspunde exact la întrebare și acoperă ambele cauze — doar că `_validate_api_keys` nu o întreba. **Niciun secret atins.** Auditul scris complet: `docs/00_GOVERNANCE/AUDIT_ODDS_API_KEY_2026-10-27.md`.
+
+Plus un **întrerupător de circuit** pentru un 401 real (cheie prezentă, respinsă): se memorează 30 min, în categoria proprie `oddsapi_validation`. **Marcajul nu e servit niciodată ca date** — distincția față de A, unde eșecul ajungea returnat ca rezultat gol „legitim". Absența cheii **nu** scrie marcajul (precondiție, nu eșec), altfel o cheie adăugată între timp ar rămâne neîncercată degeaba.
+
+**19 teste, 7 mutații, toate prinse.** M1 a fost prins inițial de **un singur** test, fiindcă scrierea și citirea erau verificate separat, iar firul dintre ele de nimeni — aceeași clasă cu M5 (`night_sync`) și M16 (ADR-082 Faza 3). Reparat cu două teste end-to-end pe cache partajat între instanțe; M1 e prins acum de două.
+
 **⏳ RĂMÂN, în ordine:**
 
-- **B — TTL categoria `odds` 4h → 24h.** Aprobat de proprietarul produsului („4 ore e ridicol"). **Acum e sigur de făcut**: fără A, ar fi înmulțit paguba de 6×. Taie ratările de ~6×.
+- **B — TTL categoria `odds` 4h → 24h.** Aprobat de proprietarul produsului („4 ore e ridicol"). ⚠️ **NU se face înaintea resetului de 1 noiembrie, și motivul e în nota de la D, care acoperă și B** — am citit-o greșit pe 27 oct și am spus „acum e sigur de făcut", uitându-mă doar la dependența de A: măsurat, în octombrie există **zero apeluri la `/odds`** (toate cele 450 sunt la `/sports`), fiindcă poarta de cotă (`rate_limit_manager.py:164`, `daily_remaining <= 0`) scurt-circuitează `_attach_odds` în amonte. Deci TTL-ul schimbat azi guvernează un cache în care nu intră nimic — **un număr pe care nimic nu l-ar putea confirma**, exact tiparul pe care proiectul îl plătește. După reset, efectul devine măsurabil.
 - **C — `monthly_remaining` ca slot propriu** în `rate_limit_manager`. Contorul **nu trebuie construit**: `x-requests-remaining` e deja parsat pentru `oddsapi`, pe fiecare răspuns. Dar e pus în slotul `daily_remaining`, iar cota e **lunară** — log-ul spune „cota zilnica epuizata" pentru un buget lunar.
 - **D — costul real al `/scores`** (`x-requests-remaining` înainte/după pasul `odds_recent_results`). Dacă e plătit, duplică rezultate pe care Flashscore le dă gratis, cu acoperire mai bună. **După 1 noiembrie** (reset credite): azi 500/500 consumate, deci un plafon nu se poate verifica că funcționează peste un provider deja epuizat.
 - **E — flux propriu + tabelă proprie.** ADR obligatoriu, **același cu §1.11 pct. 7** (`odds_history`, provenanță și semantică). Scoate Odds API de pe calea servirii (North Star #10).

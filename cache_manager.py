@@ -78,6 +78,12 @@ CATEGORY_TTL: dict[str, float] = {
     "api_football_probe": 24.0,  # [ADAUGAT] sondaj discovery /fixtures/statistics - fixture_id + verdict 403/404, nu productie
     "freelf_event_resolution": 720.0,  # [ADAUGAT Sprint 1] FreeLF Event Resolver — event_id per meci încheiat, identificator stabil odată rezolvat (tratat ca team_id, 30 zile)
     "soccerfootballinfo_event_resolution": 720.0,  # [ADAUGAT ADR-041 Faza 1] identic FreeLF — match_id stabil odata rezolvat
+    # [ADAUGAT 2026-10-27] Marcajul ultimei validari de cheie Odds API
+    # (`/sports`). NU e un rezultat cache-uit — e un intrerupator de circuit:
+    # decide DACA se mai incearca, niciodata servit ca date. 30 min = suficient
+    # ca o cheie reparata sa fie reluata repede, destul ca o cheie stricata sa
+    # nu mai produca 113 apeluri intr-o zi (masurat: 418 x HTTP 401 in 8 zile).
+    "oddsapi_validation": 0.5,
     "soccerfootballinfo_day_full": 24.0,  # [ADAUGAT ADR-041 Faza 1] payload brut per zi — evita N apeluri redundante cand se rezolva mai multe meciuri din aceeasi zi (backfill)
     "soccerfootballinfo_match_detail": 720.0,  # [ADAUGAT ADR-041 Faza 1] detaliu complet per meci ÎNCHEIAT — valorile sunt finale, identic ratiunea "teams" (practic permanent, 30 zile)
 }
