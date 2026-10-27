@@ -1,5 +1,24 @@
-"""POC TEMPORAR, STRICT READ-ONLY — relurea campionului promovat pe intrările
-de la servire persistate de ADR-073.
+"""Relurea campionului promovat pe intrările de la servire persistate (ADR-073).
+STRICT READ-ONLY.
+
+CLASA ACESTUI SCRIPT, și de ce NU e un POC (corectat 2026-10-27, după ce
+`tests/test_poc_isolation.py` garda 4 a prins eroarea): l-am numit întâi
+`_poc_replay_champion_temp.py`, iar garda a căzut corect. În proiectul ăsta
+`_poc_*` denumește o clasă precisă — validarea unei surse sau chei EXTERNE noi,
+care n-are voie să atingă baza, și căreia niciun workflow nu-i dă credențiale
+(CLAUDE.md §chei API, aplicat de 5 ori). Scriptul de aici e opusul: o analiză a
+datelor NOASTRE, care fără credențiale nu are ce măsura — clasa
+`scripts/ablation_form_weighting.py` și `scripts/sensitivity_injury_penalty.py`,
+care stau pe `main` cu o gardă dedicată de read-only.
+
+Numele vechi afirma o categorie din care nu face parte. Garda n-a dat un fals
+pozitiv; a prins o eroare de încadrare. Nu se păstrează ca POC temporar și nu
+se șterge după rulare: devine instrumentul cu care se validează banda nouă din
+P6.0-a (replay-ul e martorul contra căruia scriitorul nou trebuie să se
+potrivească).
+
+ÎNTREBAREA (P6, Pasul 2): campionul `blend_v1/8ac89c70`, promovat pe 23 august
+și ÎNGHEȚAT de atunci, mai e mai bun decât Oracle-ul servit AZI?
 
 ÎNTREBAREA (P6, Pasul 2): campionul `blend_v1/8ac89c70`, promovat pe 23 august
 și ÎNGHEȚAT de atunci, mai e mai bun decât Oracle-ul servit AZI?
@@ -56,8 +75,7 @@ dintre cele două nu e în `FEATURE_COLUMNS`, deci nu intră în predicție.
 Verificat, nu presupus — Faza 0 listează cheile folosite efectiv.
 
 ════════════════════════════════════════════════════════════════════════════
-Se șterge după închiderea investigației (tiparul POC-urilor din proiect);
-dovada rămâne în istoricul rulărilor GitHub Actions + raportul de aici.
+Read-only impus, nu promis: `tests/test_replay_champion_readonly.py`.
 ════════════════════════════════════════════════════════════════════════════
 """
 from __future__ import annotations
@@ -147,9 +165,16 @@ def _t_pereche(dif: list[float]) -> float | None:
         return None
     m = sum(dif) / n
     var = sum((x - m) ** 2 for x in dif) / (n - 1)
-    if var <= 0:
+    # `var <= 0` NU e suficient, și asta a fost prins de propria gardă înainte
+    # ca scriptul să ruleze o dată: pe diferențe identice, aritmetica float dă
+    # ~1e-33, nu exact 0, deci poarta nu se declanșa și `t` ieșea 1,02e16 —
+    # certitudine absolută dintr-un eșantion care n-are nicio dispersie de
+    # măsurat. Pragul e RELATIV la scara diferențelor, nu absolut: un prag fix
+    # ar respinge un eșantion real cu diferențe mici, legitime.
+    sd = math.sqrt(var)
+    if sd <= 1e-12 * max(1.0, abs(m)):
         return None
-    return m / math.sqrt(var / n)
+    return m / (sd / math.sqrt(n))
 
 
 def _metrici(pereche: list[tuple]) -> dict:

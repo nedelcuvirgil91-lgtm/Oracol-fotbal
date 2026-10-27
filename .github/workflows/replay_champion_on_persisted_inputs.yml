@@ -1,0 +1,72 @@
+name: Football Oracle — Relure campion pe intrările persistate (read-only)
+
+# P6, Pasul 2. Întrebarea: campionul `blend_v1/8ac89c70`, promovat pe 23 august
+# și ÎNGHEȚAT de atunci, mai e mai bun decât Oracle-ul servit AZI?
+#
+# Nu se poate răspunde din date existente — rândurile lui de shadow se opresc pe
+# 23 august, cu 13 minute înainte de promovare (394+394, zero în 65 de zile:
+# `log_shadow_for_active_challenger` nu loghează decât pentru un Challenger
+# ACTIV, iar un model promovat nu mai e Challenger). Dar ADR-073 persistă, din
+# 15 octombrie, intrările exacte de la servire, deci predicția se reconstruiește.
+#
+# STRICT READ-ONLY, impus de `tests/test_replay_champion_readonly.py`: zero
+# apeluri de scriere, zero importuri de module care scriu, două tabele citite cu
+# coloane numite explicit, niciun `select("*")`.
+#
+# FAZA 1 E O POARTĂ: relurea trebuie să reproducă probabilitățile logate LIVE
+# ale Challengerului activ `blend_v1/174e7e17`, pe aceleași meciuri. Nu le
+# reproduce ⇒ Faza 2 NU se execută și jobul iese cu cod 2. Fără martor de
+# control, orice cifră despre campion ar fi un artefact al metodei.
+#
+# DOAR `workflow_dispatch`, fără cron — instrument de decizie punctuală.
+#
+# Cifrele produse NU declanșează nimic. Promovarea, retragerea sau cablarea unei
+# căi de servire rămân decizii umane explicite (ADR-002).
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: replay-champion-on-persisted-inputs
+  cancel-in-progress: false
+
+jobs:
+  relure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Replay champion (read-only)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        # `set -o pipefail` obligatoriu: shell-ul implicit e `bash -e` FĂRĂ
+        # pipefail, deci într-un pipeline `python … | tee` codul de ieșire ar fi
+        # al lui `tee`, iar o poartă căzută (cod 2) ar apărea verde — exact
+        # semnalul pentru care rularea asta există.
+        run: |
+          set -o pipefail
+          mkdir -p logs
+          python scripts/replay_champion_on_persisted_inputs.py \
+            2>&1 | tee "logs/replay_champion_$(date -u +%Y%m%dT%H%M%SZ).log"
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: replay-champion-${{ github.run_id }}
+          path: logs/
+          if-no-files-found: error
+          retention-days: 30
