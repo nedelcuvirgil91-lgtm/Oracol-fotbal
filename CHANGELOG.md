@@ -2,6 +2,23 @@
 
 Toate schimbările notabile ale proiectului sunt documentate aici.
 
+> ## 🔴 AVERTISMENT DE VECHIME (măsurat 2026-10-27)
+>
+> **Propoziția de mai sus nu mai e adevărată.** Ultima intrare e din **29 august**; de atunci pe `main` s-au produs peste 100 de commit-uri și **~25 de ADR-uri** (058 → 082), niciunul consemnat aici.
+>
+> **Două afirmații din acest fișier sunt FALSE azi:**
+>
+> 1. Titlul secțiunii **„Learning Core: Orchestrare (ADR-037, Stage R3) — cod complet, NEMERGE-UIT pe `main`"**. Verificat în cod, nu în documente: `git show origin/main:learning_core/continuous_learning.py` conține `_phase_d_champion_health` și `is_champion_guardian_enabled`, iar `champion_guardian.py` și `rollback_service.py` sunt amândouă pe `main`. **R3 e merge-uit.** Ce rămâne neexecutat e *activarea* (R4). Aceeași propoziție falsă a stat și în `CLAUDE.md` ~3 luni, corectată în aceeași zi.
+> 2. Eticheta **`[Nelansat]`** pe toate cele cinci secțiuni de sus. Patru din cinci descriu lucruri **aflate în producție** de luni de zile.
+>
+> **Unde e evidența reală**, în ordinea în care se citește: fișierele **`docs/00_GOVERNANCE/ADR-0NN-*.md`** (fiecare schimbare de contract are ADR-ul ei, numerotat, cu `Status`) · **`docs/00_GOVERNANCE/BACKLOG.md`** (ce e de făcut și de decis) · **`docs/00_GOVERNANCE/DE_URMARIT.md`** (ce așteptăm) · **`git log`** (ce s-a întâmplat, cu dovada). Istoricul rulărilor GitHub Actions rămâne dovada durabilă pentru POC-urile șterse, cum cere regula de chei API din `CLAUDE.md`.
+>
+> **De ce nu reconstitui aici cele două luni**: ar însemna să rescriu din memoria conversațiilor un jurnal care pretinde să fie cronologie exactă. Un changelog reconstituit din amintiri e mai periculos decât unul care își declară vechimea — fiindcă un changelog e citit **exact** pentru datele lui. Secțiunile de mai jos rămân valabile ca istoric al perioadei pe care o acoperă.
+>
+> **Decizie deschisă**, aceeași clasă ca `ARCHITECTURE_STATE.md` (`BACKLOG.md` §1.11): se reînvie cu un mecanism, sau se retrogradează formal la istoric, cu ADR-urile ca jurnal declarat.
+>
+> **[CORECTAT în aceeași zi, înainte de commit]** Scrisesem aici „disciplina ADR a funcționat 82 de numere la rând fără o singură lipsă". **Fals**, și n-o verificasem. Măsurat: **76 de fișiere ADR din 82 de numere**; lipsesc **007, 008, 009, 027, 029, 032**. Nu știu dacă acele decizii n-au fost scrise niciodată sau trăiesc doar în istoricul conversațiilor de proiect (`CLAUDE.md` notează explicit că unele documente de arhitectură sunt în acea situație) — **și nu deduc**. E un gol de trasabilitate propriu, din aceeași clasă cu documentele declarate Frozen care nu există fizic în repo. Concluzia rămâne (disciplina ADR a ținut, jurnalul paralel a cedat), dar cu 76/82, nu cu 82/82.
+
 ## [Nelansat] — Migrare cheie API-Football: `API_FOOTBALL_KEY_NEW` devine cheia activă
 
 **Context**: cheia API-Football originală (`API_FOOTBALL_KEY`) a fost suspendată/blocată de provider — nu mai poate fi folosită. Migrarea a urmat integral procesul aprobat explicit (§„Regulile pentru chei API și provideri externi", `CLAUDE.md`), cu excepția documentată a pasului 6 (cheie veche ca fallback), inaplicabil prin forța faptelor.

@@ -4,6 +4,33 @@
 
 **Regulă de întreținere**: orice sesiune care merge-uiește cod, schimbă un flag de producție, sau închide un ADR **actualizează acest document în același commit** (sau imediat următor). Un „Architecture State Report" (verificat, la începutul fiecărei etape noi — vezi convenția de mai jos) citește de aici; dacă acest document e stale, se corectează întâi el, nu se lucrează pe baza memoriei conversației.
 
+---
+
+## 🔴 AVERTISMENT DE VECHIME — CITEȘTE ÎNAINTE DE ORICE ALTCEVA (măsurat 2026-10-27)
+
+**Regula de întreținere de mai sus a fost încălcată sistematic. Secțiunile §0-§3 descriu starea din 6 SEPTEMBRIE și NU se citesc ca stare curentă.**
+
+Măsurat, nu estimat, pe 27 octombrie:
+
+| Ce | Cifra |
+|---|---:|
+| Ultima atingere a acestui document | **2026-09-06** |
+| Commit-uri pe `main` de atunci | **143** |
+| ADR-uri pe care documentul NU le cunoaște | **25** (058 → 082; cunoaște până la 057) |
+| Migrări neconsemnate | **3** (056, 057, 058) |
+| Activări de flag neconsemnate | **4** |
+| `main` HEAD afirmat la §1 | `fb188a7` — **4 august**, commit care nici nu mai există local |
+
+**Cele 4 activări de flag lipsă**, fiecare cu amprentă `md5` documentată în `CLAUDE.md`: `challenger_baseline_from_control_enabled` (ADR-072, 14 oct) · `serving_inputs_persistence_enabled` (ADR-073, 15 oct) · `flashscore_team_identity_capture_enabled` (ADR-078, 19 oct) · `champion_shadow_logging_enabled` (ADR-082, 27 oct).
+
+**Ce se citește în loc**, în ordinea asta: **`BACKLOG.md`** (ce e de făcut și de decis, ordonat după cost real) · **`DE_URMARIT.md`** (ce așteptăm, când, și ce înseamnă dacă nu vine) · **`CLAUDE.md`** (starea pe componente, cu istoricul corecțiilor). `CLAUDE.md` a fost corectat în aceeași zi: trimitea aici ca la „sursa de adevăr **actualizată**".
+
+**De ce nu reconstitui aici cele 51 de zile**: ar însemna să rescriu 143 de commit-uri din memoria conversațiilor, adică exact „pe baza memoriei conversației", pe care propria regulă de întreținere o interzice. Un document care *pare* actual și e reconstituit din amintiri e mai periculos decât unul care își declară vechimea. Singura secțiune remăsurată pe producție azi e **§4bis**.
+
+**Decizia deschisă, nu luată tăcut** (`BACKLOG.md` §1.11): se reînvie documentul — cu un mecanism care îl ține viu, fiindcă regula scrisă singură a eșuat de 25 de ADR-uri — sau se retrogradează formal la **instantaneu istoric**, iar `BACKLOG`/`DE_URMARIT` devin sursa declarată. **Două surse de adevăr declarate, una moartă, e mai rău decât una** — aceeași lecție pentru care `BACKLOG.md` nu are dată în nume.
+
+---
+
 **Ultima verificare completă**: 2026-07-28, prin inspecție directă `git`/Supabase (nu presupusă) — vezi metodologia §5. **Corecție majoră față de versiunea anterioară (verificată 2026-07-22)**: acel document afirma că tot lanțul ADR-037 R1-R3 era „doar pe branch, nemerge-uit" — verificat direct azi (`git show origin/main:learning_core/champion_guardian.py` etc.), **merge-ul s-a produs între timp**. Secțiunile 1-5 de mai jos sunt rescrise complet pe baza stării reale de azi, nu corectate punctual.
 
 **Actualizare punctuală, 2026-08-03**: `main` HEAD = `30c20da` (§1) — fast-forward al `claude/continua-faza-1-adr5-o52jat` după aprobarea Pasului 1 din EPIC „ML Activation & Oracle Evolution" (`docs/00_GOVERNANCE/ML_ACTIVATION_IMPLEMENTATION_PLAN.md`). De acum, fiecare pas aprobat din acel plan merge-uiește imediat pe `main` (vezi nota din §1) — acest document se actualizează la fiecare astfel de merge, nu doar la etapele majore ADR-037/Flashscore de mai jos.
@@ -126,6 +153,27 @@ ADR-049 e acum **complet implementat**, de la antrenare până la servire live. 
 | `recalibration_log` | **0** | neschimbat — `auto_recalibration_enabled` absent → `False`, deliberat (vezi §7) |
 
 **Consecință nouă, care NU exista în iulie și e azi cel mai important fapt din această secțiune**: ambele sloturi de Challenger sunt ocupate de Challengeri blocați în verdict `monitoring`, iar `continuous_learning._process_pair()` rulează Faza B (antrenare nouă) **exclusiv** când nu există Challenger activ. Rezultat: **zero antrenări noi de la 24 august**, deși s-au acumulat 470 de meciuri terminate noi (prag: 30). Campionul care servește azi e antrenat pe 4 august, pe 49.983 de meciuri, față de 58.145 disponibile. Nu e defect — e absența unei reguli de ieșire din `monitoring`, prezisă în scris de **ADR-057** (PROPUS, 2026-08-17, neimplementat, nereferit de niciun alt document până azi). Vezi `BACKLOG_2026-09-06.md` §0.0.
+
+### 4bis. REMĂSURAT 2026-10-27 — singura secțiune din acest document care reflectă producția de azi
+
+Tabelul §4 de mai sus e din **6 septembrie** și se citește ca istoric. Valorile reale, interogate live:
+
+| Tabelă | 6 sept | **27 oct** | Ce s-a schimbat |
+|---|---:|---:|---|
+| `model_champions` — total | 5 | **5** | Neschimbat ca număr, dar cele 4 rânduri `gate_validation_test` au fost **supersedate** pe 26 oct (NU șterse — `model_champions_guard` interzice `DELETE`) |
+| `model_champions` — **activi** | (nedeclarat) | **1** | `blend_v1/8ac89c70 (all)`, singurul. Înainte, 3 rânduri de test apăreau tot ca „activi" |
+| `challengers` activi | 3 | **3** | Dar nu aceiași: `xgboost_v1/dda4f7f3` (14 oct) a înlocuit `6e7265c5`, expirat pe 13 oct |
+| `decision_feed` | 1 | **11** (3 `pending`) | Calea de aprobare umană e acum exercitată de rutină, nu o dată. ADR-079 a produs **3 retrageri** între 23-25 oct |
+| `challenger_evaluations` | 56 | **145** | Verdicte zilnice; cele de după 14 oct purtând `baseline_source` (ADR-072) |
+| `shadow_predictions` | 3675 | **8921** | Include banda nouă `experiment_group = 'champion'` (ADR-082, 179 de rânduri) |
+| `champion_health_evaluations` | 0 | **0** | Neschimbat — `champion_guardian_enabled` **absent** din `model_config` → `False` |
+| `recalibration_log` | 0 | **0** | Neschimbat — `auto_recalibration_enabled` absent → `False`, deliberat |
+
+**Flaguri în `model_config`, măsurate exhaustiv** (`jsonb_each`, cheile cu `enabled`): **23, toate `true`**. Cele care contează pentru ADR-037 rămân **absente, deci `False`**: `champion_guardian_enabled`, `champion_guardian_proposals_enabled`, `auto_recalibration_enabled`. Deci afirmația §4 („Faza D nu rulează") e **încă adevărată** — e singurul punct al secțiunii care a rezistat 51 de zile.
+
+**Blocajul descris la finalul §4 s-a rezolvat, dar nu cum prezicea documentul.** Spunea „zero antrenări noi de la 24 august … absența unei reguli de ieșire din `monitoring`, ADR-057 PROPUS, neimplementat". ADR-057 a fost **implementat și activat** (`challenger_expiry_proposals_enabled = true`), iar mecanismul a produs expirări reale — `xgboost_v1/6e7265c5` pe 13 oct, cu înlocuitorul `dda4f7f3` antrenat pe 14 oct. **Dar tiparul s-a repetat**: ambele sloturi sunt din nou ocupate de Challengeri în `monitoring`, cu propuneri de expirare `pending` (#12, #13, TTL 2 noiembrie). Diferența e că acum există un mecanism care le semnalează, nu 14 zile de tăcere.
+
+**Precondiția ADR-037 R4 s-a SCHIMBAT pe 27 oct, prin ADR-082** — relevant pentru §5 și pentru `ADR037_DEPLOYMENT_PLAN.md`: Guardianul citea predicția **Oracle** în loc de a campionului; acum citește o bandă proprie. Deci „există un campion real de evaluat" (îndeplinită din 23 august) nu mai e suficient — banda are **179 de rânduri, 0 scorabile**, iar pragul `MIN_MATCHES_FOR_HEALTH = 30` e verificabil pe **~30 octombrie**.
 
 ## 5. Ce mai rămâne (nu „înainte de merge" — merge-ul s-a închis; rămâne activarea graduală)
 

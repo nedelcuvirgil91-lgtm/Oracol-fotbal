@@ -62,6 +62,23 @@ Tot lanțul R1-R3 (branch `claude/continua-faza-1-adr5-o52jat` → `main`), înt
 - **Criteriu de rollback**: revert simplu de commit pe `main` (codul nu a scris nimic nou în stare canonică — Faza D nu a rulat).
 
 ### Etapa 2 — `champion_guardian_enabled=true`
+
+> **🔴 [ACTUALIZAT 2026-10-27 — PRECONDIȚIA S-A SCHIMBAT, prin ADR-082. Citește asta înainte de a executa Etapa 2.]**
+>
+> Până pe 27 octombrie, planul ăsta și `ARCHITECTURE_STATE.md` §5 spuneau că singurul blocaj rămas e **decizia** de a porni flagul — condiția „există un campion real de evaluat" fiind îndeplinită din 23 august. **Nu mai e adevărat.**
+>
+> **ADR-082** a descoperit și reparat faptul că Guardianul evalua campionul pe predicția **Oracle** (rândul `control`), nu pe predicția campionului — deci măsura sănătatea altcuiva. Sursa lui e acum o bandă proprie, `shadow_predictions` cu `experiment_group = 'champion'`, scrisă de `learning_core/champion_shadow.py` sub flagul `champion_shadow_logging_enabled` (**activ din 27 oct**).
+>
+> **Consecința operațională**: „suficiente meciuri scorabile" din *Efect așteptat* de mai jos nu se mai referă la `match_history`, ci la **banda campionului**. Măsurat pe 27 oct: **179 de rânduri, 0 scorabile** — toate sunt meciuri viitoare, fiindcă batch-ul ADR-056 loghează pentru fereastra descoperită de 7 zile. Pragul e `MIN_MATCHES_FOR_HEALTH = 30` (`learning_core/champion_guardian.py:53`).
+>
+> **Deci ADR-082 a făcut R4 temporar MAI blocat decât era** — un troc acceptat conștient: Guardianul nu mai poate da un verdict, dar verdictul pe care l-ar fi dat ar fi fost despre motorul greșit. Un `insufficient_data` onest bate un `healthy` despre altcineva.
+>
+> **Când e deblocat**: aritmetica pe zi de disputare a benzii (27 oct 4 · 28 oct 16 · 29 oct 11 · 30 oct 14 · 31 oct 60 · 1 nov 51) trece 30 cumulat la **29 octombrie**, deci pragul e verificabil pe **~30 octombrie**, după ce rularea de noapte aduce rezultatele. Interogarea de verificare e în `BACKLOG.md`, punctul de urmărire al benzii.
+>
+> **Verificarea „`decision_feed` — rămâne gol" de mai jos NU mai e valabilă ca formulare** și ar da un fals pozitiv: feed-ul are azi **11 rânduri** (propuneri de expirare de Challenger, ADR-057 + ADR-079), niciuna legată de rollback. Criteriul corect, care rămâne valid: **nicio decizie cu `decision_kind`/tip `rollback_candidate`**.
+>
+> V1-V5 și verificările §6.1-§6.3 ale ADR-082 (divergență **0,000e+00** pe 179/179 rânduri) sunt în `docs/00_GOVERNANCE/ADR-082_VERIFICARI_PRE_ACTIVARE.md`. Ele validează **banda**, nu Guardianul — activarea Guardianului rămâne în afara scopului ADR-082 §3, deci o decizie explicită separată a proprietarului produsului.
+
 - **Acțiune**: `UPDATE model_config SET data = jsonb_set(data, '{champion_guardian_enabled}', 'true')` — SQL exact arătat, confirmat explicit, per disciplina `supabase-safety`.
 - **Efect așteptat**: Faza D începe să ruleze — pentru fiecare `(family, league)` din Model Registry, `champion_guardian.evaluate_champion_health()` e apelat, rezultatul jurnalizat într-un `automation_run`, iar dacă există campion activ cu suficiente meciuri scorabile, `champion_health_evaluations` capătă rânduri noi. **Zero propunere de rollback** (al doilea flag încă `False`).
 - **Verificare post-activare** (zilnic, câteva zile):
@@ -101,4 +118,4 @@ Tot lanțul R1-R3 (branch `claude/continua-faza-1-adr5-o52jat` → `main`), înt
 - `docs/00_GOVERNANCE/ADR-037-learning-core-rollback-and-champion-guardian.md` — arhitectura autoritară.
 - `docs/04_LEARNING_CORE/CHAMPION_GUARDIAN_IMPLEMENTATION.md` §17 — starea de implementare R3 completă.
 - `docs/04_LEARNING_CORE/R3_IMPLEMENTATION_CHECKLIST.md` — istoricul execuției, reconciliat.
-- `docs/00_GOVERNANCE/ARCHITECTURE_STATE.md` — sursa unică de adevăr, actualizată la fiecare etapă majoră.
+- `docs/00_GOVERNANCE/ARCHITECTURE_STATE.md` — **[CORECTAT 2026-10-27]** descris aici ca „sursa unică de adevăr, actualizată la fiecare etapă majoră". Măsurat: atins ultima dată **6 septembrie**, cu **143 de commit-uri** și **25 de ADR-uri** pe `main` de atunci. Documentul își declară acum vechimea în antet; §4bis e singura parte remăsurată. Pentru starea curentă se citesc **`BACKLOG.md`** și **`DE_URMARIT.md`**.

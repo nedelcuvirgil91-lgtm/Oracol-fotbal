@@ -2017,3 +2017,76 @@ următoarea clasă adăugată.
   dovadă că a fost măsurată, nu presupusă.
 - Dacă blend-ul atinge 3/3 stabil **înaintea** XGBoost → se compară direct cei
   doi, nu fiecare contra Oracle.
+
+---
+
+## 16. ⏳ **~30 OCTOMBRIE** — banda campionului atinge pragul de 30, iar ADR-037 R4 se deblochează (2026-10-27)
+
+**Ce aștept**: ca `shadow_predictions` cu `experiment_group = 'champion'` să aibă
+cel puțin **30 de rânduri scorabile** (meci jucat + `actual_result` sosit).
+
+**De ce contează**: `MIN_MATCHES_FOR_HEALTH = 30`
+(`learning_core/champion_guardian.py:53`). Sub prag, Champion Guardian întoarce
+`insufficient_data` și **nu poate** recomanda rollback — dovedit structural prin
+verificarea V4 a ADR-082, nu presupus. Peste prag, activarea Guardianului
+(ADR-037 R4) devine o decizie reală, nu una blocată de lipsa datelor.
+
+**Interogarea, read-only:**
+
+```sql
+SELECT count(*) FILTER (WHERE mh.actual_result IN ('H','D','A')) AS scorabile,
+       count(*) AS rinduri
+FROM shadow_predictions sp
+LEFT JOIN match_history mh ON mh.fixture_id = sp.fixture_id
+WHERE sp.experiment_group = 'champion';
+```
+
+**Starea la pornirea urmăririi (27 oct)**: **179 de rânduri, 0 scorabile.** Nu e
+un defect — toate 179 sunt meciuri **viitoare**, fiindcă batch-ul ADR-056
+loghează pentru fereastra descoperită de 7 zile. Banda s-a născut pe 27 oct,
+odată cu activarea flagului.
+
+**Când se atinge, calculat pe seria reală, nu pe o medie**:
+
+| Zi de disputare | Meciuri în bandă | Cumulat |
+|---|---:|---:|
+| 27 oct | 4 | 4 |
+| 28 oct | 16 | 20 |
+| **29 oct** | 11 | **31** ← trece pragul |
+| 30 oct | 14 | 45 |
+| 31 oct | 60 | 105 |
+| 1 nov | 51 | 156 |
+| 2 nov | 14 | 170 |
+| 3 nov | 9 | 179 |
+
+Deci pragul e trecut **prin disputare** pe 29 octombrie și devine
+**verificabil** pe **30 octombrie**, după ce rularea de noapte aduce
+rezultatele.
+
+**Capcană de metodă, plătită deja de două ori**: estimarea mea inițială a fost
+„~22-24 de meciuri pe zi, deci ~2 zile" — o **medie** peste o fereastră care
+conține un weekend, citită ca **rată**. Distribuția reală variază de la 4 la 60
+pe zi. Aceeași eroare ca „27/zi" la decizia #8 (`DE_URMARIT` §7, infirmată pe
+22 oct). **Seria pe zile, nu media.**
+
+### Ce NU se face la atingerea pragului
+
+**Nu se activează Guardianul.** ADR-082 §3 pune explicit Champion Guardian,
+Rollback Engine și calea de servire în afara scopului. Activarea e Etapa 2 din
+`docs/DEPLOYMENT/ADR037_DEPLOYMENT_PLAN.md` — o decizie explicită a
+proprietarului produsului, cu SQL arătat și confirmat (North Star #6). Nimic nu
+pornește automat (ADR-002).
+
+### Ce ar schimba așteptarea
+
+- **Banda nu crește deloc după 30 oct** → flagul s-a oprit sau scrierea
+  eșuează. Semnalul e `prediction_time`, nu numărul de rânduri: scrierea e
+  `upsert`, deci rescrie aceeași fereastră (capcana consemnată la activarea
+  ADR-073).
+- **Rândurile cresc dar `scorabile` rămâne 0** → nu e banda, e sincronizarea
+  rezultatelor. Se verifică întâi `match_history.actual_result` pe meciurile
+  din 27-29 oct, altfel se caută defectul în locul greșit.
+- **Apar rânduri `champion` fără pereche `control`** → V2 a cedat. Perechea e
+  invariantul pe care se sprijină întreaga comparație; un orfan înseamnă că
+  rândul `champion` s-a scris și al doilea a eșuat, deci banda nu mai e
+  comparabilă cu nimic.

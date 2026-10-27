@@ -33,8 +33,53 @@ Nimic din lista asta nu avansează fără tine. Ordinea e după cât costă amâ
 | **1.5** | **D-14** — tabelă de audit `model_config` | decizie cerută | **Recomandarea mea: NU acum.** Reparația aplicată (skill + gardă) recuperează ce s-a pierdut. |
 | **1.6** | **Punctul 5** — clasa de duplicate `openfootball` | ✅ **ÎNCHIS 21 oct** — măsurat, reparat în cod, cele 30 supersedate (run `39545095203`). Vezi §1.6bis | Golul era **exact 30 de rânduri**, nu 1893. Cauza: un defect de 1 linie în `normalize_team_name`. Nimic de decis. |
 | **1.7** | **F3** — pornirea experimentului de value selection | ~**4 noiembrie** | Nimic nu pornește automat (ADR-002). |
+| **1.11** | **`ARCHITECTURE_STATE.md`** — se reînvie cu un mecanism, sau se retrogradează formal la instantaneu istoric | decizie cerută; documentul își declară acum vechimea, §4bis remăsurat | Documentul pe care `CLAUDE.md` îl declara „sursa de adevăr **actualizată**" e atins ultima dată pe **6 sept**: 143 de commit-uri, **25 de ADR-uri** și **4 activări de flag** neconsemnate, deși propria lui regulă de întreținere le cerea în același commit. **Recomandarea mea: varianta 2 (istoric)** — două surse de adevăr declarate, una moartă, e mai rău decât una. Vezi §1.11. |
 | **1.8** | **Radarul vedea 15 competiții din 20** | ✅ **ÎNCHIS 21 oct** — fără nicio linie de cod nouă. Vezi §1.8bis | Cauza nu era la cote. Nimic de decis. |
 | **1.9** | **`experiment_registry` contrazicea `model_champions`** | ✅ **ÎNCHIS 21 oct** — `ADR-080` ACCEPTED, implementat și backfill executat. Vezi §1.9bis | Riscul operațional era **ZERO**, verificat pe trei căi. Nimic de decis. |
+
+### 🔴 §1.11 — 27 oct: documentul pe care îl declarăm „sursa de adevăr" e mort de 51 de zile
+
+**Nu e o lipsă de actualizare, e o regulă încălcată de 25 de ADR-uri.**
+`ARCHITECTURE_STATE.md` își declară în antet propria regulă de întreținere:
+
+> „orice sesiune care merge-uiește cod, schimbă un flag de producție, sau închide un ADR **actualizează acest document în același commit** (sau imediat următor) … dacă acest document e stale, se corectează întâi el, nu se lucrează pe baza memoriei conversației."
+
+Iar `CLAUDE.md` trimitea la el ca la „**sursa de adevăr actualizată** … ce rulează live, ce e activat prin flag-uri".
+
+**Măsurat pe 27 oct, nu estimat:**
+
+| Ce | Cifra |
+|---|---:|
+| Ultima atingere | **2026-09-06** (51 de zile) |
+| Commit-uri pe `main` de atunci | **143** |
+| ADR-uri necunoscute documentului | **25** (058 → 082) |
+| Migrări neconsemnate | **3** (056, 057, 058) |
+| Activări de flag neconsemnate | **4** |
+| `main` HEAD afirmat la §1 | `fb188a7` (4 august), commit care nici nu mai există local |
+
+**Cele 4 activări lipsă** sunt exact cele cu cea mai mare consecință, fiecare cu amprentă `md5` documentată în `CLAUDE.md`: ADR-072 (baseline proaspăt la promovare, 14 oct) · ADR-073 (persistarea intrărilor de servire, 15 oct) · ADR-078 (captarea identității Flashscore, 19 oct) · ADR-082 (banda campionului, 27 oct).
+
+**Cum a ieșit la iveală**: din întrebarea proprietarului produsului „mai ai documente de actualizat?" — nu dintr-un simptom. Niciun test nu putea prinde asta; nicio rulare nu eșuează din cauza ei.
+
+**Ce s-a făcut acum, și ce NU s-a făcut deliberat:**
+
+- ✅ Documentul își **declară vechimea** într-un antet cu cifre măsurate, deci nu mai poate fi citit ca actual.
+- ✅ **§4bis** — singura secțiune remăsurată pe producție (campioni activi, decizii, evaluări, banda, cele 23 de flaguri `enabled`, toate `true`).
+- ✅ `CLAUDE.md` și `ADR037_DEPLOYMENT_PLAN.md` nu-l mai citează ca sursă actuală.
+- ❌ **NU am reconstituit cele 51 de zile.** Ar fi însemnat să rescriu 143 de commit-uri din memoria conversațiilor — adică exact „pe baza memoriei conversației", lucrul pe care propria lui regulă îl interzice. **Un document care pare actual dar e reconstituit din amintiri e mai periculos decât unul care își declară vechimea.**
+
+**DECIZIA CERUTĂ, două variante care nu se pot amâna la infinit:**
+
+1. **Se reînvie** — dar nu prin „de acum îl actualizăm", fiindcă aceea era deja regula scrisă și a eșuat de 25 de ADR-uri la rând. Ar cere un **mecanism**: o gardă care cade dacă un ADR nou e adăugat în `docs/00_GOVERNANCE/` fără ca documentul să fie atins în același commit. E ieftin (AST nu e nici necesar — e o comparație de liste de fișiere în `git diff`), dar e cod nou și o regulă nouă de proces.
+2. **Se retrogradează formal la instantaneu istoric**, iar `BACKLOG.md` + `DE_URMARIT.md` devin sursele declarate. Costă zero și descrie ce se întâmplă deja în practică de 51 de zile.
+
+**Recomandarea mea: varianta 2.** Motivul nu e lenea, e lecția pentru care documentul ăsta n-are dată în nume: **două surse de adevăr declarate, una moartă, e mai rău decât una.** Un al treilea document care trebuie întreținut manual e aceeași clasă de problemă ca un al doilea backlog. Dacă apare vreodată nevoia reală a unui instantaneu complet al arhitecturii, se generează atunci, din cod și din bază — nu se ține în viață prin disciplină.
+
+**Ce ar schimba decizia**: dacă apare un al doilea consumator al documentului (un onboarding, un audit extern, o sesiune care chiar citește de aici înainte de a lucra), atunci varianta 1 se justifică — un document cu cititori merită un mecanism. Azi singurul lui cititor declarat era `CLAUDE.md`, care tocmai a fost corectat.
+
+**Aceeași verificare a atins și `CHANGELOG.md`** (ultima intrare **29 august**, ~2 luni): conținea **două afirmații false** — titlul „ADR-037 Stage R3 … NEMERGE-UIT pe `main`" (R3 **e** pe `main`, verificat în cod) și eticheta `[Nelansat]` pe patru secțiuni aflate în producție de luni. Tratat identic: antet de vechime cu cifre, trimitere la ADR-uri + `BACKLOG` + `git log` ca evidență reală, **fără** reconstituirea celor două luni din memorie. Intră în aceeași decizie 1/2 de mai sus.
+
+**Gol propriu, găsit verificând o afirmație de-a mea care s-a dovedit FALSĂ**: scrisesem în `CHANGELOG` că „disciplina ADR a funcționat 82 de numere la rând fără o singură lipsă". Măsurat: **76 de fișiere din 82 de numere** — lipsesc **007, 008, 009, 027, 029, 032**. Nu deduc dacă acele decizii n-au fost scrise niciodată sau trăiesc doar în istoricul conversațiilor de proiect (`CLAUDE.md` notează explicit că unele documente de arhitectură sunt în acea situație). **Nemăsurat mai departe, deliberat** — e o întrebare proprie, nu un apendice la curățenia de documentație, și e din aceeași clasă cu golul deja consemnat al documentelor declarate Frozen care nu există fizic în repo. **Lecția**: tocmai scriam un antet despre documente care mint și era pe punctul să pun în el o cifră neverificată.
 
 ### 🔴 §1.0ter — 27 oct: aprobarea deciziei #13 ar reseta măsurătoarea D-15. Cuplaj nescris, TTL 2 noiembrie
 

@@ -10,17 +10,20 @@ Disclaimer de proiect (nu al acestui document): instrument de analiză statistic
 
 ## Current Implementation Status — Learning Core
 
-**Sursa de adevăr actualizată e `docs/00_GOVERNANCE/ARCHITECTURE_STATE.md`** (branch vs. `main`, ce rulează live, ce e activat prin flag-uri) — secțiunea de mai jos e un rezumat, nu duplică detaliile.
+**[CORECTAT 2026-10-27 — trimiterea de mai jos era FALSĂ, și e genul de eroare pe care documentul ăsta îl reproșează altora.]** Textul spunea „sursa de adevăr **actualizată** e `ARCHITECTURE_STATE.md`". Măsurat: acel document a fost atins ultima dată pe **6 septembrie**, iar pe `main` s-au produs de atunci **143 de commit-uri**, **25 de ADR-uri** (058-082), **3 migrări** (056, 057, 058) și **4 activări de flag** — niciuna consemnată în el, deși propria lui „Regulă de întreținere" o cere în același commit. Deci nu e doar nesincronizat: e **documentul pe care îl declarăm sursă de adevăr, mort de 51 de zile**.
+
+Sursele efectiv vii sunt, în ordinea de citire: **`docs/00_GOVERNANCE/BACKLOG.md`** (ce e de făcut și de decis), **`docs/00_GOVERNANCE/DE_URMARIT.md`** (ce așteptăm și când), și acest document. `ARCHITECTURE_STATE.md` rămâne util ca **instantaneu istoric al stării din 6 septembrie** și pentru §4bis (starea canonică și flagurile, remăsurate 27 oct) — niciodată ca răspuns la „ce rulează azi". Decizia de a-l reînvia sau de a-l retrograda formal la istoric e deschisă: `BACKLOG.md` §1.11.
 
 ✔ Model Registry · LearningAlgorithm interface · XGBoost Adapter · ProductionChampion Adapter · Training Runner · CLI `train.py`
 ✔ Challenger Runner + Challenger FSM (ADR-016) · Promotion Engine (`promotion_service.py`) · Champion Manager (`model_champions`, doi scriitori: Promotion + Rollback) · Continuous Learning / Daily Scheduler integration (ADR-030, `continuous_learning.yml`)
 ✔ **Rollback Engine** (ADR-037, R1) — append-only, CAS-guarded
 ✔ **Champion Guardian** (ADR-037, R2) — evaluator read-only al sănătății campionului activ
-✔ **Orchestrare Learning Core** (ADR-037, R3, R3.0-R3.7) — Faza D + execuție rollback cu țintă înghețată (Execution Contract) — **cod complet, testat, NEMERGE-UIT pe `main`** (vezi `docs/DEPLOYMENT/ADR037_DEPLOYMENT_PLAN.md` pentru planul de activare)
+✔ **Orchestrare Learning Core** (ADR-037, R3, R3.0-R3.7) — Faza D + execuție rollback cu țintă înghețată (Execution Contract). **[CORECTAT 2026-10-27 — rândul ăsta a spus „cod complet, testat, NEMERGE-UIT pe `main`" timp de ~3 luni, și era FALS.]** Verificat în cod, nu în documente: `git show origin/main:learning_core/continuous_learning.py` conține `_phase_d_champion_health` (×2) și `is_champion_guardian_enabled` (×4), iar `champion_guardian.py` și `rollback_service.py` sunt amândouă pe `main`. Mai mult, `ADR037_DEPLOYMENT_PLAN.md` îl contrazicea **din 28 iulie** („Etapa 1 — merge pe `main` — s-a produs între timp, verificat direct"), în chiar documentul pe care rândul ăsta îl cita ca referință. Ce rămâne neexecutat e **activarea** (R4), nu merge-ul.
+✔ **Banda de servire a campionului + atribuirea Guardianului** (ADR-082, 27 oct) — Guardianul evalua campionul pe predicția **Oracle**, nu pe a campionului; acum citește o bandă proprie (`experiment_group = 'champion'`). Flag `champion_shadow_logging_enabled` **activ**, V1-V5 documentate înaintea activării, §6.1-§6.3 verificate pe producție cu **divergență 0,000e+00 pe 179/179 rânduri**. `prob_home_win` are în continuare exact un scriitor.
 
 Not Implemented
 - Auto-promovare/auto-rollback fără om în buclă (contrazice ADR-002; cere ADR dedicat de risc)
-- Activarea ADR-037 în producție (R4 — separată deliberat de merge, vezi planul de deployment)
+- **Activarea ADR-037 R4** (Champion Guardian în producție) — separată deliberat de merge. **Precondiția s-a SCHIMBAT pe 27 oct, prin ADR-082**: nu mai e „există un campion real" (îndeplinită din 23 august), ci „banda campionului are ≥ 30 de rânduri scorabile" (`MIN_MATCHES_FOR_HEALTH`), fiindcă Guardianul citește acum din bandă. Măsurat: banda are 179 de rânduri, **0 scorabile** (toate meciuri viitoare); pragul e verificabil pe **~30 octombrie**. Vezi planul de deployment.
 
 ## ⏳ DECIZII ÎN AȘTEPTARE — de adus în discuție ACTIV, nu de așteptat să fie întrebate
 
