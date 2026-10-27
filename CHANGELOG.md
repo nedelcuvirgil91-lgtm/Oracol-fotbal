@@ -1,10 +1,12 @@
-# Changelog
+# Changelog — INSTANTANEU ISTORIC (până la 29 august 2026)
 
-Toate schimbările notabile ale proiectului sunt documentate aici.
-
-> ## 🔴 AVERTISMENT DE VECHIME (măsurat 2026-10-27)
+> ## ⚠️ STARE: **ISTORIC** — retras formal prin **ADR-083** (2026-10-27)
 >
-> **Propoziția de mai sus nu mai e adevărată.** Ultima intrare e din **29 august**; de atunci pe `main` s-au produs peste 100 de commit-uri și **~25 de ADR-uri** (058 → 082), niciunul consemnat aici.
+> **Jurnalul declarat al schimbărilor proiectului e acum seria de ADR-uri** (`docs/00_GOVERNANCE/ADR-0NN-*.md`, fiecare cu `Status` și dată) **plus `git log`**. Acest fișier acoperă perioada **până la 29 august 2026** și se citește exclusiv ca istoric al ei.
+>
+> **De ce**: un jurnal paralel, întreținut manual, e tocmai ce a cedat — în timp ce disciplina ADR a ținut. Diagnosticul general e în ADR-083 §1.1: o regulă de proces fără mecanism nu se aplică singură. **Nu se șterge și nu se rescrie retroactiv** (North Star #9).
+>
+> Textul de mai jos spunea „toate schimbările notabile ale proiectului sunt documentate aici". Nu mai e adevărat din 29 august: de atunci pe `main` s-au produs peste 100 de commit-uri și **~25 de ADR-uri** (058 → 082), niciunul consemnat aici.
 >
 > **Două afirmații din acest fișier sunt FALSE azi:**
 >
@@ -15,7 +17,7 @@ Toate schimbările notabile ale proiectului sunt documentate aici.
 >
 > **De ce nu reconstitui aici cele două luni**: ar însemna să rescriu din memoria conversațiilor un jurnal care pretinde să fie cronologie exactă. Un changelog reconstituit din amintiri e mai periculos decât unul care își declară vechimea — fiindcă un changelog e citit **exact** pentru datele lui. Secțiunile de mai jos rămân valabile ca istoric al perioadei pe care o acoperă.
 >
-> **Decizie deschisă**, aceeași clasă ca `ARCHITECTURE_STATE.md` (`BACKLOG.md` §1.11): se reînvie cu un mecanism, sau se retrogradează formal la istoric, cu ADR-urile ca jurnal declarat.
+> **✅ DECIZIE LUATĂ 2026-10-27 — `ADR-083`**, aceeași cu cea pentru `ARCHITECTURE_STATE.md`: retrogradare formală la istoric, cu ADR-urile + `git log` ca jurnal declarat. Alternativa (reînviere cu o gardă automată) a fost analizată și respinsă — `ADR-083` §4.
 >
 > **[CORECTAT în aceeași zi, înainte de commit]** Scrisesem aici „disciplina ADR a funcționat 82 de numere la rând fără o singură lipsă". **Fals**, și n-o verificasem. Măsurat: **76 de fișiere ADR din 82 de numere**; lipsesc **007, 008, 009, 027, 029, 032**. Nu știu dacă acele decizii n-au fost scrise niciodată sau trăiesc doar în istoricul conversațiilor de proiect (`CLAUDE.md` notează explicit că unele documente de arhitectură sunt în acea situație) — **și nu deduc**. E un gol de trasabilitate propriu, din aceeași clasă cu documentele declarate Frozen care nu există fizic în repo. Concluzia rămâne (disciplina ADR a ținut, jurnalul paralel a cedat), dar cu 76/82, nu cu 82/82.
 

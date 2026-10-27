@@ -106,6 +106,8 @@ Nu există ca task separat — execuția Fazei C a fost proiectată de la încep
 
 ### R3.6 — Închidere (documentație, reconciliată)
 - **Descriere**: `CHANGELOG.md` (secțiune R3 completă R3.1-R3.7); actualizare `CHAMPION_GUARDIAN_IMPLEMENTATION.md`; **acest fișier**, reconciliat cu execuția reală; document nou `docs/DEPLOYMENT/ADR037_DEPLOYMENT_PLAN.md` (manual de lansare: ce se merge-uiește, ce flag-uri există, ordinea de activare, verificări post-activare, criterii de rollback); document nou `docs/00_GOVERNANCE/ARCHITECTURE_STATE.md` (sursă unică de adevăr, actualizată permanent). NU se ating ADR-037, documente Frozen.
+
+> **[NOTĂ 2026-10-27]** „actualizată permanent" descrie **intenția de la R3.8**, nu ce s-a întâmplat. Documentul a fost atins ultima dată pe 6 septembrie (143 de commit-uri și 25 de ADR-uri mai târziu) și e **ISTORIC** din 27 oct, prin `ADR-083`. La fel `CHANGELOG.md`. Rândul rămâne ca atare — e evidența a ce s-a livrat atunci, nu o afirmație despre azi.
 - **Fișiere**: `CHANGELOG.md`, `docs/04_LEARNING_CORE/CHAMPION_GUARDIAN_IMPLEMENTATION.md`, `docs/04_LEARNING_CORE/R3_IMPLEMENTATION_CHECKLIST.md` (acest fișier), `docs/DEPLOYMENT/ADR037_DEPLOYMENT_PLAN.md` (nou), `docs/00_GOVERNANCE/ARCHITECTURE_STATE.md` (nou).
 - **Dependențe**: R3.5, R3.7.
 - **Status real**: ✅ DONE — commit `7e0d380`.

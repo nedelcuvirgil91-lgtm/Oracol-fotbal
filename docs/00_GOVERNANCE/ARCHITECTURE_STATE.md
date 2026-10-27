@@ -1,6 +1,16 @@
-# ARCHITECTURE_STATE.md — Sursa unică de adevăr a stării proiectului
+# ARCHITECTURE_STATE.md — INSTANTANEU ISTORIC (6 septembrie 2026)
 
-**Tip**: document viu, actualizat la fiecare etapă majoră (merge, activare de flag, închidere de ADR) — NU un ADR, NU o specificație înghețată. Scopul lui: să răspundă instant, fără să refacem o analiză, la întrebările „ce e implementat, ce e pe `main`, ce e doar pe branch, ce rulează live, ce e activat prin flag-uri, ce mai lipsește înainte de merge".
+> ## ⚠️ STARE: **ISTORIC** — retras formal prin **ADR-083** (2026-10-27)
+>
+> **Acest document NU răspunde la „ce rulează azi".** E un instantaneu al stării din **6 septembrie 2026**, păstrat ca dovadă a acelei date. Singura excepție e **§4bis**, remăsurată pe producție pe 27 octombrie și datată explicit.
+>
+> **Pentru starea curentă se citesc, în ordinea asta**: **`CLAUDE.md`** (starea pe componente, regulile, golurile) · **`docs/00_GOVERNANCE/BACKLOG.md`** (ce e de făcut și de decis) · **`docs/00_GOVERNANCE/DE_URMARIT.md`** (ce așteptăm și când).
+>
+> **De ce a fost retras**: documentul se declara „viu" și cerea, în propriul antet, actualizare în același commit cu orice merge, activare de flag sau închidere de ADR. Regula a fost încălcată de **25 de ADR-uri la rând** (058 → 082), cu **143 de commit-uri**, **3 migrări** și **4 activări de flag** neconsemnate. Diagnosticul, scris în ADR-083 §1.1: **o regulă de proces fără mecanism nu se aplică singură**, oricât de bine e scrisă — un document întreținut prin disciplină e un indicator care nu poate fi roșu, aceeași clasă cu `coverage_percent` fix la 100%.
+>
+> **Nu se șterge și nu se rescrie retroactiv** (North Star #9). Cifrele și analizele de mai jos erau corecte la data lor și rămân utile exact ca atare.
+
+**Tip ORIGINAL, păstrat ca atare** (nu mai e în vigoare — vezi caseta de mai sus): document viu, actualizat la fiecare etapă majoră (merge, activare de flag, închidere de ADR) — NU un ADR, NU o specificație înghețată. Scopul lui: să răspundă instant, fără să refacem o analiză, la întrebările „ce e implementat, ce e pe `main`, ce e doar pe branch, ce rulează live, ce e activat prin flag-uri, ce mai lipsește înainte de merge".
 
 **Regulă de întreținere**: orice sesiune care merge-uiește cod, schimbă un flag de producție, sau închide un ADR **actualizează acest document în același commit** (sau imediat următor). Un „Architecture State Report" (verificat, la începutul fiecărei etape noi — vezi convenția de mai jos) citește de aici; dacă acest document e stale, se corectează întâi el, nu se lucrează pe baza memoriei conversației.
 
@@ -27,7 +37,7 @@ Măsurat, nu estimat, pe 27 octombrie:
 
 **De ce nu reconstitui aici cele 51 de zile**: ar însemna să rescriu 143 de commit-uri din memoria conversațiilor, adică exact „pe baza memoriei conversației", pe care propria regulă de întreținere o interzice. Un document care *pare* actual și e reconstituit din amintiri e mai periculos decât unul care își declară vechimea. Singura secțiune remăsurată pe producție azi e **§4bis**.
 
-**Decizia deschisă, nu luată tăcut** (`BACKLOG.md` §1.11): se reînvie documentul — cu un mecanism care îl ține viu, fiindcă regula scrisă singură a eșuat de 25 de ADR-uri — sau se retrogradează formal la **instantaneu istoric**, iar `BACKLOG`/`DE_URMARIT` devin sursa declarată. **Două surse de adevăr declarate, una moartă, e mai rău decât una** — aceeași lecție pentru care `BACKLOG.md` nu are dată în nume.
+**✅ DECIZIE LUATĂ 2026-10-27 — `ADR-083`, varianta „retrogradare la istoric".** Cele două variante pe masă erau: (1) reînvierea documentului cu o **gardă** care cade dacă un ADR nou apare fără ca el să fie atins în același commit; (2) retrogradarea formală la instantaneu istoric. **S-a ales (2)**, iar motivul nu e costul: garda ar fi impus ca documentul să fie *atins*, nu ca el să fie *corect* — adică exact genul de actualizare formală care arată ca întreținere fără să fie. Argumentul decisiv e empiric: munca reală migrase deja singură în `BACKLOG.md` + `DE_URMARIT.md`, timp de 51 de zile. **Două surse de adevăr declarate, una moartă, e mai rău decât una** — aceeași lecție pentru care `BACKLOG.md` nu are dată în nume. Analiza completă, inclusiv alternativa respinsă: `ADR-083` §4.
 
 ---
 

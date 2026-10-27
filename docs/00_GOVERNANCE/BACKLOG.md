@@ -33,7 +33,7 @@ Nimic din lista asta nu avansează fără tine. Ordinea e după cât costă amâ
 | **1.5** | **D-14** — tabelă de audit `model_config` | decizie cerută | **Recomandarea mea: NU acum.** Reparația aplicată (skill + gardă) recuperează ce s-a pierdut. |
 | **1.6** | **Punctul 5** — clasa de duplicate `openfootball` | ✅ **ÎNCHIS 21 oct** — măsurat, reparat în cod, cele 30 supersedate (run `39545095203`). Vezi §1.6bis | Golul era **exact 30 de rânduri**, nu 1893. Cauza: un defect de 1 linie în `normalize_team_name`. Nimic de decis. |
 | **1.7** | **F3** — pornirea experimentului de value selection | ~**4 noiembrie** | Nimic nu pornește automat (ADR-002). |
-| **1.11** | **`ARCHITECTURE_STATE.md`** — se reînvie cu un mecanism, sau se retrogradează formal la instantaneu istoric | decizie cerută; documentul își declară acum vechimea, §4bis remăsurat | Documentul pe care `CLAUDE.md` îl declara „sursa de adevăr **actualizată**" e atins ultima dată pe **6 sept**: 143 de commit-uri, **25 de ADR-uri** și **4 activări de flag** neconsemnate, deși propria lui regulă de întreținere le cerea în același commit. **Recomandarea mea: varianta 2 (istoric)** — două surse de adevăr declarate, una moartă, e mai rău decât una. Vezi §1.11. |
+| **1.11** | **`ARCHITECTURE_STATE.md`** + **`CHANGELOG.md`** — se reînvie cu un mecanism, sau se retrogradează formal la instantaneu istoric | ✅ **ÎNCHIS 27 oct** — `ADR-083` ACCEPTED, varianta „istoric" aplicată. Vezi §1.11 | Documentul pe care `CLAUDE.md` îl declara „sursa de adevăr **actualizată**" e atins ultima dată pe **6 sept**: 143 de commit-uri, **25 de ADR-uri** și **4 activări de flag** neconsemnate, deși propria lui regulă de întreținere le cerea în același commit. **Recomandarea mea: varianta 2 (istoric)** — două surse de adevăr declarate, una moartă, e mai rău decât una. Vezi §1.11. |
 | **1.8** | **Radarul vedea 15 competiții din 20** | ✅ **ÎNCHIS 21 oct** — fără nicio linie de cod nouă. Vezi §1.8bis | Cauza nu era la cote. Nimic de decis. |
 | **1.9** | **`experiment_registry` contrazicea `model_champions`** | ✅ **ÎNCHIS 21 oct** — `ADR-080` ACCEPTED, implementat și backfill executat. Vezi §1.9bis | Riscul operațional era **ZERO**, verificat pe trei căi. Nimic de decis. |
 
@@ -67,6 +67,18 @@ Iar `CLAUDE.md` trimitea la el ca la „**sursa de adevăr actualizată** … ce
 - ✅ **§4bis** — singura secțiune remăsurată pe producție (campioni activi, decizii, evaluări, banda, cele 23 de flaguri `enabled`, toate `true`).
 - ✅ `CLAUDE.md` și `ADR037_DEPLOYMENT_PLAN.md` nu-l mai citează ca sursă actuală.
 - ❌ **NU am reconstituit cele 51 de zile.** Ar fi însemnat să rescriu 143 de commit-uri din memoria conversațiilor — adică exact „pe baza memoriei conversației", lucrul pe care propria lui regulă îl interzice. **Un document care pare actual dar e reconstituit din amintiri e mai periculos decât unul care își declară vechimea.**
+
+> **✅ DECIZIE LUATĂ 2026-10-27, aprobată explicit — varianta 2, formalizată prin `ADR-083` (ACCEPTED).**
+>
+> Ambele documente sunt acum **ISTORIC**, cu antet propriu care o declară; sursele VII declarate devin `CLAUDE.md` + `BACKLOG.md` + `DE_URMARIT.md`, iar jurnalul schimbărilor devine seria de ADR-uri + `git log`.
+>
+> **ADR-ul nu era o formalitate, și merită spus de ce**: retrogradarea mută o **responsabilitate** (cine răspunde la „ce rulează azi"), iar `FROZEN_REGISTRY.md` §Change Policy numește explicit „responsabilitățile componentelor" ca motivație validă. Fără ADR, ar fi fost exact o **editare tăcută** a unui contract de guvernanță — North Star #5. Și, practic: fără el, cineva care găsește `ARCHITECTURE_STATE.md` în trei luni nu poate distinge „abandonat" de „retras deliberat", iar a presupune e chiar cum s-a ajuns aici.
+>
+> **Partea generalizabilă, care valorează mai mult decât cele două retrogradări** (`ADR-083` §2.1): trei stări declarate în antet — VIU / ISTORIC / FROZEN; trecerea VIU → ISTORIC cere ADR; un document istoric nu se șterge (North Star #9); și **niciun document nu se declară VIU fără un mecanism care îl ține viu** — o regulă scrisă în antet nu e un mecanism, ci un indicator care nu poate fi roșu, aceeași clasă cu `coverage_percent` fix la 100% și cu `night_sync` verde prin construcție.
+>
+> **Alternativa respinsă, și motivul real** (`ADR-083` §4): o gardă care cade dacă un ADR nou apare fără ca documentul să fie atins în același commit. Ieftină tehnic, dar ar fi impus ca documentul să fie *atins*, nu ca el să fie *corect* — adică actualizare formală care arată ca întreținere fără să fie.
+
+**Textul de mai jos e analiza care a dus la decizie**, păstrată ca atare.
 
 **DECIZIA CERUTĂ, două variante care nu se pot amâna la infinit:**
 

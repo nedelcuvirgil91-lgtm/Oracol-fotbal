@@ -12,7 +12,17 @@ Disclaimer de proiect (nu al acestui document): instrument de analiză statistic
 
 **[CORECTAT 2026-10-27 — trimiterea de mai jos era FALSĂ, și e genul de eroare pe care documentul ăsta îl reproșează altora.]** Textul spunea „sursa de adevăr **actualizată** e `ARCHITECTURE_STATE.md`". Măsurat: acel document a fost atins ultima dată pe **6 septembrie**, iar pe `main` s-au produs de atunci **143 de commit-uri**, **25 de ADR-uri** (058-082), **3 migrări** (056, 057, 058) și **4 activări de flag** — niciuna consemnată în el, deși propria lui „Regulă de întreținere" o cere în același commit. Deci nu e doar nesincronizat: e **documentul pe care îl declarăm sursă de adevăr, mort de 51 de zile**.
 
-Sursele efectiv vii sunt, în ordinea de citire: **`docs/00_GOVERNANCE/BACKLOG.md`** (ce e de făcut și de decis), **`docs/00_GOVERNANCE/DE_URMARIT.md`** (ce așteptăm și când), și acest document. `ARCHITECTURE_STATE.md` rămâne util ca **instantaneu istoric al stării din 6 septembrie** și pentru §4bis (starea canonică și flagurile, remăsurate 27 oct) — niciodată ca răspuns la „ce rulează azi". Decizia de a-l reînvia sau de a-l retrograda formal la istoric e deschisă: `BACKLOG.md` §1.11.
+**✅ REZOLVAT ÎN ACEEAȘI ZI — `ADR-083` (ACCEPTED, 2026-10-27).** `ARCHITECTURE_STATE.md` și `CHANGELOG.md` sunt **retrase formal la starea ISTORIC**, cu antet propriu care o declară. Nu se șterg și nu se rescriu retroactiv (North Star #9) — un document istoric rămâne dovada stării de la data lui.
+
+**Sursele VII declarate ale proiectului, în ordinea de citire:**
+
+1. **acest document** (`CLAUDE.md`) — starea pe componente, regulile, golurile cunoscute;
+2. **`docs/00_GOVERNANCE/BACKLOG.md`** — ce e de făcut și ce decizii te așteaptă;
+3. **`docs/00_GOVERNANCE/DE_URMARIT.md`** — ce așteptăm, când, și ce înseamnă dacă nu vine.
+
+**Jurnalul declarat al schimbărilor e seria de ADR-uri** (`docs/00_GOVERNANCE/ADR-0NN-*.md`) **plus `git log`** — nu un changelog întreținut manual în paralel.
+
+**Regula generală pe care ADR-083 o stabilește, și care se aplică de acum oricărui document de guvernanță**: trei stări declarate în antet — **VIU** / **ISTORIC** / **FROZEN**; trecerea VIU → ISTORIC cere un ADR (mută o responsabilitate, deci North Star #5); un document istoric nu se șterge; și — partea care contează — **niciun document nu se declară VIU fără un mecanism care îl ține viu.** O regulă de proces scrisă în antet **nu** e un mecanism: asta e exact ce a eșuat de 25 de ADR-uri la rând. Cele trei surse de mai sus se califică fiindcă se actualizează ca efect al muncii înseși, nu dintr-o obligație separată.
 
 ✔ Model Registry · LearningAlgorithm interface · XGBoost Adapter · ProductionChampion Adapter · Training Runner · CLI `train.py`
 ✔ Challenger Runner + Challenger FSM (ADR-016) · Promotion Engine (`promotion_service.py`) · Champion Manager (`model_champions`, doi scriitori: Promotion + Rollback) · Continuous Learning / Daily Scheduler integration (ADR-030, `continuous_learning.yml`)
