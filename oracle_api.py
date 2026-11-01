@@ -311,9 +311,69 @@ class FootballOracleAPI:
         for prefix, name in self._PROVIDER_HOST_MAP:
             if url.startswith(prefix):
                 rest = url[len(prefix):].lstrip("/")
-                endpoint = rest.split("?")[0].split("/")[0] or "root"
-                return name, endpoint
+                return name, self._eticheta_endpoint(rest)
         return "unknown", "unknown"
+
+    @staticmethod
+    def _eticheta_endpoint(rest: str) -> str:
+        """Eticheta care ajunge în `provider_call_log.endpoint` și în cheia de
+        identitate a lui `provider_metrics`.
+
+        REGULA VECHE era `rest.split("?")[0].split("/")[0]` — PRIMUL segment.
+        Două defecte măsurate pe producție (2026-11-01), în direcții OPUSE:
+
+        1. **Colapsa endpoint-uri distincte.** Odds API are patru căi —
+           `/sports`, `/sports/{key}/events`, `/sports/{key}/scores`,
+           `/sports/{key}/odds` — iar toate se logau ca `sports`. Un singur
+           rând, `oddsapi|sports`, cu 5301 apeluri și 2630 de erori (49,6%),
+           din care era IMPOSIBIL de spus dacă erorile sunt la validare sau la
+           cote. A costat o concluzie reală: „zero apeluri la `/odds` în
+           octombrie" era un artefact al etichetei, nu un fapt — martorul
+           independent (prefixele din `api_cache`) arăta `odds_*` scris în
+           aceeași zi.
+        2. **Băga variabile în etichetă.** ESPN e `{slug}/scoreboard`, deci
+           primul segment e IDENTIFICATORUL DE LIGĂ. Măsurat: 14 din cele 31
+           de rânduri ale lui `provider_metrics` erau slug-uri (`fifa.world`,
+           `ger.1`, `eng.1`, …), nu endpoint-uri.
+
+        REGULA NOUĂ: **ultimul segment, cu primul pus în față doar când sunt
+        cel puțin trei.** Verificată pe TOATE formele de cale construite
+        efectiv în acest fișier, nu pe un tipar presupus:
+
+            sports                        → sports              (neschimbat)
+            sports/{key}/odds             → sports/odds         (NOU: distinct)
+            sports/{key}/events           → sports/events       (NOU: distinct)
+            sports/{key}/scores           → sports/scores       (NOU: distinct)
+            {slug}/scoreboard             → scoreboard          (slug ELIMINAT)
+            competitions/{comp}/standings → competitions/standings
+            matches                       → matches             (neschimbat)
+            eventslast.php etc.           → eventslast.php      (neschimbat)
+            current.json / forecast.json  → neschimbat
+            {path}  (FreeLF)              → neschimbat (valorile reale măsurate
+                                            sunt literale, un singur segment)
+
+        Pe niciuna dintre ele regula nouă nu introduce un segment variabil în
+        etichetă — exact defectul 2, pe care nu avem voie să-l mutăm.
+
+        COSTUL ACCEPTAT, explicit: `endpoint` e parte din cheia de identitate a
+        lui `provider_metrics` (`supabase_client.record_provider_call`), deci
+        istoricul se FRAGMENTEAZĂ — rândurile vechi își păstrează cumulatul
+        all-time, iar cele noi pornesc de la zero. Verificat că nu rupe nimic
+        funcțional: `provider_health` agregă pe TOATE endpoint-urile unui
+        provider (docstring-ul lui, „cel mai recent, pe toate endpoint-urile"),
+        iar `provider_metrics` are 31 de rânduri — plafonul PostgREST de 1000
+        din `get_provider_metrics()` rămâne departe.
+
+        `soccerfootballinfo` NU trece prin aici (are scriitor propriu, cu
+        etichete care păstrează slash-ul final) — neatins.
+
+        Funcție PURĂ și statică, deci testabilă fără rețea și fără Supabase."""
+        segmente = [s for s in rest.split("?")[0].split("/") if s]
+        if not segmente:
+            return "root"
+        if len(segmente) >= 3:
+            return f"{segmente[0]}/{segmente[-1]}"
+        return segmente[-1]
 
     def _record_metric(self, url: str, success: bool, latency_ms: float,
                         status_code: int | None = None, exc: Exception | None = None) -> None:
