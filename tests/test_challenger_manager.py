@@ -329,3 +329,28 @@ def test_module_has_single_known_importer():
                     offenders.append(str(path.relative_to(root)))
 
     assert offenders == [], f"challenger_manager e importat de un scriitor neasteptat: {offenders}"
+
+
+def test_ADR084_tabela_FSM_neatinsa_si_fara_self_loop():
+    """[ADR-084 Etapa 0] Remediul ales a fost (a): garda de idempotență stă in
+    `continuous_learning._handle_candidate_for_promotion`, NU in tabela FSM.
+
+    Afirmatia asta trаieste aici, si nu langa testele handlerului, fiindca garda
+    `test_module_has_single_known_importer` (de mai sus) permite importul
+    `challenger_manager` doar din cinci module Learning Core si din acest fisier
+    de test. Prima versiune a `tests/test_candidate_promotion_idempotent.py` il
+    importa direct si a fost prinsa — corect.
+
+    Doua proprietati, amandoua parti din decizia (a):
+      · `SUCCEEDED` NU se contine pe sine — adaugarea lui ar fi remediul (b),
+        respins fiindca ar schimba contractul FSM din ADR-016;
+      · NICIO stare nu e self-loop — `transition()` nu a devenit idempotenta
+        global, care ar fi fost remediul (c), respins ca prea larg (ar fi permis
+        si `REJECTED -> REJECTED`).
+    """
+    assert cm.ALLOWED_TRANSITIONS["SUCCEEDED"] == {"PROMOTED", "REJECTED"}
+    for stare, permise in cm.ALLOWED_TRANSITIONS.items():
+        assert stare not in permise, (
+            f"{stare} a devenit self-loop in ALLOWED_TRANSITIONS — remediul (a) "
+            f"interzice exact asta; garda de idempotenta aparține handlerului"
+        )
