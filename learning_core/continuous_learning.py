@@ -315,7 +315,13 @@ def _phase_a_monitor_existing(family: str, league: str, target_key: str, summary
     training_run_id = active["training_run_id"] if active else None
 
     if verdict == "candidate_for_promotion" and training_run_id:
-        _handle_candidate_for_promotion(run_id, training_run_id, target_key, result, summary)
+        # [ADR-084 Etapa 0] Starea e DEJA citită mai sus, la `get_active_challenger`
+        # — se pasează, nu se re-citește. O a doua citire ar introduce o fereastră
+        # TOCTOU care azi nu există, pentru zero informație în plus.
+        _handle_candidate_for_promotion(
+            run_id, training_run_id, target_key, result, summary,
+            stare_curenta=active.get("state") if active else None,
+        )
     elif verdict == "rejected" and training_run_id:
         _handle_rejected_verdict(run_id, training_run_id, result)
     elif verdict == "monitoring" and training_run_id:
@@ -327,12 +333,51 @@ def _phase_a_monitor_existing(family: str, league: str, target_key: str, summary
 
 def _handle_candidate_for_promotion(
     run_id: int, training_run_id: str, target_key: str, result: dict, summary: dict,
+    stare_curenta: str | None = None,
 ) -> None:
-    try:
-        challenger_manager.transition(training_run_id, "SUCCEEDED")
-    except challenger_manager.ChallengerManagerError as exc:
-        ar.fail_run(run_id, f"tranzitie SUCCEEDED esuata: {exc}")
-        return
+    # [ADR-084 Etapa 0] Candidatura e IDEMPOTENTĂ.
+    #
+    # `challenger_manager.ALLOWED_TRANSITIONS["SUCCEEDED"]` e
+    # `{"PROMOTED", "REJECTED"}` — NU se conține pe sine. Iar handlerul ăsta
+    # trata eșecul tranziției ca fatal și făcea `return`. Consecința: A DOUA zi
+    # consecutivă în care un Challenger atinge poarta nu producea NICIO
+    # propunere — nici promovare, nici retragerea expirării deschise.
+    #
+    # S-A ÎNTÂMPLAT DE 4 ORI, pe 3 zile, iar ultima a costat măsurabil:
+    #   automation_runs 355  (23 aug) blend_v1
+    #   automation_runs 1288 (24 oct) blend_v1
+    #   automation_runs 1291 (24 oct) xgboost_v1
+    #   automation_runs 1413 (30 oct) xgboost_v1 — `dda4f7f3` era 3/3 la n=378
+    #                                  (Brier, log-loss ȘI acuratețe), iar
+    #                                  propunerea de promovare s-a pierdut tăcut,
+    #                                  la două zile de TTL-ul deciziei #13.
+    #
+    # CE NU SE FACE, deliberat: nu se atinge `ALLOWED_TRANSITIONS` și nu se face
+    # `transition()` idempotentă global — o tranziție genuin invalidă trebuie să
+    # eșueze în continuare, zgomotos. Garda e strict despre no-op-ul local.
+    #
+    # DE CE E SIGUR să ne sprijinim pe starea citită de apelant, nu pe o
+    # re-citire: (a) a SĂRI înseamnă a NU scrie, deci nu există cursă de pierdut;
+    # (b) calea de promovare REVALIDEAZĂ la execuție — `promotion_service.py:80`
+    # cere `state == "SUCCEEDED"`, iar liniile 88-90 cer ca ULTIMUL verdict să
+    # fie `candidate_for_promotion`. Deci o stare învechită aici nu poate produce
+    # o promovare greșită; cel mai rău caz e o propunere respinsă la execuție.
+    #
+    # `stare_curenta=None` păstrează comportamentul de dinainte (se încearcă
+    # tranziția) — apelanții care nu o pasează nu se schimbă.
+    #
+    # NOTĂ de acoperire, ca să nu pară mai mult decât e: apelantul unic ia starea
+    # din `get_active_challenger`, care filtrează `.not_.in_("state",
+    # ["PROMOTED","REJECTED"])`. Deci prin calea ASTA garda nu vede niciodată o
+    # stare terminală — ramura de eșec rămâne DEFENSIVĂ (apelant viitor, sau o
+    # tranziție concurentă între citire și handler), nu una exercitată în
+    # producție azi.
+    if stare_curenta != "SUCCEEDED":
+        try:
+            challenger_manager.transition(training_run_id, "SUCCEEDED")
+        except challenger_manager.ChallengerManagerError as exc:
+            ar.fail_run(run_id, f"tranzitie SUCCEEDED esuata: {exc}")
+            return
 
     ar.complete_run(run_id, summary={"verdict": "candidate_for_promotion", "training_run_id": training_run_id})
 
