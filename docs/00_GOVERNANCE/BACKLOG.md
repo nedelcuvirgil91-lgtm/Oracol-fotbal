@@ -551,9 +551,41 @@ Plus un **întrerupător de circuit** pentru un 401 real (cheie prezentă, respi
 
 **19 teste, 7 mutații, toate prinse.** M1 a fost prins inițial de **un singur** test, fiindcă scrierea și citirea erau verificate separat, iar firul dintre ele de nimeni — aceeași clasă cu M5 (`night_sync`) și M16 (ADR-082 Faza 3). Reparat cu două teste end-to-end pe cache partajat între instanțe; M1 e prins acum de două.
 
+**✅ A3 — ACEEAȘI GARDĂ, AL DOILEA PUNCT DE APEL. FĂCUT 2 nov** (`1cd745c`, 10 teste, 5 mutații).
+
+A2 pusese garda `is_available` pe calea `/sports`. `_fetch_market` — calea `/odds` — a rămas **nepăzită**, iar întrerupătorul de circuit e și el exclusiv pe `/sports`. Măsurat: **34 de 401-uri în 26 de secunde**, 2 nov 08:55:35 → 08:56:01, adică 17 ligi × 2 apeluri.
+
+**De ce n-a fost prinsă la A2, și asta e lecția**: până pe 1 nov (`939b570`) eticheta `provider_call_log.endpoint` lua **primul segment de cale**, deci toate cele patru endpoint-uri Odds API se scriau `sports`. Cele „418 × 401 în 8 zile" au fost astfel atribuite integral căii de validare, și garda s-a pus doar acolo. **Reparația etichetei a găsit punctul orb al propriului ei predecesor.**
+
+Garda e **echivalentă în date**, nu „mai bună": `_get` întoarce `None` pe orice răspuns non-ok, deci `None` de la gardă e exact ce primea apelantul și până atunci. Se schimbă numărul de cereri HTTP, nimic altceva.
+
+**✅ A4 — APELUL `btts` ELIMINAT. FĂCUT 2 nov** (`13fd1d4` + `ce2a69f`, 6 teste, 3 mutații). **Cel mai mare câștig de cotă din tot planul.**
+
+`_fetch_odds` făcea un al treilea apel per ligă, `_fetch_market(sport_key, "btts")`. Documentația oficială (`the-odds-api.com/sports-odds-data/betting-markets.html`) listează `btts` la **Additional Markets** și spune explicit: *„additional markets need to be accessed **one event at a time** using the `/events/{eventId}/odds` endpoint"*. Noi îl ceream pe endpoint-ul **bulk**, unde piața nu există. **Nu era limitare de plan, nici cheie greșită — era endpoint-ul greșit**, iar apelul nu putea reuși pentru nicio ligă, în nicio zi.
+
+Măsurat înainte, pe prima fereastră cu etichetă corectă: alternanță strictă `200` (h2h,totals) → `422` (btts), **0 din 28 reușite**. `totals` merge, fiindcă e Featured Market — contrastul e dovada.
+
+**Eliminarea e bit-identică**: `isinstance(btts_data, list)` a fost mereu `False`, deci `btts_by_id` mereu gol, deci `btts_yes`/`btts_no` mereu `0.0`. Cheile din aval rămân neatinse.
+
+**CONFIRMAT ÎN PRODUCȚIE, rularea 110 (2 nov, 14:50→16:06)**: `sports/odds` **14 apeluri, toate 200, ZERO 422** — exact jumătate din cele 28 dinainte. Predicția a fost scrisă înaintea măsurătorii.
+
+**Nu se trece pe `/events/{eventId}/odds`**: ar costa un apel per **meci**, nu per ligă (~120 în loc de 14), iar aceeași pagină spune că piețele adiționale sunt *„currently limited to US sports and selected bookmakers"*. Mai scump și probabil gol. `prob_btts` se calculează oricum prin Monte Carlo, independent de API, iar valoarea nu se persistă nicăieri — **zero coloane `btts` în toate cele 62 de tabele**.
+
+**✅ A5 — `error_body` CABLAT ȘI PENTRU ODDS API. FĂCUT 2 nov** (`356ef79`, `1cb1e77`, 20 teste, 8 mutații).
+
+`error_body` (ADR-081) era pasat dintr-un singur loc, `soccerfootballinfo_client`; `oracle_api._record_metric` n-avea parametrul deloc. Aceeași clasă ca D-2: nu lipsea canalul, **lipsea un parametru**.
+
+**A cerut Amendamentul 1 la ADR-081** (`9c1282c`): §3 justifica persistarea corpului cu *„cheia RapidAPI circulă exclusiv în header-ul de cerere"* — adevărat pentru SFI, **fals pentru Odds API**, unde cheia e parametru de query. Clasa ADR-077, prinsă **înainte** de a produce pagubă. S-a adăugat **a treia gardă** în calea de scriere: redactare de secrete, înaintea trunchierii (ordinea e load-bearing — trunchierea întâi ar tăia secretul la jumătate).
+
+**Încă NEexercitată**: rularea 110 n-a avut niciun eșec Odds API, deci `error_body` e NULL peste tot — corect prin contract. Garda așteaptă primul eșec real.
+
 **⏳ RĂMÂN, în ordine:**
 
-- **B — TTL categoria `odds` 4h → 24h.** Aprobat de proprietarul produsului („4 ore e ridicol"). ⚠️ **NU se face înaintea resetului de 1 noiembrie, și motivul e în nota de la D, care acoperă și B** — am citit-o greșit pe 27 oct și am spus „acum e sigur de făcut", uitându-mă doar la dependența de A: măsurat, în octombrie există **zero apeluri la `/odds`** (toate cele 450 sunt la `/sports`), fiindcă poarta de cotă (`rate_limit_manager.py:164`, `daily_remaining <= 0`) scurt-circuitează `_attach_odds` în amonte. Deci TTL-ul schimbat azi guvernează un cache în care nu intră nimic — **un număr pe care nimic nu l-ar putea confirma**, exact tiparul pe care proiectul îl plătește. După reset, efectul devine măsurabil.
+- **B — TTL categoria `odds` 4h → 24h.** Aprobat de proprietarul produsului („4 ore e ridicol"). **🔴 DOUĂ CORECȚII, 2 nov:**
+  - **Premisa de mai sus era FALSĂ.** „Zero apeluri la `/odds` în octombrie" era **artefact al etichetei colapsate**, nu efectul porții de cotă — toate cele patru endpoint-uri se scriau `sports`. Reparat prin `939b570`; martor independent: prefixele `odds_*` din `api_cache`, scrise 1 nov 14:56:10. Lecția „nu schimba un număr pe care nimic nu l-ar putea confirma" rămâne validă ca metodă, dar **nu se mai aplică aici**.
+  - **🔴 BLOCANT NOU, NEreparat: B nu e „o schimbare de un număr".** `_category_for_key` (`oracle_api.py:250`) mapează **două** prefixe pe categoria `"odds"`: `odds_` **ȘI `events_`**. Deci urcarea 4,0 → 24,0 ar întinde și cache-ul de **descoperire de fixture-uri** — iar `OddsApiFixtureAdapter` e cablat în producție (`sync/sync_scheduled_fixtures.py:43` și `:72`), deci alimentează `scheduled_fixtures`. Nu atinge probabilitățile, dar decide **care** meciuri primesc predicție și când; proiectul a plătit de două ori pentru descoperire învechită (TTL `matches` tăiat 1,0 → 0,5 după incident live; ADR-070, ore placeholder).
+  - **Și comentariul din `_fetch_events_odds_api` promite exact opusul**: *„`events` = 0,5h TTL, nu 4h) si neatinsa de marirea TTL-ului pe `odds`"*. **Fals** — verificat: **nicio cheie de cache nu se mapează pe categoria `"events"`**, deci `CATEGORY_TTL["events"] = 0.5` e **configurație moartă**. A șaptea instanță a clasei `pipefail`, de data asta păcălind o **decizie**, nu un test.
+  - **Forma corectă**: `events_` primește categorie proprie ÎNTÂI, apoi se urcă `odds`.
 - **C — `monthly_remaining` ca slot propriu** în `rate_limit_manager`. Contorul **nu trebuie construit**: `x-requests-remaining` e deja parsat pentru `oddsapi`, pe fiecare răspuns. Dar e pus în slotul `daily_remaining`, iar cota e **lunară** — log-ul spune „cota zilnica epuizata" pentru un buget lunar.
 - **D — costul real al `/scores`** (`x-requests-remaining` înainte/după pasul `odds_recent_results`). Dacă e plătit, duplică rezultate pe care Flashscore le dă gratis, cu acoperire mai bună. **După 1 noiembrie** (reset credite): azi 500/500 consumate, deci un plafon nu se poate verifica că funcționează peste un provider deja epuizat.
 - **E — flux propriu + tabelă proprie.** ADR obligatoriu, **același cu §1.11 pct. 7** (`odds_history`, provenanță și semantică). Scoate Odds API de pe calea servirii (North Star #10).

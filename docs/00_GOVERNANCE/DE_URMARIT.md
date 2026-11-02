@@ -2,21 +2,21 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-10-22**. Ultimele elemente adăugate: **§12 — planul
-ADR-081 pentru LUNI 26 oct** (migrare → merge, în ordinea asta, cu motivul
-tehnic) și **§13 — prima declanșare în producție a detectorului de drift
-ADR-078**.
+Ultima actualizare: **2026-11-02**. Ultimul element adăugat: **§16 — primul
+verdict al Champion Guardian**, după activarea ADR-037 R4.
 
 **Elemente deschise, în ordinea termenului:**
 
 | § | Ce | Termen |
 |---|---|---|
-| ~~**§13**~~ | ✅ **EXECUTAT 22 oct** — `Sabah FC` unit cu `Sabah Baku`, cod pe `main` + backfill pe 11 rânduri | închis |
-| ~~**§12**~~ | ✅ **EXECUTAT 26 oct** — ADR-081 complet: migrarea 058 aplicată + merge (`01ebd91`). Deblochează ADR-077 la prima rulare de noapte | închis |
-| **§15** | 📊 **MĂSURAT 26 oct** — XGBoost bate Oracle-ul servit cu **+5,76pp**, larg și fără scurgere. **Declanșator APROBAT**: 3/3 × 10 zile consecutive · n ≥ 500 | serie azi: **0** (25 oct a rupt-o) · n=278 |
+| **§16** | 🔴 **PRIMUL VERDICT CHAMPION GUARDIAN** — R4 activat 2 nov 17:30:03. Predicție scrisă înainte: `healthy`, toate patru flagurile `false` | **rularea de noapte de 3 nov** |
+| **§17** | 🔴 **Punctul B Odds API e BLOCAT de un cuplaj nescris** — `events_` și `odds_` împart categoria `"odds"`; comentariul care promite izolarea e FALS | te așteaptă |
+| **§15** | 📊 XGBoost bate Oracle-ul servit cu **+5,76pp**. Declanșator: 3/3 × 10 zile consecutive · n ≥ 500 | serie ruptă 25 oct; #13 a expirat 2 nov |
 | **§14** | Verdictul oscilează lângă prag — miza **reîncadrată** de §15: promovarea nu schimbă nimic servit | informativ |
-| **§7** | Decizia #8 (expirare Challenger) | ~26-27 oct |
+| ~~**§7**~~ | ✅ **ÎNCHIS 2 nov** — deciziile #12 și #13 au EXPIRAT prin sweep, `resolved_at = 10:19:32`, n = 600 / 447. Zero duplicate. Revin ~9 nov | închis |
 | **§9** | Supersedarea celor 30 de rânduri `openfootball` | fără termen, te așteaptă |
+| ~~**§13**~~ | ✅ **EXECUTAT 22 oct** — `Sabah FC` unit cu `Sabah Baku` | închis |
+| ~~**§12**~~ | ✅ **EXECUTAT 26 oct** — ADR-081 complet: migrarea 058 + merge (`01ebd91`) | închis |
 
 ---
 
@@ -2090,3 +2090,81 @@ pornește automat (ADR-002).
   invariantul pe care se sprijină întreaga comparație; un orfan înseamnă că
   rândul `champion` s-a scris și al doilea a eșuat, deci banda nu mai e
   comparabilă cu nimic.
+
+---
+
+## §16. 🔴 Primul verdict al Champion Guardian — rularea de noapte de 3 noiembrie
+
+**ADR-037 R4 ACTIVAT 2026-11-02, 17:30:03 UTC**, aprobat explicit. `champion_guardian_enabled = true` (boolean). Prima expunere reală a Fazei D după **71 de zile** în care campionul n-a fost monitorizat deloc.
+
+### Predicția, scrisă ÎNAINTE de activare ca să fie infirmabilă
+
+Pe `blend_v1` / `all` / `8ac89c70-8727-459f-aa42-08a2edd16431`:
+
+| Câmp | Aștept | Prag de alarmă |
+|---|---:|---:|
+| `health_state` | **`healthy`** | — |
+| `baseline_source` | `promotion_evaluation` | — |
+| `n_matches_evaluated` | **159+** | ≥ 30 (`MIN_MATCHES_FOR_HEALTH`) |
+| `brier_live` | ≈ **0,551** | > 0,6848 |
+| `logloss_live` | ≈ **0,936** | — |
+| `accuracy_live` | ≈ **0,553** | — |
+| `stability_indicator` | ≈ **0,113** | > 0,20 |
+| cele patru flaguri | toate **`false`** | — |
+| `brier_baseline` | **0,6225190008212559** | (verdictul de promovare, 23 aug, n=207) |
+
+### Ce înseamnă fiecare abatere
+
+- **Orice altceva decât `healthy` e o SURPRIZĂ care cere investigație, nu o „reparare".** Un declanșator atins nu se repară.
+- **`degrading` e structural IMPOSIBIL la prima rulare** — cere două ferestre degradate consecutive (`CONSECUTIVE_DEGRADED_WINDOWS = 2`), iar istoricul e gol. Dacă apare, e un defect de implementare, nu un semnal.
+- **`critical`** ar însemna eșec structural: artefactul nu se încarcă sau `predict_proba` cade. Verifică întâi dacă `blend_v1_champion_loader` mai scrie banda — e **același lanț**, deci o bandă scrisă azi contrazice un `critical`.
+- **`insufficient_data`** ar însemna că banda a scăzut sub 30 — imposibil fără o invalidare masivă; verifică `invalidated_at`.
+
+### Restul contractului Etapei 2
+
+1. `automation_runs` cu `process_type='champion_health_check'`: **2 per ciclu** — `blend_v1|all` **completed**, `xgboost_v1|all` **skipped** („niciun campion activ").
+2. **`decision_feed` NEATINS** — zero decizii `rollback_candidate`. `champion_guardian_proposals_enabled` rămâne **ABSENT** (Etapa 4, decizie separată).
+3. **`model_champions` NEATINS** — Faza D e read-only pe starea canonică.
+4. Amprentă `model_config`: **41 chei**, `md5((data − 'champion_guardian_enabled')::text)` = `4039cc0f371c88f209d26eb2e613b483`.
+
+### Dacă NU vine
+
+Zero rânduri în `champion_health_evaluations` după o rulare completă = Faza D n-a rulat. Verifică în ordine: flagul citit corect (`is_champion_guardian_enabled()` face `bool(...)` pe valoare — dacă cineva a scris șirul `"true"`, tot `True` iese, deci nu asta); `learning_core_enabled` (Faza D stă **în** `_process_pair`, care e gatat de el); și dacă etapa 8 a rulat deloc în rândul de audit `night_sync`.
+
+### Criteriu de revenire
+
+```sql
+UPDATE model_config
+SET data = data || '{"champion_guardian_enabled": false}'::jsonb, updated_at = now()
+WHERE id = 1;
+```
+
+Arătat și confirmat explicit înainte, ca orice scriere. Faza D se oprește instant la rularea următoare, fără deploy. Rândurile din jurnal **rămân** — append-only, inofensive.
+
+### Etapa 3 începe după asta
+
+Câteva zile de observare, **fără nicio schimbare de config**. Etapa 4 nu se discută până nu există date acumulate: planul cere explicit *„nu doar a trecut timpul, ci datele arată coerent"*.
+
+---
+
+## §17. 🔴 Punctul B Odds API e blocat de un cuplaj nescris — și de un comentariu fals
+
+**Nu are termen, te așteaptă.** Măsurat 2 noiembrie.
+
+`CATEGORY_TTL["odds"] = 4.0` pare să guverneze un singur lucru. Guvernează **două**: `_category_for_key` (`oracle_api.py:250`) mapează pe categoria `"odds"` atât prefixul `odds_` cât și **`events_`**.
+
+Deci urcarea aprobată 4,0 → 24,0 ar întinde și cache-ul de **descoperire de fixture-uri** de la Odds API. Iar `OddsApiFixtureAdapter` e cablat în producție (`sync/sync_scheduled_fixtures.py:43` și `:72`), deci alimentează `scheduled_fixtures` — **care meciuri există și la ce oră**.
+
+Nu atinge probabilitățile. Dar proiectul a plătit **de două ori** pentru descoperire învechită: TTL-ul `matches` tăiat 1,0 → 0,5 după un incident live, și ADR-070 (ore placeholder, 28 de meciuri corectate pe 6 ligi).
+
+**Și comentariul din `_fetch_events_odds_api` promite exact opusul:**
+
+> *„Mai mica in consecinta (`events` = 0.5h TTL, nu 4h) si **neatinsa de marirea TTL-ului pe `odds`**"*
+
+**Fals.** Verificat: **nicio cheie de cache nu se mapează pe categoria `"events"`** — singurele apariții ale șirului în codul de producție sunt nume de câmpuri JSON în codul Flashscore și un flag de acoperire. Deci `CATEGORY_TTL["events"] = 0.5` e **configurație moartă**, iar izolarea pe care comentariul o promite nu există.
+
+**A șaptea instanță a clasei `pipefail`** — dar prima care păcălește o **decizie**, nu un test. Cine ar fi făcut B citind acel comentariu ar fi concluzionat corect după literă și greșit după fapt.
+
+**Forma corectă a lui B**: `events_` primește categorie proprie (intrarea moartă `"events": 0.5` există deja și e exact ce presupunea comentariul) **ÎNAINTE** de a urca `odds`. Abia atunci mărirea e izolată la cache-ul de cote, care alimentează doar value bets.
+
+**NEreparat.** Atinge `oracle_api.py` și `cache_manager.py`, deci cere aprobare explicită.

@@ -31,9 +31,29 @@ Disclaimer de proiect (nu al acestui document): instrument de analiză statistic
 ✔ **Orchestrare Learning Core** (ADR-037, R3, R3.0-R3.7) — Faza D + execuție rollback cu țintă înghețată (Execution Contract). **[CORECTAT 2026-10-27 — rândul ăsta a spus „cod complet, testat, NEMERGE-UIT pe `main`" timp de ~3 luni, și era FALS.]** Verificat în cod, nu în documente: `git show origin/main:learning_core/continuous_learning.py` conține `_phase_d_champion_health` (×2) și `is_champion_guardian_enabled` (×4), iar `champion_guardian.py` și `rollback_service.py` sunt amândouă pe `main`. Mai mult, `ADR037_DEPLOYMENT_PLAN.md` îl contrazicea **din 28 iulie** („Etapa 1 — merge pe `main` — s-a produs între timp, verificat direct"), în chiar documentul pe care rândul ăsta îl cita ca referință. Ce rămâne neexecutat e **activarea** (R4), nu merge-ul.
 ✔ **Banda de servire a campionului + atribuirea Guardianului** (ADR-082, 27 oct) — Guardianul evalua campionul pe predicția **Oracle**, nu pe a campionului; acum citește o bandă proprie (`experiment_group = 'champion'`). Flag `champion_shadow_logging_enabled` **activ**, V1-V5 documentate înaintea activării, §6.1-§6.3 verificate pe producție cu **divergență 0,000e+00 pe 179/179 rânduri**. `prob_home_win` are în continuare exact un scriitor.
 
+✔ **ADR-037 R4 — Champion Guardian ACTIV în producție (Etapa 2), 2026-11-02 17:30:03 UTC.** Aprobat explicit, după o analiză remăsurată în aceeași zi.
+
+> **Precondiția se schimbase pe 27 oct prin ADR-082**: nu mai era „există un campion real" (îndeplinită din 23 august), ci „banda campionului are ≥ 30 de rânduri scorabile" (`MIN_MATCHES_FOR_HEALTH`), fiindcă Guardianul citește acum din bandă. Pe 27 oct banda avea 179 de rânduri și **0 scorabile**. La activare: **159 scorabile din 374**, 17 ligi — **5,3× pragul**.
+>
+> **Amprentă**: 40 → **41 chei**, `md5((data − 'champion_guardian_enabled')::text)` = `4039cc0f371c88f209d26eb2e613b483`, **identic** cu `md5` integral dinainte → exact o cheie adăugată, zero chei existente atinse. `updated_at` 27 oct 18:30:18 → **2 nov 17:30:03** (remediul D-14 în efect). Valoarea e **boolean**, nu șirul `"true"`.
+>
+> **VERDICTUL A FOST PREZIS ÎNAINTE DE ACTIVARE**, ca o surpriză să fie detectabilă: `healthy`, cu toate patru flagurile `false` și marje largi — Brier live **0,5511** vs prag 0,6848 (**19,5% sub**), trend recent 0,5059 vs prag 0,6565, stabilitate 0,1126 vs 0,20. `degrading` e structural imposibil la prima rulare (`CONSECUTIVE_DEGRADED_WINDOWS = 2`, istoric gol).
+>
+> **Campionul e măsurabil mai bun decât la promovare, pe toate trei metricile**: Brier 0,6225 → **0,5511**, log-loss 1,0388 → **0,9362**, acuratețe 0,5121 → **0,5535** (+4,1pp). Iar trendul urcă: jumătatea recentă a ferestrei bate jumătatea veche.
+>
+> **Argumentul care a decis**: campionul era activ de **71 de zile cu ZERO evaluări de sănătate**. Nimic nu-l urmărea. Faptul că e sănătos întărește argumentul, nu îl slăbește — monitorul se pornește înainte să ai nevoie de el, iar prima fereastră bună devine reperul pentru regula ferestrelor consecutive.
+>
+> **Ce NU s-a activat**: `champion_guardian_proposals_enabled` rămâne **ABSENT** (Etapa 4, decizie separată, North Star #3). Deci Guardianul **evaluează și jurnalizează, dar nu propune nimic**. Faza D e read-only pe starea canonică: scrie un rând append-only în `champion_health_evaluations` + 1-2 `automation_runs`; `model_champions` și `decision_feed` sunt neatinse.
+>
+> **Cost asumat, măsurat**: `automation_runs` crește cu ~2/noapte, deci „Activity Log" din `app.py` (`list_recent_runs(limit=50)`, **nefiltrat pe producător**) scade de la ~3,3 la ~2,9 zile de istoric vizibil.
+>
+> **Revenire**: `champion_guardian_enabled = false` — Faza D se oprește instant la rularea următoare, fără deploy. Jurnalul rămâne.
+>
+> **Lecție de proces, plătită în aceeași zi**: proprietarul produsului își amintea că aprobase R4 „acum câteva zile". Verificat: aprobarea exista, dar era pentru **`champion_shadow_logging_enabled`** (banda, ADR-082, 27 oct 18:30:18) — flagul adiacent, același ADR, aceeași săptămână. Flagul Guardianului era absent, zero rânduri de sănătate, zero rulări `champion_health_check`, zero commit-uri. **A doua instanță a clasei D-11** (14 oct: „am promovat campionul" — se aprobase o expirare). Două aprobări adiacente pe același subiect se confundă; verificarea costă o interogare.
+
 Not Implemented
 - Auto-promovare/auto-rollback fără om în buclă (contrazice ADR-002; cere ADR dedicat de risc)
-- **Activarea ADR-037 R4** (Champion Guardian în producție) — separată deliberat de merge. **Precondiția s-a SCHIMBAT pe 27 oct, prin ADR-082**: nu mai e „există un campion real" (îndeplinită din 23 august), ci „banda campionului are ≥ 30 de rânduri scorabile" (`MIN_MATCHES_FOR_HEALTH`), fiindcă Guardianul citește acum din bandă. Măsurat: banda are 179 de rânduri, **0 scorabile** (toate meciuri viitoare); pragul e verificabil pe **~30 octombrie**. Vezi planul de deployment.
+- **Etapa 4 ADR-037** (`champion_guardian_proposals_enabled`) — propunerile T3a de rollback. NU se discută până nu există date acumulate din Etapa 3; planul cere explicit „nu doar a trecut timpul, ci datele arată coerent".
 
 ## ⏳ DECIZII ÎN AȘTEPTARE — de adus în discuție ACTIV, nu de așteptat să fie întrebate
 
@@ -866,6 +886,21 @@ Cheile API sunt tratate ca infrastructură critică — nu ca detalii de configu
   - **Defect găsit în propriile mele teste, înainte de commit**: `get`/`set` cad prin Nivelul 2 (Supabase). În container lipsesc credențialele, deci treceau — dar pe o mașină care le are ar fi atins rețeaua, contra regulii proiectului. **Un test care trece fiindcă mediul e sărac nu e un test fără rețea, e unul norocos.** Reparat cu o fixtură care oprește L2 explicit.
   - **Singurul loc din tot codul care face cheie din listă nemărginită** e acel `oracle_api.py:1663` (verificat pe toate construcțiile de `cache_key`; restul sunt mărginite — id, dată, cod de ligă). Deci garda e **prevenție pentru o clasă cu un membru cunoscut**, nu plasă pentru un defect răspândit. Dar e justificată: cu Norvegia + Suedia (martie 2027, deja pe listă) schema veche ar da **328** de octeți, deci fiecare ligă adăugată ar fi fost încă un perete.
   - **Lecția de metodă**: defectul n-a fost găsit de niciun test, de nicio privire pe ecran și de nicio alertă — ci de o întrebare „ce a adus ultima rulare de noapte?". Un indicator care nu poate fi roșu (jobul verde prin construcție) e, ca și `coverage_percent` fix la 100%, **o absență de indicator**.
+
+- **O etichetă care colapsa patru endpoint-uri a ascuns două defecte și o risipă de 50% — lanț închis 1-2 noiembrie.** Cea mai productivă zi de observabilitate din proiect, și toată a pornit dintr-o singură reparație de etichetă.
+
+  **Defectul de bază**: `_detect_provider_endpoint` lua **primul segment de cale**, deci cele patru endpoint-uri Odds API (`/sports`, `/sports/{k}/odds`, `/sports/{k}/events`, `/sports/{k}/scores`) se scriau toate ca **`sports`** în `provider_call_log` și `provider_metrics`. În direcția opusă, băga identificatorul de ligă ESPN în etichetă — 14 rânduri de slug-uri în loc de endpoint-uri. Reparat (`939b570`, 34 de teste), cu eticheta construită din primul + ultimul segment.
+
+  **Ce s-a văzut imediat ce endpoint-urile au devenit distincte:**
+  1. **Afirmația „zero apeluri la `/odds` în octombrie" era artefact**, nu realitate. O purtasem ca premisă într-un reminder programat, și pe ea se sprijinea decizia de a amâna punctul B.
+  2. **Defectul A2 avea un AL DOILEA punct de apel, nereparat de trei luni**: `_fetch_market` trimitea cereri `/odds` **fără `apiKey`** (`requests` omite un parametru `None`). Măsurat: **34 de 401-uri în 26 de secunde**. Invizibil fiindcă cele „418 × 401 în 8 zile" fuseseră atribuite integral căii `/sports`. **Reparația etichetei a găsit punctul orb al propriului ei predecesor** (`1cd745c`).
+  3. **Apelul `btts` nu putea reuși NICIODATĂ** — `btts` e Additional Market la The Odds API, cerut exclusiv prin `/events/{eventId}/odds`; noi îl ceream pe endpoint-ul bulk. 0 din 28. Eliminat (`13fd1d4`), **jumătate din bugetul de cote recuperată**, confirmat în producție: `sports/odds` 28 → **14 apeluri, zero 422**.
+
+  **Clasa, de reținut ca atare: un indicator care COLAPSEAZĂ lucruri distincte, citit ca și cum le-ar distinge.** Frate cu `has_stats` pe 2599/2599, `coverage_percent` fix la 100% și `night_sync` verde prin construcție. **Corolar plătit**: o etichetă colapsată face și **comparațiile înainte/după** nefiabile — „401-urile pe `/sports` au scăzut de la 418 la 4" nu era o comparație echivalentă, fiindcă cele 418 erau ele însele un agregat peste patru endpoint-uri.
+
+  **Colateral, tot din lanț**: `error_body` (ADR-081) era pasat dintr-un singur loc și lipsea complet pe Odds API — aceeași clasă ca D-2, **un parametru**. Cablarea a cerut **Amendamentul 1 la ADR-081**: §3 justifica persistarea corpului cu „cheia circulă exclusiv în header-ul de cerere", adevărat pentru SFI și **fals pentru Odds API**, unde cheia e parametru de query. Clasa ADR-077, prinsă înainte de a produce pagubă.
+
+  **Trei mutații au TRECUT la prima rulare**, fiecare arătând un gol în teste, nu în cod: o contrapondere care trecea din construcție (regexul nu putea potrivi forma pe care o testa); testele de cablare care verificau cele două capete și nu firul dintre ele; și un test care trecea prin a doua plasă de siguranță, nu prin ramura pe care o declara. **A opta instanță `pipefail`** a apărut tot aici — nota de eliminare a apelului `btts` conține chiar șirul `_fetch_market(sport_key, "btts")`, deci garda trebuia să fie AST.
 
 - **Radarul de value bets vedea 15 competiții din 20 — ÎNCHIS 2026-10-21, fără nicio linie de cod nouă.** Pornit dintr-o întrebare a proprietarului produsului („radarul vede toate competițiile pe care le avem în listă?"). Lipseau exact Conference League, HNL, Austria Bundesliga, Swiss Super League, Danish Superliga. Detalii complete, cu toate cifrele: `DE_URMARIT.md` §10.
   - **Cauza nu era la cote, deși totul arăta într-acolo.** `oracle_api.py:1667` — `comps = competitions or list(ODDS_SPORT_KEYS.keys())`. Implicitul unei funcții centrale e „ligile acoperite de **The Odds API**" (16), nu „ligile pe care le **urmărim**" (21), iar diferența e exact mulțimea celor 5. Batch-ul ADR-056 o apela fără argument, deci acele ligi n-au avut niciodată rând `control` — iar radarul cere predicția ÎNAINTE de cote. Dovada curată, aceeași zi, același tip de competiție: **15 oct, Europa League 18/18, Conference League 0/18.**

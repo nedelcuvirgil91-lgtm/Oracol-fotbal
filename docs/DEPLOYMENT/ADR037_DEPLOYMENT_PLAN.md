@@ -61,9 +61,27 @@ Tot lanțul R1-R3 (branch `claude/continua-faza-1-adr5-o52jat` → `main`), înt
 - **Verificare post-activare**: după prima rulare cron de pe `main`, query read-only pe `automation_runs` — confirmă `process_type='champion_health_check'` **absent** (zero rânduri noi de acest tip).
 - **Criteriu de rollback**: revert simplu de commit pe `main` (codul nu a scris nimic nou în stare canonică — Faza D nu a rulat).
 
-### Etapa 2 — `champion_guardian_enabled=true`
+### Etapa 2 — `champion_guardian_enabled=true` — ✅ **EXECUTATĂ 2026-11-02, 17:30:03 UTC**
 
-> **🔴 [ACTUALIZAT 2026-10-27 — PRECONDIȚIA S-A SCHIMBAT, prin ADR-082. Citește asta înainte de a executa Etapa 2.]**
+> **✅ [EXECUTAT — 2026-11-02, aprobat explicit de proprietarul produsului.]**
+>
+> `champion_guardian_enabled` = **`true`** (boolean, nu șirul `"true"` — contează, `is_champion_guardian_enabled()` face `bool(...)` pe valoare).
+>
+> **Precondiția schimbată de ADR-082 era îndeplinită cu marjă**: banda campionului avea **159 de rânduri scorabile din 374**, 17 ligi, fereastra 27 oct → 2 nov. Pragul e `MIN_MATCHES_FOR_HEALTH = 30` → **5,3×**. (Pe 27 oct: 179 de rânduri, **0** scorabile.)
+>
+> **Amprentă, verificată chirurgical**: 40 → **41 chei**; `md5((data − 'champion_guardian_enabled')::text)` = `4039cc0f371c88f209d26eb2e613b483`, **identic** cu `md5` integral dinainte → exact o cheie adăugată, zero chei existente atinse. `updated_at` 27 oct 18:30:18 → **2 nov 17:30:03**. Flaguri vecine reconfirmate `true`: `learning_core_enabled`, `champion_shadow_logging_enabled`, `challenger_expiry_proposals_enabled`, `serving_inputs_persistence_enabled`. `champion_guardian_proposals_enabled` rămâne **ABSENT**.
+>
+> **Verdictul a fost PREZIS înainte de activare**, ca o surpriză să fie detectabilă: `healthy`, toate patru flagurile `false` — Brier live **0,5511** vs prag 0,6848 (**19,5% sub**), trend recent 0,5059 vs prag 0,6565, stabilitate 0,1126 vs 0,20, structural trece (artefact 937 750 B, `algorithm_version` „1" = `_ALGORITHM_VERSION`, martor pozitiv: banda scrisă în aceeași zi de un lanț care încarcă acel artefact).
+>
+> **Campionul e mai bun decât la promovare pe toate trei metricile**: Brier 0,6225 → 0,5511 · log-loss 1,0388 → 0,9362 · acuratețe 0,5121 → 0,5535 (+4,1pp). Trendul urcă.
+>
+> **Argumentul care a decis**: campion activ de **71 de zile cu zero evaluări de sănătate**. Monitorul se pornește înainte să ai nevoie de el, iar prima fereastră bună devine reperul pentru regula ferestrelor consecutive.
+>
+> **Verificarea post-activare e în `DE_URMARIT.md` §16**, cu predicția pe fiecare câmp și cu ce înseamnă fiecare abatere. Etapa 3 începe după primul verdict.
+>
+> ---
+>
+> **🔴 [ISTORIC — 2026-10-27, precondiția care s-a schimbat. Păstrat ca atare, nu rescris.]**
 >
 > Până pe 27 octombrie, planul ăsta și `ARCHITECTURE_STATE.md` §5 spuneau că singurul blocaj rămas e **decizia** de a porni flagul — condiția „există un campion real de evaluat" fiind îndeplinită din 23 august. **Nu mai e adevărat.**
 >
