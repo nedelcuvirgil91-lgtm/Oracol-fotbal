@@ -11,6 +11,7 @@ etapa 5 + declanșatorul de reluare pentru decizia de fond ADR-084**.
 |---|---|---|
 | **§16** | 🔴 **PRIMUL VERDICT CHAMPION GUARDIAN** — R4 activat 2 nov 17:30:03. Predicție scrisă înainte: `healthy`, toate patru flagurile `false` | **rularea de noapte de 3 nov** |
 | **§18** | 🔴 **ADR-085 etapa 5** — testul decisiv NU e „restanța a scăzut", e ca **partiția pe oră să dispară** (era 47,8% seara vs 0,8% ziua). Și e **precondiția** deciziei de fond ADR-084 | **rularea de noapte de 3 nov**, apoi 3 zile |
+| **§19** | 📊 **Ablația Team Profile — rularea FINALĂ la ~16 xG/echipă.** Negativă de două ori (13 oct și 2 nov); interpretarea pentru decembrie e **declarată deja**, ca să nu alegem sensul după cifră | **~7 decembrie 2026** (median 11 azi, +1/săptămână) |
 | **§17** | 🔴 **Punctul B Odds API e BLOCAT de un cuplaj nescris** — `events_` și `odds_` împart categoria `"odds"`; comentariul care promite izolarea e FALS | te așteaptă |
 | **§15** | 📊 XGBoost bate Oracle-ul servit cu **+5,76pp**. Declanșator: 3/3 × 10 zile consecutive · n ≥ 500 | serie ruptă 25 oct; #13 a expirat 2 nov |
 | **§14** | Verdictul oscilează lângă prag — miza **reîncadrată** de §15: promovarea nu schimbă nimic servit | informativ |
@@ -2246,3 +2247,86 @@ Două afirmații proprii, false, purtate zile:
 **Lecția**: o proiecție contrazisă de două puncte nu e încă infirmată.
 Retragerea prematură e tot o afirmație greșită, doar mai greu de prins, fiindcă
 pare prudență.
+
+---
+
+## §19 — Ablația Team Profile: rularea finală la ~16 xG/echipă (≈ decembrie 2026)
+
+**Adăugat 2026-11-02**, după a doua rulare. Secțiunea există ca să avem **cifrele
+de comparat** și **interpretarea declarată înainte** — nu ca să reluăm analiza.
+
+### De ce a existat o a doua rulare înainte de prag
+
+Declanșatorul aprobat e **~16 meciuri cu xG per echipă**; pe 2 noiembrie eram la
+**median 11**. Re-rularea înainte de prag se justifică printr-un argument de
+**validitate**, nu de volum: ablația din 13 octombrie a rulat **în mijlocul
+penei ADR-076** (xG pe octombrie 1/232), iar feature-ul se calculează din
+*ultimele 5 meciuri **cu xG*** ale echipei — verificat în
+`scripts/ablation_team_profile.py`, istoricul primește doar meciuri cu
+`xg is not None`. Deci fereastra se întindea înapoi dincolo de **8 septembrie**:
+a testat un semnal **învechit cu ~5 săptămâni**, nu doar unul pe eșantion mic.
+
+### Cifrele de comparat în decembrie
+
+| | 13 oct | **2 nov** | *decembrie* |
+|---|---:|---:|---:|
+| meciuri evaluabile | 298 | **909** | *(se completează)* |
+| median xG/echipă | 5 / 8 *(remăsurat)* | **11** | *~16* |
+| log-loss la **k=1,00** | +0,0543 · \|t\|=3,58 | **+0,0404 · \|t\|=4,51** | |
+| log-loss la **k=0,75** | — | +0,0324 · \|t\|=4,14 | |
+| log-loss la **k=0,50** | — | +0,0202 · \|t\|=3,40 | |
+| log-loss la **k=0,30** | — | +0,0088 · \|t\|=2,38 | |
+| log-loss la **k=0,15** | +0,0057 | **+0,0028 · \|t\|=1,54** | |
+| Brier la k=1,00 | — | +0,0268 · \|t\|=4,40 | |
+| prindere strânsă [0,85–1,18], k=0,50 | — | ll +0,0105 · \|t\|=2,47 | |
+| `goals_per_sot`, k=0,50 | — | ll +0,0061 · \|t\|=1,37 | |
+| referință (producție) | — | acc 0,4906 · ll 1,0119 · brier 0,6053 | |
+| MDE pe Brier (80% putere) | — | **0,0170** | |
+| amploarea semnalului (>10% de la 1,0) | 77% | **76%** | |
+| optim | **k = 0** | **k = 0** | |
+
+**Toate deltele pe log-loss și Brier sunt POZITIVE în toate cele șapte
+variante**, în ambele rulări. Degradare **monotonă în doză**.
+
+### Ce s-a învățat între cele două rulări
+
+**Efectul a scăzut cu 26%** (+0,0543 → +0,0404), **dar \|t\| a crescut**
+(3,58 → 4,51). Pe date mai multe și mai proaspete, paguba e **mai mică dar mult
+mai sigură**. Dacă semnalul ar fi convergeat spre „nu strică", \|t\| ar fi
+scăzut — a crescut. Și amploarea semnalului e neschimbată (76% vs 77%), deci
+**nu** e cazul „prea slab ca să conteze": mișcă xG-ul substanțial, în direcția
+greșită.
+
+**Rezervă consemnată**: cele două rulări **nu sunt pe eșantioane independente**
+— cele 909 le includ în mare parte pe cele 298. „Efectul a scăzut" înseamnă deci
+că **meciurile noi au efect mai mic**. Separarea ar cere o rulare pe setul
+disjunct; **nefăcută**, și nu se face doar ca să se facă.
+
+### INTERPRETAREA PENTRU DECEMBRIE, declarată ACUM
+
+Scrisă înainte de a vedea cifra, ca să nu alegem sensul după rezultat:
+
+| rezultat în decembrie | concluzie | ce urmează |
+|---|---|---|
+| degradare în continuare monotonă, optim la **k=0** | subiectul se **închide definitiv** | feature-ul rămâne NEPROMOVAT; `flashscore_team_dna` se păstrează ca **sursă de date**, nu ca multiplicator |
+| \|t\| scade sub ~2 **ȘI** efectul sub MDE pe toate variantele | semnal indistinct de zero la precizia maximă disponibilă | tot NEPROMOVAT, dar concluzia devine **„prea slab"**, nu „dăunător" |
+| vreo variantă mai bună **simultan pe toate trei** | surpriză reală | **nimic nu se promovează automat** — poarta completă, aprobare explicită (ADR-002) |
+
+**NU se re-rulează a treia oară înainte de decembrie**, indiferent de tentație —
+protecția contra testării repetate (ADR-084 §7.1: te uiți repetat până vezi ce
+vrei). Dacă pragul se atinge mai devreme decât ~7 decembrie, se rulează atunci,
+o singură dată.
+
+### Cum se reproduce rularea
+
+`scripts/ablation_team_profile.py --date <fișier>`, read-only, zero scrieri.
+Fișierul e o extragere **pipe-delimitată, 24 de coloane fixe** (ordinea e în
+docstring-ul lui `incarca()`).
+
+> **🔴 CAPCANĂ, prinsă pe 2 noiembrie înainte să producă un rezultat fals**:
+> `concat_ws` **sare peste NULL-uri**, deci rândurile cu câmpuri lipsă ies cu
+> 16/21/23 de coloane în loc de 24 și **totul se decalează**. E exact decalajul
+> despre care docstring-ul scriptului avertizează („nu a aruncat nicio excepție…
+> a produs un tabel care arăta normal"). **Extragerea trebuie să folosească
+> `coalesce(x::text,'')` pe FIECARE câmp**, iar numărul de coloane se verifică
+> înainte de rulare: `{24: <toate rândurile>}`, nimic altceva.

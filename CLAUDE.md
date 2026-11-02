@@ -283,6 +283,33 @@ Contorul de meciuri evaluabile a trecut pragul: **301/300**, afișat de aplicaț
 >
 > **De ce estimarea inițială era greșită**: documentul din 13 oct scria „256 de echipe, median 5, zero peste 9". Remăsurat azi cu tăietura la acea dată: **median 8, maxim 14**. Diferența nu e a măsurătorii — e **pana de extragere Flashscore** (ADR-076): acoperirea xG pe octombrie era 1/232 când s-a făcut măsurătoarea, și a urcat la 93/323 după reparație plus recuperarea D-B. **Estimarea s-a sprijinit pe un set sub-acoperit.** Aceeași clasă ca ADR-077: o premisă de volum măsurată în timpul unei pene, purtată mai departe ca fiind curentă.
 >
+> **[RE-RULATĂ 2026-11-02, read-only, la cererea proprietarului produsului — rezultat NEGATIV A DOUA OARĂ, și mai sigur decât prima.]** Justificarea re-rulării înainte de prag: ablația din 13 oct a rulat **în mijlocul penei ADR-076** (xG pe octombrie 1/232), iar feature-ul se calculează din *ultimele 5 meciuri **cu xG*** ale echipei — deci fereastra se întindea înapoi dincolo de 8 septembrie. A testat un semnal **învechit**, nu doar unul pe eșantion mic.
+>
+> | | 13 oct | **2 nov** |
+> |---|---:|---:|
+> | meciuri evaluabile | 298 | **909** (3,05×) |
+> | median xG/echipă | 5 *(măsurat atunci)* / 8 *(remăsurat azi)* | **11** |
+> | log-loss la **k=1,00** | **+0,0543** · \|t\|=3,58 | **+0,0404** · **\|t\|=4,51** |
+> | log-loss la **k=0,15** | +0,0057 | **+0,0028** |
+> | Brier la k=1,00 | — | +0,0268 · \|t\|=4,40 |
+> | referință (producție) | — | acc 0,4906 · ll 1,0119 · brier 0,6053 |
+> | amploarea semnalului | 77% deviază >10% | **76%** deviază >10% |
+> | optim | **k = 0** | **k = 0** |
+> | vreo variantă mai bună pe toate trei? | **nu** | **nu** |
+>
+> **Toate deltele pe log-loss și Brier sunt POZITIVE în toate cele șapte variante** — degradare monotonă în doză, la fel ca prima dată. Efectul minim detectabil pe Brier la n=909 e **0,0170**; degradarea la k=1,00 e **0,0268**, deci peste prag, nu la limită.
+>
+> **Citirea care contează**: efectul a **scăzut cu 26%**, dar \|t\| a **crescut** (3,58 → 4,51). Pe date mai multe și mai proaspete, paguba e mai mică dar **mult mai sigură**. Dacă semnalul ar fi convergeat spre „nu strică", \|t\| ar fi scăzut. **Nu există traiectorie spre „ajută"**, iar amploarea semnalului e neschimbată — deci nu e cazul „prea slab ca să conteze": mișcă xG-ul substanțial, în direcția greșită.
+>
+> **Rezervă spusă de mine, nu descoperită mai târziu**: cele două rulări **nu sunt pe eșantioane independente** — cele 909 le includ în mare parte pe cele 298. Deci „efectul a scăzut" înseamnă că meciurile NOI au efect mai mic, trăgând media în jos. Separarea ar cere o rulare pe setul disjunct; **nefăcută**.
+>
+> **⏳ RULAREA FINALĂ, la ~16 xG/echipă (≈ decembrie 2026) — interpretarea DECLARATĂ ACUM, înainte să vedem cifra**, ca să nu alegem sensul după rezultat:
+> - **Degradare în continuare monotonă, optim la k=0** → subiectul se **închide definitiv**, feature-ul rămâne NEPROMOVAT, iar `flashscore_team_dna` poate fi reevaluat ca și cod (se păstrează ca sursă de date, nu ca multiplicator).
+> - **\|t\| scade sub ~2 ȘI efectul sub MDE pe toate variantele** → semnalul e indistinct de zero la precizia maximă disponibilă; tot NEPROMOVAT, dar concluzia devine „prea slab", nu „dăunător".
+> - **Vreo variantă mai bună simultan pe toate trei** → surpriză reală; **nu promovează nimic automat**, intră pe poarta completă cu aprobare explicită (ADR-002).
+>
+> **NU se re-rulează a treia oară înainte de decembrie**, indiferent de tentație — protecția contra testării repetate (ADR-084 §7.1). Ieșirea completă: `scratchpad/ablatie_rezultat_2026-11-02.txt` (sesiune efemeră), cifrele de comparat sunt cele din tabelul de mai sus.
+
 > **🔴 ȘI ETICHETA DIN UI E FALSĂ, NEREPARATĂ.** `app.py:778-781` afișează „prag atins — **test de ablație în așteptare**" pe condiția pur aritmetică `n_eval >= threshold`. Nu există nicio legătură între acel șir și starea reală a testului: **ablația a rulat pe 13 octombrie, rezultatul a fost negativ**, iar nimic în cod și nimic în bază nu înregistrează asta. Ecranul va scrie „în așteptare" la infinit, oricât ar crește cifra (azi 915/300). E clasa „documentație care minte", mutată în interfață — frate cu `has_stats` pe 2599/2599. **Reparația atinge `app.py`, fișier protejat, deci cere aprobare separată**; documentul din 13 oct propunea deja ca bara să urmărească xG-ul median per echipă, cantitatea care chiar decide.
 
 ### D-8. `consensus_validation` nu are fază de execuție — decizii orfane structural (descoperit 2026-10-13)
