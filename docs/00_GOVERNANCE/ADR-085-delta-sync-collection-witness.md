@@ -367,6 +367,66 @@ arată că fallback-ul **chiar prinde** cazuri. Iar `sync_results.py` documentea
 el însuși că fereastra lui de o zi a fost lărgită tocmai după ce **pierduse
 definitiv 16 meciuri World Cup**.
 
+#### 3.1bis Temerea de calitate, verificată pe toate ligile — și reîncadrată
+
+> **[ADĂUGAT la întrebarea explicită a proprietarului produsului: „pe mine mă
+> sperie acest provider, că nu are statistici complete ca Flashscore... verifică
+> dacă pentru toate ligile noastre primul scriitor este Flashscore și nu alt
+> provider care are date parțiale."]**
+
+**Măsurat, sezonul curent, toate cele 21 de ligi cu meciuri terminate:**
+
+| | meciuri |
+|---|---:|
+| identitate `flashscore_` | **2037 / 2057 (99,03%)** |
+| identitate `fd_` (football-data.org) | **0 — pe FIECARE ligă** |
+| `stats_source = 'flashscore'` | **2058** |
+| `stats_source = 'freelivefootball'` | **0** |
+| `stats_source = 'soccerfootballinfo'` | **1** |
+
+**football-data.org nu poate scrie statistici proaste, fiindcă nu are ce.**
+Payload-ul lui complet (`sync/sources/football_data.py:232-244`) e: `fixture_id`,
+nume, ligă, dată, `actual_home_goals/away_goals/result`, `used_for_training`,
+`season`. `home_xg_pred`/`away_xg_pred` sunt **hardcodate `None`** (liniile
+211-212). Zero coloane de statistici.
+
+**Subtilitatea care face rezultatul mai tare, nu mai slab**: `fixture_id` e
+`COALESCE`-only (primul scriitor câștigă, ADR-036). Deci „0 identități `fd_`" nu
+înseamnă că football-data n-a scris niciodată — înseamnă că **Flashscore a creat
+rândul primul**, fiindcă descoperă fixture-urile cu 7 zile înainte. Identitatea
+`fd_` e aruncată; football-data scrie doar rezultatul într-un rând care e deja al
+Flashscore-ului.
+
+**Cele 20 de excepții de identitate, toate numărate**: 13 Romania SuperLiga
+(`tsdb`), 5 izolate (`odds`/`tsdb`: Super Lig, Eredivisie, Europa League, MLS,
+Bundesliga), 2 World Cup 2026 (`odds`/`espn`). **18 din 20 au statistici COMPLETE
+de la Flashscore** — prin chiar asimetria din §1.7: când alt provider câștigă
+identitatea, Delta Sync întoarce `False` și Flashscore intră. Cele 2 World Cup
+sunt în afara celor 20 de competiții urmărite.
+
+**Unde temerea E justificată: FreeLF.** `match_statistics_adapter.py:85-93`
+scrie **6 câmpuri** (posesie ×2, xG actual ×2, șuturi la poartă ×2) din cele 20+
+ale Flashscore — genuin parțial. Dar: **zero rânduri în tot sezonul** (cota
+epuizată din august, 122 apeluri / 0 reușite, documentat), iar `COALESCE`-only
+înseamnă că Flashscore poate umple restul **după** el. Nu suprascrie nimic.
+
+**SFI scrie un set bogat**, nu parțial, și cel singur rând al lui e **100%
+complet** pe 13 câmpuri verificate (șuturi, șuturi la poartă, posesie, xG,
+cornere, faulturi, cartonașe, ofsaiduri, intervenții portar, arbitru, stadion,
+scor la pauză, aliniament) — față de o medie de **94,1%** pe rândurile
+Flashscore, unde diferența vine din meciurile de cupă fără xG, nu din lipsuri.
+
+**REÎNCADRAREA, care e punctul**: calitatea NU e amenințată de un scriitor
+parțial care suprascrie date bune — `COALESCE` o face imposibil. E amenințată de
+un scriitor care **blochează** sursa bogată. Cele 23 de meciuri din §1.1 nu
+aveau date *parțiale*; nu aveau **nicio** dată. football-data.org nu a corupt
+nimic — scriind rezultatul, a închis poarta prin care veneau cele 20 de coloane.
+
+**Caveat onest**: `stats_source` reține doar **primul** scriitor al acelui câmp,
+deci în principiu un rând ar putea avea proveniență mixtă invizibilă acolo.
+Practic irelevant azi (totul e ~100% complet și Flashscore scrie toate cele 20),
+dar e exact ce face §4.3 necesar.
+
 **Argumentul decisiv, adăugat după §1.9: eliminarea scriitorilor ar însemna să
 ANULĂM o reparație făcută pe 26 octombrie.** Scriitorul care a declanșat golul e
 Soccer Football Info, pe care l-am reparat acum șapte zile după 15 zile de eșec
