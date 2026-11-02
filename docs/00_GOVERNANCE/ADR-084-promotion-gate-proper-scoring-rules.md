@@ -9,6 +9,31 @@ preliminară obligatorie adăugată** (§9 Etapa 0 — un defect FSM care făcea
 întregul ADR inert), o **regulă de eligibilitate** nouă (§4.6), și proiecția
 statistică din §5.5 marcată ca **neconfirmată de datele ulterioare**. Nimic din
 §9 nu e implementat; toate etapele rămân **plan**, nu aprobări.
+
+> **Revizia 3** (2026-11-02, aprobată explicit: „Aprob asta: (a) acum, (b) după
+> ce citim prima rulare de noapte cu codul nou"). **Strict corectarea a două
+> afirmații proprii dovedite FALSE; decizia de fond rămâne NEaprobată și
+> amânată deliberat.** Zero cod atins.
+>
+> 1. **§9 spunea „Implementare — NEÎNCEPUTĂ. Nicio linie de cod nu a fost
+>    scrisă."** Fals de pe **1 noiembrie**: **Etapa 0 a fost aprobată separat și
+>    implementată** (`6883ffc`, `b7180ac`, `d9adf60`; garda e în cod la
+>    `learning_core/continuous_learning.py:375`). Corectat la §9.
+> 2. **§5.5 spunea „Criteriul rafinat NU ajută XGBoost" și „`dda4f7f3` are 2
+>    zile sub ambele criterii", plus retragerea unei proiecții ca
+>    „neconfirmată".** Fals: pe **30 octombrie**, la n=378, `dda4f7f3` a avut
+>    **toate trei** metricile semnificative. Retragerea de pe 29 oct a fost
+>    **prematură**, iar documentul a purtat-o patru zile. Corectat la §5.5, cu
+>    dovada din producție.
+>
+> **Starea vie la data reviziei 3, care e motivul real al amânării lui (b)**:
+> `blend_v1/174e7e17` (n=659) ar trece criteriul propus — Brier ✅, log-loss ✅,
+> acuratețe ❌ dar `Δacc = +1,06pp` — și ar fi trecut **șapte zile consecutive**
+> (27 oct – 2 nov). Deci aprobarea nu e teoretică: produce imediat un candidat.
+> Dar cifrele lui vin din rândul `control`, iar acela **s-a schimbat pe 2
+> noiembrie** (ADR-085, etapele 1-4). **O poartă de promovare nu se rafinează pe
+> date care s-au mișcat ieri.** Condiția de reluare a lui (b) e la §11.
+
 **Autor**: sesiune Claude Code, la cererea proprietarului produsului
 **Legat de**: North Star #2 (dovadă statistică simultană pe metrici multiple),
 ADR-002 (promovarea e act uman), ADR-016 (Challenger FSM), ADR-019 (Champion
@@ -429,28 +454,67 @@ Cele 15 zile sunt artefactul baseline-ului de dinainte de ADR-072, **nu** o
 proprietate a porții propuse. Pe rânduri corecte (`shadow_control`) rămân doar
 `174e7e17` și `dda4f7f3`.
 
-### 5.5 Criteriul rafinat NU ajută XGBoost
+### 5.5 Criteriul rafinat și XGBoost — **[REVIZIA 3: titlul și conținutul erau FALSE]**
 
-`dda4f7f3` are 2 zile sub **ambele** criterii. Rafinarea **cere** exact cele două
-metrici pe care el le ratează. Deci ADR-ul ăsta ajută `blend_v1`, nu
-`xgboost_v1`.
+> **🔴 Textul acestei secțiuni a afirmat patru zile două lucruri neadevărate**:
+> că „criteriul rafinat NU ajută XGBoost" și că „`dda4f7f3` are 2 zile sub
+> ambele criterii". Mai grav: retrăsese o proiecție ca „neconfirmată" **exact cu
+> o zi înainte ca ea să se adeverească**. Lăsat ca istoric mai jos, fiindcă un
+> document nu se rescrie retroactiv (North Star #9) — dar NU se mai citește ca
+> stare.
 
-> **🔴 [REVIZIA 2] Proiecția din revizia 1 e NECONFIRMATĂ și se retrage ca
+**Seria reală, din `challenger_evaluations`, `xgboost_v1/dda4f7f3`:**
+
+| zi | n | Brier | log-loss | acuratețe | Δ Brier |
+|---|---:|:-:|:-:|:-:|---:|
+| 27 oct | 347 | ❌ | ❌ | ✅ | −0,019830 |
+| 28 oct | 351 | ❌ | ❌ | ✅ | −0,020618 |
+| 29 oct | 370 | ❌ | ❌ | ✅ | −0,019551 |
+| **30 oct** | **378** | **✅** | **✅** | **✅** | **−0,021003** |
+| 31 oct | 390 | ❌ | ❌ | ✅ | −0,019837 |
+| 1 nov | 447 | ❌ | ❌ | ✅ | −0,015462 |
+| 2 nov | 506 | ❌ | ❌ | ❌ | −0,011911 |
+
+**Pe 30 octombrie a avut toate trei**, deci ar fi trecut nu doar criteriul
+propus, ci **și poarta actuală de 3/3**. Proiecția retrasă pe 29 oct se
+adeverise a doua zi.
+
+**Și în acea zi candidatura a fost ÎNGHIȚITĂ** — dovada e în producție:
+`automation_runs` id=**1413**, 30 oct 09:32:09, `xgboost_v1|all`, status
+**failed**, `error_detail` = *„tranzitie SUCCEEDED esuata: tranziție invalidă:
+SUCCEEDED -> SUCCEEDED"*. Exact defectul pentru care Etapa 0 a fost adăugată la
+revizia 2 și reparat pe 1 noiembrie. **Poarta a tras, iar FSM-ul a mâncat
+candidatura.**
+
+**Ce rămâne adevărat din afirmația originală**: pe majoritatea zilelor
+`dda4f7f3` ratează exact cele două metrici pe care criteriul propus le cere, iar
+pe 2 noiembrie a căzut și acuratețea. Deci criteriul rafinat **nu e o ușă
+deschisă pentru el** — dar „nu-l ajută niciodată" era prea tare, și o zi din
+șapte o infirmă.
+
+**Lecția de metodă, plătită a doua oară în acest document**: o proiecție
+contrazisă de două puncte **nu e încă infirmată**. Retragerea prematură e tot o
+afirmație greșită, doar în direcția cealaltă — și e mai greu de prins, fiindcă
+pare prudență.
+
+<details>
+<summary>Textul reviziei 2, păstrat ca istoric (NU e stare)</summary>
+
+> **[REVIZIA 2] Proiecția din revizia 1 e NECONFIRMATĂ și se retrage ca
 > așteptare.** Scrisesem că, la ritmul măsurat al lui `n` (seria zilnică +11,
-> +36, +13, **+61, +59**, +10, +4 — calendarul, nu o medie) și cu `t` scalând cu
+> +36, +13, +61, +59, +10, +4 — calendarul, nu o medie) și cu `t` scalând cu
 > √n, ambele metrici lipsă ar trece 1,96 „în jurul 1-2 noiembrie, pe poarta
 > actuală".
 >
 > Două zile noi au testat ipoteza și **nu** au confirmat-o. La `n = 370`
 > (29 oct), `brier_significant` e în continuare `false`, iar efectul a scăzut:
-> Brier −0,020618 → **−0,019551**, log-loss −0,030851 → **−0,029233**. Raportul
+> Brier −0,020618 → −0,019551, log-loss −0,030851 → −0,029233. Raportul
 > estimat al statisticii, presupunând dispersia per meci aproximativ constantă:
-> ×(0,9483 × √1,0541) ≈ **t ≈ 1,83**, adică **mai jos**, nu mai sus.
-> **Degradarea efectului anulează câștigul din `n`.**
+> ×(0,9483 × √1,0541) ≈ t ≈ 1,83, adică mai jos, nu mai sus.
 >
-> Nicio dată nu se mai afirmă ca așteptare. Dacă `xgboost_v1` ajunge vreodată la
-> două metrici semnificative, se vede în `challenger_evaluations` în dimineața
-> respectivă — nu se prezice.
+> Nicio dată nu se mai afirmă ca așteptare.
+
+</details>
 
 ---
 
@@ -633,17 +697,33 @@ de aceea §4.3 o prezintă ca primă citire, nu ca dovadă.
 
 ---
 
-## 9. Implementare — NEÎNCEPUTĂ. Tot ce urmează e PLAN, nu aprobare
+## 9. Implementare — Etapa 0 FĂCUTĂ; etapele 1-6 rămân PLAN, nu aprobare
 
-**Nicio linie de cod nu a fost scrisă.** Niciuna dintre etapele de mai jos nu e
-aprobată prin acceptarea acestui document: fiecare cere o aprobare proprie, iar
-activarea (Faza 6) una explicit separată. Ordinea e obligatorie.
+> **[CORECTAT REVIZIA 3 — antetul acesta a spus „NEÎNCEPUTĂ. Nicio linie de cod
+> nu a fost scrisă" și era FALS de pe 1 noiembrie.]** Exact clasa „documentație
+> care minte" pe care proiectul o reproșează altor intrări, în chiar documentul
+> care enumeră la §8 erorile proprii.
 
-### Etapa 0 — PRELIMINARĂ OBLIGATORIE: idempotența candidaturii
+**Etapa 0 e implementată.** Etapele 1-6 **nu** sunt aprobate prin acceptarea
+acestui document: fiecare cere o aprobare proprie, iar activarea (Etapa 6) una
+explicit separată. Ordinea e obligatorie.
+
+### Etapa 0 — ✅ APROBATĂ SEPARAT ȘI IMPLEMENTATĂ, 2026-11-01
 
 > **[REVIZIA 2 — etapă nouă.]** Fără ea, **întregul ADR e inert** pentru exact
 > modelele pentru care a fost scris (vezi §6.1). Are valoare **independentă**:
 > defectul lovește și poarta actuală de 3/3.
+
+**[REVIZIA 3] Făcută**: `6883ffc` (reparația), `b7180ac` (10 teste, 5 mutații,
+defectul ca regresie), `d9adf60` (garda pe tabela FSM, că remediul a fost (a) și
+nu (b) sau (c)). Garda e în cod la `learning_core/continuous_learning.py:375`:
+`if stare_curenta != "SUCCEEDED"`.
+
+**Și „limita de verificare" declarată mai jos s-a închis**: defectul nu mai e
+ipotetic — a fost **observat în producție de patru ori** (`automation_runs` 355,
+1288, 1291, **1413**), iar 1413 e cazul care a mâncat o candidatură 3/3 reală
+(30 oct, `dda4f7f3`, n=378 — vezi §5.5). Deci Etapa 0 a reparat un defect
+măsurat, nu unul prezis.
 
 - **Fișier**: `learning_core/continuous_learning.py`,
   `_handle_candidate_for_promotion` (azi liniile 331-335) și apelantul unic
@@ -714,3 +794,65 @@ ADR; e consemnată ca direcție, nu ca angajament.
 6. **[REVIZIA 2]** Eligibilitatea §4.6 respectată: un experiment pe
    `match_history_frozen` (azi: `flashscore_team_dna/v1`) primește în continuare
    poarta **3/3**, verificat pe un caz real, nu doar pe un fals.
+
+---
+
+## 11. [REVIZIA 3] Decizia de fond — AMÂNATĂ, cu declanșator verificabil
+
+**Aprobare explicită a proprietarului produsului, 2026-11-02**: revizia 3 (a)
+acum; decizia de fond (b) **după prima rulare de noapte cu codul ADR-085 și
+după ce cifrele se dovedesc stabile**.
+
+> **O poartă de promovare nu se rafinează pe date care s-au mișcat ieri.**
+
+### De ce amânarea e un argument, nu o ezitare
+
+Criteriul propus se evaluează pe `challenger_evaluations`, iar ambii Challengeri
+activi au azi `baseline_source = 'shadow_control'` — deci cifrele lor vin din
+rândul `control` din `shadow_predictions`. **Acel rând și-a schimbat sursa de
+alimentare pe 2 noiembrie**: ADR-085 etapele 1-4 au reparat Delta Sync și poarta
+Single Owner, iar 27 de meciuri au primit statistici și xG care lipseau, dintre
+care 23 din ultima săptămână. Plus etapa 3, care schimbă ce se scrie în
+`stats_source`.
+
+A aproba criteriul acum ar însemna să-l calibrăm pe o fereastră în care **o
+divergență ar avea două cauze candidate** — exact obiecția pe care proiectul a
+ridicat-o deja la `BACKLOG.md` §3.3 și o respectă de atunci.
+
+### Starea la amânare, ca să fie comparabilă
+
+| Challenger | n | Brier | log-loss | acuratețe | Δacc | ar trece? |
+|---|---:|:-:|:-:|:-:|---:|:-:|
+| `blend_v1/174e7e17` | 659 | ✅ | ✅ | ❌ | +1,06pp | **DA** |
+| `xgboost_v1/dda4f7f3` | 506 | ❌ | ❌ | ❌ | +3,56pp | nu |
+
+`blend_v1/174e7e17` ar fi trecut criteriul propus **șapte zile consecutive**
+(27 oct – 2 nov), cu Δ Brier între −0,0085 și −0,0107 și Δacc mereu pozitiv.
+Deci aprobarea produce **imediat** un candidat de promovare — nu e o schimbare
+de principiu fără consecință. (Promovarea rămâne act uman, ADR-002.)
+
+### DECLANȘATORUL de reluare, verificabil — nu „mai vedem"
+
+Se reia discuția de fond când **toate trei** sunt îndeplinite:
+
+1. **Cel puțin 3 zile de evaluare consecutive** cu codul ADR-085 pe `main`
+   (prima e rularea de noapte din 3 noiembrie).
+2. **Partiția pe oră a dispărut** — ADR-085 §6.3: rata de goluri pe meciurile
+   de la 19:00 UTC în sus trebuie să coboare spre cea de zi (era 47,8% vs 0,8%).
+   Cât timp nu a dispărut, rândul `control` încă pierde meciuri, deci cifrele nu
+   sunt stabile.
+3. **Verdictele lui `blend_v1/174e7e17` nu oscilează** pe acele zile: Brier și
+   log-loss rămân amândouă semnificative, iar `delta_accuracy` rămâne ≥ 0.
+   O oscilație înseamnă că suntem lângă prag, iar precedentul e documentat —
+   verdictul a basculat de două ori în cinci zile în octombrie, la același
+   increment de +61 de meciuri.
+
+**Dacă (3) NU se îndeplinește**, asta e în sine un rezultat relevant pentru
+decizia de fond: un criteriu care produce un candidat instabil nu e o
+îmbunătățire, iar §7.1 (riscul croirii regulii după date) devine argumentul
+dominant.
+
+**Această secțiune e consemnată și în `docs/00_GOVERNANCE/BACKLOG.md` §1 și în
+`DE_URMARIT.md`** — precedentul ADR-057 a costat **14 zile fără nicio
+antrenare** fiindcă o decizie amânată trăia doar în ADR-ul ei, necitată de
+niciun document viu și de niciun cod.

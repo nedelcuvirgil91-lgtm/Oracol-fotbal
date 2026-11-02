@@ -2,14 +2,15 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-11-02**. Ultimul element adăugat: **§16 — primul
-verdict al Champion Guardian**, după activarea ADR-037 R4.
+Ultima actualizare: **2026-11-02**. Ultimul element adăugat: **§18 — ADR-085
+etapa 5 + declanșatorul de reluare pentru decizia de fond ADR-084**.
 
 **Elemente deschise, în ordinea termenului:**
 
 | § | Ce | Termen |
 |---|---|---|
 | **§16** | 🔴 **PRIMUL VERDICT CHAMPION GUARDIAN** — R4 activat 2 nov 17:30:03. Predicție scrisă înainte: `healthy`, toate patru flagurile `false` | **rularea de noapte de 3 nov** |
+| **§18** | 🔴 **ADR-085 etapa 5** — testul decisiv NU e „restanța a scăzut", e ca **partiția pe oră să dispară** (era 47,8% seara vs 0,8% ziua). Și e **precondiția** deciziei de fond ADR-084 | **rularea de noapte de 3 nov**, apoi 3 zile |
 | **§17** | 🔴 **Punctul B Odds API e BLOCAT de un cuplaj nescris** — `events_` și `odds_` împart categoria `"odds"`; comentariul care promite izolarea e FALS | te așteaptă |
 | **§15** | 📊 XGBoost bate Oracle-ul servit cu **+5,76pp**. Declanșator: 3/3 × 10 zile consecutive · n ≥ 500 | serie ruptă 25 oct; #13 a expirat 2 nov |
 | **§14** | Verdictul oscilează lângă prag — miza **reîncadrată** de §15: promovarea nu schimbă nimic servit | informativ |
@@ -2168,3 +2169,80 @@ Nu atinge probabilitățile. Dar proiectul a plătit **de două ori** pentru des
 **Forma corectă a lui B**: `events_` primește categorie proprie (intrarea moartă `"events": 0.5` există deja și e exact ce presupunea comentariul) **ÎNAINTE** de a urca `odds`. Abia atunci mărirea e izolată la cache-ul de cote, care alimentează doar value bets.
 
 **NEreparat.** Atinge `oracle_api.py` și `cache_manager.py`, deci cere aprobare explicită.
+
+---
+
+## §18 — ADR-085 etapa 5, și declanșatorul deciziei de fond ADR-084
+
+**Adăugat 2026-11-02.** Două lucruri legate: verificarea reparației Delta Sync,
+și faptul că **ea e precondiția** pentru decizia amânată a porții de promovare.
+
+### A. Etapa 5 ADR-085 — ce se verifică la rularea de noapte din 3 noiembrie
+
+ADR-085 e ACCEPTED; etapele 1-4 sunt pe `main` (`1b3c3ef`, 2 nov). Rularea din 3
+nov e prima care poartă codul nou.
+
+**⚠️ Testul decisiv NU e „restanța a scăzut"** — aceea poate scădea din alte
+motive. Testul e ca **partiția pe oră să dispară**, fiindcă e singura
+măsurătoare care a izolat cauza:
+
+| set, 26 oct – 1 nov | seara (≥19 UTC) | gol | ziua | gol |
+|---|---:|---:|---:|---:|
+| toate ligile | 46 | 22 (47,8%) | 120 | 1 (0,8%) |
+| fără MLS | 34 | 14 (41,2%) | 105 | 1 (0,95%) |
+| doar MLS | 12 | 8 (66,7%) | 15 | 0 (0%) |
+
+Rata de seară trebuie să coboare spre cea de zi. Celelalte verificări, în
+ordine: restanța ≤ 6 (cele 6 MLS din septembrie sunt clasa ADR-076, altă
+cauză) · durata etapei 5 **în creștere** față de 6-7 min (dacă rămâne la 6,
+reparația nu e în efect) · clasa 11 din `check_data_health` cu `delta_sync = 0`
+· rândurile noi fără statistici să aibă `stats_source` **NULL**, nu
+`'flashscore'`.
+
+**Dacă partiția NU dispare**: nu se repară nimic pe loc. Se verifică întâi dacă
+rularea a purtat codul nou (`head_sha`) — precedentul din 21 oct, când o
+reparație a stat inertă 6 zile fiindcă alt defect o masca.
+
+### B. Decizia de fond ADR-084 — AMÂNATĂ, cu declanșator verificabil
+
+**Aprobat explicit 2 nov**: revizia 3 a ADR-084 acum (făcută), decizia de fond
+**după** ce cifrele se dovedesc stabile.
+
+**Motivul nu e ezitare**: ambii Challengeri au `baseline_source = 'shadow_control'`,
+deci cifrele lor vin din rândul `control` — iar acela și-a schimbat alimentarea
+pe 2 nov. O divergență ar avea **două cauze candidate**.
+
+**Miza e vie**: `blend_v1/174e7e17` (n=659) ar trece criteriul propus
+(Brier ✅, log-loss ✅, acuratețe ❌ dar Δacc **+1,06pp**) și ar fi trecut
+**șapte zile consecutive**, 27 oct – 2 nov. Aprobarea produce imediat un
+candidat de promovare.
+
+**Se reia când TOATE trei sunt îndeplinite** (ADR-084 §11):
+
+1. ≥ **3 zile de evaluare consecutive** cu codul ADR-085 pe `main`;
+2. **partiția pe oră a dispărut** (punctul A);
+3. verdictele lui `174e7e17` **nu oscilează** — Brier și log-loss rămân
+   amândouă semnificative, `delta_accuracy` rămâne ≥ 0.
+
+**Dacă (3) nu se îndeplinește, asta e în sine un rezultat**: un criteriu care
+produce un candidat instabil nu e o îmbunătățire, iar §7.1 din ADR-084 (riscul
+croirii regulii după date) devine argumentul dominant.
+
+### C. Ce s-a corectat în ADR-084 la revizia 3, ca să nu se recitească greșit
+
+Două afirmații proprii, false, purtate zile:
+
+- §9 spunea *„Implementare NEÎNCEPUTĂ, nicio linie de cod"* — **Etapa 0 era
+  făcută din 1 nov** (`6883ffc`, `b7180ac`, `d9adf60`).
+- §5.5 spunea *„criteriul rafinat NU ajută XGBoost"* și retrăgea o proiecție ca
+  neconfirmată — **pe 30 oct `dda4f7f3` a avut toate trei metricile** la n=378,
+  deci ar fi trecut chiar și poarta actuală. Retragerea de pe 29 oct a fost
+  prematură cu o zi.
+- **Și în acea zi candidatura a fost înghițită**: `automation_runs` id=**1413**,
+  30 oct 09:32:09, `failed`, *„tranziție invalidă: SUCCEEDED -> SUCCEEDED"* —
+  exact defectul reparat de Etapa 0 a doua zi. **Poarta a tras, FSM-ul a mâncat
+  candidatura.**
+
+**Lecția**: o proiecție contrazisă de două puncte nu e încă infirmată.
+Retragerea prematură e tot o afirmație greșită, doar mai greu de prins, fiindcă
+pare prudență.
