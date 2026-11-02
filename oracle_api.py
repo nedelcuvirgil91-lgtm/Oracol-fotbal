@@ -375,8 +375,34 @@ class FootballOracleAPI:
             return f"{segmente[0]}/{segmente[-1]}"
         return segmente[-1]
 
+    @staticmethod
+    def _corp_eroare(resp) -> str | None:
+        """[ADAUGAT 2026-11-02] Corpul unui raspuns esuat, pe o singura linie.
+
+        NU arunca NICIODATA: e chemata exclusiv pe calea de eroare, deci o
+        exceptie aici ar masca defectul pe care tocmai incearca sa-l explice.
+        `getattr` fiindca dublurile de test (`_FakeResp` in zeci de fisiere) au
+        `ok`/`status_code`/`json()` dar nu `text` — acelasi tipar defensiv deja
+        folosit in `_get` pentru `headers`.
+
+        DE CE NU importa `soccerfootballinfo_client._corp_diagnostic`, desi
+        face acelasi lucru: acela e un client de Sync Layer, iar
+        `oracle_api` e stratul de acces la provideri — un import „in sus\" ar
+        incalca North Star #10 pentru zece linii. Trunchierea NU se duplica
+        aici: plafonul propriu al caii de scriere (`supabase_client.
+        _LUNGIME_MAXIMA_ERROR_BODY`) o face oricum, iar ADR-081 spune explicit
+        ca acela exista tocmai ca sa nu aiba incredere in apelant."""
+        try:
+            text = getattr(resp, "text", None)
+            if not text:
+                return None
+            return " ".join(str(text).split()) or None
+        except Exception:
+            return None
+
     def _record_metric(self, url: str, success: bool, latency_ms: float,
-                        status_code: int | None = None, exc: Exception | None = None) -> None:
+                        status_code: int | None = None, exc: Exception | None = None,
+                        error_body: str | None = None) -> None:
         # Best-effort, nu blocheaza fluxul principal daca esueaza (acelasi
         # principiu de degradare gratioasa folosit peste tot in proiect).
         #
@@ -390,8 +416,13 @@ class FootballOracleAPI:
                 from provider_call_classification import classify_failure
                 status_code, failure_reason = classify_failure(status_code, exc=exc)
             import supabase_client as _sb
+            # [ADR-081, extins 2026-11-02] `error_body` ajunge pana in
+            # `provider_call_log`. Garzile NU stau aici: calea de scriere
+            # forteaza `None` pe succes, redacteaza secretele si trunchiaza —
+            # vezi `supabase_client._error_body_de_scris`.
             _sb.record_provider_call(provider, endpoint, success, latency_ms,
-                                      http_status=status_code, failure_reason=failure_reason)
+                                      http_status=status_code, failure_reason=failure_reason,
+                                      error_body=error_body)
         except Exception:
             pass
 
@@ -484,18 +515,18 @@ class FootballOracleAPI:
             if request_manager is not None and provider != "unknown":
                 request_manager.record_response_headers(provider, getattr(r, "headers", None))
             if r.status_code == 404:
-                logger.warning("[HTTP 404] %s", url[:80]); self._record_metric(url, False, latency_ms, status_code=404); return _ret(None, r)
+                logger.warning("[HTTP 404] %s", url[:80]); self._record_metric(url, False, latency_ms, status_code=404, error_body=self._corp_eroare(r)); return _ret(None, r)
             if r.status_code == 403:
-                logger.warning("[HTTP 403] %s", url[:80]); self._record_metric(url, False, latency_ms, status_code=403); return _ret(None, r)
+                logger.warning("[HTTP 403] %s", url[:80]); self._record_metric(url, False, latency_ms, status_code=403, error_body=self._corp_eroare(r)); return _ret(None, r)
             if r.status_code == 429:
                 logger.warning("[HTTP 429] %s", url[:80])
-                self._record_metric(url, False, latency_ms, status_code=429)
+                self._record_metric(url, False, latency_ms, status_code=429, error_body=self._corp_eroare(r))
                 if FREE_LF_HOST in url:
                     self._freelf_exhausted = True
                     logger.warning("[FreeLF] Limita 429 — trecem pe fallback ESPN/demo.")
                 return _ret(None, r)
             if not r.ok:
-                logger.warning("[HTTP %s] %s", r.status_code, url[:80]); self._record_metric(url, False, latency_ms, status_code=r.status_code); return _ret(None, r)
+                logger.warning("[HTTP %s] %s", r.status_code, url[:80]); self._record_metric(url, False, latency_ms, status_code=r.status_code, error_body=self._corp_eroare(r)); return _ret(None, r)
             self._record_metric(url, True, latency_ms, status_code=r.status_code)
             return _ret(r.json(), r)
         except Exception as exc:
