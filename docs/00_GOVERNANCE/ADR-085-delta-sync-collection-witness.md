@@ -190,6 +190,82 @@ de la 09:00 ajunge primul și salvează meciul.
 **Deci rezultatul colectării depinde azi de adâncimea cozii GitHub.** O cursă cu
 câștigător nedeterminist, pe o coloană din care se antrenează modele.
 
+### 1.9 DECLANȘATORUL, datat și atribuit — e o reparație a noastră
+
+> **[ADĂUGAT după prima versiune a acestui ADR, la întrebarea explicită a
+> proprietarului produsului: „noi avem vreun număr de colectare mai mic?... Sau
+> alt motiv identificat de tine?"]** Prima versiune lăsa deschisă întrebarea *de
+> ce exact săptămâna aceea*. Acum e închisă, cu dată.
+
+**Două ipoteze eliminate întâi, prin măsurare:**
+
+- **Plafonul per ligă.** `DEFAULT_LIMIT_PER_LEAGUE_AUTOMATED = 20` în cod, dar
+  valoarea **efectivă în producție e 50** (`model_config`, cheia
+  `flashscore_limit_per_league_automated`). Maximul real pe ligă în săptămâna
+  26 oct: **MLS 27**, Serie A 18. Nicio ligă nu s-a apropiat de 50. **Nu e
+  trunchiere.**
+- **Ligile noi** (Austria, Elveția, Danemarca, adăugate 17 oct). Plafonul e *per
+  ligă*, nu global — deci nu diluează. Toate trei au **zero goluri**.
+- **Providerul de rezultate** (football-data.org acoperă 10 competiții).
+  Infirmată: Primeira Liga, Eredivisie și Bundesliga sunt acoperite de FD, au
+  meciuri de seară și **zero goluri**; Scottish Premiership are 6 meciuri de
+  seară, NU e acoperită de FD, și tot **zero goluri**.
+
+**Declanșatorul real, din rândurile de audit `night_sync` (ADR-026, producător
+adăugat 21 oct — acest ADR e prima dată când acele rânduri răspund la o
+întrebare cauzală):**
+
+| zi | pas `results` | etapa 5 Flashscore | goluri de seară |
+|---|---:|---:|---:|
+| 21 oct | 3,6 s | 7,9 min | 0 |
+| 22 oct | 19,0 s | 15,5 min | 0 |
+| 23 oct | 35,0 s | 23,1 min | 0 |
+| 24 oct | 14,6 s | 10,7 min | 0 |
+| 25 oct | 24,0 s | 22,8 min | 0 |
+| 26 oct | 11,9 s | 11,7 min | 2 |
+| **27 oct** | **62,0 s** | **5,8 min** | 2 |
+| 28 oct | 66,9 s | 6,1 min | 5 |
+| 30 oct | 74,8 s | 6,7 min | 2 |
+| 31 oct | 62,5 s | 6,7 min | 5 |
+| 1 nov | **107,7 s** | 12,0 min | 5 |
+| 2 nov | **115,3 s** | 10,3 min | — |
+
+Pasul care **scrie** rezultatele a crescut de 3-10×, iar etapa care colectează
+statisticile a scăzut la **jumătate** — simultan, exact la data la care încep
+golurile. Semnătură cuantificată pe **ambele** capete ale mecanismului.
+
+**Cauza acelei creșteri: commit-ul `9202d82`, 26 octombrie 10:43** — reparația
+parametrului `d` al Soccer Football Info. Propriul lui mesaj datează defectul
+reparat: *„ultimul succes 10 oct 08:20:04, primul 400 pe 11 oct 08:37:03, apoi
+100% eșec, 15 zile"*. Iar `fetch_results_from_soccerfootballinfo()` e **a treia
+sursă din pasul `results`** (`sync_results.py:583`).
+
+**Lanțul, complet:**
+
+1. 11 → 26 oct: SFI eșua 100% la rezultate. `results` scria puține rânduri
+   (4-35 s). Flashscore ajungea primul. **Zero goluri.**
+2. 26 oct 10:43: am reparat `d`. SFI redevine funcțional.
+3. De pe 26-27 oct: `results` urcă la 62-115 s — scrie mult mai multe
+   `actual_result`.
+4. Acele scrieri închid Delta Sync cu ~17 minute înaintea etapei 5, în
+   **aceeași** rulare.
+5. Etapa 5 scade la 6-7 min și raportează **`ok: true`**.
+6. 23 de meciuri de seară rămân permanent fără statistici.
+
+**Golul e efectul secundar al unei reparații corecte.** Defectul din Delta Sync
+era latent **exact fiindcă un scriitor concurent era stricat**.
+
+**Simetria merită consemnată**: mesajul lui `9202d82` conține propoziția
+*„Defectul s-a activat FĂRĂ niciun commit"* — un defect trezit de o schimbare a
+**datelor**. Aici e oglinda: un defect trezit de un **commit**, și anume de o
+reparație. Clasa comună: **un defect latent se trezește când se schimbă ceva ce
+nu-l atinge.**
+
+**Consecința care schimbă prioritatea etapei 4 (§7)**: orice reparație viitoare
+la `results`, `odds_recent_results` sau SFI va retrezi același defect, în același
+mod tăcut. Fără un indicator de restanță, o reparație corectă va rupe din nou
+colectarea, iar etapa 5 va raporta verde în 6 minute.
+
 ---
 
 ## 2. Clasa de defect — a treia instanță, numită deja în proiect
@@ -277,11 +353,18 @@ arată că fallback-ul **chiar prinde** cazuri. Iar `sync_results.py` documentea
 el însuși că fereastra lui de o zi a fost lărgită tocmai după ce **pierduse
 definitiv 16 meciuri World Cup**.
 
+**Argumentul decisiv, adăugat după §1.9: eliminarea scriitorilor ar însemna să
+ANULĂM o reparație făcută pe 26 octombrie.** Scriitorul care a declanșat golul e
+Soccer Football Info, pe care l-am reparat acum șapte zile după 15 zile de eșec
+total. El e sursa de rezultate pentru ligile pe care football-data.org nu le
+acoperă — inclusiv cele 13 rânduri Romania SuperLiga din §1.7. A-l scoate din
+joc ar reintroduce exact golul pe care reparația l-a închis.
+
 **Verdict**: A rezolvă golul **îngustând sistemul ca o întrebare greșită să
-devină adevărată**, și plătește pentru asta cu un punct unic de eșec pe coloana
-cea mai fundamentală. **NU se recomandă.** Rămâne o opțiune deschisă, consemnată
-aici cu cifrele ei, dacă proprietarul produsului decide altfel după ce citește
-§3.2.
+devină adevărată**, plătește cu un punct unic de eșec pe coloana cea mai
+fundamentală, și ar reveni asupra unei reparații corecte. **NU se recomandă.**
+Rămâne o opțiune deschisă, consemnată aici cu cifrele ei, dacă proprietarul
+produsului decide altfel după ce citește §3.2.
 
 ### 3.2 Opțiunea B — se repară întrebarea (RECOMANDATĂ)
 
@@ -482,11 +565,43 @@ Flashscore, deci afirmația devine adevărată prin umplere, nu prin rescriere
 
 | etapă | ce | cere aprobare separată |
 |---|---|---|
-| **0** | Recuperarea restanței de azi (29 de meciuri) prin `--recover-missing-stats` | ✅ **aprobată și executată 2 nov** |
+| **0** | Recuperarea restanței de azi (29 de meciuri) prin `--recover-missing-stats` | ✅ **aprobată și EXECUTATĂ 2 nov — vezi §7.1** |
 | 1 | B — Delta Sync pe coloana-țintă, mărginit (§4.1) + teste + mutații | da (merge pe `main`) |
 | 2 | C(ii) — poarta Single Owner pe aceeași definiție (§4.2) | da |
 | 3 | `stats_source` condiționat (§4.3) | da |
-| 4 | Verificarea din §6.3, după prima rulare de noapte | — |
+| **4** | **Clasă nouă în `check_data_health`: meciuri terminate, competiție urmărită, fără statistici. Prag ZERO absolut, nu procent.** §1.9 o mută din „util" în **obligatoriu** | da |
+| 5 | Verificarea din §6.3, după prima rulare de noapte | — |
+
+### 7.1 Etapa 0 — executată și verificată, 2 noiembrie 2026
+
+Rularea `41505315571` (FDL, `--recover-missing-stats`, `max_recover=50`,
+`recover_days_back=60`, `limit_per_league=40`), 18:56:47 → 19:21:42 UTC,
+**24m55s, `success`**.
+
+`limit_per_league` a fost pus la 40 deliberat: el mărginește **Discovery**, iar
+`_plan_recuperare()` restrânge apoi lista strict la țintele din restanță, deci un
+hub mai adânc costă doar paginile de hub, nu fetch-uri în plus.
+
+| indicator | înainte | după |
+|---|---:|---:|
+| restanță 60 zile (`home_shots IS NULL`) | 29 | **6** |
+| **din săptămâna 26 oct** | **23** | **0** ✅ |
+| `match_statistics_extended` | 58.423 | **59.341** (+918) |
+| `player_match_stats` | 86.369 | **87.518** (+1.149) |
+| sezon domestic cu xG | 1625 / 1654 (98,25%) | **1652 / 1658 (99,64%)** |
+
+**Verificarea de calitate, nu doar de număr**: pe cele **27** de meciuri
+recuperate, 8 competiții — `referee`, `home_ht_goals`, `home_shots`,
+`home_xg_actual` și `home_possession` sunt prezente pe **27 din 27**. Deci tabul
+summary a fost parsat complet, nu parțial. Semnalul corect era ăsta, nu numărul
+de rânduri (care poate crește și dintr-un `upsert` pe aceeași fereastră).
+
+**Cele 6 rămase sunt o CLASĂ DIFERITĂ, iar martorul le separă curat**: toate 6
+(MLS, 9-13 septembrie) au **`referee IS NOT NULL`** — summary-ul a fost parsat,
+dar tabul de statistici n-a dat nimic. Reziduul **penei ADR-076** (8 sep – 18
+oct), nu al defectului din acest ADR, care are semnătura inversă
+(`referee IS NULL`). Nu au fost recuperate fiindcă la 50+ zile nu mai apar pe
+hub-ul `/results/` — explicație, nu defect.
 
 Etapele 1-3 pot merge într-un singur commit: ating același contract („ce
 înseamnă «colectat»"), iar separarea lor ar lăsa producția într-o stare
