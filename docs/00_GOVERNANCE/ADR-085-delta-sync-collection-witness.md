@@ -104,8 +104,22 @@ iulie** pentru Aston Villa – Fulham din 31 oct.
 | cu statistici | 146 | 14,74 | 24 (16,4%) | 122 (83,6%) |
 | **fără statistici** | 23 | **19,83** | **22 (95,7%)** | **1 (4,3%)** |
 
-**22 din 23 sunt meciuri de la 19:00 UTC în sus.** Asta nu e o coincidență de
-calendar — e consecința directă a programării:
+**22 din 23 sunt meciuri de la 19:00 UTC în sus.**
+
+> **Confuz verificat și ELIMINAT** (nu presupus curat): MLS joacă aproape mereu
+> târziu în UTC, deci partiția ar fi putut fi o proprietate a ligii, nu a orei.
+> Tăiat în trei:
+>
+> | set | seara | gol | ziua | gol |
+> |---|---:|---:|---:|---:|
+> | toate ligile | 46 | 22 (47,8%) | 120 | 1 (0,8%) |
+> | **fără MLS** | 34 | **14 (41,2%)** | 105 | **1 (0,95%)** |
+> | **doar MLS** | 12 | **8 (66,7%)** | 15 | **0 (0%)** |
+>
+> MLS are **15 meciuri de zi** în fereastră și **zero** goluri pe ele. Partiția
+> ține și în interiorul MLS, și în afara lui. **E ora, nu liga.**
+
+Asta nu e o coincidență de calendar — e consecința directă a programării:
 
 - `live_sync.yml` (DOAR Flashscore, fără pasul de rezultate) rulează la
   **09:00, 13:00, 17:00 UTC** (`cron: "0 9,13,17 * * *"`).
@@ -601,7 +615,15 @@ de rânduri (care poate crește și dintr-un `upsert` pe aceeași fereastră).
 dar tabul de statistici n-a dat nimic. Reziduul **penei ADR-076** (8 sep – 18
 oct), nu al defectului din acest ADR, care are semnătura inversă
 (`referee IS NULL`). Nu au fost recuperate fiindcă la 50+ zile nu mai apar pe
-hub-ul `/results/` — explicație, nu defect.
+hub-ul `/results/` — explicație, nu defect. Toate 6 sunt la 21:00-23:30 UTC, dar
+pentru MLS ora nu discriminează (vezi contraponderea din §1.4) — ce le
+clasifică e arbitrul, nu ora.
+
+**Registrul NU s-a împrospătat, și e corect**: `experiment_registry` pentru
+`flashscore_team_dna` rămâne la `n = 1506`, evaluat 15:16:50, adică **înaintea**
+recuperării. Evaluarea rulează în `night_sync` (`evaluate_all_active_experiments`,
+`run_daily.py:537`), nu în FDL. Cifrele Team Profile se vor schimba la prima
+rulare de noapte — **de aceea orice citire a lor azi e dinainte de recuperare.**
 
 Etapele 1-3 pot merge într-un singur commit: ating același contract („ce
 înseamnă «colectat»"), iar separarea lor ar lăsa producția într-o stare
