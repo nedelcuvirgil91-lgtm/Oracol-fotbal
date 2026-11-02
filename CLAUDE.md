@@ -267,7 +267,23 @@ Contorul de meciuri evaluabile a trecut pragul: **301/300**, afișat de aplicaț
 
 **Legătură cu ADR-072, de reținut înainte de orice promovare**: `flashscore_team_dna/v1` e singurul `candidate_for_promotion` cu **0 rânduri `control`** (0 din 989), deci singurul pe care ADR-072 **nu îl poate verifica**. Cade corect pe `match_history_frozen` (D2 funcționează), dar cifra lui rămâne produsă de baseline-ul care, în 4 din 5 cazuri măsurate, flatează challenger-ul.
 
-**[ÎNCHIS 2026-10-13 — ablația a rulat, rezultat NEGATIV]** Nicio variantă nu e mai bună simultan pe toate trei metricile, iar degradarea e **monotonă în doză** (log-loss +0,0543 la aplicarea brută, |t|=3,58). Feature-ul rămâne NEPROMOVAT. **Declanșatorul de reluare NU e un prag de meciuri** — mărirea 300→600 n-ar ajuta, fiindcă zgomotul metricii depinde de xG-ul acumulat *per echipă*, nu de mărimea setului de test; iar fereastra nu poate fi mărită azi (nicio echipă n-are 10 meciuri cu xG, median 5). Reluare justificată la ~16 meciuri cu xG per echipă, estimativ februarie-martie 2027. Detalii: `BACKLOG_2026-10-13.md` §1.2.
+**[ÎNCHIS 2026-10-13 — ablația a rulat, rezultat NEGATIV]** Nicio variantă nu e mai bună simultan pe toate trei metricile, iar degradarea e **monotonă în doză** (log-loss +0,0543 la aplicarea brută, |t|=3,58). Feature-ul rămâne NEPROMOVAT. **Declanșatorul de reluare NU e un prag de meciuri** — mărirea 300→600 n-ar ajuta, fiindcă zgomotul metricii depinde de xG-ul acumulat *per echipă*, nu de mărimea setului de test; iar fereastra nu poate fi mărită azi (nicio echipă n-are 10 meciuri cu xG, median 5). Reluare justificată la ~16 meciuri cu xG per echipă, ~~estimativ februarie-martie 2027~~. Detalii: `BACKLOG_2026-10-13.md` §1.2.
+
+> **[REMĂSURAT 2026-11-02 — estimarea „februarie-martie 2027" era prea pesimistă, și motivul e instructiv.]** Întrebarea proprietarului produsului („văd că s-a ajuns la 915 meciuri, se ia vreo decizie?") a dus la remăsurarea cantității care chiar guvernează decizia. Seria, cu tăietura pe `kickoff_date` (deci curba de calendar, la acoperirea xG de azi), ligi domestice, sezonul curent:
+>
+> | până la | median xG/echipă | maxim | echipe ≥16 |
+> |---|---:|---:|---:|
+> | 14 sep | 6 | 11 | 0 |
+> | 13 oct | 8 | 14 | 0 |
+> | 20 oct | 9 | 16 | 7 |
+> | 27 oct | 10 | 17 | 24 |
+> | **2 nov** | **11** | **19** | **29** |
+>
+> **+1 la median pe săptămână, liniar curat.** De la 11 la ținta de ~16 = **5 săptămâni → ~7 decembrie 2026**, nu februarie-martie 2027. Eroarea implicită e deja **±24%**, nu ±36%.
+>
+> **De ce estimarea inițială era greșită**: documentul din 13 oct scria „256 de echipe, median 5, zero peste 9". Remăsurat azi cu tăietura la acea dată: **median 8, maxim 14**. Diferența nu e a măsurătorii — e **pana de extragere Flashscore** (ADR-076): acoperirea xG pe octombrie era 1/232 când s-a făcut măsurătoarea, și a urcat la 93/323 după reparație plus recuperarea D-B. **Estimarea s-a sprijinit pe un set sub-acoperit.** Aceeași clasă ca ADR-077: o premisă de volum măsurată în timpul unei pene, purtată mai departe ca fiind curentă.
+>
+> **🔴 ȘI ETICHETA DIN UI E FALSĂ, NEREPARATĂ.** `app.py:778-781` afișează „prag atins — **test de ablație în așteptare**" pe condiția pur aritmetică `n_eval >= threshold`. Nu există nicio legătură între acel șir și starea reală a testului: **ablația a rulat pe 13 octombrie, rezultatul a fost negativ**, iar nimic în cod și nimic în bază nu înregistrează asta. Ecranul va scrie „în așteptare" la infinit, oricât ar crește cifra (azi 915/300). E clasa „documentație care minte", mutată în interfață — frate cu `has_stats` pe 2599/2599. **Reparația atinge `app.py`, fișier protejat, deci cere aprobare separată**; documentul din 13 oct propunea deja ca bara să urmărească xG-ul median per echipă, cantitatea care chiar decide.
 
 ### D-8. `consensus_validation` nu are fază de execuție — decizii orfane structural (descoperit 2026-10-13)
 
@@ -413,6 +429,7 @@ Același tipar ca la `sync_pre_match_odds` în august: instrumentare întâi, re
    - **🔴 Premisa de volum s-a EVAPORAT între propunere și execuție, și am purtat cifrele vechi ca fiind curente.** Textul de aici spunea „SFI ar trece de la 0 la **~95 de meciuri/săptămână**, cu rată de succes nemăsurată" — cifra din 19 oct. Remăsurat pe 27 oct: golul e **8 meciuri pe 60 de zile, nu 653**; pe 7 și 14 zile e **2**, iar acoperirea e **99,0%**. Reparația ADR-076 plus recuperarea D-B l-au închis. Deci volumul real e ~2/săptămână, nu ~95, iar etapizarea cu `limit=20` cerută de ADR §2.1 a devenit inutilă.
    - **Argumentul care a justificat totuși implementarea**: proxy-ul nu e *corect*, e doar **din nou aliniat prin accident** — merge fiindcă Flashscore scrie arbitrul și statisticile împreună. Când extragerea i se rupe (s-a rupt de două ori), scrie arbitrul și ratează statisticile, criteriul redevine 0, și mergem orbi. **Lărgirea e un detector, nu un umplător.** Iar costul care bloca decizia a dispărut odată cu volumul, deci rata reală de succes a SFI — nemăsurată din august — devine acum observabilă în siguranță. Analiza completă: `BACKLOG.md` §1.3bis, ADR-077 §5.
 2. **D-C, ruptura PARȚIALĂ rămâne nedetectabilă** (3 categorii din 45 redenumite ar trece neobservate de clasa 7). Instrumentul e ieftin — `match_statistics_extended` e deja EAV, deci „o etichetă care exista și a dispărut" e o interogare, nu o colectare (34 de etichete distincte măsurate). **Dar linia de bază nu există încă**: pornit azi, ar compara cu golul de 39 de zile. De reluat în jurul lui **2 noiembrie**, sau de scris acum cu o gardă care îl ține tăcut până ambele ferestre au volum.
+   - **[TERMENUL A TRECUT — 2026-11-02, și intră în `BACKLOG.md` §1 ca decizie, nu mai rămâne o dată în text.]** Linia de bază **există acum**: de la reparația ADR-076 (18 oct) au trecut 15 zile cu extragere funcțională, deci cele două ferestre se pot compara. **Nefăcut** — e o decizie, nu o investigație. Argumentul care îl menține relevant: clasa 11 adăugată azi (ADR-085 etapa 4) prinde ruptura **TOTALĂ** într-o competiție urmărită, dar o rupere **parțială** (3 categorii din 45 redenumite) trece în continuare neobservată de ea, fiindcă `home_shots` ar rămâne populat.
 
 **Gol mai larg, lăsat scris explicit**: nimic nu detectează azi când un ADR nou adaugă **al doilea scriitor** pe un câmp folosit de altul ca martor. Garda ADR-036 acoperă doar `FEATURE_COLUMNS`, iar `referee` nu e acolo.
 
@@ -573,7 +590,13 @@ oct.
 
 **🔴 DECLANȘATORUL POATE FI RESETAT DE O APROBARE DE RUTINĂ (găsit 2026-10-27).**
 `decision_feed` **#13** e o propunere de **expirare** pentru exact
-`xgboost_v1/dda4f7f3`, `pending`, **TTL 2 noiembrie**. Comiterea ei eliberează
+`xgboost_v1/dda4f7f3`, ~~`pending`, **TTL 2 noiembrie**~~ → **`expired` 2 nov
+10:19:32 prin sweep, n final 447** (la fel #12, `174e7e17`, n final 600 — zero
+duplicate reemise, deci răcirea de 168 h din ADR-079 funcționează). **Cuplajul
+descris mai jos NU s-a materializat: nimeni n-a aprobat nimic, iar seria n-a
+fost resetată.** Revin ~**9 noiembrie**, moment în care cuplajul redevine
+actual, așa că textul rămâne ca descriere a riscului, nu a stării. Comiterea ei
+ar elibera
 slotul familiei, deci Faza B naște un Challenger nou cu `training_run_id` NOU și
 zero rânduri în `challenger_evaluations` — iar seria pe care declanșatorul o
 numără **repornește de la 0**, fără ca nimeni să fi atins declanșatorul.
@@ -585,6 +608,57 @@ completă, cu tabelul pe ambele propuneri deschise: `BACKLOG.md` §1.0ter.
 **Clasa, mai largă decât cazul**: un declanșator care urmărește o entitate
 ștergibilă are nevoie și de o condiție despre existența ei, altfel se resetează
 tăcut și arată identic cu „n-a atins pragul încă".
+
+### D-16. Poarta de promovare — ADR-084, decizia de fond AMÂNATĂ cu declanșator (2026-11-02)
+
+**Scrisă aici fiindcă secțiunea asta o cere**: orice decizie amânată se
+consemnează în documentele vii, cu declanșator verificabil. Precedentul ADR-057
+a costat **14 zile fără nicio antrenare** exact pentru că trăia doar în ADR-ul
+ei.
+
+**Ce propune `ADR-084`** (PROPUNERE, revizia 3): poarta trece de la „toate trei
+metricile simultan semnificative" la **`brier_significant AND
+logloss_significant`** plus o gardă de direcție `delta_accuracy >= 0`. Brier și
+log-loss sunt *proper scoring rules* — folosesc toată distribuția, iar produsul
+vinde probabilități. **North Star #2 rămâne ca principiu**; se schimbă
+operaționalizarea. ADR-002 neatins: promovarea rămâne act uman.
+
+**Miza e VIE, nu teoretică**: `blend_v1/174e7e17` (n=659) ar trece criteriul —
+Brier ✅, log-loss ✅, acuratețe ❌ dar **Δacc +1,06pp** — și ar fi trecut
+**șapte zile consecutive** (27 oct – 2 nov). Aprobarea produce **imediat** un
+candidat de promovare.
+
+**De ce se amână, și e argument nu ezitare**: ambii Challengeri activi au
+`baseline_source = 'shadow_control'`, deci cifrele vin din rândul `control` —
+iar acela **și-a schimbat alimentarea pe 2 noiembrie** (ADR-085 etapele 1-4: 27
+de meciuri cu statistici și xG care lipseau, plus `stats_source` schimbat). A
+calibra poarta acum ar da oricărei divergențe **două cauze candidate** — exact
+obiecția pe care proiectul o respectă deja la `BACKLOG.md` §3.3.
+
+> **O poartă de promovare nu se rafinează pe date care s-au mișcat ieri.**
+
+**DECLANȘATOR — toate trei** (ADR-084 §11): (1) ≥ **3 zile de evaluare
+consecutive** cu codul ADR-085 pe `main`; (2) **partiția pe oră a dispărut**
+(era 47,8% goluri pe meciurile de seară vs 0,8% pe cele de zi); (3) verdictele
+lui `174e7e17` **nu oscilează** — Brier și log-loss rămân amândouă
+semnificative, `Δacc` rămâne ≥ 0.
+
+**Dacă (3) NU se îndeplinește, asta e în sine răspunsul**: un criteriu care
+produce un candidat instabil nu e o îmbunătățire, iar §7.1 (riscul croirii
+regulii după date) devine argumentul dominant.
+
+**Etapa 0 e deja făcută** (aprobată separat, 1 nov): idempotența candidaturii.
+Nu era un defect prezis — a fost observat de **patru ori** în producție
+(`automation_runs` 355, 1288, 1291, **1413**), iar 1413 e cazul care a mâncat o
+candidatură **3/3 reală**: pe 30 oct `dda4f7f3` a avut toate trei metricile la
+n=378, poarta a tras, și FSM-ul a respins tranziția `SUCCEEDED -> SUCCEEDED`.
+
+**Două afirmații din ADR-084 erau FALSE și s-au corectat la revizia 3**: §9
+spunea „implementare neîncepută, nicio linie de cod" (Etapa 0 era făcută din 1
+nov), iar §5.5 spunea „criteriul rafinat nu ajută XGBoost" și retrăgea o
+proiecție ca neconfirmată — **adeverită a doua zi**. **Lecția: o proiecție
+contrazisă de două puncte nu e încă infirmată; retragerea prematură e tot o
+afirmație greșită, doar mai greu de prins, fiindcă pare prudență.**
 
 ---
 
@@ -887,6 +961,24 @@ Cheile API sunt tratate ca infrastructură critică — nu ca detalii de configu
   - **Singurul loc din tot codul care face cheie din listă nemărginită** e acel `oracle_api.py:1663` (verificat pe toate construcțiile de `cache_key`; restul sunt mărginite — id, dată, cod de ligă). Deci garda e **prevenție pentru o clasă cu un membru cunoscut**, nu plasă pentru un defect răspândit. Dar e justificată: cu Norvegia + Suedia (martie 2027, deja pe listă) schema veche ar da **328** de octeți, deci fiecare ligă adăugată ar fi fost încă un perete.
   - **Lecția de metodă**: defectul n-a fost găsit de niciun test, de nicio privire pe ecran și de nicio alertă — ci de o întrebare „ce a adus ultima rulare de noapte?". Un indicator care nu poate fi roșu (jobul verde prin construcție) e, ca și `coverage_percent` fix la 100%, **o absență de indicator**.
 
+- **Un meci de seară își pierdea statisticile PERMANENT, iar etapa care îl producea raporta verde — ADR-085, reparat 2 noiembrie.** Nu l-a găsit niciun test, nicio alertă și nicio privire pe ecran: l-a găsit o **obiecție a proprietarului produsului** („vrei să spui că nu avem acoperire 100% pe xG?"). Afirmația mea era corectă ca fapt, dar verificarea cerută de obiecție a scos la iveală un gol activ pe care nu-l căutam. **A cincea oară în proiect** când observația proprietarului bate diagnosticul meu.
+  - **Amploarea**: **23 de meciuri din 166** (26 oct – 1 nov), 5 ligi, printre ele **AC Milan – Inter, Juventus – Napoli, PSG – Lyon, Aston Villa – Fulham, Athletic – Real Sociedad**. Acoperirea fusese **100,0% pe fiecare săptămână anterioară** de la 27 iulie, deci golul era strict în ultima săptămână.
+  - **NU era latență, dovedit cu martor pozitiv**: latența reală pe *aceeași* săptămână, pentru cele 143 colectate, era **0,82 zile medie / 1,67 maxim**. Sevilla – Osasuna avea zero rânduri la 7 zile.
+  - **DOUĂ PORȚI, amândouă pe un câmp-martor care nu răspunde la întrebarea pusă, închise în aceeași rulare la câteva minute una de alta:**
+    1. `is_flashscore_match_already_collected` întreba *„are acest meci un rezultat?"* ca proxy pentru *„a colectat Flashscore statisticile?"*. `actual_result` are **patru** scriitori (Flashscore + football-data.org + Odds API scores + SFI), deci proxy-ul e fals de câte ori un provider API scrie primul.
+    2. `get_match_ids_with_complete_flashscore_stats` citea `has_stats`, care înseamnă **„pagina descărcată", nu „extragere reușită"** — deci un rând scris **înainte de meci** (unul pe **30 iulie**, pentru un meci din 31 octombrie) sărea și providerii de rezervă.
+  - **Separarea e binară și curată**: Flashscore scrie `referee` + scorul la pauză + statisticile în **același payload**. Cele 146 colectate aveau **146/146** arbitru și scor la pauză; cele 23 aveau **ZERO** din amândouă, dar goluri finale pe toate 23. Deci rezultatul nu-l scrisese Flashscore.
+  - **Cauza proximă: ora loviturii de start.** 22 din 23 sunt meciuri de la **19:00 UTC** în sus (medie 19,83 vs 14,74). `live_sync` rulează 09/13/17 UTC, deci un meci de seară se termină după ultima lui rulare; apoi `night_sync` îl atinge cu etapa 1-4 (primul pas `results`) **cu patru etape înaintea** etapei 5 (Flashscore). **Confuzul MLS verificat și eliminat**: MLS are 15 meciuri de zi în fereastră și **zero** goluri pe ele, deci e ora, nu liga.
+  - **🔴 DECLANȘATORUL E O REPARAȚIE A NOASTRĂ, datată.** Rândurile de audit `night_sync` (producător adăugat 21 oct — prima dată când răspund la o întrebare **cauzală**) arată pasul `results` sărind de la **4-35 s** la **62-115 s** și etapa 5 scăzând de la **15-23 min la 6-7 min**, simultan, exact la data golurilor. Cauza: commit-ul **`9202d82`** (26 oct 10:43) a reparat parametrul `d` al Soccer Football Info, care eșuase **100% timp de 15 zile**. **Defectul din Delta Sync era latent exact fiindcă un scriitor concurent era stricat.**
+    - **Simetrie de reținut**: mesajul lui `9202d82` conține propoziția *„Defectul s-a activat FĂRĂ niciun commit"* — un defect trezit de o schimbare a **datelor**. Aici e oglinda: trezit de un **commit**, și anume de o reparație. **Clasa comună: un defect latent se trezește când se schimbă ceva ce nu-l atinge.**
+  - **Ipoteze eliminate prin măsurare, nu prin argument** (toate propuse de proprietarul produsului, toate plauzibile): plafonul per ligă — implicitul din cod e 20, dar valoarea **efectivă în producție e 50**, iar maximul real a fost MLS 27; **ligile noi** (3 adăugate pe 17 oct) — plafonul e *per ligă*, nu global, și toate trei au zero goluri; **providerul de rezultate** — Primeira Liga, Eredivisie și Bundesliga sunt acoperite de football-data, au meciuri de seară și zero goluri, iar Scottish Premiership are 6 meciuri de seară, nu e acoperită, și tot zero.
+  - **Temerea de calitate, verificată pe toate ligile și REÎNCADRATĂ**: identitate `flashscore_` pe **2037/2057 (99,03%)**, identitate `fd_` pe **0** — pe fiecare ligă. **football-data.org nu poate scrie statistici proaste: nu are ce** (payload-ul lui e identitate + scor + sezon; `home_xg_pred`/`away_xg_pred` sunt hardcodate `None`). Cele 20 de excepții: 18 au statistici complete de la Flashscore oricum, prin asimetria de mai jos. FreeLF **e** genuin parțial (6 câmpuri din 20+), dar are **zero rânduri** în tot sezonul. **Calitatea nu e amenințată de un scriitor parțial care suprascrie date bune — `COALESCE` o face imposibil. E amenințată de un scriitor care BLOCHEAZĂ sursa bogată.** Cele 23 nu aveau date *parțiale*; nu aveau **nicio** dată.
+  - **ASIMETRIA care face defectul contraintuitiv**: dacă alt provider câștigă **identitatea**, Delta Sync întoarce `False` și Flashscore re-colectează (dovada: Romania SuperLiga are 13 rânduri cu identitate `tsdb` și totuși **110/110 cu arbitru, 0 fără statistici**). Dacă Flashscore câștigă identitatea dar altcineva scrie rezultatul, nu se mai întoarce niciodată. **Cu cât Flashscore descoperă un meci mai devreme, cu atât e mai probabil să-și piardă statisticile.**
+  - **A TREIA INSTANȚĂ a clasei numite deja în acest document** („nimic nu detectează când un ADR nou adaugă al doilea scriitor pe un câmp folosit de altul ca martor"), după `referee` (ADR-077) și `has_stats` (ADR-076). **A patra, găsită cu aceeași ocazie**: `stats_source` era scris necondiționat `"flashscore"` — **1653 din 1654** de meciuri domestice terminate, inclusiv toate cele 29 fără nicio statistică. Consecința reală, nu de igienă: `match_stats_backfill_service.py:185` scrie `stats_source` doar dacă e `NULL`, și nu era niciodată, deci un provider de rezervă care completa statisticile **nu putea înregistra că el le-a dat**.
+  - **Recuperarea (aprobată, executată, verificată)**: run `41505315571`, 24m55s, `success`. Restanța **29 → 6**; săptămâna 26 oct **23 → 0**; sezon domestic **1625/1654 → 1652/1658 (99,64%)**. Pe cele **27** de meciuri recuperate, `referee` + scor la pauză + șuturi + xG + posesia sunt prezente **27/27**. Cele 6 rămase sunt **altă clasă** — toate au `referee` prezent, deci reziduul penei ADR-076, cu semnătura **inversă**.
+  - **Reparația (aprobată, implementată, `1b3c3ef`)**: Delta Sync și poarta Single Owner citesc amândouă `home_shots` — **o singură definiție a lui „colectat"**, aceeași pe care o folosește și selectorul recuperării; `stats_source` se revendică **după** extragere, pe valorile parsate; și **clasa 11 în `check_data_health`**, prag **ZERO absolut**, care separă cele două clase prin `referee` fiindcă au remedii opuse. **Zero migrări, zero coloane noi, zero provideri eliminați** — eliminarea celorlalți scriitori a fost analizată și **respinsă** (ar fi anulat reparația din 26 oct și ar fi pus un punct unic de eșec pe coloana pe care se sprijină ELO, antrenarea, evaluarea și poarta de promovare).
+  - **Ce rămâne**: etapa 5 — verificarea de după prima rulare de noapte. **Testul decisiv NU e „restanța a scăzut", e ca PARTIȚIA PE ORĂ să dispară** (47,8% seara vs 0,8% ziua). `DE_URMARIT.md` §18.
+
 - **O etichetă care colapsa patru endpoint-uri a ascuns două defecte și o risipă de 50% — lanț închis 1-2 noiembrie.** Cea mai productivă zi de observabilitate din proiect, și toată a pornit dintr-o singură reparație de etichetă.
 
   **Defectul de bază**: `_detect_provider_endpoint` lua **primul segment de cale**, deci cele patru endpoint-uri Odds API (`/sports`, `/sports/{k}/odds`, `/sports/{k}/events`, `/sports/{k}/scores`) se scriau toate ca **`sports`** în `provider_call_log` și `provider_metrics`. În direcția opusă, băga identificatorul de ligă ESPN în etichetă — 14 rânduri de slug-uri în loc de endpoint-uri. Reparat (`939b570`, 34 de teste), cu eticheta construită din primul + ultimul segment.
@@ -925,10 +1017,14 @@ Cheile API sunt tratate ca infrastructură critică — nu ca detalii de configu
 
 - **Unificarea formelor abreviate (2026-08-23, ÎNCHISĂ) — 8 rânduri rămân abreviate DELIBERAT.** Trei cluburi trăiau sub două nume în paralel (`Din. Zagreb`/`Dinamo Zagreb`, `St. Mirren`/`St Mirren`, `St. Truiden`/`St Truiden`) — două lanțuri ELO, două istorii H2H. Canonic ales: forma **lungă**, abrevierea devine alias (decizie proprietar produs; stratul de alias există tocmai ca forma unui provider să nu dicteze vocabularul stocat — ADR-058, precedent `PSG`→`Paris Saint-Germain`). Cauza era în hartă, nu doar în date: `Din. Zagreb` și `St. Truiden` erau emise ca **baze canonice** de `scripts/identity_f3_emit_aliases.py`, pentru că auditul F0 le văzuse doar cu sufix de țară și nu avea cum să știe că există o formă lungă în istoric. Scoase din blocul generat, cu avertisment contra reintroducerii la regenerare oarbă. Backfill: 326 de rânduri în `match_history` (29), `flashscore_match_context` (254), `shadow_predictions` (40), `flashscore_standings_snapshot` (3). Coliziunea unică apărută (Rijeka–Dinamo Zagreb, 8 aug) rezolvată prin supersedarea rândului TSDB de către cel Flashscore, același tipar aplicat în aceeași zi. **Cele 8 rânduri din `consensus_capture_samples` rămân sub forma abreviată**: un trigger la nivel de bază de date interzice orice `UPDATE` — tabela e strict append-only prin design („o captură greșită nu se corectează, rămâne un fapt istoric; studiul T1 o poate exclude la nevoie"). Nu e un rest de curățat, e o regulă respectată; orice monitorizare viitoare trebuie să le excludă, nu să le raporteze.
 
-- **Fiecare reprogramare lasă un rând ORFAN în `flashscore_data_completeness` — gol structural, fără pagubă azi (identificat 2026-08-30).** Constrângerea UNIQUE e pe **`match_ref`**, care conține data (`falkirk__hearts__2026-08-22`), NU pe `match_id`. Deci când migrarea 048 mută corect un meci la data nouă, scrapingul următor creează un rând NOU (`...__2026-09-15`) în loc să-l actualizeze pe cel vechi. **23 de rânduri orfane azi din 1102 (2%).**
-  - **Verificat că NU produce pagubă acum**: toate cele 23 de perechi sunt identice ca CONȚINUT — zero divergență pe `has_stats`, `has_lineups`, `coverage_percent`.
-  - **Dar structura permite o pagubă viitoare, tăcută**: `get_match_ids_with_complete_flashscore_stats()` face `.eq("has_stats", True)` și întoarce un set de `match_id`. Dacă vreodată scrapingul de DUPĂ reprogramare ar fi incomplet, iar cel de DINAINTE complet, rândul orfan ar marca meciul drept acoperit — iar `sync/sync_match_statistics.py` ar **sări** apelarea providerilor de rezervă (SFI/FreeLF), conform regulii Single Owner (ADR-045). Meciul ar rămâne fără statistici, fără niciun semnal.
-  - **Reparația structurală cere ADR** (UNIQUE pe `match_id`, sau ștergerea rândului vechi la reprogramare — ambele schimbă un contract de date, regula #5). **NEfăcută deliberat**: zero pagubă demonstrată, iar curățarea celor 23 de rânduri ar fi un `DELETE` fără beneficiu curent.
+- **Fiecare reprogramare lasă un rând ORFAN în `flashscore_data_completeness` (identificat 2026-08-30).** Constrângerea UNIQUE e pe **`match_ref`**, care conține data (`falkirk__hearts__2026-08-22`), NU pe `match_id`. Deci când migrarea 048 mută corect un meci la data nouă, scrapingul următor creează un rând NOU (`...__2026-09-15`) în loc să-l actualizeze pe cel vechi. **23 de rânduri orfane la identificare, din 1102 (2%).**
+  - **🔴 [CORECTAT 2026-11-02 — titlul spunea „gol structural, FĂRĂ PAGUBĂ AZI", iar paguba s-a materializat.]** Scenariul descris mai jos ca ipotetic — *„dacă vreodată scrapingul de DUPĂ reprogramare ar fi incomplet, iar cel de DINAINTE complet, rândul orfan ar marca meciul drept acoperit"* — **s-a întâmplat**, la o scară mai mare decât reprogramările: **23 de meciuri din 166** (26 oct – 1 nov) au rămas fără statistici și fără xG, printre ele AC Milan – Inter, Juventus – Napoli, PSG – Lyon. Rândul de completitudine era scris **înainte de meci** (unul pe **30 iulie**, pentru un meci din 31 octombrie), cu `has_stats = true` și `coverage_percent = 100`. Cauza nu era reprogramarea, era **descoperirea timpurie** — dar mecanismul e exact cel prezis aici.
+  - **Reparat prin `ADR-085` (ACCEPTED, etapele 1-4 pe `main`, `1b3c3ef`)**: poarta Single Owner nu mai citește rândul de completitudine, ci coloana-țintă `home_shots`. **Golul orfan rămâne deschis ca STRUCTURĂ și devine inofensiv ca PAGUBĂ**, fără nicio linie în plus.
+  - **Lecția, și de ce a costat**: afirmația „fără pagubă azi" era corectă la măsurare și a fost purtată **64 de zile** ca stare. De aici încolo, „fără pagubă" se scrie **numai cu măsurătoarea și data alături** — altfel e o ipoteză care îmbătrânește arătând ca un fapt.
+  - *[Cele două puncte de mai jos sunt textul din 30 august, păstrat ca ISTORIC al diagnosticului — NU se citesc ca stare. Al doilea a prezis corect ce s-a întâmplat pe 26 oct – 1 nov; primul a fost adevărat la măsurare și a încetat să fie.]*
+    - ~~**Verificat că NU produce pagubă acum**~~: toate cele 23 de perechi sunt identice ca CONȚINUT — zero divergență pe `has_stats`, `has_lineups`, `coverage_percent`.
+    - **Dar structura permite o pagubă viitoare, tăcută** *(s-a materializat — vezi mai sus)*: `get_match_ids_with_complete_flashscore_stats()` face `.eq("has_stats", True)` și întoarce un set de `match_id`. Dacă vreodată scrapingul de DUPĂ reprogramare ar fi incomplet, iar cel de DINAINTE complet, rândul orfan ar marca meciul drept acoperit — iar `sync/sync_match_statistics.py` ar **sări** apelarea providerilor de rezervă (SFI/FreeLF), conform regulii Single Owner (ADR-045). Meciul ar rămâne fără statistici, fără niciun semnal.
+  - **Reparația structurală cere ADR** (UNIQUE pe `match_id`, sau ștergerea rândului vechi la reprogramare — ambele schimbă un contract de date, regula #5). **Rămâne NEfăcută, dar motivul s-a schimbat**: ~~zero pagubă demonstrată~~ → ADR-085 a scos rândul orfan din calea oricărei decizii (nimic nu-l mai citește ca martor), deci nu mai e nevoie de un contract nou pentru a elimina paguba. Ce rămâne e **igienă de schemă**, nu o reparație, iar curățarea celor 23 de rânduri ar fi un `DELETE` fără beneficiu.
   - **Cum a ieșit la iveală — merită reținut ca metodă.** Pornise ca „anomalie": 3 meciuri scoțiene cu 22 de jucători fiecare, pentru un fixture programat peste 36 de zile (Flashscore nu publică aliniamente cu o lună înainte). **Nu era anomalie** — era înregistrarea fidelă a unei amânări. Runda din 22 august, completă: 5 meciuri amânate, fiecare cu un club din cupele europene (Hearts, Hibernian, Aberdeen, Rangers, Celtic); 3 deja reprogramate pe 15 septembrie; derby-ul Dundee (fără club european) jucat normal. **Contrastul e dovada**: meciul jucat are **40** de jucători (loturi complete, cu rezerve), cele amânate au **exact 22** (doar primul unsprezece × 2) — echipele anunțate cu ~1h înainte de startul original, care n-au mai apucat să fie completate cu rezerve sau note. Golul real a apărut abia în timpul verificării ipotezei greșite.
 
 - **`shadow_predictions` nu are niciun mecanism de invalidare — gol de contract, ADR necesar** (identificat 2026-08-23, prin Discovery Rule; nu e urgent). `evaluate_experiment()` filtrează doar pe `processing_stage='final'` și `experiment_group='treatment'`; `error_message` nici măcar nu e citit. Cele 5 rânduri cu orientare inversată (`blend_v1`, `xgboost_v1`, `flashscore_team_dna`) sunt azi excluse de la evaluare doar *accidental*, pentru că join-ul cere `match_history.prob_home_pred IS NOT NULL` iar corecția le-a anulat — orice backfill viitor al acelor coloane le re-armează tăcut. Politica propusă: **o predicție făcută sub o identitate greșită nu se corectează, se invalidează** — nu se șterge (rupe trasabilitatea, #9), nu i se permută probabilitățile (fabricație). Adăugarea filtrului de excludere schimbă contractul de evaluare → ADR obligatoriu (regula #5). Se va repeta la fiecare `hard_conflict` produs de migrarea 049.
@@ -1065,7 +1161,7 @@ Cheile API sunt tratate ca infrastructură critică — nu ca detalii de configu
 
 ```bash
 pip install -r requirements.txt
-pytest tests/ -q                       # 82 teste, fără rețea
+pytest tests/ -q                       # 4145 teste (2026-11-02), fără rețea
 python sync/run_daily.py --dry-run     # simulare sincronizare zilnică, fără scriere
 streamlit run app.py                   # UI local
 ```
