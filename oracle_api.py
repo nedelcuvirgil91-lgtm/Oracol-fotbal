@@ -1510,8 +1510,19 @@ class FootballOracleAPI:
     # ── Odds ──────────────────────────────────────────────────────────────
     def _fetch_market(self, sport_key: str, markets: str) -> list | None:
         """Un singur apel către /odds cu setul de piețe dat — izolat, astfel
-        încât un eșec pe piețe suplimentare (ex. btts indisponibil pe planul
-        curent) nu poate afecta niciodată h2h, deja funcțional."""
+        încât un eșec pe o piață suplimentară nu poate afecta niciodată h2h,
+        deja funcțional.
+
+        [CORECTAT 2026-11-02] Docstring-ul spunea „ex. btts indisponibil pe
+        planul curent". Exemplul era **greșit în cauză**, nu doar învechit:
+        `btts` nu lipsea din plan, ci din ENDPOINT — e Additional Market, iar
+        acelea se cer exclusiv prin `/events/{eventId}/odds`, niciodată prin
+        `/sports/{sport}/odds`. Formularea aceea a ținut în viață trei luni
+        ipoteza „e o limitare de cont", care nu putea fi testată. Apelul `btts`
+        a fost eliminat; vezi nota din `_fetch_odds`.
+
+        Azi rămân DOUĂ apeluri posibile per ligă — `h2h,totals`, cu fallback pe
+        `h2h` — iar al doilea se face doar dacă primul eșuează."""
         # [ADAUGAT 2026-11-02] A DOUA instanta a defectului A2 din auditul
         # `ODDS_API_KEY` (27 oct), la al doilea punct de apel. `requests` OMITE
         # un parametru `None`, deci cand `get_api_key_param()` intoarce `None`
@@ -1520,9 +1531,14 @@ class FootballOracleAPI:
         #
         # MASURAT, nu presupus: **34 de 401-uri in 26 de secunde**, 2026-11-02
         # 08:55:35 -> 08:56:01. Exact 17 ligi x 2 apeluri (`h2h,totals`, apoi
-        # `h2h`); al treilea apel, `btts`, nu se atinge fiindca `_fetch_odds`
-        # face `return {}` la linia 1525 inainte de el. La 09:29 apelurile au
-        # redevenit 200 — deci cheia e buna, fereastra a fost tranzitorie.
+        # `h2h`). La 09:29 apelurile au redevenit 200 — deci cheia e buna,
+        # fereastra a fost tranzitorie.
+        #
+        # [ACTUALIZAT in aceeasi zi] Nota initiala explica si de ce al treilea
+        # apel per liga, `btts`, nu aparea in cele 34. Apelul acela a fost
+        # ELIMINAT intre timp (nu putea reusi niciodata — vezi `_fetch_odds`),
+        # deci explicatia nu mai are obiect si a fost scoasa, nu lasata sa
+        # descrie un cod care nu mai exista.
         #
         # DE CE N-A FOST PRINSA LA A2: pana la 2026-11-01 (`939b570`) eticheta
         # `provider_call_log.endpoint` lua PRIMUL segment de cale, deci toate
@@ -1597,16 +1613,44 @@ class FootballOracleAPI:
             # persistent care o ducea mai departe ore.
             return {}
 
-        # [ADAUGAT] btts — apel separat, best-effort, complet izolat: dacă
-        # piața nu există pe planul curent, eșuează fără să afecteze h2h/
-        # totals de mai sus. Potrivire pe ev["id"], stabil între apeluri
-        # succesive pentru același sport_key (aceeași convenție ca ev_id la
-        # h2h/totals).
-        btts_data = self._fetch_market(sport_key, "btts")
+        # [ELIMINAT 2026-11-02 — apelul `btts` nu putea reusi NICIODATA, aprobat
+        # explicit] Aici se facea un al TREILEA apel per liga:
+        # `self._fetch_market(sport_key, "btts")`.
+        #
+        # DOCUMENTATIA OFICIALA, citita direct (the-odds-api.com/sports-odds-
+        # data/betting-markets.html): `btts` e listat la **Additional Markets**,
+        # iar acolo scrie explicit *„additional markets need to be accessed ONE
+        # EVENT AT A TIME using the `/events/{eventId}/odds` endpoint"*. Noi il
+        # ceream pe endpoint-ul BULK, `/sports/{sport_key}/odds`, unde piata
+        # pur si simplu nu exista.
+        #
+        # Deci nu era nici limitare de plan, nici cheie de piata gresita — era
+        # ENDPOINT-UL gresit, iar apelul nu putea reusi pentru nicio liga, in
+        # nicio zi. Comentariul de dinainte presupunea „planul curent", si a
+        # tinut ipoteza in viata trei luni.
+        #
+        # MASURAT inainte de eliminare, pe singura fereastra cu eticheta de
+        # endpoint corecta (1-2 nov, dupa `939b570`): alternanta stricta
+        # `200` (h2h,totals) -> `422` (btts), 14 ligi x 2 = 28 de apeluri,
+        # **0 din 28 reusite**. `totals` merge fiindca e Featured Market.
+        #
+        # ELIMINAREA E BIT-IDENTICA, nu doar sigura: `isinstance(btts_data,
+        # list)` a fost mereu False, deci `btts_by_id` a fost mereu gol, deci
+        # `btts_yes`/`btts_no` de mai jos au fost mereu 0.0. Se pastreaza
+        # variabila goala exact ca bucla si cheile `btts_*_odds` sa ramana
+        # NEATINSE — `oracle_engine._special_value_bets` le citeste si le sare
+        # deja prin `if bk_odds <= 1.0`.
+        #
+        # CASTIG: `/odds` trece de la 2 apeluri per liga la 1 — **jumatate din
+        # bugetul de cote**, pe o cota LUNARA.
+        #
+        # DE CE NU se trece pe `/events/{eventId}/odds`: ar costa un apel per
+        # MECI, nu per liga (~120 in loc de 14 pe fereastra), iar aceeasi
+        # pagina spune ca piețele aditionale sunt *„currently limited to US
+        # sports and selected bookmakers"*. Mai scump si probabil gol.
+        # `prob_btts` se calculeaza oricum prin Monte Carlo
+        # (`oracle_engine.py:1687`), independent de API.
         btts_by_id: dict[str, dict] = {}
-        if isinstance(btts_data, list):
-            for ev in btts_data:
-                btts_by_id[ev.get("id", "")] = ev
 
         result: dict[str, dict] = {}
         for ev in data:
