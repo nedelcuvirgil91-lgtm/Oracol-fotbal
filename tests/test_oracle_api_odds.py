@@ -93,10 +93,26 @@ _EVENT_BTTS = [{
 }]
 
 
-def test_fetch_odds_parses_totals_and_btts_when_available():
+def test_fetch_odds_parseaza_totals_si_NU_mai_cere_btts():
+    """[REDENUMIT ȘI ÎNTĂRIT 2026-11-02 — nu șters.]
+
+    Se numea `test_fetch_odds_parses_totals_and_btts_when_available` și afirma
+    că `btts` se parsează „când e disponibil". Afirmația nu putea fi adevărată
+    niciodată: `btts` e **Additional Market** la The Odds API, accesibil
+    EXCLUSIV prin `/events/{eventId}/odds` — nu prin endpoint-ul bulk
+    `/sports/{sport}/odds` pe care îl folosim. Măsurat: 0 reușite din 28.
+
+    Testul trecea doar fiindcă dublura de sesiune răspundea la `"btts"` — o
+    dublură care modela o lume inexistentă. Aceeași clasă ca falsul care nu
+    emula plafonul implicit PostgREST (ADR-080, defectul #1): verde, și fără
+    să dovedească nimic.
+
+    Afirmă acum contractul REAL, și e strict mai puternic decât înainte:
+    `totals` se parsează, `btts` NU se mai cere deloc — **nici măcar dacă
+    providerul ar răspunde** — și se face exact UN apel de piață per ligă."""
     session = _FakeSession({
         "h2h,totals": _FakeResp(_EVENT_H2H_TOTALS),
-        "btts":       _FakeResp(_EVENT_BTTS),
+        "btts":       _FakeResp(_EVENT_BTTS),  # ar răspunde, dar nu e întrebat
     })
     api = _api(session)
     result = api._fetch_odds("soccer_epl")
@@ -104,7 +120,10 @@ def test_fetch_odds_parses_totals_and_btts_when_available():
     entry = result["ev1"]
     assert entry["home"] == 2.1 and entry["draw"] == 3.4 and entry["away"] == 3.8
     assert entry["over25"] == 1.9 and entry["under25"] == 1.95  # doar linia 2.5
-    assert entry["btts_yes"] == 1.75 and entry["btts_no"] == 2.05
+    assert entry["btts_yes"] == 0.0 and entry["btts_no"] == 0.0
+    assert "btts" not in session.calls, f"btts a fost cerut: {session.calls}"
+    assert session.calls == ["h2h,totals"], (
+        f"exact UN apel de piață per ligă pe calea de succes, nu {session.calls}")
 
 
 def test_fetch_odds_falls_back_to_h2h_only_when_expanded_markets_fail():
