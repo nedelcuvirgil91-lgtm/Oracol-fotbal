@@ -1481,6 +1481,48 @@ class FootballOracleAPI:
         """Un singur apel către /odds cu setul de piețe dat — izolat, astfel
         încât un eșec pe piețe suplimentare (ex. btts indisponibil pe planul
         curent) nu poate afecta niciodată h2h, deja funcțional."""
+        # [ADAUGAT 2026-11-02] A DOUA instanta a defectului A2 din auditul
+        # `ODDS_API_KEY` (27 oct), la al doilea punct de apel. `requests` OMITE
+        # un parametru `None`, deci cand `get_api_key_param()` intoarce `None`
+        # cererea pleaca spre `/odds` **fara `apiKey`** si primeste garantat
+        # HTTP 401.
+        #
+        # MASURAT, nu presupus: **34 de 401-uri in 26 de secunde**, 2026-11-02
+        # 08:55:35 -> 08:56:01. Exact 17 ligi x 2 apeluri (`h2h,totals`, apoi
+        # `h2h`); al treilea apel, `btts`, nu se atinge fiindca `_fetch_odds`
+        # face `return {}` la linia 1525 inainte de el. La 09:29 apelurile au
+        # redevenit 200 — deci cheia e buna, fereastra a fost tranzitorie.
+        #
+        # DE CE N-A FOST PRINSA LA A2: pana la 2026-11-01 (`939b570`) eticheta
+        # `provider_call_log.endpoint` lua PRIMUL segment de cale, deci toate
+        # cele patru endpoint-uri Odds API se scriau `sports`. Cele „418 x 401
+        # in 8 zile" au fost astfel atribuite integral caii de validare, iar
+        # garda s-a pus doar acolo (`_validate_api_keys`, linia 643).
+        # Intrerupatorul de circuit (linia 602) e si el exclusiv pe calea
+        # `/sports`. Reparatia etichetei a gasit punctul orb al propriului ei
+        # predecesor.
+        #
+        # ECHIVALENTA IN DATE, nu „imbunatatire": `_get` intoarce `None` pe
+        # orice raspuns non-ok (`if not r.ok: return _ret(None, r)`), deci
+        # `None` de aici e EXACT ce primea apelantul si pana acum. `_fetch_odds`
+        # trateaza deja calea `None` (si, de la reparatia cache-ului negativ, o
+        # trateaza fara sa scrie `{}` in cache). `_dead_keys` se populeaza
+        # identic. Se schimba numarul de cereri HTTP, nimic altceva.
+        #
+        # CONSECINTA DE OBSERVABILITATE, asumata: o cerere nesarita nu mai
+        # produce rand in `provider_call_log` — fiindca nu mai e o cerere.
+        # Acelasi tipar ca `provider_kill_switch` (linia 457) si ca poarta
+        # `should_request` (linia 466), amandoua `return _ret(None, None)` fara
+        # sa inregistreze. De aceea se logheaza la WARNING, nu la INFO: o cheie
+        # neutilizabila opreste cotele pe TOATE ligile, deci trebuie sa se vada
+        # in log-ul rularii de noapte, nu doar in absenta randurilor.
+        if not self._key_manager.is_available("oddsapi"):
+            logger.warning(
+                "[Odds] %s/%s sarit — nicio cheie Odds API utilizabila "
+                "(absenta din mediu sau cota lunara atinsa). Nu se trimite o "
+                "cerere fara apiKey, care ar primi 401 garantat.",
+                sport_key, markets)
+            return None
         return self._get(
             f"{ODDS_API_URL}/sports/{sport_key}/odds",
             params={"apiKey": self._key_manager.get_api_key_param("oddsapi"), "regions": "eu",
