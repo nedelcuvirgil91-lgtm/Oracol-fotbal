@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from datetime import datetime, timedelta, timezone
 
 from mappings import normalize_team_name
@@ -1726,19 +1727,74 @@ def set_provider_usage(provider: str, api_key_label: str, month: str, used: int,
 _LUNGIME_MAXIMA_ERROR_BODY = 400
 
 
+# [ADAUGAT 2026-11-02] Tipare de secret redactate din corpul de eroare.
+# Lista e DELIBERAT ingusta: `key` SIMPLU nu e inclus, fiindca raspunsurile
+# Odds API contin legitim `{"key": "soccer_epl"}`, iar redactarea lui ar
+# distruge exact diagnosticul pentru care coloana exista.
+#
+# SEPARATORUL tolereaza ghilimele de ambele parti, si asta NU e cosmetic: o
+# versiune anterioara cerea numele urmat DIRECT de `=` sau `:`, deci prindea
+# forma de query (`apiKey=...`) si rata complet forma JSON (`"apiKey": "..."`)
+# — exact forma in care un API isi reflecta cererea intr-un corp de eroare,
+# adica exact cazul pentru care garda exista. Gasit printr-o mutatie care a
+# TRECUT: contraponderea mea folosea tot forma JSON, deci nu putea cadea.
+_TIPARE_SECRET = re.compile(
+    r"(?i)\b(api[-_]?key|apikey|access[-_]?token|token|secret|passwd|password|auth)"
+    r"([\"']?\s*(?:[=:]|%3D)\s*[\"']?)([^\s&\"'<>,}\]]{4,})"
+)
+# A doua plasa, pe VALOARE nu pe nume: un sir lung de hexazecimale intr-un corp
+# de eroare e aproape sigur o cheie sau un hash, niciodata text util. Cheia
+# Odds API are exact 32 de caractere hexazecimale.
+_SIR_HEX_LUNG = re.compile(r"\b[0-9a-fA-F]{32,}\b")
+
+_REDACTAT = "«REDACTAT»"
+
+
+def _redacteaza_secrete(text: str) -> str:
+    """[ADAUGAT 2026-11-02] Scoate din corpul de eroare orice arata a secret.
+
+    DE CE EXISTA, si de ce nu exista de la inceput: ADR-081 §3 a justificat
+    persistarea corpului cu argumentul *„cheia RapidAPI circula exclusiv in
+    header-ul de cerere, corpul raspunsului nu o contine"*. Argumentul e
+    ADEVARAT pentru SoccerFootballInfo, singurul apelant de atunci — si FALS
+    pentru Odds API, unde cheia e **parametru de query**. Un provider care
+    isi reflecta cererea in corpul erorii ar scrie cheia in tabela.
+
+    Aceeasi clasa ca ADR-077: un ADR nou invalideaza tacit precondiția altuia.
+    Aici se repara INAINTE sa produca paguba, nu dupa.
+
+    LIMITA, scrisa ca sa nu fie descoperita mai tarziu ca surpriza: redactarea
+    e pe TIPAR, nu pe valoare. Nu are acces la valorile reale ale cheilor
+    (`supabase_client` nu importa `key_manager`, si nici nu trebuie). Un corp
+    care ar contine o cheie goala, fara nume de parametru si fara forma
+    hexazecimala, ar trece. E a DOUA linie de aparare, nu prima — prima ramane
+    ca providerii sa nu reflecte cererea.
+
+    Functie PURA."""
+    text = _TIPARE_SECRET.sub(lambda m: f"{m.group(1)}{m.group(2)}{_REDACTAT}", text)
+    return _SIR_HEX_LUNG.sub(_REDACTAT, text)
+
+
 def _error_body_de_scris(success: bool, error_body: str | None) -> str | None:
     """[ADR-081] Ce ajunge efectiv in coloana `error_body`.
 
-    DOUA GARZI, amandoua in calea de SCRIERE, nu in apelant:
+    TREI GARZI, toate in calea de SCRIERE, nu in apelant:
       1. pe SUCCES se intoarce intotdeauna None, oricat ar pasa apelantul —
          altfel un apelant neatent ar umple tabela cu corpuri de raspunsuri
          reusite (volum, si fara nicio valoare de diagnostic);
-      2. plafon de lungime propriu, vezi `_LUNGIME_MAXIMA_ERROR_BODY`.
+      2. [ADAUGAT 2026-11-02] redactare de secrete — vezi
+         `_redacteaza_secrete()`. Sta AICI, nu in apelant, din exact acelasi
+         motiv ca celelalte doua: un apelant viitor care uita nu trebuie sa
+         poata scrie un secret in tabela;
+      3. plafon de lungime propriu, vezi `_LUNGIME_MAXIMA_ERROR_BODY`.
+
+    ORDINEA 2 INAINTE DE 3 e load-bearing: trunchierea inaintea redactarii ar
+    putea taia un secret la jumatate, iar jumatatea ramasa tot e o scurgere.
 
     Functie PURA, deci testabila fara Supabase."""
     if success or not error_body:
         return None
-    text = str(error_body)
+    text = _redacteaza_secrete(str(error_body))
     if len(text) > _LUNGIME_MAXIMA_ERROR_BODY:
         return text[:_LUNGIME_MAXIMA_ERROR_BODY]
     return text
