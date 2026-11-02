@@ -1,6 +1,9 @@
 # ADR-085 — Delta Sync întreabă dacă s-au colectat statisticile, nu dacă există un rezultat
 
-**Status**: **PROPUNERE — cere aprobare explicită a proprietarului produsului**
+**Status**: **ACCEPTED** — aprobat explicit de proprietarul produsului
+(2026-11-02, „Aprob push-ul si etapele 1-4"). Etapele 1-4 **implementate și
+verificate** în aceeași zi (§7.2); etapa 5 (verificarea de după prima rulare de
+noapte) rămâne de făcut.
 **Data**: 2026-11-02
 **Autor**: sesiune Claude Code, la cererea explicită a proprietarului produsului
 („trebuie reparata si treaba cu recuperarea. Daca trebuie adr, scrie adr. Daca
@@ -639,12 +642,83 @@ Flashscore, deci afirmația devine adevărată prin umplere, nu prin rescriere
 
 | etapă | ce | cere aprobare separată |
 |---|---|---|
-| **0** | Recuperarea restanței de azi (29 de meciuri) prin `--recover-missing-stats` | ✅ **aprobată și EXECUTATĂ 2 nov — vezi §7.1** |
-| 1 | B — Delta Sync pe coloana-țintă, mărginit (§4.1) + teste + mutații | da (merge pe `main`) |
-| 2 | C(ii) — poarta Single Owner pe aceeași definiție (§4.2) | da |
-| 3 | `stats_source` condiționat (§4.3) | da |
-| **4** | **Clasă nouă în `check_data_health`: meciuri terminate, competiție urmărită, fără statistici. Prag ZERO absolut, nu procent.** §1.9 o mută din „util" în **obligatoriu** | da |
-| 5 | Verificarea din §6.3, după prima rulare de noapte | — |
+| **0** | Recuperarea restanței de azi (29 de meciuri) prin `--recover-missing-stats` | ✅ **aprobată și EXECUTATĂ 2 nov — §7.1** |
+| **1** | B — Delta Sync pe coloana-țintă, mărginit (§4.1) | ✅ **aprobată și IMPLEMENTATĂ 2 nov — §7.2** |
+| **2** | C(ii) — poarta Single Owner pe aceeași definiție (§4.2) | ✅ **aprobată și IMPLEMENTATĂ — §7.2** |
+| **3** | `stats_source` condiționat (§4.3) | ✅ **aprobată și IMPLEMENTATĂ — §7.2** |
+| **4** | Clasă nouă în `check_data_health`, prag ZERO absolut | ✅ **aprobată și IMPLEMENTATĂ — §7.2** |
+| 5 | Verificarea din §6.3, după prima rulare de noapte | — (rămâne de făcut) |
+
+**Statusul acestui ADR devine ACCEPTED** la aprobarea explicită a
+proprietarului produsului din 2 noiembrie 2026 („Aprob push-ul si etapele
+1-4"), inclusiv etapa 4, propusă de mine și acceptată.
+
+### 7.2 Etapele 1-4 — implementate și verificate, 2 noiembrie 2026
+
+**Ce s-a schimbat**, 3 fișiere de producție, **zero migrări, zero coloane noi,
+zero provideri eliminați**:
+
+| etapă | fișier | schimbarea |
+|---|---|---|
+| 1 | `database/queries.py` | `is_flashscore_match_already_collected` — pasul 1 citește `home_shots`, nu `actual_result`; pas 4 nou (`FLASHSCORE_RECOLLECT_WINDOW_DAYS = 60`). Pașii 2-3, inclusiv marja de fus orar din august, **neatinși**. |
+| 2 | `database/queries.py` | `get_match_ids_with_complete_flashscore_stats` — citește `match_history.home_shots IS NOT NULL` în loc de `flashscore_data_completeness.has_stats`. Chunk-uirea la 500 păstrată. |
+| 3 | `providers/flashscore/normalizer.py` | `stats_source` se adaugă **după** bucla de extragere, doar dacă vreo valoare din `STAT_LABEL_TO_FIELDS` a ajuns **parsată** în payload. |
+| 4 | `scripts/check_data_health.py` | clasa **11**, cu funcția pură `meciuri_fara_statistici` (prag 3 zile, derivat din latența măsurată 0,82/1,67 zile) + `_PRAG_ZILE_FARA_STATISTICI`. |
+
+**Calea de predicție e NEATINSĂ, verificat**: `git diff --stat` pe
+`oracle_engine.py`, `feature_engine.py`, `ml_predictor.py`, `recalibration.py`,
+`app.py`, `oracle_api.py` e **GOL**.
+
+**`pytest tests/`: 4145 passed, 2 skipped.** Aritmetica se închide **exact**:
+4114 → 4145 = **+31**, adică 28 în `tests/test_adr085_collection_witness.py` +
+3 în `tests/test_database_queries_single_owner.py` (14 → 17). Niciun test
+umbrit.
+
+**14 mutații, toate prinse.** M1 defectul original reintrodus (3 teste cad) ·
+M2 marginea de renunțare ștearsă · M3 garda meci-în-viitor ștearsă · M4 poarta
+Single Owner lăsată pe `has_stats` (3) · M5 `stats_source` necondiționat (3) ·
+M6 revendicare pe etichete brute, nu pe valori parsate · M7 chunk-uirea
+ștearsă · M8 pragul de zile scos din clasa 11 (2) · M9 cele două clase
+colapsate · M10 prezența statisticilor ignorată (2) · M11 `home_shots`
+verificat dar necerut în `select` · M12-M14 pe gărzile reparate. Fiecare rulată
+pe instantaneu, cu `md5sum -c` după, niciodată prin `git checkout`.
+
+**🔴 TREI GĂRZI EXISTENTE AU CĂZUT, și una dintre ele trecea din motivul
+greșit:**
+
+1. `test_raportul_numara_zece_clase` cerea literal `{findings}/10`. Rescrisă să
+   derive numitorul din **cel mai mare indice de clasă efectiv tipărit** — altfel
+   ar fi trebuit editată la fiecare clasă nouă, iar un numitor rămas în urmă ar
+   trece neobservat (exact ce s-a întâmplat cu „sapte clase" din docstring,
+   care a rămas fals până la zece).
+2. `test_constatarea_se_numara_DOAR_la_declansare` felia de la clasa 10 până la
+   finalul funcției, deci clasa 11 i-a intrat în felie. Capătul e acum
+   **începutul clasei următoare**, nu finalul raportului.
+3. `test_filtrul_single_owner_chunk_uieste_numarand_cererile` folosea un fals
+   al cărui `not_` e o **metodă**, iar codul nou cere lanțul `.not_.is_(…)`.
+   Mutat pe `_QueryCuNot`, cel scris exact pentru forma reală.
+
+**Și contraponderea lui, `test_filtrul_single_owner_lista_mica_o_singura_cerere`,
+TRECEA din motivul greșit**: cu același fals, lanțul arunca `AttributeError`
+**după** apelul `in_`, excepția era prinsă de funcție, iar `len(cereri) == 1` era
+satisfăcut de o cerere **eșuată**. Verifica că s-a făcut o cerere, nu că a mers.
+Reparată cu un fals complet și cu verificarea rezultatului. **A patra instanță
+în acest proiect a clasei „un test care trece pentru motivul greșit"**, după
+M3/M5/M7 din 1-2 noiembrie.
+
+**O contrapondere a prins o eroare a mea înainte de commit**: scrisesem eticheta
+de statistică drept `"Shots on Goal"`, care nu există — cea reală e
+`"Total shots"`. Testul pozitiv a căzut imediat. Fără el, testul negativ ar fi
+trecut și ar fi „dovedit" că `stats_source` lipsește — dintr-un motiv care n-avea
+nimic de-a face cu reparația.
+
+**Verificat end-to-end pe DATE REALE de producție** (cum s-a făcut și la clasa
+10): interogarea clasei 11 reprodusă prin MCP a întors **7 rânduri**, iar funcția
+pură le-a clasificat **7 EXTRAGERE / 0 DELTA SYNC** — corect, toate au `referee`
+prezent. Clasificarea e utilă, nu decorativă: spune „recolectarea nu ajută,
+verifică selectorii", exact adevărul pentru ele. Fereastra de 90 de zile prinde
+și un meci de Conference League din 11 august, dincolo de cele 60 ale
+recuperării.
 
 ### 7.1 Etapa 0 — executată și verificată, 2 noiembrie 2026
 

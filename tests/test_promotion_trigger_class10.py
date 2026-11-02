@@ -19,6 +19,7 @@ alternative plauzibile:
 from __future__ import annotations
 
 import ast
+import re
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -325,8 +326,20 @@ def test_pragurile_sunt_CONSTANTE_nu_literale_in_raport():
             f"pragul {literal} e scris ca literal în loc de constantă"
 
 
-def test_raportul_numara_zece_clase():
-    assert "{findings}/10" in _sursa("scripts/check_data_health.py")
+def test_raportul_numara_toate_clasele():
+    """[ACTUALIZAT ADR-085 — era `{findings}/10`, iar clasa 11 l-a făcut fals.]
+
+    Numărul nu se mai scrie aici ca literal: garda cere doar ca numitorul din
+    raport să fie CEL MAI MARE indice de clasă efectiv tipărit. Altfel acest
+    test ar trebui editat la fiecare clasă nouă, iar un numitor rămas în urmă
+    (exact ce s-a întâmplat cu „sapte clase" din docstring, corectat când
+    ajunsesem deja la zece) ar trece neobservat."""
+    sursa = _sursa("scripts/check_data_health.py")
+    indici = {int(m) for m in re.findall(r'print\(f?"  (\d+)\. ', sursa)}
+    assert indici, "nicio clasă detectată în raport"
+    assert f"{{findings}}/{max(indici)}" in sursa, (
+        f"numitorul din raport nu e {max(indici)}, deși clasele tipărite "
+        f"merg până acolo: {sorted(indici)}")
 
 
 def test_constatarea_se_numara_DOAR_la_declansare():
@@ -339,7 +352,14 @@ def test_constatarea_se_numara_DOAR_la_declansare():
     # + secțiunea din raport), deci `index()` prindea tot fișierul și număra
     # toate cele 10 incrementări. Ancorăm pe linia de raport, care e unică.
     i = sursa.index('print("  10. DECLANȘATOR DE SERVIRE')
-    bloc = sursa[i:sursa.index("Clase cu constatări")]
+    # [ACTUALIZAT ADR-085] Capătul era „Clase cu constatări", adică finalul
+    # raportului — iar clasa 11, adăugată între ele, a făcut garda să numere
+    # DOUĂ incrementări și să cadă. Capătul corect e începutul clasei
+    # următoare, nu finalul funcției: așa garda rămâne despre clasa 10 și nu
+    # trebuie reeditată la fiecare clasă nouă.
+    urmatoarea = re.search(r'print\(f?"  11\. ', sursa[i:])
+    sfarsit = i + urmatoarea.start() if urmatoarea else sursa.index("Clase cu constatări")
+    bloc = sursa[i:sfarsit]
     assert bloc.count("findings += 1") == 1, \
         f"clasa 10 incrementează de {bloc.count('findings += 1')} ori"
     pozitie_declansati = bloc.index("if declansati:")

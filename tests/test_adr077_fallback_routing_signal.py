@@ -242,7 +242,13 @@ def test_filtrul_single_owner_chunk_uieste_numarand_cererile():
 
     cereri: list[list] = []
 
-    class _Q2(_Query):
+    # [ACTUALIZAT ADR-085 §4.2] Baza era `_Query`, al cărui `not_` e o METODĂ.
+    # Poarta citește acum `match_history` cu `.not_.is_("home_shots","null")`,
+    # un lanț cu DOUĂ puncte — deci falsul trebuie să fie `_QueryCuNot`, cel
+    # scris exact pentru forma reală. Altfel testul ar cădea pe limita
+    # falsului, nu pe o proprietate a codului, iar „reparația" evidentă ar fi
+    # să slăbim garda de chunk-uire.
+    class _Q2(_QueryCuNot):
         def in_(self, _col, vals):
             cereri.append(list(vals))
             return self
@@ -265,15 +271,27 @@ def test_filtrul_single_owner_chunk_uieste_numarand_cererile():
 
 
 def test_filtrul_single_owner_lista_mica_o_singura_cerere():
-    """Contrapondere: chunk-uirea nu trebuie să adauge cereri degeaba."""
+    """Contrapondere: chunk-uirea nu trebuie să adauge cereri degeaba.
+
+    [REPARAT ADR-085] Testul TRECEA, dar din motivul greșit: baza era `_Query`,
+    al cărui `not_` e o metodă, deci lanțul real `.not_.is_(...)` arunca
+    `AttributeError` — prins de `except` din funcție, care întoarce setul gol.
+    `in_` fusese deja apelat, deci `len(cereri) == 1` era satisfăcut de o
+    cerere EȘUATĂ. Verificam că s-a făcut o cerere, nu că a mers.
+    Acum falsul suportă forma reală și se verifică și rezultatul."""
     import pytest
     mp = pytest.MonkeyPatch()
     cereri: list[list] = []
 
-    class _Q2(_Query):
+    class _Q2(_QueryCuNot):
         def in_(self, _col, vals):
             cereri.append(list(vals))
             return self
+
+        def execute(self):
+            class _R:
+                data = [{"id": 2}]
+            return _R()
 
     class _C2:
         def __init__(self):
@@ -284,8 +302,11 @@ def test_filtrul_single_owner_lista_mica_o_singura_cerere():
 
     try:
         mp.setattr(q, "get_client", lambda: _C2())
-        q.get_match_ids_with_complete_flashscore_stats([1, 2, 3])
+        rezultat = q.get_match_ids_with_complete_flashscore_stats([1, 2, 3])
         assert len(cereri) == 1
+        assert rezultat == {2}, (
+            "cererea a fost făcută dar n-a produs rezultat — exact simptomul "
+            "defectului reparat în acest test")
     finally:
         mp.undo()
 

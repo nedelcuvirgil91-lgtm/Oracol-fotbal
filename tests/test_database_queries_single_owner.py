@@ -38,6 +38,9 @@ class _FakeQuery:
     def not_(self):
         return self
 
+    def is_(self, *a, **kw):
+        self._calls.append((self._table_name, "is_", a, kw)); return self
+
     def limit(self, *a, **kw):
         self._calls.append((self._table_name, "limit", a, kw)); return self
 
@@ -67,10 +70,56 @@ class _BoomClient:
 # ════════════════════════════════════════════════════════════════════════
 
 def test_get_match_ids_with_complete_flashscore_stats_returns_matching_ids(monkeypatch):
-    fake = _FakeClient({"flashscore_data_completeness": [{"match_id": 1}, {"match_id": 3}]})
+    """[ACTUALIZAT ADR-085 §4.2] Citea `flashscore_data_completeness.has_stats`;
+    citește acum `match_history.home_shots IS NOT NULL`. Testul vechi afirma
+    contractul VECHI, deci a trebuit schimbat — nu e o adaptare cosmetică."""
+    fake = _FakeClient({"match_history": [{"id": 1}, {"id": 3}]})
     monkeypatch.setattr(q, "get_client", lambda: fake)
     result = q.get_match_ids_with_complete_flashscore_stats([1, 2, 3])
     assert result == {1, 3}
+
+
+def test_poarta_single_owner_NU_mai_citeste_completeness(monkeypatch):
+    """[ADR-085 §4.2] Garda centrală: un rând `flashscore_data_completeness`
+    scris ÎNAINTE de meci (has_stats=true, coverage=100%) nu mai are voie să
+    declare meciul acoperit. Toate cele 23 de meciuri din golul măsurat aveau
+    exact un asemenea rând — unul scris pe 30 iulie pentru un meci din 31
+    octombrie."""
+    fake = _FakeClient({
+        # completitudinea MINTE (rând de dinainte de meci), match_history e gol
+        "flashscore_data_completeness": [{"match_id": 7}],
+        "match_history": [],
+    })
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    assert q.get_match_ids_with_complete_flashscore_stats([7]) == set()
+    tabele = {c[0] for c in fake.calls}
+    assert "flashscore_data_completeness" not in tabele, (
+        f"poarta citește încă tabela de completitudine: {fake.calls}")
+    assert "match_history" in tabele
+
+
+def test_poarta_single_owner_filtreaza_pe_home_shots_nenul(monkeypatch):
+    """Contrapondere la testul de mai sus: nu e suficient să NU citească
+    tabela greșită — trebuie să aplice efectiv filtrul corect. Fără asta,
+    o implementare care citește `match_history` fără niciun filtru ar trece."""
+    fake = _FakeClient({"match_history": [{"id": 1}]})
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    q.get_match_ids_with_complete_flashscore_stats([1])
+    assert ("match_history", "is_", ("home_shots", "null"), {}) in fake.calls, (
+        f"filtrul pe coloana-țintă lipsește: {fake.calls}")
+
+
+def test_poarta_single_owner_pastreaza_chunk_uirea_la_500(monkeypatch):
+    """[ADR-077 §2.2] Chunk-uirea nu are voie să se piardă la schimbarea de
+    tabelă — `.in_()` pe `match_history.id` are exact același plafon PostgREST
+    de 1000. A cincea instanță a clasei, reparată preventiv acolo; aici se
+    păzește să nu fie anulată din neatenție."""
+    fake = _FakeClient({"match_history": []})
+    monkeypatch.setattr(q, "get_client", lambda: fake)
+    q.get_match_ids_with_complete_flashscore_stats(list(range(1, 1201)))
+    bucati = [c[2][1] for c in fake.calls if c[1] == "in_"]
+    assert [len(b) for b in bucati] == [500, 500, 200], (
+        f"chunk-uirea s-a pierdut: {[len(b) for b in bucati]}")
 
 
 def test_get_match_ids_with_complete_flashscore_stats_empty_input_no_query(monkeypatch):

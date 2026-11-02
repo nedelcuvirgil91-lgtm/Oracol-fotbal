@@ -11,7 +11,9 @@ DE CE EXISTA: toate cele patru clase de probleme de mai jos au fost gasite
 arata 15/300). Nu exista nicio monitorizare pentru ele — deci cresteau tacut.
 Acest script le face vizibile.
 
-CE VERIFICA (sapte clase distincte, fiecare cu propriul prag):
+CE VERIFICA (unsprezece clase distincte, fiecare cu propriul prag — numarul
+creste prin decizie, nu prin construcție; cifra de aici a spus "sapte" si dupa
+ce ajunsesem la zece, corectata 2026-11-02):
 
   1. FIXTURE-URI STALE — meciuri cu ora de start trecuta si fara rezultat,
      separate pe vechime. Cele recente sunt normale (runda in desfasurare);
@@ -42,6 +44,13 @@ CE VERIFICA (sapte clase distincte, fiecare cu propriul prag):
      pentru ca lipsa ei a costat 39 de zile de tacere si 693 de meciuri
      fara xG real. Pragul e ZERO ABSOLUT, nu un procent — motivul, in
      comentariul clasei.
+
+  11. MECIURI TERMINATE FARA STATISTICI (ADR-085, adaugata 2026-11-02) —
+     meciuri jucate acum mai mult de 3 zile, in competitii urmarite, cu
+     `home_shots IS NULL`. Prag ZERO ABSOLUT. Separa doua clase prin
+     `referee`: NULL = Delta Sync n-a lasat Flashscore sa ajunga (ADR-085),
+     prezent = extragerea e rupta (ADR-076). Au remedii DIFERITE, deci se
+     raporteaza separat.
 
 Utilizare:
     python scripts/check_data_health.py
@@ -324,6 +333,81 @@ def _semnificative(rand: dict) -> int:
     return sum(1 for cheie in ("accuracy_significant", "brier_significant",
                                "logloss_significant")
                if rand.get(cheie) is True)
+
+
+# [ADR-085 §7, etapa 4] Câte zile după fluier are voie un meci să rămână fără
+# statistici înainte să fie o constatare. Măsurat, nu ales: latența reală de
+# colectare în săptămânile sănătoase e 0,82 zile medie / 1,67 maxim (ADR-085
+# §1.2), iar pe săptămâna 19 oct a fost 0,90 / 1,67. Trei zile lasă marjă
+# pentru o rulare de noapte sărită sau întârziată de coada GitHub, fără să
+# tolereze un gol real.
+_PRAG_ZILE_FARA_STATISTICI = 3
+
+
+def meciuri_fara_statistici(
+    randuri: list[dict], azi: date, prag_zile: int = _PRAG_ZILE_FARA_STATISTICI,
+) -> dict:
+    """[ADR-085 §7, etapa 4] Meciuri TERMINATE, într-o competiție urmărită,
+    mai vechi de `prag_zile`, rămase fără statistici (`home_shots IS NULL`).
+
+    Funcție PURĂ — fără I/O, testabilă fără Supabase și fără o rulare de noapte,
+    aceeași convenție ca `serie_3_din_3`.
+
+    DE CE EXISTĂ CLASA: golul reparat de ADR-085 a fost **tăcut**. Nimic nu l-a
+    semnalat — nici un test, nici o alertă, nici o privire pe ecran. Etapa 5 a
+    lui `night_sync` raporta `ok: true` în 6 minute în loc de 15-23, fiindcă
+    sărea exact meciurile care aveau nevoie de colectare. L-a găsit o întrebare
+    întâmplătoare a proprietarului produsului, 7 zile mai târziu.
+
+    Și defectul nu era unic: s-a trezit fiindcă o reparație a NOASTRĂ
+    (`9202d82`, parametrul `d` al SFI) a făcut un scriitor concurent să
+    funcționeze. Orice reparație viitoare la `results`, `odds_recent_results`
+    sau SFI poate retrezi același tipar. Fără clasa asta, l-am descoperi din nou
+    din întâmplare.
+
+    PRAGUL E ZERO ABSOLUT, nu un procent — aceeași alegere ca la clasa 7
+    (ADR-076) și pentru același motiv: un procent pe un numitor mare rămâne
+    verde cât timp golul e mic, iar un gol mic care crește e exact ce vrem să
+    prindem din prima zi. 23 de meciuri din 2057 sunt 1,1% — ar fi trecut
+    neobservate sub orice prag procentual rezonabil.
+
+    SEPARĂ CELE DOUĂ CLASE prin `referee`, fiindcă au cauze și remedii
+    DIFERITE, iar martorul le distinge curat (verificat pe producție, ADR-085
+    §1.3 și §7.1):
+      - `referee IS NULL`  -> tabul summary nu a fost parsat niciodată = clasa
+        ADR-085 (Delta Sync). Remediul e recolectarea.
+      - `referee NOT NULL` -> summary parsat, tabul de statistici gol = clasa
+        ADR-076 (extragere ruptă). Remediul e la selectori, iar recolectarea nu
+        ajută.
+    A le raporta împreună ar trimite pe pistă greșită exact persoana care se
+    uită la raport."""
+    gol_delta_sync: list[dict] = []
+    gol_extragere: list[dict] = []
+    for r in randuri:
+        brut = (r.get("kickoff_date") or "")[:10]
+        if not brut:
+            continue
+        try:
+            zi = date.fromisoformat(brut)
+        except ValueError:
+            continue
+        if (azi - zi).days < prag_zile:
+            continue
+        if r.get("home_shots") is not None:
+            continue
+        ținta = gol_extragere if r.get("referee") is not None else gol_delta_sync
+        ținta.append({
+            "league": r.get("league"),
+            "kickoff_date": brut,
+            "home_team": r.get("home_team"),
+            "away_team": r.get("away_team"),
+        })
+    cheie = lambda x: (x["kickoff_date"], x["league"] or "")
+    return {
+        "delta_sync": sorted(gol_delta_sync, key=cheie),
+        "extragere": sorted(gol_extragere, key=cheie),
+        "total": len(gol_delta_sync) + len(gol_extragere),
+    }
 
 
 def _fetch_all(client, table: str, columns: str, apply_filters) -> list[dict]:
@@ -814,7 +898,60 @@ def main() -> int:
             findings += 1
     print(BAR)
 
-    print(f"  Clase cu constatări: {findings}/10")
+    # ── 11. MECIURI TERMINATE FĂRĂ STATISTICI (ADR-085, etapa 4) ────────────
+    #
+    # Clasa asta există pentru că golul reparat de ADR-085 a fost TĂCUT, iar
+    # etapa care îl producea raporta `ok: true`. Vezi docstring-ul lui
+    # `meciuri_fara_statistici` pentru motivul complet și pentru de ce pragul e
+    # ZERO ABSOLUT, nu procentual.
+    print(f"  11. MECIURI TERMINATE FĂRĂ STATISTICI (> {_PRAG_ZILE_FARA_STATISTICI} zile, "
+          "ligi urmărite) — prag ZERO")
+    try:
+        from providers.flashscore.discovery import (
+            FLASHSCORE_TRACKED_COMPETITIONS as _TRACKED,
+        )
+        prag_data = (date.today() - timedelta(days=90)).isoformat()
+        randuri_stat = _fetch_all(
+            client, "match_history",
+            "id,league,kickoff_date,home_team,away_team,home_shots,referee",
+            lambda q: (q.gte("kickoff_date", prag_data)
+                        .not_.is_("actual_result", "null")
+                        .in_("league", list(_TRACKED))),
+        )
+    except Exception as exc:
+        randuri_stat = None
+        logger.warning("[Health] clasa 11 — interogarea a eșuat: %s", exc)
+    if randuri_stat is None:
+        print("     [ATENȚIE] interogarea nu a putut fi făcută — se raportează "
+              "ca NECUNOSCUTĂ, nu ca zero (Regula #8).")
+    else:
+        gol = meciuri_fara_statistici(randuri_stat, date.today())
+        print(f"     verificate: {len(randuri_stat)} meciuri terminate, "
+              f"{len(_TRACKED)} competiții urmărite, fereastră 90 zile")
+        if gol["total"] == 0:
+            print("     ✅ ZERO meciuri fără statistici.")
+        else:
+            for eticheta, lista, explicatie in (
+                ("DELTA SYNC (ADR-085)", gol["delta_sync"],
+                 "summary NEparsat (`referee` NULL) — Flashscore n-a ajuns "
+                 "niciodată la meci. Remediul: recolectare "
+                 "(`--recover-missing-stats`)."),
+                ("EXTRAGERE (ADR-076)", gol["extragere"],
+                 "summary parsat, tab de statistici GOL (`referee` prezent) — "
+                 "recolectarea NU ajută; se verifică selectorii."),
+            ):
+                if not lista:
+                    continue
+                print(f"     ⛔ {len(lista)} × {eticheta} — {explicatie}")
+                for m in lista[:10]:
+                    print(f"        {m['kickoff_date']}  [{m['league']}]  "
+                          f"{m['home_team']} – {m['away_team']}")
+                if len(lista) > 10:
+                    print(f"        … și încă {len(lista) - 10}")
+            findings += 1
+    print(BAR)
+
+    print(f"  Clase cu constatări: {findings}/11")
     print("  Verificare încheiată. ZERO scriere efectuată.")
     print(BAR)
     return 1 if findings else 0

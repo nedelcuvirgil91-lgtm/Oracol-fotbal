@@ -617,7 +617,27 @@ def normalize_match_statistics(pages: dict[str, str]) -> dict[str, Any]:
         "actual_result": actual_result,
         "home_ht_goals": home_ht_goals,
         "away_ht_goals": away_ht_goals,
-        "stats_source": "flashscore",
+        # [ADR-085 §4.3] `stats_source` NU se mai scrie aici necondiționat —
+        # se adaugă mai jos, DOAR dacă s-a extras efectiv măcar o valoare din
+        # `STAT_LABEL_TO_FIELDS`. Motivul, măsurat: linia asta era în același
+        # payload cu `actual_result`/`referee`/`stadium`, deci o vizită de
+        # DINAINTE de meci (care extrage stadionul, h2h și clasamentul, dar
+        # zero statistici) revendica totuși Flashscore ca sursă a
+        # statisticilor. Rezultatul: 1653 din 1654 de meciuri domestice
+        # terminate aveau `stats_source = 'flashscore'`, INCLUSIV toate cele
+        # 29 fără nicio statistică. Un audit „de la cine avem statisticile?"
+        # primea „flashscore" pentru rânduri care n-au statistici.
+        #
+        # Consecința practică, nu doar de igienă:
+        # `services/match_stats_backfill_service.py:185` scrie `stats_source`
+        # doar `if candidate.get("stats_source") is None` — gardă corectă, dar
+        # care nu se declanșa niciodată, fiindcă Flashscore revendicase deja
+        # fals. Un provider de rezervă care completează statisticile nu putea
+        # înregistra că el le-a dat (North Star #9).
+        #
+        # Absența cheii lasă coloana neatinsă prin `COALESCE`-ul RPC-ului
+        # canonic (ADR-036) — North Star #8: o stare necunoscută nu se
+        # aproximează.
         # [ADR-068, Faza A] Litera BRUTA a starii, necoloana canonica. Nu
         # exista `flashscore_status_raw` in `match_history`, iar RPC-ul citeste
         # doar chei cunoscute (`p->>'...'`), deci o cheie in plus e ignorata
@@ -645,6 +665,17 @@ def normalize_match_statistics(pages: dict[str, str]) -> dict[str, Any]:
         parse = _parse_numeric if label in ("Expected goals (xG)", "Ball possession") else _parse_int_loose
         result[home_field] = parse(home_val)
         result[away_field] = parse(away_val)
+
+    # [ADR-085 §4.3] Revendicarea provenienței, DUPĂ extragere, nu înainte.
+    # Se citesc valorile deja PARSATE din `result`, nu dicționarul brut
+    # `stats`: o etichetă prezentă cu text neparsabil ("-", "") ar fi trecut
+    # ca „am extras ceva" deși coloana rămâne NULL. Întrebarea corectă e „a
+    # ajuns vreo valoare în payload?", nu „a existat vreo etichetă pe pagină?".
+    _campuri_statistici = [
+        f for pereche in STAT_LABEL_TO_FIELDS.values() for f in pereche
+    ]
+    if any(result.get(f) is not None for f in _campuri_statistici):
+        result["stats_source"] = "flashscore"
 
     lineups_html = pages.get("lineups")
     if lineups_html:

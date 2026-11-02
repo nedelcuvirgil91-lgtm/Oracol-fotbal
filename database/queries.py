@@ -2859,10 +2859,36 @@ _PAGE_SIZE = 1000
 
 def get_match_ids_with_complete_flashscore_stats(match_ids: list[int]) -> set[int]:
     """Subsetul din `match_ids` pentru care Flashscore a scris deja
-    statistici de baza complete (`flashscore_data_completeness.has_stats`).
-    Folosit de `sync/sync_match_statistics.py` — daca un meci apare in acest
-    set, Soccer Football Info/FreeLF NU mai sunt apelate pentru el (Single
-    Owner, ADR-045)."""
+    statistici de baza. Folosit de `sync/sync_match_statistics.py` — daca un
+    meci apare in acest set, Soccer Football Info/FreeLF NU mai sunt apelate
+    pentru el (Single Owner, ADR-045).
+
+    **[ADR-085 §4.2 — CRITERIUL S-A SCHIMBAT, 2026-11-02.]** Citea
+    `flashscore_data_completeness.has_stats`, care prin decizie documentată
+    înseamnă **„pagina a fost descărcată", nu „extragerea a reușit"** — exact
+    proxy-ul pentru care pana de 39 de zile din ADR-076 a trecut neobservată.
+
+    Costul măsurat: Discovery vizitează un meci cu până la 7 zile ÎNAINTE de
+    fluier, scrie atunci un rând de completitudine cu `has_stats = true` și
+    `coverage_percent = 100`, și acel rând rămâne. Toate cele 23 de meciuri din
+    golul ADR-085 §1.1 aveau un asemenea rând — unul scris pe **30 iulie**,
+    pentru un meci jucat pe **31 octombrie**. Deci providerii de rezervă erau
+    săriți pentru meciuri la care nimeni nu colectase nimic.
+
+    Acum criteriul e `match_history.home_shots IS NOT NULL` — **aceeași
+    definiție a lui „colectat"** ca în `is_flashscore_match_already_collected`
+    și `get_flashscore_mids_missing_statistics`. O singură definiție în toate
+    cele trei locuri, nu trei care pot diverge.
+
+    Efect colateral util, fără nicio linie în plus: rândurile ORFANE din
+    `flashscore_data_completeness` (constrângerea UNIQUE e pe `match_ref`, care
+    include data, deci fiecare reprogramare lasă un orfan — gol documentat din
+    30 august) devin **inofensive**, fiindcă poarta nu le mai citește. Golul
+    rămâne deschis ca structură; dispare ca pagubă.
+
+    Numele funcției rămâne neschimbat — e contract de apelant, iar `Flashscore`
+    din el e în continuare corect: `home_shots` are owner unic de scriere
+    (ADR-036) și pentru meciurile Flashscore el e Flashscore."""
     client = get_client()
     if client is None or not match_ids:
         return set()
@@ -2874,20 +2900,22 @@ def get_match_ids_with_complete_flashscore_stats(match_ids: list[int]) -> set[in
     # proiect (`get_training_data`, `get_shadow_predictions`,
     # `get_distinct_experiments`, citirea din `match_history`).
     # Reparată PREVENTIV, nu după ce taie tăcut un rezultat.
+    # [ADR-085 §4.2] Se păstrează neatinsă la schimbarea de tabelă — `.in_()`
+    # pe `match_history.id` are exact același plafon.
     CHUNK = 500
     gasite: set[int] = set()
     try:
         for i in range(0, len(match_ids), CHUNK):
             bucata = match_ids[i:i + CHUNK]
             res = (
-                client.table("flashscore_data_completeness")
-                .select("match_id")
-                .in_("match_id", bucata)
-                .eq("has_stats", True)
+                client.table("match_history")
+                .select("id")
+                .in_("id", bucata)
+                .not_.is_("home_shots", "null")
                 .execute()
             )
             gasite.update(
-                r["match_id"] for r in (res.data or []) if r.get("match_id") is not None
+                r["id"] for r in (res.data or []) if r.get("id") is not None
             )
         return gasite
     except Exception as exc:
@@ -3788,11 +3816,45 @@ def get_team_recent_form_context(team: str, n: int = 5) -> list[dict]:
     return results
 
 
+# [ADR-085 §4.1] Fereastra în care Delta Sync mai reîncearcă un meci terminat
+# fără statistici. Aceeași valoare cu implicitul recuperării
+# (`get_flashscore_mids_missing_statistics(days_back=60)` și
+# `--recover-days-back`) — DELIBERAT un singur număr, nu două care pot deriva.
+# Dincolo de ea se renunță EXPLICIT: un meci pe care Flashscore genuin nu-l
+# servește (pagină fără tab de statistici, meci amânat, competiție scoasă din
+# listă) nu se mai cere la fiecare rulare. Rămâne accesibil prin recuperarea
+# manuală, care ocolește Delta Sync prin construcție.
+FLASHSCORE_RECOLLECT_WINDOW_DAYS = 60
+
+
 def is_flashscore_match_already_collected(mid: str) -> bool:
     """Delta Sync (Faza 2, §7 din task) — verifică ÎNAINTE de fetch dacă
     acest meci (identificat prin `mid`-ul Flashscore, cunoscut deja la
     Discovery, înaintea oricărui fetch) a fost deja persistat canonic ȘI
     complet (nu doar un rând „schelet" scris pentru un meci încă nejucat).
+
+    [ADR-085 §4.1 — ÎNTREBAREA S-A SCHIMBAT, 2026-11-02] Până acum, un rând cu
+    `actual_result` nenul însemna „colectat". **Era fals**, iar costul a fost
+    măsurat: 23 de meciuri din 166 (săptămâna 26 oct – 1 nov), printre ele
+    AC Milan – Inter, Juventus – Napoli, PSG – Lyon, au rămas PERMANENT fără
+    statistici și fără xG, deși Flashscore le publică.
+
+    `actual_result` are **patru** scriitori (Flashscore + football-data.org +
+    Odds API scores + Soccer Football Info, `sync_results.py:577-586`), deci nu
+    poate răspunde la „a colectat FLASHSCORE acest meci?". Când un provider API
+    scrie rezultatul primul — ce se întâmplă sistematic pentru meciurile de
+    seară, fiindcă pasul `results` rulează cu patru etape înaintea etapei
+    Flashscore în aceeași rulare de noapte — poarta se închidea definitiv.
+
+    Declanșatorul a fost o reparație a noastră: `9202d82` (26 oct) a reparat
+    parametrul `d` al SFI, care eșuase 100% timp de 15 zile. Defectul de aici
+    era latent **exact fiindcă un scriitor concurent era stricat**.
+
+    Acum întrebarea se pune pe **coloana-țintă**: `home_shots`, care nu poate
+    minți despre propria absență. Același remediu ca ADR-077 (`referee` →
+    `home_shots`) și același criteriu cu care recuperarea își alege țintele
+    (`get_flashscore_mids_missing_statistics`) — o singură definiție a lui
+    „colectat", nu două care pot diverge.
 
     `normalize_match_statistics()` scrie `fixture_id = f"flashscore_{mid}"`
     pe `match_history` (același `mid` extras din URL-ul hub-ului de
@@ -3809,14 +3871,23 @@ def is_flashscore_match_already_collected(mid: str) -> bool:
     (`night_sync.yml`/`live_sync.yml`, care descoperă același meci prin
     `/results/` DUPĂ ce s-a jucat) l-ar fi sărit definitiv prin Delta
     Sync, lăsând `actual_result`/scorul NULL la nesfârșit — Flashscore nu
-    s-ar mai fi întors niciodată să-l completeze. Acum: dacă rândul are
-    deja `actual_result`, tot True (comportament neschimbat, cazul normal).
-    Dacă NU are `actual_result` ȘI `kickoff_date` e clar în trecut
-    (dincolo de marja de siguranță de fus orar, identică celei din
-    `pre_match_odds.py::_TIMEZONE_SAFETY_MARGIN`), întoarce False — se
-    reîncearcă fetch/persist, ca meciul să poată fi completat. Dacă
-    `kickoff_date` e încă în viitor (sau lipsă/neparsabil), rămâne True —
-    nu are rost să reîncercăm un meci care încă nu s-a jucat.
+    s-ar mai fi întors niciodată să-l completeze.
+
+    **[CORECTAT ADR-085 — rândurile de mai jos descriau regula de atunci, iar
+    prima dintre ele e exact defectul reparat acum.]** Regula din 5 august era
+    „dacă rândul are deja `actual_result`, tot True". Ordinea actuală:
+
+    1. `home_shots` nenul -> **True** (colectat, dovedit pe coloana-țintă);
+    2. `kickoff_date` lipsă sau neparsabilă -> True (nu putem decide,
+       comportament neschimbat);
+    3. meciul sigur nu a început (`kickoff - marjă > acum`, marja identică
+       celei din `pre_match_odds.py::_TIMEZONE_SAFETY_MARGIN`) -> True;
+    4. mai vechi decât `FLASHSCORE_RECOLLECT_WINDOW_DAYS` -> True (se renunță
+       explicit);
+    5. altfel -> **False**, se reîncearcă fetch/persist.
+
+    Pașii 2 și 3 sunt neatinși față de 5 august, inclusiv toată logica de marjă
+    de fus orar. S-a schimbat întrebarea de la pasul 1 și s-a adăugat pasul 4.
 
     Un `False` NU înseamnă cu certitudine "niciodată colectat" — dacă
     meciul exista deja în `match_history` cu `fixture_id` de la alt
@@ -3830,7 +3901,7 @@ def is_flashscore_match_already_collected(mid: str) -> bool:
     try:
         res = (
             client.table("match_history")
-            .select("id,kickoff_date,actual_result")
+            .select("id,kickoff_date,actual_result,home_shots")
             .eq("fixture_id", f"flashscore_{mid}")
             .limit(1)
             .execute()
@@ -3839,7 +3910,11 @@ def is_flashscore_match_already_collected(mid: str) -> bool:
         if not rows:
             return False
         row = rows[0]
-        if row.get("actual_result") is not None:
+        # [ADR-085 §4.1] Coloana-ȚINTĂ, nu un câmp-martor cu mai mulți
+        # scriitori. `home_shots` are un owner unic de scriere pentru
+        # meciurile Flashscore, iar prezența ei e dovada directă — nu un proxy
+        # — că tabul de statistici a fost parsat.
+        if row.get("home_shots") is not None:
             return True
         kickoff_raw = row.get("kickoff_date")
         if not kickoff_raw:
@@ -3861,6 +3936,15 @@ def is_flashscore_match_already_collected(mid: str) -> bool:
         # putin prea devreme e ieftin (un fetch in plus), a nu reincerca
         # niciodata e bug-ul pe care il reparam.
         if kickoff - timedelta(hours=6) > now:
+            return True
+        # [ADR-085 §4.1] Marginea de renunțare. Fără ea, un meci pe care
+        # Flashscore genuin nu-l servește ar fi recerut la FIECARE rulare, la
+        # nesfârșit — exact risipa reparată la `live_sync` în august (jumătate
+        # dintr-o rulare petrecută pe muncă inutilă). Costul măsurat al
+        # ferestrei: restanța reală era 29 de meciuri pe 60 de zile, deci ~23
+        # de fetch-uri în plus pe săptămână, sub 2% din cele ~150 ale unei
+        # rulări.
+        if kickoff + timedelta(days=FLASHSCORE_RECOLLECT_WINDOW_DAYS) < now:
             return True
         return False
     except Exception as exc:
