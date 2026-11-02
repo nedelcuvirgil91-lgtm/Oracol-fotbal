@@ -76,6 +76,11 @@ Argumentele secundare, în ordine:
 - **Nicio scurgere de secret**: cheia RapidAPI circulă exclusiv în header-ul de
   **cerere**. Corpul răspunsului nu o conține — proprietate deja documentată în
   comentariul de lângă `_corp_diagnostic()`, nu o presupunere nouă.
+  > **⚠️ [AMENDAMENT 1, 2026-11-02 — argumentul ăsta e SPECIFIC PROVIDERULUI,
+  > nu general. Vezi §8.]** Rândul de mai sus rămâne **neatins**, fiindcă era
+  > adevărat la data lui și pentru providerul la care se referea (North Star
+  > #9 — un document nu se rescrie retroactiv). Dar nu se mai poate cita ca
+  > proprietate a coloanei: Odds API trimite cheia ca **parametru de query**.
 - **Întârzierea nu costă nimic**: SFI eșuează de ~9 ori pe noapte, deci corpul
   intră singur în tabelă la prima rulare. ADR-077 e deschis din 17 oct,
   providerul mort din 11 oct — o zi în plus pe o cale care produce deja zero nu
@@ -203,3 +208,101 @@ divergență viitoare de semnătură, în timp ce în producție scrierea în
 `provider_call_log` s-ar fi oprit **tăcut**. Fals-ul strict transformă acea
 clasă de defect într-un eșec zgomotos de test. Aceeași lecție ca la clientul
 fals din reparația D-10, care nu emula plafonul implicit PostgREST.
+
+---
+
+## 8. Amendament 1 (2026-11-02) — „nicio scurgere de secret" era o proprietate a providerului, nu a coloanei
+
+**Status**: ACCEPTED (aprobat explicit de proprietarul produsului, 2026-11-02,
+varianta (a) din trei prezentate). **Cod deja pe `main`**: `1cb1e77` (garda),
+`356ef79` (cablarea), `8bf3385` (gărzile).
+
+### 8.1 Ce s-a dovedit fals
+
+§3 susține, ca argument secundar al deciziei de a stoca deloc corpul:
+
+> *„Nicio scurgere de secret: cheia RapidAPI circulă exclusiv în header-ul de
+> **cerere**. Corpul răspunsului nu o conține."*
+
+Afirmația e **adevărată pentru SoccerFootballInfo** — RapidAPI autentifică prin
+header — și **falsă pentru The Odds API**, unde cheia e **parametru de query**
+(`?apiKey=…`). Un provider care își reflectă cererea în corpul erorii ar fi
+scris cheia în `provider_call_log.error_body`.
+
+ADR-ul nu a greșit: la 22 octombrie exista **un singur** apelant, iar pentru el
+argumentul era verificat. Greșeala ar fi fost să-l citim ca proprietate a
+coloanei atunci când al doilea apelant a apărut.
+
+### 8.2 Clasa, care e mai importantă decât cazul
+
+**Un ADR nou invalidează tacit precondiția altuia.** Exact clasa documentată de
+**ADR-077**, unde ADR-044/045 a adus Flashscore ca al doilea scriitor al lui
+`referee` și a transformat criteriul de rutare al ADR-041 în unul care întorcea
+0 pe orice fereastră — nedetectat **39 de zile**.
+
+Diferența, și singurul motiv pentru care costul e zero aici: acolo s-a
+descoperit *după*, aici *înainte de cablare*. Nu din noroc — din regula că o
+extindere se verifică față de argumentele scrise ale ADR-ului pe care îl
+extinde, nu doar față de cod.
+
+**Rămâne adevărat golul mai larg, deja consemnat în `CLAUDE.md` D-12**: nimic
+nu detectează azi când un ADR nou adaugă al doilea scriitor — sau al doilea
+apelant — pe ceva ce altul folosește ca premisă. Garda ADR-036 acoperă strict
+`FEATURE_COLUMNS`.
+
+### 8.3 Ce se schimbă
+
+**§2 (Decizie) rămâne neatinsă.** Coloana, plafonul de 400 de caractere,
+retenția de 9 zile și garda „pe succes se scrie NULL" sunt toate neschimbate.
+
+Se adaugă **a treia gardă în calea de scriere**, lângă celelalte două, exact
+unde §2 pct. 3 spune că trebuie să stea („gărzile nu stau în apelant"):
+
+- `supabase_client._redacteaza_secrete()` — funcție **pură**, aplicată de
+  `_error_body_de_scris()` **înaintea** trunchierii. Ordinea e load-bearing:
+  trunchierea întâi ar tăia secretul la jumătate, iar jumătatea rămasă e tot o
+  scurgere. Test dedicat.
+- Două plase, una pe **nume de parametru** (`apiKey`, `token`, `secret`,
+  `password`, `auth`, …) și una pe **valoare** (șiruri de ≥32 hexazecimale —
+  cheia Odds API are exact 32).
+- `key` **simplu** e deliberat **în afara** listei: răspunsurile Odds API conțin
+  legitim `{"key": "soccer_epl"}`, iar redactarea lui ar distruge exact
+  diagnosticul pentru care coloana există. Contrapondere dedicată în teste.
+
+### 8.4 Limita, declarată ca test
+
+Redactarea e pe **tipar**, nu pe valoare — `supabase_client` nu importă
+`key_manager` și nici nu trebuie. O cheie care ar apărea fără nume de parametru
+și fără formă hexazecimală ar trece. **E a doua linie de apărare, nu prima**;
+prima rămâne ca providerii să nu reflecte cererea.
+
+Limita e scrisă ca test (`test_LIMITA_DECLARATA_…`), nu ca notă, tocmai ca
+nimeni să nu presupună mai multă protecție decât există — aceeași regulă ca
+North Star #8.
+
+### 8.5 Costul se mută, și cu cât exact
+
+§3 mărginea costul la **~32 kB** (9 eșecuri SFI/noapte × 400 B × 9 zile).
+Odată ce `oracle_api` cablează `error_body`, intră și ceilalți provideri.
+Măsurat pe 2 noiembrie, eșecuri în ultimele 9 zile:
+
+| Provider | Eșecuri / 9 zile | Cost maxim |
+|---|---:|---:|
+| `oddsapi` | 365 | 143 kB |
+| `freelivefootball` | 157 | 61 kB |
+| `footballdata` | 48 | 19 kB |
+| `soccerfootballinfo` | 13 | 5 kB |
+
+**Total ~228 kB** în loc de 32 kB — de șapte ori mai mult decât bugetul scris,
+și tot neglijabil în absolut. Plafonul și retenția rămân neschimbate, deci
+cifra nu poate crește nemărginit. TheSportsDB nu mai apare deloc (0 eșecuri) —
+întrerupătorul de provider își face treaba.
+
+### 8.6 Ce NU face acest amendament
+
+- **Nu rescrie §3.** Rândul original rămâne, cu un marcaj care trimite aici.
+- **Nu ridică plafonul de 400 de caractere** și nu atinge retenția.
+- **Nu rescrie retroactiv** rândurile existente — cele 90 de rânduri `oddsapi`
+  rămân cu `error_body = NULL`. Corpurile lor nu mai există nicăieri.
+- **Nu decide nimic despre `btts`.** Amendamentul face întrebarea *observabilă*;
+  răspunsul vine de la prima rulare de noapte care scrie un 422 cu corp.
