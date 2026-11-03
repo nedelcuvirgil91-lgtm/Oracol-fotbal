@@ -673,6 +673,34 @@ Brier ✅, log-loss ✅, acuratețe ❌ dar **Δacc +1,06pp** — și ar fi trec
 **șapte zile consecutive** (27 oct – 2 nov). Aprobarea produce **imediat** un
 candidat de promovare.
 
+> **🔴 [MĂSURAT 2026-11-03 — condiția (3) e îndeplinită de 12 zile, DAR MIZA SE
+> ERODEAZĂ, monoton.]** Brier și log-loss semnificative în **toate** cele 12
+> zile (23 oct – 3 nov), `Δacc` pozitiv în toate — **zero oscilație**, condiția
+> (3) bifată. Dar nu e „acuratețea cedează": **se contractă tot avantajul**, pe
+> toate trei metricile simultan — `Δacc` **+3,08 → +1,04pp**, `Δbrier`
+> −0,0136 → −0,0082, `Δlog-loss` −0,0209 → −0,0123, în timp ce `n` urcă
+> 357 → 672. Tiparul clasic al unui avantaj timpuriu care regresează.
+>
+> Deci afirmația de mai sus („aprobarea produce **imediat** un candidat") era
+> adevărată pe 2 noiembrie și devine tot mai puțin adevărată: garda de direcție
+> propusă e `Δacc ≥ 0`, iar `174e7e17` se apropie de ea **de sus**. O
+> extrapolare pe ultima săptămână (−0,0008/zi) ar trece zero pe la mijlocul lui
+> noiembrie — spus **ca extrapolare**: ultimele trei incremente sunt zgomotoase
+> și panta încetinește, iar se aplică propria lecție de mai jos (o proiecție
+> contrazisă de două puncte nu e încă infirmată).
+>
+> **De aici, așteptarea e INFORMATIVĂ, nu doar prudentă**: dacă `Δacc` se
+> stabilizează peste zero, cazul e mai puternic pe date așezate; dacă trece sub
+> zero, **candidatul dispare singur, iar asta e în sine răspunsul** — un
+> criteriu al cărui unic exemplu viu se evaporă în două săptămâni nu e un
+> criteriu pentru care merită schimbată poarta, și §7.1 devine dominant.
+> Seria completă, pe zile: `DE_URMARIT.md` §18.1.
+>
+> **Starea celorlalte două condiții la 3 nov**: (1) **NEÎNDEPLINITĂ prin
+> construcție** — `1b3c3ef` a ajuns pe `main` pe 2 nov 20:06 UTC, deci **ziua 1
+> din 3** e 3 nov; cel mai devreme **5 noiembrie**. (2) ✅ **provizoriu**, pe
+> cohorta genuin post-reparație (7/7 meciuri de seară, `p ≈ 1,1%`).
+
 **De ce se amână, și e argument nu ezitare**: ambii Challengeri activi au
 `baseline_source = 'shadow_control'`, deci cifrele vin din rândul `control` —
 iar acela **și-a schimbat alimentarea pe 2 noiembrie** (ADR-085 etapele 1-4: 27
@@ -1068,9 +1096,10 @@ Cheile API sunt tratate ca infrastructură critică — nu ca detalii de configu
   - **Temerea de calitate, verificată pe toate ligile și REÎNCADRATĂ**: identitate `flashscore_` pe **2037/2057 (99,03%)**, identitate `fd_` pe **0** — pe fiecare ligă. **football-data.org nu poate scrie statistici proaste: nu are ce** (payload-ul lui e identitate + scor + sezon; `home_xg_pred`/`away_xg_pred` sunt hardcodate `None`). Cele 20 de excepții: 18 au statistici complete de la Flashscore oricum, prin asimetria de mai jos. FreeLF **e** genuin parțial (6 câmpuri din 20+), dar are **zero rânduri** în tot sezonul. **Calitatea nu e amenințată de un scriitor parțial care suprascrie date bune — `COALESCE` o face imposibil. E amenințată de un scriitor care BLOCHEAZĂ sursa bogată.** Cele 23 nu aveau date *parțiale*; nu aveau **nicio** dată.
   - **ASIMETRIA care face defectul contraintuitiv**: dacă alt provider câștigă **identitatea**, Delta Sync întoarce `False` și Flashscore re-colectează (dovada: Romania SuperLiga are 13 rânduri cu identitate `tsdb` și totuși **110/110 cu arbitru, 0 fără statistici**). Dacă Flashscore câștigă identitatea dar altcineva scrie rezultatul, nu se mai întoarce niciodată. **Cu cât Flashscore descoperă un meci mai devreme, cu atât e mai probabil să-și piardă statisticile.**
   - **A TREIA INSTANȚĂ a clasei numite deja în acest document** („nimic nu detectează când un ADR nou adaugă al doilea scriitor pe un câmp folosit de altul ca martor"), după `referee` (ADR-077) și `has_stats` (ADR-076). **A patra, găsită cu aceeași ocazie**: `stats_source` era scris necondiționat `"flashscore"` — **1653 din 1654** de meciuri domestice terminate, inclusiv toate cele 29 fără nicio statistică. Consecința reală, nu de igienă: `match_stats_backfill_service.py:185` scrie `stats_source` doar dacă e `NULL`, și nu era niciodată, deci un provider de rezervă care completa statisticile **nu putea înregistra că el le-a dat**.
+    - **✅ REZIDUUL GOLIT 2026-11-03, aprobat explicit — și era de 70× mai mare decât îl raportasem.** Etapa 3 a reparat scrierea *de aici înainte*; rândurile deja scrise nu se rescriu retroactiv, deci reziduul rămăsese. Raportasem **6 rânduri**; real: **495** — **7** meciuri jucate (6 în fereastra de 60 de zile + **1 din 11 aug**, în afara ei) plus **488** meciuri **nejucate**, unde revendicarea e imposibil de adevărată fiindcă meciul n-a început. Operația a fost `UPDATE ... SET stats_source = NULL`, **NU `DELETE`** — distincția a fost ridicată de proprietarul produsului, cu întrebarea *„dacă ștergi cele 488 de meciuri nejucate, o să le mai găsesc în aplicație?"*: printre ele erau **Barcelona–Aston Villa, Atlético–Bayern, Villarreal–PSG, AEK–Real Madrid**, cu predicție servită. Un `DELETE` le-ar fi șters din aplicație, iar pe cele 7 jucate ar fi distrus rezultate reale, ar fi rupt lanțul ELO pentru 11 cluburi MLS (`home_elo_after`/`away_elo_after` **sunt** Canonical Live ELO Snapshot) și ar fi lăsat 34 de rânduri `shadow_predictions` orfane — **clasa D-13**. **Martor pozitiv cerut înainte de masă**: pe `flashscore_tGbMn4el`, `md5` al rândului cu eticheta pusă înapoi = amprenta de dinainte, **identic** → exact un câmp schimbat, bit cu bit, reversibilitate dovedită. **Starea finală e un invariant ABSOLUT**: `stats_source IS NOT NULL ⟹ home_shots IS NOT NULL` pe **5710/5710**, trei surse (`football-data.co.uk` 3501 · `flashscore` 2060 · `soccerfootballinfo` 149), aritmetica închisă exact. **🔴 Lecția, plătită de două ori în aceeași oră**: *scopul unei măsurători preluat dintr-o interogare existentă, nu derivat din întrebarea pusă* — întâi fereastra de 60 de zile (din reminder), apoi filtrul `actual_result IS NOT NULL` (din interogarea precedentă). `DE_URMARIT.md` §18.3.
   - **Recuperarea (aprobată, executată, verificată)**: run `41505315571`, 24m55s, `success`. Restanța **29 → 6**; săptămâna 26 oct **23 → 0**; sezon domestic **1625/1654 → 1652/1658 (99,64%)**. Pe cele **27** de meciuri recuperate, `referee` + scor la pauză + șuturi + xG + posesia sunt prezente **27/27**. Cele 6 rămase sunt **altă clasă** — toate au `referee` prezent, deci reziduul penei ADR-076, cu semnătura **inversă**.
   - **Reparația (aprobată, implementată, `1b3c3ef`)**: Delta Sync și poarta Single Owner citesc amândouă `home_shots` — **o singură definiție a lui „colectat"**, aceeași pe care o folosește și selectorul recuperării; `stats_source` se revendică **după** extragere, pe valorile parsate; și **clasa 11 în `check_data_health`**, prag **ZERO absolut**, care separă cele două clase prin `referee` fiindcă au remedii opuse. **Zero migrări, zero coloane noi, zero provideri eliminați** — eliminarea celorlalți scriitori a fost analizată și **respinsă** (ar fi anulat reparația din 26 oct și ar fi pus un punct unic de eșec pe coloana pe care se sprijină ELO, antrenarea, evaluarea și poarta de promovare).
-  - **Ce rămâne**: etapa 5 — verificarea de după prima rulare de noapte. **Testul decisiv NU e „restanța a scăzut", e ca PARTIȚIA PE ORĂ să dispară** (47,8% seara vs 0,8% ziua). `DE_URMARIT.md` §18.
+  - **✅ ETAPA 5 — ÎNCHISĂ 2026-11-03.** Testul decisiv era ca **partiția pe oră să dispară**, nu ca restanța să scadă. **Capcana prinsă la verificare**: fereastra 26 oct – 3 nov dă 0/53 seara și 0/129 ziua — și **nu dovedește nimic**, fiindcă include cele 27 de meciuri recuperate manual pe 2 nov. Cohorta onestă e doar cea jucată **după** `1b3c3ef` și colectată de rularea de azi: **7/7 meciuri de seară cu statistici** (Newcastle–Everton, Atalanta–Parma, Benfica–Alverca, Dep. A Coruña–Osasuna, Gil Vicente–Vitória, Lorient–Brest, U Cluj–FCSB), `p ≈ 1,1%` sub rata veche de 47,8%. Restanța 60 de zile **6**, clasa `delta_sync` **0**. **Testul de DURATĂ nu poate fi concludent, și calibrarea greșită e a mea**: aștepta „o creștere" a etapei 5, iar măsurat dă **9,6 min**, în banda precedentă (6,7–15,3) — reparația produce fetch-uri suplimentare doar pentru meciurile pe care Delta Sync le-ar fi sărit, iar restanța fusese deja recuperată manual. Nu e rezultat negativ, e test sub pragul de zgomot. `DE_URMARIT.md` §18.2.
 
 - **O etichetă care colapsa patru endpoint-uri a ascuns două defecte și o risipă de 50% — lanț închis 1-2 noiembrie.** Cea mai productivă zi de observabilitate din proiect, și toată a pornit dintr-o singură reparație de etichetă.
 
@@ -1258,7 +1287,7 @@ Cheile API sunt tratate ca infrastructură critică — nu ca detalii de configu
 
 ```bash
 pip install -r requirements.txt
-pytest tests/ -q                       # 4145 teste (2026-11-02), fără rețea
+pytest tests/ -q                       # 4202 passed, 2 skipped (2026-11-03), fără rețea
 python sync/run_daily.py --dry-run     # simulare sincronizare zilnică, fără scriere
 streamlit run app.py                   # UI local
 ```
