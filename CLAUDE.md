@@ -705,6 +705,38 @@ proiecție ca neconfirmată — **adeverită a doua zi**. **Lecția: o proiecți
 contrazisă de două puncte nu e încă infirmată; retragerea prematură e tot o
 afirmație greșită, doar mai greu de prins, fiindcă pare prudență.**
 
+### D-17. Cele trei motoare nu sunt independente — iar ansamblul lor, deja măsurat, bate ce servim (2026-11-03)
+
+**Pornit dintr-o întrebare sceptică a proprietarului produsului** — *„vrei să spui că în august am găsit un campion care nu mai poate fi bătut?"* — și răspunsul măsurat e **nu**, dar din alt motiv decât modestia. **A șasea oară** când o obiecție a proprietarului produsului deschide un gol real pe care nu-l căutam.
+
+**DE CE converg cele trei la 0,003 Brier — trei cauze, toate măsurate:**
+
+| # | cauza | dovada |
+|---|---|---|
+| 1 | `blend_v1` e **65% Oracle prin construcție** | `blend_predictions(ml_weight=0.35)`. Deviere faţă de Oracle: blend **0,0262** vs XGB **0,0740** → raport **0,354** = exact ponderea. Argmax diferit: **4,8%** vs **20,9%**. Corelație: **0,974** vs **0,777**. |
+| 2 | `blend_v1` și `xgboost_v1` sunt **același model** | ambele `self._engine = MLPredictorEngine()`, aceleași date. Campion vs challenger blend: **0,0117**. |
+| 3 | ML vede **aproape numai intrările lui Oracle** | `FEATURE_COLUMNS` = 14, din care **10 SUNT** intrările Oracle; independente doar **4** (cornere, cartonașe, faulturi, șuturi). |
+
+> Avem, măsurat, **un motor, un model antrenat pe intrările acelui motor, și media lor**. Nu trei. 0,003 e aritmetica corectă a acestei structuri, nu un defect.
+
+**DAR diferența ML nu e zgomot**: pe 111 dezacorduri din 519 meciuri (21,4%), XGBoost câștigă **49**, Oracle **32**; log-loss pe dezacorduri 1,0573 vs 1,1491, iar pe acorduri sunt identice.
+
+**🔴 CONSTATAREA**: cadrul ADR-052 e **activ** și a captat 1732 de instantanee Oracle/ML/Blend pe același meci. Blendul **50/50 — calculat și persistat în fiecare noapte, dar NESERVIT** — bate ambii părinți. Calea de servire folosește `w = 0`, verificat în cod: `blend_predictions` nu e apelat niciodată în servire.
+
+**VALIDAT WALK-FORWARD** (Pasul 1, aprobat explicit; protocol declarat înainte — `w` ales exclusiv pe trecut, criteriu log-loss, burn-in 300, n out-of-sample **1122**):
+
+| vs `w = 0` | Δ | \|t\| / z | |
+|---|---:|---:|:-:|
+| Brier | **−0,0089** | **2,99** | ✅ |
+| log-loss | **−0,0136** | **3,02** | ✅ |
+| acuratețe | +1,25pp | z = **1,45** | ❌ |
+
+**Efectul nu se contractă** (−0,0087 in-sample → −0,0089 out-of-sample). Ponderea aleasă săptămânal e **stabilă**: 0,40-0,55 pe zece săptămâni, niciodată lângă capete. **Adaptivitatea nu cumpără nimic** — constanta 0,50 e marginal *mai bună*, deci nu se construiește niciun mecanism adaptiv.
+
+**⚠️ Sub poarta de azi (3/3) NU trece. Sub cea propusă de ADR-084 AR trece — și tocmai de aceea NU se folosește ca argument pentru ADR-084**: a găsi un caz pe care regula nouă îl aprobă nu e dovadă că regula e corectă (§7.1). De declarat ca efect secundar dacă ADR-084 se aprobă, niciodată descoperit după.
+
+**Precondiție absolută înainte de orice servire**: `ml_source = "local"`, artefact din afara Model Registry (D-15). **Pasul 2 = guvernarea artefactului**, și e precondiție, nu opțiune. Cifrele complete, protocolul și rezervele: `DE_URMARIT.md` §20.
+
 ---
 
 ## Reperul extern — cât de bun e Oracle, de fapt (măsurat prima dată 2026-10-14)

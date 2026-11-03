@@ -2330,3 +2330,135 @@ docstring-ul lui `incarca()`).
 > a produs un tabel care arăta normal"). **Extragerea trebuie să folosească
 > `coalesce(x::text,'')` pe FIECARE câmp**, iar numărul de coloane se verifică
 > înainte de rulare: `{24: <toate rândurile>}`, nimic altceva.
+
+---
+
+## §20 — Efectul de ansamblu Oracle+ML: MĂSURAT, validat walk-forward, NESERVIT (2026-11-03)
+
+**Pornit dintr-o întrebare sceptică a proprietarului produsului** — *„vrei să spui
+că în august am găsit un campion care nu mai poate fi bătut? așa de deștepți am
+fost?"* — și răspunsul corect s-a dovedit **nu**, dar din alt motiv decât
+modestia. Analiza a plecat de la convergența celor trei „motoare independente"
+(ADR-051) la **0,003 Brier** unul de altul și a ajuns la ceva ce nimeni nu
+căuta.
+
+### A. De ce converg — trei cauze, toate măsurate, niciuna presupusă
+
+| # | cauza | dovada |
+|---|---|---|
+| 1 | **`blend_v1` e 65% Oracle prin construcție** | `ml_predictor.blend_predictions(ml_weight=0.35)`. Devierea medie faţă de Oracle: blend **0,0262**, XGBoost **0,0740** → raport **0,354**, adică exact ponderea. Argmax diferit: blend **4,8%**, XGB **20,9%**. Corelație cu Oracle: **0,974** vs **0,777**. |
+| 2 | **`blend_v1` și `xgboost_v1` sunt ACELAȘI model** | ambele `self._engine = MLPredictorEngine()`, ambele ignoră `training_data` și extrag aceleași date din Supabase. Campion vs challenger blend: distanță **0,0117**. |
+| 3 | **ML vede aproape numai intrările lui Oracle** | `FEATURE_COLUMNS` = **14**, din care **10** SUNT intrările Oracle (ELO ×2, formă ×2, H2H ×2, ratinguri of./def. ×4). Independente: doar **4** — `corner_dominance`, `card_diff`, `foul_diff`, `shot_dominance`. |
+
+> Cele trei „motoare independente" sunt, măsurat: **un motor, un model antrenat
+> pe intrările acelui motor, și media lor ponderată 65/35.** 0,003 nu e un
+> defect — e rezultatul aritmetic corect al acestei structuri.
+
+### B. Dar diferența ML NU e zgomot
+
+Pe 519 meciuri, Oracle și `xgboost_v1/dda4f7f3` aleg altceva la **111 (21,4%)**:
+
+| pe dezacorduri | |
+|---|---:|
+| câștigă XGBoost | **49** |
+| câștigă Oracle | **32** |
+| greșesc amândoi | 30 |
+| log-loss | Oracle 1,1491 · **XGB 1,0573** |
+| *(pe acorduri)* | Oracle 0,9473 · XGB 0,9534 — **identice** |
+
+Unde sunt de acord, sunt interschimbabili; unde diferă, ML are dreptate mai
+des. **Onest**: 49 vs 32 dă z ≈ 1,78 (cu corecție de continuitate), p ≈ 0,075 —
+sugestiv, nu concludent singur. Diferența de log-loss e dovada mai tare.
+
+### C. Constatarea: ansamblul bate ambii părinți, și e deja captat
+
+Cadrul ADR-052 (`validation_framework_enabled` = **true**) a captat **1732** de
+instantanee Oracle/ML/Blend pe același meci + **88 de rapoarte**. Pe **1516**
+meciuri cu rezultat, **fără scurgere temporală** (1516/1518 capturate înainte de
+fluier, în medie cu **164 de ore**):
+
+| motor | Brier | log-loss | acuratețe |
+|---|---:|---:|---:|
+| **ORACLE** — *ce servim* | 0,5993 | 1,0056 | 0,5033 |
+| ML (live) | 0,5977 | 1,0017 | 0,5053 |
+| **BLEND 50/50** — *doar afișat* | **0,5906** | **0,9922** | **0,5185** |
+
+Curba ponderii, in-sample: optim la **0,4-0,5**, largă și plată; **orice** `w`
+între 0,1 și 0,9 bate `w = 0`.
+
+**Calea de servire folosește `w = 0`** — verificat în cod, nu dedus:
+`blend_predictions` e apelat **exclusiv** din
+`learning_core/blend_challenger_shadow.py`, niciodată în servire. Iar cifra
+confirmă: Oracle la `w=0` dă Brier 0,5993 ≈ rândul `control` 0,5994.
+
+### D. VALIDAREA WALK-FORWARD (aprobată explicit, Pasul 1)
+
+**Protocol declarat ÎNAINTE de a vedea rezultatul**: fereastră expandabilă pe
+`kickoff_date`; pentru fiecare săptămână, `w` se alege **exclusiv** pe meciurile
+strict anterioare; criteriul de alegere = **log-loss** (regulă de scor proprie);
+grilă 0,00-1,00 pas 0,05; la egalitate se ia cel mai mic `w` (conservator);
+burn-in ≥ 300 de meciuri de antrenare. **n out-of-sample = 1122**, 10 săptămâni.
+
+| variantă | Brier | log-loss | acuratețe |
+|---|---:|---:|---:|
+| **w = 0,00** *(ce servim)* | 0,5917 | 0,9943 | 0,5134 |
+| w = 0,35 *(`blend_v1` azi)* | 0,5839 | 0,9825 | 0,5241 |
+| **w = 0,50 fix** | **0,5827** | **0,9807** | 0,5258 |
+| ADAPTIV (ales săptămânal) | 0,5829 | 0,9810 | **0,5294** |
+| w = 1,00 *(ML pur)* | 0,5884 | 0,9886 | 0,5214 |
+
+**Semnificație, w = 0,50 fix vs w = 0, perechat, out-of-sample:**
+
+| metrică | Δ | \|t\| / z | |
+|---|---:|---:|:-:|
+| Brier | **−0,0089** | **2,99** | ✅ |
+| log-loss | **−0,0136** | **3,02** | ✅ |
+| acuratețe | +1,25pp | McNemar 47 vs 33, z = **1,45** | ❌ |
+
+**Efectul NU se contractă**: −0,0087 in-sample → **−0,0089** out-of-sample pe
+Brier. Acuratețea, în schimb, pierde semnificația (z 2,00 → 1,45).
+
+**Ponderea aleasă, pe săptămâni**: 0,45 · 0,40 · 0,45 · 0,50 · 0,45 · 0,45 ·
+0,50 · **0,55** · **0,55** · **0,55** (antrenare 394 → 1500). Interval
+**0,40-0,55**, niciodată lângă capete, cu drift lent în sus. **Stabil, nu
+zgomot.**
+
+### E. Trei concluzii care schimbă propunerea
+
+1. **Adaptivitatea nu cumpără nimic.** Constanta 0,50 (Brier 0,5827, log-loss
+   0,9807) e **marginal mai bună** decât alegerea adaptivă (0,5829 / 0,9810).
+   Deci NU se construiește un mecanism de pondere adaptivă — o constantă e la
+   fel de bună și infinit mai simplă. Adaptivul câștigă doar pe acuratețe, exact
+   metrica nesemnificativă.
+2. **Sub poarta de AZI (3/3 simultan) asta NU trece.** Avem 2/3.
+3. **⚠️ Sub poarta propusă de ADR-084 (`brier AND logloss` + `Δacc ≥ 0`), AR
+   trece.** **ȘI TOCMAI DE ACEEA NU SE FOLOSEȘTE CA ARGUMENT PENTRU ADR-084** —
+   a găsi un caz pe care regula nouă îl aprobă nu e dovadă că regula nouă e
+   corectă; e exact croirea regulii după date pe care ADR-084 §7.1 o numește.
+   Se consemnează ca **efect secundar de declarat explicit** dacă ADR-084 se
+   aprobă vreodată, niciodată descoperit ulterior.
+
+### F. Rezerve, spuse acum, nu descoperite mai târziu
+
+- **O singură fereastră de sezon** (7 aug – 2 nov). Zero validare pe alt sezon.
+- **Trei săptămâni de evaluare au n mic** (2, 16, 17 — pauze internaționale).
+  Agregatul e dominat de săptămânile mari; cele zece nu cântăresc egal.
+- **Artefactul ML s-a reantrenat pe parcurs** — „ML" nu e un model fix. E
+  realist (așa ar și servi), dar nu e o constantă.
+- **Acuratețea nu trece.** E și metrica cea mai puțin relevantă pentru radarul de
+  value bets (compară probabilități cu cote, nu argmax-uri) — dar asta e o
+  observație, nu o pledoarie. Rămâne 2/3.
+- **Guvernanța e precondiție, nu detaliu**: `ml_source = "local"`, artefact din
+  afara Model Registry (D-15). Nimic nu se servește înaintea Pasului 2.
+
+### G. Ce urmează — NIMIC automat
+
+**Pasul 2** (guvernarea artefactului ML) e precondiția. **Pasul 3** ar fi un ADR
+dedicat pentru calea de servire, cu flag implicit oprit și shadow. **Pasul 4**,
+pe termen lung: singura sursă reală de câștig suplimentar e **decorelarea** —
+corelația e 0,78 azi, produsă de patru feature-uri; mai multă independență vine
+din informație pe care Oracle n-o are (calea accidentărilor, verificată live,
+componentă moartă cu impact de până la 30% pe xG), nu din reponderare.
+
+**Toate măsurătorile din această secțiune sunt read-only.** Zero scrieri, zero
+cod de producție atins.
