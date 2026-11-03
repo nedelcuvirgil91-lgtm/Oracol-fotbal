@@ -1,0 +1,64 @@
+-- ════════════════════════════════════════════════════════════════════════════
+-- 060 — Reaplicarea `search_path` pe `_upsert_match_canonical_locked`
+-- ════════════════════════════════════════════════════════════════════════════
+--
+-- NU E O OMISIUNE, E O REGRESIE — și lanțul e lizibil în chiar directorul ăsta.
+--
+-- Migrarea 042 („SECURITY DEFINER view fix + explicit search_path pentru 15
+-- functii", Master Repair Plan, Pasul 3, P1) a aplicat hardening pe toate cele
+-- 15 functii din `public`. Linia 35 a acelei migrari era exact:
+--
+--     ALTER FUNCTION public._upsert_match_canonical_locked(jsonb)
+--       SET search_path = public, pg_temp;
+--
+-- Apoi migrarile 048, 049, 052 si 053 au redefinit functia — si EXCLUSIV pe ea
+-- — prin `CREATE OR REPLACE FUNCTION`, fara nicio clauza `SET`. In PostgreSQL,
+-- `CREATE OR REPLACE FUNCTION` INLOCUIESTE atributele functiei, inclusiv
+-- `proconfig`. Fiecare dintre cele patru a sters TACIT setarea pusa de 042:
+-- fara eroare, fara avertisment, de patru ori la rand.
+--
+-- Masurat 2026-11-03, inainte de reparatie: 1 functie din 15 fara `search_path`,
+-- si exact aceea e RPC-ul canonic de scriere — cel care serializeaza fiecare
+-- scriere in `match_history` prin `pg_advisory_xact_lock`. Celelalte 14 isi
+-- pastrasera setarea dintr-un motiv pasiv: nimeni nu le-a mai redefinit dupa 042.
+--
+-- CE NU ERA GRAV, scris explicit ca sa nu fie citit mai alarmant decat e:
+--   · NICIUNA dintre cele 15 functii nu e `SECURITY DEFINER` (verificat in
+--     `pg_proc.prosecdef`; afirmat deja de antetul lui 042), deci nu exista
+--     vector de escaladare — functia ruleaza cu privilegiile apelantului;
+--   · calea de productie e protejata oricum: ambele invelisuri publice
+--     (`upsert_match_canonical`, `upsert_matches_canonical`) AU `search_path`
+--     setat, iar apelul imbricat il mosteneste. Niciun apel din cod nu atinge
+--     direct functia cu underscore (verificat: cele doua referinte din
+--     `queries.py` si `check_data_health.py` sunt comentarii);
+--   · `match_history` are RLS activ cu ZERO politici, deci un apel direct prin
+--     PostgREST n-ar putea scrie, desi `EXECUTE` e acordat lui `anon` (ca la
+--     toate celelalte functii).
+-- Riscul practic era ~0 — exact concluzia la care ajunsese 042 despre el
+-- insusi: „hardening standard impotriva unui atac teoretic de tip search_path
+-- hijacking, nu o schimbare de comportament".
+--
+-- DECI DE CE SE REPARA: nu pentru breșa (nu era una), ci fiindca MECANISMUL de
+-- regresie e real si se va repeta. Clasa e ruda celei deja numite in
+-- `CLAUDE.md` — „un ADR a invalidat tacit preconditia altui ADR" (ADR-077,
+-- `referee`) — cu alt mecanism: o instructiune care reseteaza atribute pe care
+-- nu le mentioneaza.
+--
+-- DE CE NU SE PUNE CLAUZA IN INTERIORUL DEFINITIEI. Ar insemna rescrierea unui
+-- corp de 15.541 de caractere pe calea canonica de scriere, pentru zero castig:
+-- a cincea migrare care o redefineste tot ar putea omite clauza. Prevenirea
+-- reala e garda din repo — `tests/test_migration_function_search_path.py` —
+-- care cade la commit daca o migrare noua redefineste o functie fara sa-i
+-- (re)seteze calea, si care verifica si ORDINEA (un `ALTER` care precede un
+-- `CREATE OR REPLACE` nu acopera nimic — exact ordinea 042 -> 048).
+--
+-- IDEMPOTENTA: `ALTER FUNCTION ... SET` e idempotent prin natura lui; o rulare
+-- repetata lasa aceeasi valoare.
+--
+-- VERIFICAT DUPA RULARE, din doua surse independente: `pg_proc` da 15 functii,
+-- 15 cu `search_path`, 0 fara, 0 `SECURITY DEFINER`; iar advisor-ul Supabase nu
+-- mai raporteaza deloc `function_search_path_mutable`.
+-- ════════════════════════════════════════════════════════════════════════════
+
+ALTER FUNCTION public._upsert_match_canonical_locked(jsonb)
+  SET search_path = public, pg_temp;
