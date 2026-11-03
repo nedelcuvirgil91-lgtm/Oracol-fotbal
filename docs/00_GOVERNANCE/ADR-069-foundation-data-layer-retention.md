@@ -360,3 +360,129 @@ arătat integral, cu aprobare separată — exact fluxul de azi.
   `flashscore_standings_snapshot`.
 - Nu schimbă `RETENTION_SEASON_COUNT = 6`.
 - Nu automatizează ștergerea recurentă — vezi nota de mai sus.
+
+---
+
+## Amendamentul 1 (2026-11-03) — o premisă a acestui ADR era FALSĂ, iar backup-ul se păstrează
+
+**Aprobat explicit** (varianta (b) din cele trei oferite de Discovery Rule:
+amendament la acest ADR, nu ADR nou și nu „în afara scopului"). Pornit din
+revizuirea restantă a backup-ului (intrarea **D-6** din `CLAUDE.md`, ajunsă la
+**39 de zile** de întârziere), nu dintr-un simptom.
+
+### Premisa infirmată
+
+§„Argumente CONTRA" afirma:
+
+> *„Ștergerea unui H2H vechi taie exact perechile cu istoric rar. Coventry–
+> Fulham are 10 întâlniri în 60 de ani; retenția i-ar lăsa mai puține."*
+
+Afirmația e **falsă ca descriere a tabelei**, iar exemplul alege chiar fixture-ul
+care o infirmă. Măsurat pe producție, 2026-11-03:
+
+`flashscore_match_context` ține **maximum 5 rânduri per (fixture, categorie)** —
+`meeting_order` ia valori **0..4** pe toate cele trei categorii
+(`h2h_overall`, `recent_form_home`, `recent_form_away`), verificat pe toate
+cele 33.856 de rânduri. Deci tabela **nu a ținut niciodată istoric H2H adânc**
+și nu avea de unde să-l piardă. Nu „retenția i-a lăsat mai puține": niciodată nu
+a avut mai mult de cinci.
+
+### Cauza reală: cheia unică nu e o identitate
+
+`(context_match_id, category, meeting_order)` e cheia unică declarată
+(`flashscore_match_context_context_match_id_category_meeting__key`). Dar
+`meeting_order` e o **POZIȚIE** — 0 = cel mai recent. Când cele două cluburi se
+întâlnesc din nou, fiecare meci mai vechi se deplasează cu o poziție, iar
+`upsert ... on conflict` **rescrie slotul cu alt meci**.
+
+Exemplul e tocmai Coventry City – Fulham, fixture `126852`:
+
+| slot | backup (26 aug) | viu (24 oct) |
+|---:|---|---|
+| 0 | — | **2026-10-24**, 0-1 ← întâlnire nouă |
+| 1 | — | 2022-04-10 |
+| 2 | 1968-04-05, **1-1** | 2021-10-02 |
+| 3 | 1967-11-10, **0-3** | 1968-04-05, **1-1** |
+| 4 | — | 1967-11-10, **0-3** |
+
+Tot s-a deplasat cu exact unu. Cuantificat pe tot backup-ul: din **285** de
+rânduri care împart cheia unică cu un rând viu, **274 descriu altă dată** și
+**236** altă pereche gazdă/oaspete. Doar **2 din 459** au conținut identic.
+
+Consecința de reținut: `captured_at` se împrospătează, rândul arată **plin și
+proaspăt**, și descrie **alt meci** decât descria înainte. E clasa deja numită în
+`CLAUDE.md` („un indicator care COLAPSEAZĂ lucruri distincte, citit ca și cum
+le-ar distinge"), cu un nivel mai jos: aici e **cheia** care nu e identitate,
+deci scrierea rescrie corect după contract și totuși pierde informație.
+
+### Pagubă azi: ZERO, verificat pe toți consumatorii
+
+Cei trei cititori de producție ai tabelei, verificați individual:
+
+| cititor | ce face | depinde de stabilitatea slotului? |
+|---|---|---|
+| `is_flashscore_h2h_context_present()` (`queries.py:3066`) | test de prezență, boolean, `.eq("category","h2h_overall")` | **nu** |
+| `get_match_context_segments()` (`queries.py:3150`) | segmentele unui meci, pentru afișare | **nu** — citește conținutul curent |
+| `get_team_recent_form_context()` (`queries.py:3772`) | Level FS2, forma recentă | **nu** |
+
+`_build_h2h()` **nu** citește această tabelă (folosește
+`get_h2h_from_history()` din `match_history`, plus `freelf_h2h_snapshot`) —
+reconfirmat, aceeași verificare ca în §„Argumente CONTRA".
+
+Iar pentru `recent_form_home`/`recent_form_away` poziția e **semantica
+corectă**: „al N-lea meci cel mai recent" e exact ce trebuie. Defectul e îngust
+și atinge numai `h2h_overall`, numai în rolul de arhivă — rol pe care nimeni nu
+i-l cere.
+
+### Decizie: NU se schimbă cheia
+
+Pagubă zero la toți consumatorii, iar o cheie nouă ar cere o migrare pe 33.856
+de rânduri pentru un beneficiu pe care niciun cititor nu-l folosește. Se
+corectează **premisa**, nu schema. Dacă vreodată un consumator va avea nevoie de
+H2H adânc din această tabelă, consecința trebuie reevaluată explicit — exact
+formularea folosită deja în §„Argumente CONTRA" pentru `_build_h2h()`.
+
+### Backup-ul se PĂSTREAZĂ, cu cifra corectată
+
+`flashscore_match_context_retention_backup_20260826` — **se păstrează**, decizie
+explicită a proprietarului produsului (2026-11-03), **fără termen nou**: e
+singura copie a unor date pe care tabela vie nu le poate ține prin construcție.
+
+Cifra din revizuire a fost greșită de trei ori înainte de a fi corectă, și
+procesul merită consemnat ca metodă:
+
+| test | rezultat | ce dovedea |
+|---|---:|---|
+| pe `id` | 0 / 459 | **nimic** — `id` se reemite la re-inserare |
+| pe `context_match_id` | 459 / 459 | **nimic** — identifică *fixture-ul*; 13,25 rânduri fiecare |
+| pe cheia unică reală | 285 / 459 | doar **2** au același conținut |
+| **pe meci** (fixture + `meeting_date`) | 192 prezente · 13 la alt fixture | **254 nu există nicăieri** |
+
+Deci backup-ul e singura copie a **254** de rânduri (1967-11-10 → 2021-02-20),
+nu a tuturor celor 459 cum s-a afirmat la începutul revizuirii. Prima
+măsurătoare a nimerit concluzia corectă **din noroc, nu prin construcție**.
+
+### Reparație colaterală: RLS activat
+
+Aceeași revizuire a măsurat că backup-ul era **singura tabelă din `public` fără
+RLS** (1 din 62), cu `anon` având `SELECT, INSERT, UPDATE, DELETE, TRUNCATE`.
+Deci „o păstrăm ca plasă de siguranță" era **fals în practică**: oricine deține
+cheia publicabilă putea goli plasa. Cauza: `CREATE TABLE ... AS SELECT` nu
+moștenește RLS de la sursă — exact tiparul pe care garda
+`tests/test_migration_grants.py` îl numește în docstring-ul ei.
+
+Executat 2026-11-03, cu aprobare explicită:
+
+```sql
+ALTER TABLE flashscore_match_context_retention_backup_20260826
+  ENABLE ROW LEVEL SECURITY;
+```
+
+Verificat după, din două surse independente: `relrowsecurity = true`, 0 politici,
+**0 tabele în `public` fără RLS** (era 1), 459 de rânduri intacte, tabela vie
+neatinsă (33.856); iar lint-ul propriu al Supabase, `rls_disabled_in_public`
+(nivel **ERROR**), **nu mai apare** în raportul de securitate.
+
+**Lecția de mecanism**: acel lint exista și era de nivel ERROR — ar fi semnalat
+tabela **din 26 august**, ziua creării. N-a lipsit detectorul; a lipsit faptul că
+nimic din proiect nu citește advisor-ul Supabase.
