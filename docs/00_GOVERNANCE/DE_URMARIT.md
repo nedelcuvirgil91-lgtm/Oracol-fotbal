@@ -2321,6 +2321,7 @@ Prima rulare de noapte cu codul ADR-085 (`2026-11-03`, pornită 09:18, 72,7 min,
 | restanța 60 de zile | ≤ 6 | **6** | ✅ |
 | clasa `delta_sync` (clasa 11) | rămâne 0 | **0** | ✅ |
 | revendicare falsă `stats_source` pe rânduri NOI | 0 | **0** | ✅ |
+| revendicări false preexistente (vezi §18.3) | nemăsurat atunci | **495**, toate golite | ✅ |
 | costul etapei 5 | < ~2% din rulare | nedetectabil | ✅ |
 
 Cele 6 rămase sunt toate **MLS, 9–13 septembrie, toate cu `referee` prezent** →
@@ -2336,30 +2337,72 @@ min. **Nu e un rezultat negativ, e un test sub pragul de zgomot.** De nu mai
 reluat în forma asta: semnalul care chiar rezolvă e partiția pe cohorta
 post-reparație.
 
-**🔴 REZIDUU NOU, cu consecință numibilă — NEREPARAT, decizie deschisă.** Cele 6
-rânduri rămase poartă `stats_source = 'flashscore'` **fals** — n-au nicio
-statistică. Scrise înainte de `1b3c3ef`, deci **nu e un defect al reparației**
-(zero rescriere retroactivă, corect). Dar
-`match_stats_backfill_service.py:185` scrie `stats_source` **doar dacă e
-`NULL`** → **un provider de rezervă care le-ar completa statisticile nu poate
-înregistra că el le-a dat.** Exact defectul reparat de etapa 3 *de aici
-înainte*, rămas latent pe 6 rânduri.
+### §18.3 Revendicările false de `stats_source` — ✅ ÎNCHISE 2026-11-03, dar reziduul era de 70× mai mare decât l-am raportat
 
-**Operația corectă e `UPDATE ... SET stats_source = NULL` pe cele 6
-`fixture_id`, NU `DELETE`.** Verificat rând cu rând: toate șase sunt meciuri
-reale, cu rezultat, goluri, `home_elo_after`/`away_elo_after` (= Canonical Live
-ELO Snapshot, citit la servire prin `get_latest_team_elo()`), predicție servită
-și **34 de rânduri `shadow_predictions` în total**. Un `DELETE` ar șterge 6
-rezultate reale, ar rupe lanțul ELO pentru 11 cluburi MLS și ar lăsa 34 de
-rânduri shadow orfane. **Clasa D-13**: *„nu există nimic de șters — o ștergere
-ar distruge meciuri reale, nu copii."* Ce e greșit pe aceste rânduri nu e
-existența lor, e **o etichetă**.
+**[CORECTAT — prima versiune a acestei intrări spunea „6 rânduri". Reziduul real
+era 495.]** `stats_source` era scris necondiționat `"flashscore"` în același
+payload cu `actual_result`/`referee`/`stadium`, deci **o vizită de DINAINTE de
+meci revendica Flashscore ca sursă a statisticilor**. ADR-085 etapa 3 a reparat
+scrierea *de aici înainte*; rândurile deja scrise nu se rescriu retroactiv
+(corect) — deci reziduul a rămas.
 
-Garda obligatorie în `UPDATE`: `AND home_shots IS NULL` — dacă între timp vreun
-rând primește statistici de la Flashscore, revendicarea devine **adevărată** și
-nu trebuie ștearsă. Tiparul „o schimbare intermediară face operația inofensivă
-în loc de greșită", de la ștergerea celor două rânduri de clasament din 29
-august.
+**Consecința nu e de igienă**: `match_stats_backfill_service.py:185` scrie
+`stats_source` **doar dacă e `NULL`** → un provider de rezervă care completează
+statisticile **nu putea înregistra că el le-a dat** (North Star #9).
+
+| cohortă | rânduri | ce era | tratament |
+|---|---:|---|---|
+| meciuri **jucate**, fără statistici, revendicare falsă | **7** | 6 în fereastra de 60 de zile + **1 din 11 aug**, în afara ei | `stats_source = NULL` |
+| meciuri **nejucate**, revendicare falsă | **488** | revendicare imposibil de adevărată: meciul n-a început | `stats_source = NULL` |
+| **total golit** | **495** | | |
+
+**Operația a fost `UPDATE ... SET stats_source = NULL`, NU `DELETE`** — și
+distincția a fost ridicată de proprietarul produsului, cu întrebarea corectă:
+*„dacă ștergi cele 488 de meciuri nejucate, o să le mai găsesc în aplicație?"*
+Printre cele 488 erau **Barcelona–Aston Villa, Atlético–Bayern,
+Villarreal–PSG, AEK–Real Madrid** — meciuri din acea seară și săptămână, cu
+predicție servită. Un `DELETE` le-ar fi șters din aplicație; pe cele 7 jucate ar
+fi șters rezultate reale, ar fi rupt lanțul ELO pentru 11 cluburi MLS (coloanele
+`home_elo_after`/`away_elo_after` **sunt** Canonical Live ELO Snapshot, citit la
+servire prin `get_latest_team_elo()`) și ar fi lăsat **34 de rânduri
+`shadow_predictions`** orfane. **Clasa D-13**: *„nu există nimic de șters — o
+ștergere ar distruge meciuri reale, nu copii."* Ce era greșit pe acele rânduri
+nu era existența lor, era **o etichetă**.
+
+**MARTOR POZITIV pe un singur rând, înainte de cele 487** (cerut explicit:
+„fă un singur rând ca să fim siguri"). Pe `flashscore_tGbMn4el`
+(Barcelona–Aston Villa): `md5(to_jsonb(rând) || '{"stats_source":"flashscore"}')`
+după `UPDATE` = **`6e467da1719f6f9ea68d7af2c6b04920`**, **identic** cu amprenta
+rândului întreg de dinainte. Deci **exact un câmp s-a schimbat, nimic altceva,
+bit cu bit** — iar reversibilitatea e dovedită de aceeași egalitate, nu promisă.
+
+**Verificat că nicio cale de afișare sau servire nu citește coloana**: `grep`
+pe `app.py`, `oracle_engine.py`, `oracle_api.py`, `database/queries.py`,
+`supabase_client.py` → **zero potriviri**. Singurii consumatori sunt
+`match_stats_backfill_service` și `match_identity_reconciliation_service`,
+ambele rulând **după** ce meciul s-a jucat.
+
+**Garda obligatorie, în fiecare `UPDATE`**: `AND home_shots IS NULL` — dacă
+între timp un rând primește statistici, revendicarea devine **adevărată** și nu
+trebuie golită. Tiparul „o schimbare intermediară face operația inofensivă în
+loc de greșită", de la ștergerea celor două rânduri de clasament din 29 august.
+
+**STAREA FINALĂ — invariant ABSOLUT, fără excepție de documentat:**
+`stats_source IS NOT NULL ⟹ home_shots IS NOT NULL`, pe **5710 din 5710** de
+rânduri cu revendicare. Trei surse reale, toate complet acoperite:
+`football-data.co.uk` **3501** (2023-08 → 2025-05), `flashscore` **2060**
+(14 iul → 2 nov 2026), `soccerfootballinfo` **149** (2 mai → 9 oct 2026) —
+aritmetica se închide exact. `freelivefootball` are 0 rânduri.
+
+**🔴 LECȚIA, și am plătit-o DE DOUĂ ORI la rând în aceeași oră:** *scopul unei
+măsurători preluat dintr-o interogare existentă, nu derivat din întrebarea
+pusă.* Prima dată am măsurat în **fereastra de 60 de zile**, fiindcă aceea era
+fereastra interogării din reminder — și am ratat rândul din 11 august. A doua
+dată am purtat filtrul `actual_result IS NOT NULL` din interogarea precedentă —
+și am ratat 488 de rânduri, de 70× mai multe decât raportasem. Fereastra de 60
+de zile e **corectă** pentru „restanța recentă" (clasa 11) și **greșită** pentru
+„câte revendicări false există". Ruda măsurătorii pe cheia greșită din D-6,
+unde cifra a fost greșită de trei ori înainte de a fi corectă.
 
 ---
 
