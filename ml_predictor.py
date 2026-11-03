@@ -39,16 +39,26 @@ MIN_SAMPLES_TO_TRAIN = 30  # sub acest prag, ML nu se activează — doar Poisso
 # [ADAUGAT — ADR-015] Identitate fixă pentru istoricul de antrenare — trebuie
 # să coincidă exact cu learning_core.algorithms.xgboost_v1.XGBoostV1Algorithm
 # (name/version/league_scope), fiindcă reprezintă același algoritm; train()
-# e apelat direct de fluxul de producție (run_daily.py, oracle_engine.py),
-# nu doar prin adaptorul Learning Core — de aceea înregistrarea se face aici,
-# nu doar în XGBoostV1Algorithm.fit().
+# e apelat direct de fluxul de producție, nu doar prin adaptorul Learning
+# Core — de aceea înregistrarea se face aici, nu doar în
+# XGBoostV1Algorithm.fit().
+#
+# [CORECTAT — ADR-086 §2.2] Rândul de mai sus spunea „(run_daily.py,
+# oracle_engine.py)". FALS pentru run_daily.py de la ADR-054, care a ELIMINAT
+# pasul `ml_retrain` (vezi sync/run_daily.py:139, comentariu explicit).
+# Singurul apelant direct rămas e oracle_engine.retrain_ml_model() (un
+# „ce-ar-fi-dacă" manual, care NU atinge modelul activ). Motivația rămâne
+# valabilă pentru UN apelant, nu pentru doi — deci `_ALGORITHM_FAMILY` rămâne
+# necesar ca IMPLICIT al lui `requested_by`, nu ca valoare unică: de la
+# ADR-086 Decizia A, familia solicitantă se pasează explicit de cei doi
+# adaptori Learning Core.
 _ALGORITHM_FAMILY  = "xgboost_v1"
 _ALGORITHM_VERSION = "1"
 _LEAGUE_SCOPE       = "all"
 
 
 def _record_training_run(status: str, samples_used: int, walk_forward_metrics: dict,
-                          message: str) -> str:
+                          message: str, *, algorithm_family: str = _ALGORITHM_FAMILY) -> str:
     """Înregistrează rularea în training_runs (local + Supabase best-effort)
     și compară cu campionul activ, dacă există — pur informativ, loghează
     rezultatul. Nu decide, nu promovează, nu întrerupe niciodată train():
@@ -58,7 +68,38 @@ def _record_training_run(status: str, samples_used: int, walk_forward_metrics: d
     Întoarce ÎNTOTDEAUNA run_id-ul generat — chiar dacă persistarea/
     comparația de mai jos eșuează (best-effort, prins în try/except intern)
     — apelantul (train()) îl reține pe self.last_training_run_id pentru
-    trasabilitate (ADR-052), independent de succesul scrierii în DB."""
+    trasabilitate (ADR-052), independent de succesul scrierii în DB.
+
+    [ADAUGAT — ADR-086, Decizia A] `algorithm_family` e familia care a CERUT
+    antrenarea, nu o constantă. Implicit `_ALGORITHM_FAMILY` ("xgboost_v1"),
+    deci singurul apelant direct rămas (`oracle_engine.retrain_ml_model()`,
+    un „ce-ar-fi-dacă" manual care nu atinge modelul activ) e complet
+    neschimbat.
+
+    DE CE A FOST NEVOIE. `BlendV1Algorithm.fit()` apelează ACELAȘI
+    `MLPredictorEngine.train()`, deci rândul scris de aici purta eticheta
+    "xgboost_v1" și pentru antrenările cerute de `blend_v1`. Eticheta
+    CORECTĂ era calculată mai târziu, de `training_runner.run_training()`
+    (`algorithm_name=algorithm.name`), dar `storage.save_training_run()` e
+    idempotent pe `training_run_id` — fișierul local exista deja, deci ieșea
+    devreme și nu scria niciodată rândul remote. **Eticheta corectă era
+    calculată și aruncată de garda pusă ca să repare defectul celor două
+    rânduri** (audit ADR-051/052). A treia instanță a clasei „valoarea
+    corectă există în proces și nu ajunge la scriere", după D-2
+    (`log_shadow_prediction` fără `features`) și `error_body` (ADR-081).
+
+    CONSECINȚA MĂSURATĂ a etichetei greșite: `local_model_cache` selectează
+    pe `(algorithm_name, league_scope)`, deci vedea și rulările cerute de
+    blend — iar **37,4 din 89,9 zile (41,6%)** artefactul evaluat în shadow
+    pe calea `xgboost_v1` nu era artefactul care servea ieșirea ML (ADR-086
+    §1.3). Cu eticheta corectă, cea mai recentă rulare `xgboost_v1` cu
+    artefact ESTE artefactul Challengerului `xgboost_v1` activ — nepotrivirea
+    devine zero PRIN CONSTRUCȚIE, fără să se atingă deloc jurnalizarea
+    shadow.
+
+    Aceeași valoare merge și la `compare_to_champion()` (ADR-086 §2.1): o
+    antrenare cerută de `blend_v1` era comparată informativ cu campionul
+    `xgboost_v1`, care nu a existat niciodată."""
     import uuid
     run_id = str(uuid.uuid4())
     try:
@@ -70,13 +111,13 @@ def _record_training_run(status: str, samples_used: int, walk_forward_metrics: d
                 training_run_id=run_id, status=status, samples_used=samples_used,
                 walk_forward_metrics=walk_forward_metrics, message=message,
             ),
-            algorithm_name=_ALGORITHM_FAMILY,
+            algorithm_name=algorithm_family,
             algorithm_version=_ALGORITHM_VERSION,
             league_scope=_LEAGUE_SCOPE,
         )
         if walk_forward_metrics:
             comparison = champion_comparison.compare_to_champion(
-                algorithm_family=_ALGORITHM_FAMILY,
+                algorithm_family=algorithm_family,
                 algorithm_version=_ALGORITHM_VERSION,
                 league_scope=_LEAGUE_SCOPE,
                 new_training_run_id=run_id,
@@ -469,12 +510,24 @@ class MLPredictorEngine:
         return float(result.x)
 
     # ── Antrenare ─────────────────────────────────────────────────────────
-    def train(self) -> MLTrainingResult:
+    def train(self, *, requested_by: str | None = None) -> MLTrainingResult:
+        """[ADAUGAT — ADR-086, Decizia A] `requested_by` e familia care cere
+        antrenarea (`"xgboost_v1"` / `"blend_v1"`), pasată mai departe la
+        `_record_training_run()` ca `algorithm_family`. `None` înseamnă
+        „apelant direct, fără context de familie" și cade pe
+        `_ALGORITHM_FAMILY` — deci `oracle_engine.retrain_ml_model()` rămâne
+        bit cu bit neschimbat. Vezi docstring-ul lui `_record_training_run`
+        pentru ce defect măsurat închide, și ADR-086 §3 pentru de ce NU s-a
+        rezolvat prin „fiecare adaptor scrie propriul rând" (ar fi
+        reintrodus defectul celor două rânduri, reparat la auditul
+        ADR-051/052)."""
+        familie = requested_by or _ALGORITHM_FAMILY
         if not sb.is_available():
             self.last_train_status = "unavailable"
             self.last_record_run_id = _record_training_run(
                 "unavailable", 0, {},
-                "Supabase indisponibil — verifică SUPABASE_URL / SUPABASE_SECRET_KEY în secrets.")
+                "Supabase indisponibil — verifică SUPABASE_URL / SUPABASE_SECRET_KEY în secrets.",
+                algorithm_family=familie)
             return MLTrainingResult(
                 status="unavailable",
                 message="Supabase indisponibil — verifică SUPABASE_URL / SUPABASE_SECRET_KEY în secrets.",
@@ -485,7 +538,8 @@ class MLPredictorEngine:
             n = 0 if df is None else len(df)
             self.last_train_status = "insufficient_data"
             msg = f"Doar {n} meciuri cu rezultat cunoscut — minim {MIN_SAMPLES_TO_TRAIN} necesare pentru antrenare ML."
-            self.last_record_run_id = _record_training_run("insufficient_data", n, {}, msg)
+            self.last_record_run_id = _record_training_run("insufficient_data", n, {}, msg,
+                                                            algorithm_family=familie)
             return MLTrainingResult(status="insufficient_data", samples_used=n, message=msg)
 
         try:
@@ -587,6 +641,7 @@ class MLPredictorEngine:
                 "trained", self.samples_used,
                 {"accuracy": acc, "log_loss": ll, "brier_score": brier},
                 train_message,
+                algorithm_family=familie,
             )
             self.last_record_run_id = run_id
             self.last_training_run_id = run_id
@@ -599,7 +654,8 @@ class MLPredictorEngine:
         except Exception as exc:
             logger.error("[ML] Training failed: %s", exc)
             self.last_train_status = "error"
-            self.last_record_run_id = _record_training_run("error", 0, {}, str(exc))
+            self.last_record_run_id = _record_training_run("error", 0, {}, str(exc),
+                                                            algorithm_family=familie)
             return MLTrainingResult(status="error", message=str(exc))
 
     # ── Predicție ─────────────────────────────────────────────────────────

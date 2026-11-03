@@ -58,8 +58,19 @@ class BlendV1Algorithm:
         acel rând — training_runner.run_training() persista apoi un AL
         DOILEA rând, cu id diferit, pentru aceeași tentativă reală de
         antrenare (același gol ca la XGBoostV1Algorithm.fit(), descoperit
-        separat la audit, nu presupus — tipar identic, fix identic)."""
-        result = self._engine.train()
+        separat la audit, nu presupus — tipar identic, fix identic).
+
+        [ADAUGAT — ADR-086, Decizia A] `requested_by=self.name` ("blend_v1")
+        e pasat explicit. Fără el, rândul `training_runs` purta eticheta
+        "xgboost_v1" — fiindcă `_record_training_run()` o avea hardcodată —
+        iar eticheta corectă, calculată mai târziu de
+        `training_runner.run_training()`, era ARUNCATĂ de garda de
+        idempotență din `storage.save_training_run()`. Consecința măsurată:
+        `local_model_cache` selectează pe `algorithm_name`, deci servea și
+        artefactele cerute de blend pe calea `xgboost_v1` — 41,6% din
+        perioada măsurată, artefactul evaluat în shadow nu era cel care
+        servea (ADR-086 §1.3)."""
+        result = self._engine.train(requested_by=self.name)
         return TrainingRunResult(
             training_run_id=self._engine.last_record_run_id,
             status=result.status,

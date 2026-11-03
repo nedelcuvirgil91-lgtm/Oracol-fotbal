@@ -33,6 +33,22 @@ class _FakeModel:
         return np.array([[0.4, 0.3, 0.3]])
 
 
+@pytest.fixture(autouse=True)
+def _garda_fsm_oprita(monkeypatch):
+    """[ADAUGAT — ADR-086, Decizia B] `load_latest_trained_model_or_none()`
+    citește acum flagul `local_cache_fsm_guard_enabled` prin
+    `sb.load_config()`. Fără acest patch, testele de mai jos ar trece pe o
+    mașină FĂRĂ credențiale Supabase (clientul e None → se întoarce
+    implicitul) și ar ATINGE REȚEAUA pe una care le are — contra regulii
+    „fără dependință de rețea".
+
+    Exact capcana găsită în propriile mele teste pe 21 octombrie: *un test
+    care trece fiindcă mediul e sărac nu e un test fără rețea, e unul
+    norocos.* Implicitul `False` păstrează neschimbată semantica tuturor
+    testelor scrise înainte de ADR-086."""
+    monkeypatch.setattr("supabase_client.load_config", lambda default: dict(default))
+
+
 @pytest.fixture
 def happy_path(monkeypatch):
     monkeypatch.setattr("supabase_client.list_recent_training_runs", lambda family, scope, limit=10: [_valid_run()])
@@ -161,22 +177,34 @@ def test_exceptions_are_swallowed_not_propagated(monkeypatch):
     assert lmc.load_latest_trained_model_or_none("xgboost_v1", "all") is None
 
 
-def test_module_has_single_known_importer():
-    """local_model_cache e folosit doar de oracle_engine.py (_resolve_local_cache)
-    si de propriul test — tipar identic champion_loader.py."""
+def _importatori_de_local_model_cache(root, skip_names=()):
+    """Fișierele care importă `local_model_cache`, exceptând modulul însuși,
+    orice fișier de sub `tests/`, și numele din `skip_names`.
+
+    [REFACTORIZAT — ADR-086] Înainte, exceptările erau o LISTĂ de nume de
+    teste: `{"test_local_model_cache.py", "test_champion_diagnostic_probe.py"}`.
+    Lista aceea **fusese deja amendată o dată** (al doilea nume), iar
+    `tests/test_adr086_artifact_governance.py` a doborât garda la adăugare —
+    deși un test care importă modulul e exact comportamentul aşteptat, spus
+    chiar de docstring-ul vechi („si de propriul test").
+
+    Invariantul real e despre **codul de producție**: nimic în afara
+    `oracle_engine.py` nu are voie să importe modulul. Exceptarea întregului
+    director `tests/` prin construcție face garda să nu mai ceară întreținere
+    la fiecare test nou, fără să slăbească nimic din ce contează — orice
+    importator NOU de producție e prins în continuare.
+
+    Aceeași clasă corectată azi la `tests/test_upsert_timestamp_freshness.py`:
+    o listă întreținută manual se învechește exact ca documentația pe care
+    proiectul o reproșează altora."""
     import ast
-    import pathlib
 
-    ALLOWED_IMPORTERS = {"oracle_engine.py"}
-
-    root = pathlib.Path(__file__).resolve().parent.parent
-    offenders = []
     for path in root.rglob("*.py"):
         if ".git" in path.parts:
             continue
-        if path.name in ("local_model_cache.py", "test_local_model_cache.py", "test_champion_diagnostic_probe.py"):
+        if "tests" in path.relative_to(root).parts:
             continue
-        if path.name in ALLOWED_IMPORTERS:
+        if path.name == "local_model_cache.py" or path.name in skip_names:
             continue
         try:
             tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"), filename=str(path))
@@ -185,12 +213,39 @@ def test_module_has_single_known_importer():
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 if any(alias.name.split(".")[-1] == "local_model_cache" for alias in node.names):
-                    offenders.append(str(path.relative_to(root)))
+                    yield str(path.relative_to(root))
             elif isinstance(node, ast.ImportFrom):
                 module = node.module or ""
                 if module.split(".")[-1] == "local_model_cache" or any(
                     alias.name == "local_model_cache" for alias in node.names
                 ):
-                    offenders.append(str(path.relative_to(root)))
+                    yield str(path.relative_to(root))
 
+
+def test_module_has_single_known_importer():
+    """local_model_cache e folosit doar de oracle_engine.py
+    (_resolve_local_cache) — tipar identic champion_loader.py. Testele care îl
+    importă sunt normale și nu intră în socoteală (vezi helper-ul)."""
+    import pathlib
+
+    ALLOWED_IMPORTERS = {"oracle_engine.py"}
+    root = pathlib.Path(__file__).resolve().parent.parent
+    offenders = sorted(_importatori_de_local_model_cache(root, skip_names=ALLOWED_IMPORTERS))
     assert offenders == [], f"local_model_cache e importat in afara scopului asteptat: {offenders}"
+
+
+def test_garda_de_importatori_nu_trece_VID():
+    """CONTRAPONDERE, care lipsea. Fără ea, garda de mai sus ar fi trecut
+    liniștită și dacă scanarea s-ar fi rupt (rădăcină greșită, parsare
+    eșuată, generator care nu produce nimic) — `offenders == []` arată identic
+    pentru „nimeni nu importă" și pentru „n-am căutat".
+
+    Martor POZITIV: fără exceptarea lui `oracle_engine.py`, importatorul
+    legitim TREBUIE găsit."""
+    import pathlib
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    gasiti = sorted(_importatori_de_local_model_cache(root))
+    assert "oracle_engine.py" in gasiti, (
+        "scanarea nu găsește nici importatorul legitim — garda ar trece vid"
+    )

@@ -2462,3 +2462,77 @@ componentă moartă cu impact de până la 30% pe xG), nu din reponderare.
 
 **Toate măsurătorile din această secțiune sunt read-only.** Zero scrieri, zero
 cod de producție atins.
+
+---
+
+## §21 — ADR-086: ce se verifică la PRIMA antrenare cerută de `blend_v1` (de la 2026-11-03)
+
+**Intrarea asta există fiindcă măsurătoarea „după" din ADR-086 §6 altfel ar
+trăi doar în ADR-ul ei** — exact precedentul ADR-057, care a costat 14 zile
+fără nicio antrenare fiindcă nimeni nu s-a uitat când condiția lui s-a
+împlinit.
+
+### Ce s-a schimbat
+
+`ADR-086` (ACCEPTED, implementat 3 nov) — Decizia **A**: rândul `training_runs`
+poartă acum familia care a CERUT antrenarea. Până azi, fiecare antrenare era
+etichetată `xgboost_v1`, inclusiv cele cerute de `blend_v1`, fiindcă eticheta
+corectă — calculată de `training_runner` — era aruncată de garda de idempotență
+din `storage.save_training_run()`.
+
+### Linia de bază, măsurată ÎNAINTE (3 noiembrie, read-only)
+
+| ce | valoare |
+|---|---|
+| rânduri `training_runs` cu `algorithm_name='blend_v1'` | **0** (zero, din totdeauna) |
+| rulări `trained` pentru `xgboost_v1`/`all` | 64 |
+| dintre ele, cu artefact persistat | 5 |
+| artefact servit | `dda4f7f3` (familia Challengerului: `xgboost_v1`) |
+| nepotrivire servit ↔ evaluat, istoric | **37,4 / 89,9 zile = 41,6%** |
+
+### Declanșatorul
+
+**Prima rulare `continuous_learning` în care Faza B antrenează pentru familia
+`blend_v1`.** Nu e calendaristic: depinde de eliberarea slotului familiei
+(`blend_v1/174e7e17` e `SUCCEEDED`, deci slotul e ocupat până la o expirare sau
+o promovare). Verificabil:
+
+```sql
+-- a aparut primul rand etichetat blend_v1?
+SELECT algorithm_name, count(*) AS randuri, max(created_at) AS ultima
+FROM training_runs WHERE league_scope = 'all' GROUP BY 1 ORDER BY 1;
+```
+
+### Ce TREBUIE să se vadă
+
+1. **Apare primul rând** cu `algorithm_name = 'blend_v1'`.
+2. **UNUL SINGUR per tentativă de antrenare.** Dacă apar două, varianta
+   respinsă pentru A s-a strecurat cumva și defectul reparat la auditul
+   ADR-051/052 a fost reintrodus → **reparația se retrage**. Contrapondere deja
+   în suită (`test_un_singur_rand_per_tentativa_de_antrenare`), dar se
+   reverifică în date.
+3. `list_recent_training_runs('xgboost_v1','all')` **nu** îl vede — deci
+   artefactul servit nu se mută pe o rulare cerută de blend.
+
+### Ce înseamnă dacă NU vine
+
+**Nu e un defect al ADR-086.** Înseamnă că slotul familiei `blend_v1` n-a fost
+eliberat, adică nicio antrenare blend n-a fost declanșată. Se citește din
+`challengers`, nu se presupune. Atenție la capcana opusă: **absența unui rând
+`blend_v1` arată identic pentru „reparația nu funcționează" și pentru „Faza B
+n-a antrenat blend încă"** — martorul care le separă e existența unei rulări
+`threshold_check` / Faza B pentru `blend_v1|all` în `automation_runs`.
+
+### Separat, și NEDECIS: activarea flagului B
+
+`local_cache_fsm_guard_enabled` e **absent din `model_config`** (North Star
+#3), deci Decizia B e cod inert. Verificările cerute înaintea activării:
+ADR-086 §8. **La activare, artefactul servit trebuie să rămână `dda4f7f3`** —
+Challengerul lui nu e terminal, deci garda nu are ce exclude. O schimbare la
+activare înseamnă că garda prinde altceva decât ce credem.
+
+**Consecința operațională de reținut** (ADR-086 §4.2): cu A+B active, dacă
+familia `xgboost_v1` n-are niciun Challenger în stare neterminală, **ML se
+oprește complet** și se servește Oracle-only. Pe istoric a existat o fereastră
+de **8,4 ore** în acea situație (13-14 oct). E comportamentul corect — nimic
+negatat nu servește — dar nu e o ipoteză, s-a întâmplat.

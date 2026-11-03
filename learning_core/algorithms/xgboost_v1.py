@@ -49,8 +49,16 @@ class XGBoostV1Algorithm:
         antrenare (gol descoperit la audit, nu presupus). Acum ambele
         scrieri (aici + train()) convin asupra aceluiași id — vezi
         learning_core/storage.save_training_run(), care a devenit idempotent
-        exact pentru acest caz."""
-        result = self._engine.train()
+        exact pentru acest caz.
+
+        [ADAUGAT — ADR-086, Decizia A] `requested_by=self.name` se pasează
+        EXPLICIT, deși "xgboost_v1" coincide cu implicitul lui
+        `_record_training_run()`. Deliberat: o gardă AST verifică că AMBII
+        adaptori pasează parametrul, iar dacă aici s-ar fi bazat pe implicit,
+        garda ar fi trebuit scrisă cu o excepție — adică exact genul de
+        asimetrie care face ca următoarea familie adăugată să moștenească
+        tăcut eticheta greșită."""
+        result = self._engine.train(requested_by=self.name)
         return TrainingRunResult(
             training_run_id=self._engine.last_record_run_id,
             status=result.status,
