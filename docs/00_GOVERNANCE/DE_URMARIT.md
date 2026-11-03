@@ -2248,6 +2248,119 @@ Două afirmații proprii, false, purtate zile:
 Retragerea prematură e tot o afirmație greșită, doar mai greu de prins, fiindcă
 pare prudență.
 
+### §18.1 🔴 Condiția (3) e îndeplinită de 12 zile — dar MIZA SE ERODEAZĂ, monoton (măsurat 2026-11-03)
+
+Intrarea asta există fiindcă „condiția (3) îndeplinită 12 zile la rând" se
+citește ca un semnal mult mai tare decât e. Seria completă a verdictelor lui
+`blend_v1/174e7e17`, toate cu `baseline_source = 'shadow_control'`:
+
+| zi | n | Brier sig. | log-loss sig. | acc. sig. | **Δacc** | Δbrier | Δlog-loss |
+|---|---:|:-:|:-:|:-:|---:|---:|---:|
+| 23 oct | 357 | ✅ | ✅ | ✅ | **+3,08pp** | −0,0136 | −0,0209 |
+| 24 oct | 370 | ✅ | ✅ | ✅ | +2,97pp | −0,0126 | −0,0193 |
+| 25 oct | 431 | ✅ | ✅ | ❌ | +1,86pp | −0,0108 | −0,0168 |
+| 26 oct | 490 | ✅ | ✅ | ❌ | +1,63pp | −0,0102 | −0,0160 |
+| 27 oct | 500 | ✅ | ✅ | ❌ | +1,60pp | −0,0100 | −0,0156 |
+| 28 oct | 504 | ✅ | ✅ | ❌ | +1,59pp | −0,0102 | −0,0159 |
+| 29 oct | 523 | ✅ | ✅ | ❌ | +1,53pp | −0,0102 | −0,0159 |
+| 30 oct | 531 | ✅ | ✅ | ❌ | +1,51pp | −0,0107 | −0,0166 |
+| 31 oct | 543 | ✅ | ✅ | ❌ | +1,47pp | −0,0104 | −0,0160 |
+| 1 nov | 600 | ✅ | ✅ | ❌ | +1,33pp | −0,0095 | −0,0145 |
+| 2 nov | 659 | ✅ | ✅ | ❌ | +1,06pp | −0,0085 | −0,0129 |
+| **3 nov** | **672** | ✅ | ✅ | ❌ | **+1,04pp** | **−0,0082** | **−0,0123** |
+
+**Zero oscilație** — Brier și log-loss semnificative în toate cele 12 zile,
+`Δacc` pozitiv în toate. Condiția (3) din declanșator e **îndeplinită**.
+
+**Dar nu e „acuratețea cedează" — se contractă TOT avantajul**, pe toate trei
+metricile simultan: Δacc 3,08 → 1,04pp, Δbrier −0,0136 → −0,0082, Δlog-loss
+−0,0209 → −0,0123. Tiparul clasic al unui avantaj timpuriu care regresează pe
+măsură ce `n` crește.
+
+**Consecința pentru ADR-084, directă**: ADR-ul scrie *„aprobarea produce
+**imediat** un candidat de promovare"*. Era adevărat pe 2 noiembrie și devine
+tot mai puțin adevărat. Garda de direcție propusă e `Δacc ≥ 0`, iar `174e7e17`
+se apropie de ea **de sus**.
+
+**Extrapolare, declarată ca extrapolare**: panta pe ultima săptămână (27 oct →
+3 nov) e −0,0008/zi, ceea ce ar trece zero pe la mijlocul lui noiembrie. Dar
+ultimele trei incremente (−0,0014, −0,0027, −0,0002) sunt zgomotoase și panta
+**încetinește** — deci nu e o proiecție, e o direcție. Se aplică propria lecție
+din §18: *o proiecție contrazisă de două puncte nu e încă infirmată* — deci
+nici „candidatul e condamnat" nu se afirmă.
+
+**🧭 DE CE AȘTEPTAREA E INFORMATIVĂ, nu doar prudentă** — partea care contează
+pentru decizia de fond:
+
+- dacă `Δacc` se **stabilizează** peste zero → cazul pentru ADR-084 e mai
+  puternic decât azi, pe date care s-au așezat;
+- dacă **trece sub zero** → candidatul dispare singur, **iar asta e în sine
+  răspunsul**: un criteriu al cărui unic exemplu viu se evaporă în două
+  săptămâni nu e un criteriu pentru care merită schimbată poarta. §7.1 (riscul
+  croirii regulii după date) devine argumentul dominant, exact cum prevede
+  declanșatorul.
+
+**Starea celorlalte două condiții la 3 noiembrie** (ziua 1 din 3): (1)
+**NEÎNDEPLINITĂ** prin construcție — `1b3c3ef` a ajuns pe `main` pe 2 nov 20:06
+UTC, deci prima rulare cu codul e cea de azi; cel mai devreme **5 noiembrie**.
+(2) ✅ **provizoriu**, pe cohorta genuin post-reparație: **7/7 meciuri de seară**
+din 2 nov cu statistici (Newcastle–Everton, Atalanta–Parma, Benfica–Alverca,
+Dep. A Coruña–Osasuna, Gil Vicente–Vitória, Lorient–Brest, U Cluj–FCSB),
+`p ≈ 1,1%` sub rata veche de 47,8%. Fereastra 26 oct – 3 nov dă 0/53 și 0/129,
+dar **nu dovedește nimic** — include cele 27 de meciuri recuperate manual pe
+2 nov.
+
+### §18.2 ADR-085 etapa 5 — ÎNCHISĂ 2026-11-03, cu un test care NU poate rezolva și un reziduu nou
+
+Prima rulare de noapte cu codul ADR-085 (`2026-11-03`, pornită 09:18, 72,7 min,
+`completed`).
+
+| verificare | așteptat | măsurat | |
+|---|---|---|:-:|
+| partiția pe oră, cohorta post-reparație | rata de seară cade spre cea de zi | **7/7 meciuri de seară cu statistici**, `p ≈ 1,1%` sub rata veche | ✅ |
+| restanța 60 de zile | ≤ 6 | **6** | ✅ |
+| clasa `delta_sync` (clasa 11) | rămâne 0 | **0** | ✅ |
+| revendicare falsă `stats_source` pe rânduri NOI | 0 | **0** | ✅ |
+| costul etapei 5 | < ~2% din rulare | nedetectabil | ✅ |
+
+Cele 6 rămase sunt toate **MLS, 9–13 septembrie, toate cu `referee` prezent** →
+clasa ADR-076 (pagina descărcată, extragerea eșuată), **nu** clasa Delta Sync.
+
+**🔴 Testul de durată nu poate fi concludent, și calibrarea greșită e a mea.**
+Reminderul programat cerea „aștept **o creștere**" a etapei 5. Măsurat: **9,6
+min**, în banda zilelor precedente (**6,7 / 6,7 / 7,0 / 10,3 / 12,0 / 15,3**).
+Cauza: reparația produce fetch-uri suplimentare doar pentru meciurile pe care
+Delta Sync le-ar fi sărit, iar restanța fusese **deja recuperată manual** pe 2
+nov (27 de meciuri) — deci munca marginală e invizibilă într-o bandă de 6,7–15,3
+min. **Nu e un rezultat negativ, e un test sub pragul de zgomot.** De nu mai
+reluat în forma asta: semnalul care chiar rezolvă e partiția pe cohorta
+post-reparație.
+
+**🔴 REZIDUU NOU, cu consecință numibilă — NEREPARAT, decizie deschisă.** Cele 6
+rânduri rămase poartă `stats_source = 'flashscore'` **fals** — n-au nicio
+statistică. Scrise înainte de `1b3c3ef`, deci **nu e un defect al reparației**
+(zero rescriere retroactivă, corect). Dar
+`match_stats_backfill_service.py:185` scrie `stats_source` **doar dacă e
+`NULL`** → **un provider de rezervă care le-ar completa statisticile nu poate
+înregistra că el le-a dat.** Exact defectul reparat de etapa 3 *de aici
+înainte*, rămas latent pe 6 rânduri.
+
+**Operația corectă e `UPDATE ... SET stats_source = NULL` pe cele 6
+`fixture_id`, NU `DELETE`.** Verificat rând cu rând: toate șase sunt meciuri
+reale, cu rezultat, goluri, `home_elo_after`/`away_elo_after` (= Canonical Live
+ELO Snapshot, citit la servire prin `get_latest_team_elo()`), predicție servită
+și **34 de rânduri `shadow_predictions` în total**. Un `DELETE` ar șterge 6
+rezultate reale, ar rupe lanțul ELO pentru 11 cluburi MLS și ar lăsa 34 de
+rânduri shadow orfane. **Clasa D-13**: *„nu există nimic de șters — o ștergere
+ar distruge meciuri reale, nu copii."* Ce e greșit pe aceste rânduri nu e
+existența lor, e **o etichetă**.
+
+Garda obligatorie în `UPDATE`: `AND home_shots IS NULL` — dacă între timp vreun
+rând primește statistici de la Flashscore, revendicarea devine **adevărată** și
+nu trebuie ștearsă. Tiparul „o schimbare intermediară face operația inofensivă
+în loc de greșită", de la ștergerea celor două rânduri de clasament din 29
+august.
+
 ---
 
 ## §19 — Ablația Team Profile: rularea finală la ~16 xG/echipă (≈ decembrie 2026)
