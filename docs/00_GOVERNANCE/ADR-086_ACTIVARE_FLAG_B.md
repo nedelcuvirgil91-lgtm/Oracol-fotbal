@@ -1,7 +1,10 @@
 # ADR-086 — protocol de activare pentru `local_cache_fsm_guard_enabled` (Decizia B)
 
-**Stare: PREGĂTIT, NEEXECUTAT.** Scris 2026-11-03, după livrarea codului
-(`ca3b813` pe `main`). Precedent de formă: `ADR-082_VERIFICARI_PRE_ACTIVARE.md`.
+**Stare: ✅ EXECUTAT — flag ACTIV în producție din 2026-11-03, 20:34:49 UTC.**
+Scris 2026-11-03, după livrarea codului (`ca3b813` pe `main`); executat în
+aceeași zi, după ce condiția 3 din §1 a fost îndeplinită de rularea manuală
+`night_sync` **112** (`automation_runs` id=**1537**). Precedent de formă:
+`ADR-082_VERIFICARI_PRE_ACTIVARE.md`. Jurnalul execuției: §9.
 
 **Nu se rulează nimic din §3 până §1 e bifat integral.**
 
@@ -23,8 +26,8 @@ ADR-051.
 |---|---|:-:|
 | 1 | `pytest tests/` verde pe `main` | ✅ **4202 passed, 2 skipped** (4170 + 31 + 1, aritmetica se închide exact) |
 | 2 | mutații rulate și prinse | ✅ **13/13**, ADR-086 §9.5 |
-| 3 | **o rulare de noapte cu flagul OPRIT, comportament identic** | ⛔ **NEÎNDEPLINITĂ** — codul a ajuns pe `main` la ~15:00, 3 nov |
-| 4 | amprenta `model_config` măsurată **imediat înainte** | pregătită, §2 |
+| 3 | **o rulare de noapte cu flagul OPRIT, comportament identic** | ✅ **ÎNDEPLINITĂ** — rularea **112**, `automation_runs` id=1537, 19:10:01 → 20:11:54, `completed`, 9/9 etape, `critice_esuate = []` |
+| 4 | amprenta `model_config` măsurată **imediat înainte** | ✅ remăsurată 20:3x — **41 / false /** `29793d1b…ec25`, identică cu ancora din §2 |
 
 ### §1.1 De ce condiția 3 nu e formalitate — precedentul datat
 
@@ -238,8 +241,79 @@ amprente să scadă, iar „42 → 41" ar arăta identic cu o scriere neconsemna
 
 ## §9. Jurnal
 
-- **2026-11-03** — protocol scris, nimic executat. Condiția 3 din §1 e
+- **2026-11-03, ~15:00** — protocol scris, nimic executat. Condiția 3 din §1 e
   neîndeplinită prin construcție (codul a ajuns pe `main` în aceeași zi).
   Ancora din §2 măsurată read-only. §6 adaugă o remăsurare care **restrânge**
   riscul declarat în ADR-086 §4.2: două dintre cele trei căi sunt dovedit
   neafectate.
+
+- **2026-11-03, 19:10 → 20:11 — rularea 112 închide condiția 3.** Pornită
+  manual pe `head_sha = 31a9a17`, verificat ÎNAINTE de pornire că include
+  `ca3b813`. Rândul de audit: `automation_runs` id=**1537**,
+  `target_key = 2026-11-03` (al treilea rând al zilei, deci regula „Reuse" din
+  ADR-026 a creat corect un rând nou, nu a refolosit unul încheiat),
+  `github_run_id = 41700468157`, durată **61,9 min**, `status = completed`,
+  9/9 etape, `critice_esuate = []`.
+
+  **Verificarea decisivă — trecută**: etapa **Challenger Shadow Batch**
+  `durata_s = 1959,9`, `ok: true`, `critic: true`. Apelul nou
+  `is_fsm_guard_enabled()` → `sb.load_config()` din calea de pornire a
+  motorului **nu a rupt nimic** — exact calea pe care un nume de fișier de
+  cache a omorât patru nopți la rând pe 17 octombrie, cu `night_sync` verde
+  (§1.1).
+
+  **Scrieri proaspete**: **200 de rânduri atinse per bandă**, `prediction_time`
+  avansat la **20:11:2x** pe toate cele 7 benzi vii — `xgboost_v1/dda4f7f3`
+  (control + treatment), `blend_v1/174e7e17` (control + treatment),
+  `blend_v1/8ac89c70` (champion + control), `flashscore_team_dna/v1`. Benzile
+  înghețate au rămas înghețate, corect: `8ac89c70` treatment (23 aug, campion
+  promovat), `4e17c737` (19 sep), `6e7265c5` (13 oct), `e638c1dc` (6 sep) —
+  toate `REJECTED`. **Semnalul corect e `prediction_time` avansat, nu totalul
+  de rânduri** (scrierea e `upsert`, batch-ul reprocesează aceeași fereastră).
+
+  **Artefactul servit**: în continuare **`dda4f7f3`** — 721 instantanee în
+  `engine_comparison_snapshots`, ultimul la **20:11:26**.
+
+  **Ce NU a validat, repetat ca în §1.2**: ambele sloturi de familie erau
+  `SUCCEEDED`, deci **Faza B nu a antrenat** → **Decizia A rămâne
+  neexercitată în producție**. Dovada pentru A vine abia la prima antrenare
+  cerută de `blend_v1` (`DE_URMARIT.md` §21).
+
+  **Două durate sub banda obișnuită, notate fără alarmă**: etapa 5 Flashscore
+  **373,9 s** (banda 6,7–15,3 min) și `team_stats_tsdb` **0,0 s**. Cauza e
+  cunoscută și nu e un defect: a fost **a treia rulare a zilei pe aceeași
+  dată**, deci Delta Sync a sărit meciurile colectate de cele dinainte. Nu se
+  citește ca îmbunătățire și nu se compară cu banda istorică.
+
+- **2026-11-03, 20:34:49 — FLAG ACTIVAT**, cu aprobare explicită a
+  proprietarului produsului, după pre-flight-ul §2 **remăsurat** (nu
+  refolosit): **41 chei / `flag_prezent = false` /**
+  `md5_integral = 29793d1b4ab1d281cb27765eb880ec25` /
+  `updated_at = 2026-11-02 17:30:03` — identic cu ancora, deci nicio scriere
+  nu se strecurase între timp (clasa D-14 verificată, nu presupusă).
+
+  **Amprenta de după, §4, se închide exact**: `total_chei` **41 → 42**;
+  `valoare_flag` `true` cu `jsonb_typeof = boolean` (**nu** `string`);
+  `md5(data − 'local_cache_fsm_guard_enabled')` =
+  **`29793d1b4ab1d281cb27765eb880ec25`**, **identic** cu `md5_integral` din
+  pre-flight → exact o cheie adăugată, **zero chei existente atinse**;
+  `updated_at` **2026-11-02 17:30:03 → 2026-11-03 20:34:49** (remediul D-14,
+  varianta 1, în efect a doua oară după ADR-037 R4).
+
+  **Niciuna din cele cinci condiții de oprire din §8 nu a fost atinsă.**
+
+  **Jumătatea „datele" din §5.1 e acum bifată cu date reale**, nu presupusă:
+  interogarea §5 dă `dda4f7f3` primul candidat cu
+  `ar_fi_sarit_de_garda = false`, iar cele trei artefacte `REJECTED`
+  (`6e7265c5`, `4e17c737`, `e638c1dc`) sunt chiar `REJECTED`. Harta pe care
+  garda citește e cea pe care codul o presupune.
+
+  **🔴 Limita rămâne cea declarată ÎNAINTE de activare, și se repetă aici ca să
+  nu fie citită greșit mai târziu: garda e INERTĂ azi.** `dda4f7f3` e cel mai
+  recent artefact valid, bucla se oprește la el, deci nimic nu va fi sărit și
+  nicio linie de log nu va apărea. **Un „totul e în ordine" la rularea
+  următoare e compatibil și cu o gardă complet moartă** — corectitudinea ei se
+  sprijină pe cele 31 de teste și 13 mutații (§5.1, jumătatea „logica"), nu pe
+  o observație de producție. Primul martor pozitiv genuin apare abia în
+  scenariul §6, adică dacă `dda4f7f3` devine `REJECTED` (propunerea
+  `decision_feed` #13 revine ~**9 noiembrie**).
