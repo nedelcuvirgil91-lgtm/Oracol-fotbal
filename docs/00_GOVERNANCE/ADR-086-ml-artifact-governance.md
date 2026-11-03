@@ -296,6 +296,30 @@ ore.
 consecință reală, nu una teoretică, și e motivul pentru care B e gatat și pentru
 care cele două se activează împreună, cu măsurătoare.
 
+**[REMĂSURAT 2026-11-03, după livrare — paragraful de mai sus numea consecința
+fără să numească CONSUMATORUL care o plătește.]** Verificat în cod, pe toți cei
+trei consumatori ai artefactului:
+
+| consumator | afectat de B? | dovada |
+|---|:-:|---|
+| probabilitățile **servite** | **NU** | `_get_ml_engine_prediction` e **read-only** față de `ph`/`pd_`/`pa` — scris în propriul docstring, `oracle_engine.py:2632` |
+| evaluarea **Challengerilor** (poarta de promovare) | **NU** | adaptoarele de shadow încarcă artefactul **direct** (`model_artifact_storage.load_model_artifact(training_run_id)`), **nu** prin `local_model_cache` |
+| `engine_comparison_snapshots` (ADR-052) | **DA** | trece prin `self.ml` |
+
+Deci „ML se oprește complet" **nu atinge nici predicțiile servite, nici poarta
+de promovare**. Costul e exact unul: **canalul de măsurare al lui D-17 rămâne
+gol** până când Faza B antrenează un înlocuitor.
+
+**Iar argumentul se întoarce în favoarea activării**: cu B **oprit**, un
+artefact respins ar continua să alimenteze snapshot-urile ADR-052 — am măsura
+ansamblul **pe un artefact pe care guvernanța l-a retras**, adică exact clasa
+„ce se evaluează nu e ce se servește", cu un nivel mai sus. Un gol în date e
+onest; date dintr-un artefact retras induc în eroare. **North Star #8 tranșează:
+golul e preferabil.**
+
+Protocolul complet de activare, cu ancora măsurată, condițiile de oprire și
+limita martorului: **`ADR-086_ACTIVARE_FLAG_B.md`**.
+
 ---
 
 ### §4.3 Dependența NOUĂ pe care B o introduce, și de ce nu încalcă North Star #10
@@ -438,6 +462,11 @@ la activare înseamnă că garda prinde altceva decât ce credem.
 ---
 
 ## §8. Verificare cerută ÎNAINTE de activarea flagului B
+
+> **Protocolul executabil, cu SQL-ul exact, ancora măsurată, condițiile de
+> oprire și revenirea: `ADR-086_ACTIVARE_FLAG_B.md` (PREGĂTIT, NEEXECUTAT).**
+> Lista de mai jos rămâne cerința normativă; documentul acela e forma în care
+> se rulează.
 
 1. `pytest tests/` verde pe `main` înainte de push, cu aritmetica testelor
    închisă exact.

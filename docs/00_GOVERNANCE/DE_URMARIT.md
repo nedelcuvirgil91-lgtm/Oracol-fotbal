@@ -2531,10 +2531,28 @@ n-a antrenat blend încă"** — martorul care le separă e existența unei rul�
 ### Separat, și NEDECIS: activarea flagului B
 
 `local_cache_fsm_guard_enabled` e **absent din `model_config`** (North Star
-#3), deci Decizia B e cod inert. Verificările cerute înaintea activării:
-ADR-086 §8. **La activare, artefactul servit trebuie să rămână `dda4f7f3`** —
-Challengerul lui nu e terminal, deci garda nu are ce exclude. O schimbare la
-activare înseamnă că garda prinde altceva decât ce credem.
+#3), deci Decizia B e cod inert. **Protocolul executabil, cu SQL-ul exact,
+ancora măsurată (41 de chei, `md5` = `29793d1b4ab1d281cb27765eb880ec25`),
+cele cinci condiții de oprire și revenirea: `ADR-086_ACTIVARE_FLAG_B.md`** —
+PREGĂTIT, NEEXECUTAT.
+
+**Blocajul e o singură precondiție**: o rulare de noapte cu flagul oprit, care
+confirmă comportament identic. Codul a ajuns pe `main` pe 3 nov la ~15:00, deci
+prima rulare cu el e cea din noaptea 3→4 nov. **Nu e formalitate**: B adaugă un
+apel `load_config()` în calea de pornire a motorului, adică exact calea pe care
+o exercită etapa Challenger Shadow Batch — cea omorâtă patru nopți la rând pe
+17 oct de un nume de fișier de cache, cu `night_sync` verde.
+
+**La activare, artefactul servit trebuie să rămână `dda4f7f3`** — Challengerul
+lui nu e terminal, deci garda nu are ce exclude. O schimbare la activare
+înseamnă că garda prinde altceva decât ce credem.
+
+**🔴 Și nu există martor pozitiv end-to-end, prin construcție**: cele trei
+artefacte `REJECTED` nu sunt oricum selectate (bucla se întoarce la primul
+candidat valid, iar `dda4f7f3` e primul), deci garda nu va sări nimic și nu va
+loga nimic. **Un „totul e în ordine" e compatibil și cu o gardă complet
+inertă.** Corectitudinea ei se sprijină pe 31 de teste și 13 mutații, nu pe o
+observație de producție — limită reală, consemnată în protocol §5.1.
 
 **Consecința operațională de reținut** (ADR-086 §4.2): cu A+B active, dacă
 familia `xgboost_v1` n-are niciun Challenger în stare neterminală, **ML se
