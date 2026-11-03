@@ -2,13 +2,16 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-11-02**. Ultimul element adăugat: **§18 — ADR-085
-etapa 5 + declanșatorul de reluare pentru decizia de fond ADR-084**.
+Ultima actualizare: **2026-11-03**. Ultimul element adăugat: **§20.H — rândul
+`control` are DOUĂ roluri (predicția servită ȘI baseline-ul porții), deci
+Pasul 3 nu poate precede ADR-084 și D-15**.
 
 **Elemente deschise, în ordinea termenului:**
 
 | § | Ce | Termen |
 |---|---|---|
+| **§20.H** | 🔴 **Pasul 3 (servirea blendului) e BLOCAT de o dependență circulară** — rândul `control` e simultan predicția servită și baseline-ul porții, deci schimbarea servirii invalidează seriile pe care ADR-084 și D-15 se sprijină. Plus: ce a măsurat §20 ca mai bun (`blend_engine.py`, 50/50) **nu e** campionul `blend_v1` (0,35, Model Registry) | **după** ADR-084 și D-15 |
+| **§21** | ✅ Flagul B **ACTIV** din 3 nov 20:34:49. Rămâne: prima antrenare cerută de `blend_v1` (dovada Deciziei A) | fără termen — depinde de eliberarea slotului |
 | **§16** | 🔴 **PRIMUL VERDICT CHAMPION GUARDIAN** — R4 activat 2 nov 17:30:03. Predicție scrisă înainte: `healthy`, toate patru flagurile `false` | **rularea de noapte de 3 nov** |
 | **§18** | 🔴 **ADR-085 etapa 5** — testul decisiv NU e „restanța a scăzut", e ca **partiția pe oră să dispară** (era 47,8% seara vs 0,8% ziua). Și e **precondiția** deciziei de fond ADR-084 | **rularea de noapte de 3 nov**, apoi 3 zile |
 | **§19** | 📊 **Ablația Team Profile — rularea FINALĂ la ~16 xG/echipă.** Negativă de două ori (13 oct și 2 nov); interpretarea pentru decembrie e **declarată deja**, ca să nu alegem sensul după cifră | **~7 decembrie 2026** (median 11 azi, +1/săptămână) |
@@ -2606,18 +2609,172 @@ zgomot.**
   observație, nu o pledoarie. Rămâne 2/3.
 - **Guvernanța e precondiție, nu detaliu**: `ml_source = "local"`, artefact din
   afara Model Registry (D-15). Nimic nu se servește înaintea Pasului 2.
+  **[COMPLETAT 2026-11-03, seara]** Pasul 2 e închis, dar **nu era singura
+  precondiție** — vezi **§20.H**: rândul `control` e simultan predicția servită
+  ȘI baseline-ul porții de promovare, deci Pasul 3 nu poate precede ADR-084 și
+  D-15. `ml_source` rămâne `"local"`: ADR-086 §5.1 **nu** cere `PROMOTED`.
 
 ### G. Ce urmează — NIMIC automat
 
-**Pasul 2** (guvernarea artefactului ML) e precondiția. **Pasul 3** ar fi un ADR
-dedicat pentru calea de servire, cu flag implicit oprit și shadow. **Pasul 4**,
-pe termen lung: singura sursă reală de câștig suplimentar e **decorelarea** —
-corelația e 0,78 azi, produsă de patru feature-uri; mai multă independență vine
-din informație pe care Oracle n-o are (calea accidentărilor, verificată live,
-componentă moartă cu impact de până la 30% pe xG), nu din reponderare.
+~~**Pasul 2** (guvernarea artefactului ML) e precondiția.~~ **Pasul 3** ar fi un
+ADR dedicat pentru calea de servire, cu flag implicit oprit și shadow.
+**Pasul 4**, pe termen lung: singura sursă reală de câștig suplimentar e
+**decorelarea** — corelația e 0,78 azi, produsă de patru feature-uri; mai multă
+independență vine din informație pe care Oracle n-o are (calea accidentărilor,
+verificată live, componentă moartă cu impact de până la 30% pe xG), nu din
+reponderare.
+
+> **🔴 [CORECTAT 2026-11-03, seara — „Pasul 2 e precondiția" e INCOMPLET, și
+> incompletitudinea schimbă ordinea.]** Pasul 2 e închis (ADR-086, flagul B
+> activ), dar precondiția reală are **trei** părți, nu una. Vezi **§20.H**.
+> Formularea de mai sus, citită literal, ar fi autorizat scrierea ADR-ului
+> Pasul 3 chiar azi — iar asta ar fi intrat în conflict direct cu două decizii
+> deja aprobate.
 
 **Toate măsurătorile din această secțiune sunt read-only.** Zero scrieri, zero
 cod de producție atins.
+
+---
+
+### H. 🔴 Rândul `control` are DOUĂ roluri — predicția servită ȘI baseline-ul porții (2026-11-03)
+
+**Constatare nouă, nedocumentată până acum, găsită verificând dacă Pasul 3 se
+poate scrie azi.** E motivul real pentru care nu se poate — mai puternic decât
+„dovada e subțire".
+
+#### Dovada, în cod, nu dedusă
+
+`oracle_engine.py:2396`, în `_log_challenger_shadow()`:
+
+```python
+control_prob_home=pred.prob_home_win, control_prob_draw=pred.prob_draw,
+control_prob_away=pred.prob_away_win,
+```
+
+Rândul `experiment_group = 'control'` **ESTE predicția servită**, bit cu bit. Iar
+ADR-072 (activ din 14 oct) a promovat exact acel rând la **baseline al porții de
+promovare**. Confirmat în date, nu presupus: `baseline_source = 'shadow_control'`
+pe **20** de evaluări `blend_v1/174e7e17` (17 oct – 3 nov) și **13**
+`xgboost_v1/dda4f7f3` (23 oct – 3 nov).
+
+> **Calea de servire și instrumentul de măsură sunt același obiect.**
+
+#### Consecința: o dependență CIRCULARĂ
+
+Dacă Pasul 3 schimbă `pred.prob_home_win` într-un blend, baseline-ul contra
+căruia se judecă **toți** Challengerii începe să conțină ML. Trei efecte, toate
+verificabile:
+
+1. **Avantajul oricărui Challenger scade prin construcție.** `blend_v1` compară
+   azi Oracle+ML(0,35) contra Oracle; cu baseline-ul devenit Oracle+ML(0,50),
+   comparația devine blend contra blend.
+2. **Seria de 12 zile a lui `174e7e17`** (condiția 3 din declanșatorul ADR-084,
+   §18.1) **își pierde comparabilitatea la mijloc** — exact obiecția pe care
+   ADR-084 și-a construit propriul declanșator: *„o poartă de promovare nu se
+   rafinează pe date care s-au mișcat ieri."*
+3. **Seria declanșatorului D-15** (3/3 × 10 zile, §15) e invalidată la fel.
+
+**Deci Pasul 3 are nevoie de poartă ca să fie judecat, dar Pasul 3 schimbă
+baseline-ul porții.** Nu e o obiecție de stil — e o imposibilitate de ordine.
+
+**Clasa, mai largă decât cazul**: proiectul a plătit deja de trei ori clasa „un
+ADR nou adaugă al doilea scriitor pe un câmp folosit de altul ca martor"
+(`referee`/ADR-077, `has_stats`/ADR-076, `actual_result`/ADR-085). Aici e forma
+**simetrică și mai greu de văzut**: *un singur câmp cu două roluri*. Niciun
+scriitor nou nu apare; rolul al doilea a fost adăugat de ADR-072, peste un câmp
+care deja îl avea pe primul.
+
+#### Al doilea conflict: ce a măsurat §20 ca fiind câștigător NU e o entitate guvernată
+
+Verificat: coloana „BLEND 50/50" din §20.C/§20.D vine din **`blend_engine.py`**,
+`WeightedAverageStrategy`, cu `weights = {}` → 1,0 pentru fiecare motor →
+**exact 50/50**. Nu există nicio cheie `blend_engine_config` în `model_config`
+(măsurat), deci implicitul e în vigoare. Modulul se declară el însuși: *„NU este
+un Challenger, nu este un model ML separat."*
+
+Între timp, `blend_v1` — care **ESTE** familie în Model Registry, cu campion
+PROMOVAT `8ac89c70` — amestecă la **0,35**, prin altă funcție,
+`ml_predictor.blend_predictions(ml_weight=0.35)`, cu **un singur apelant**
+(`learning_core/blend_challenger_shadow.py:89`).
+
+| | mecanismul măsurat ca mai bun | mecanismul guvernat |
+|---|---|---|
+| cod | `blend_engine.py` | `ml_predictor.blend_predictions` |
+| pondere | **0,50** (implicit) | **0,35** |
+| identitate Model Registry | **niciuna** | `blend_v1`, campion `8ac89c70` |
+| scalare pe încredere | nu | **da** — `effective_w = w · min(samples/150, 1)` |
+
+**„Servim blendul de 50/50" NU înseamnă „servim campionul blend".** Ar însemna
+să servim o combinație **neînregistrată**, contra regulii Learning Core *„orice
+model identificabil unic prin (`algorithm_family`, `algorithm_version`,
+`training_run_id`, `dataset_id`)"*. Și e o capcană de reproducere: cele două
+mecanisme **nu sunt interschimbabile nici la aceeași pondere nominală**, din
+cauza lui `sample_factor`.
+
+#### Al treilea: premisa se erodează, mai repede decât a lui ADR-084
+
+`xgboost_v1/dda4f7f3` — al cărui semnal ML **este** sursa valorii blendului:
+
+| zi | n | Δacc | Δbrier | Δlog-loss | sem |
+|---|---:|---:|---:|---:|---:|
+| 23 oct | 204 | +8,33pp | **−0,0410** | −0,0612 | **3/3** |
+| 26 oct | 337 | +5,34pp | −0,0213 | −0,0317 | 1/3 |
+| 30 oct | 378 | +5,56pp | −0,0210 | −0,0313 | **3/3** |
+| **3 nov** | **520** | **+3,27pp** | **−0,0106** | **−0,0148** | **0/3** |
+
+Avantajul pe Brier s-a contractat cu **74%**, iar semnificația a dispărut
+complet. `blend_v1` erodează la fel (−0,0136 → −0,0082, §18.1). Câștigul măsurat
+al blendului 50/50 e **−0,0089 pe Brier** — **același ordin de mărime** cu
+avantajul actual al lui XGBoost singur, care încă scade. Cele două nu sunt
+independente: blendul câștigă *din* informația independentă a ML-ului.
+
+#### Ce ADR-086 a rezolvat, și ce NU
+
+Verificat la `oracle_engine.py:648`: `ml_source` e în continuare **`"local"`**.
+ADR-086 §5.1 o spune explicit — **nu cere `PROMOTED` pentru servire**, fiindcă ar
+fi oprit ML-ul azi. Deci Pasul 2 e închis *așa cum proiectul l-a definit*
+(trasabilitate + etichetă corectă + excluderea artefactelor respinse), dar grija
+de fond din §20.F — *„artefact din afara Model Registry"* — **rămâne**, iar
+Pasul 3 ar servi exact ieșirea acelui artefact.
+
+#### Un punct ÎN FAVOAREA scrierii, găsit la aceeași verificare
+
+**ADR-052 §83 a anticipat și amânat explicit** exact această întrebare:
+
+> *„dacă conectarea ML→Blend la nivel de servire live ridică o întrebare
+> similară […] acea întrebare se tratează separat, la momentul Implementation
+> Blueprint-ului relevant, nu presupusă aici."*
+
+Deci Pasul 3 **nu** e o mișcare neautorizată — e tratamentul separat spre care
+ADR-052 a trimis. De reținut și că `docs/04_LEARNING_CORE/RUNTIME_CONTRACT.md` e
+**FROZEN prin ADR-019**: dacă implementarea adaugă un al doilea consumator al
+ieșirii ML în calea de servire, ADR-ul trebuie s-o declare, nu s-o presupună.
+
+#### O ipoteză proprie, verificată și INFIRMATĂ
+
+Credeam că am un argument tare în plus: `home_shots` alimentează
+`shot_dominance`, unul din **doar 4** feature-uri ML independente de Oracle, iar
+ADR-085 a reparat exact acea coloană pe 2 noiembrie — deci măsurătoarea §20 ar fi
+pe date care s-au mișcat ieri. **Măsurat pe fereastra §20**: acoperire
+`home_shots` **99,8% (aug) / 98,9% (sep) / 100% (oct) / 100% (nov)**; golul
+recuperat = **27 din ~1820 = 1,5%**. **Prea mic ca să fie argument.** Ipoteza
+cade, și se consemnează ca atare — pana ADR-076 se închisese retroactiv prin
+recuperarea D-B și prin ceilalți scriitori ai coloanei.
+
+#### ORDINEA FORȚATĂ — precondiția reală a Pasului 3
+
+| # | ce trebuie să se închidă întâi | starea la 3 nov |
+|---|---|---|
+| 1 | **ADR-084** — decizia de fond pe poartă | cel mai devreme **5 nov** (ziua 3 din 3) |
+| 2 | **D-15** — declanșatorul 3/3 × 10 zile, `n` ≥ 500 | serie **0** pe ambii; XGBoost **0/3** |
+| 3 | **Pasul 3** — ADR pentru calea de servire | abia după 1 **și** 2 |
+
+**Nu e prudență, e ordine derivată**: ambele decizii de mai sus citesc baseline-ul
+pe care Pasul 3 l-ar schimba.
+
+**Și subiectul se poate închide singur**: dacă erodarea continuă pe ambele
+familii, nu va mai exista nimic de servit — iar asta e un **răspuns**, nu un
+eșec. Se consemnează acum, ca să nu fie citit mai târziu ca ezitare.
 
 ---
 
