@@ -356,13 +356,54 @@ Linia de bază, măsurată **înainte** de orice schimbare (3 noiembrie, cifrele
 | rulări cu artefact | 5 |
 | artefact servit azi | `dda4f7f3` |
 | familia Challengerului lui | `xgboost_v1` / SUCCEEDED |
-| rulări etichetate `blend_v1` în `training_runs` | **0** |
+| rulări etichetate `blend_v1` în `training_runs` | **1** — vezi §6.1: scrisesem „0", și era o DEDUCȚIE prezentată ca măsurătoare |
 | nepotrivire servit ↔ evaluat | **37,4 / 89,9 zile = 41,6%** |
 
-**După A, la prima antrenare cerută de `blend_v1`**: apare primul rând
-`training_runs` cu `algorithm_name='blend_v1'`, iar
-`list_recent_training_runs('xgboost_v1','all')` **nu** îl vede. Acela e testul
-decisiv — nu „suita e verde".
+**După A, la prima antrenare cerută de `blend_v1`**: apare un rând
+`training_runs` cu `algorithm_name='blend_v1'` **și `created_at` ulterior
+livrării ADR-086** — nu „primul rând", fiindcă unul există deja din 4 august —
+iar `list_recent_training_runs('xgboost_v1','all')` **nu** îl vede. Acela e
+testul decisiv — nu „suita e verde".
+
+### §6.1 🔴 O cifră a mea din tabelul de mai sus era FALSĂ — deducție prezentată ca măsurătoare
+
+Prima versiune scria: *rulări etichetate `blend_v1` în `training_runs` = **0**
+(zero, din totdeauna)*. **Nu am numărat niciodată.** Am dedus-o din mecanismul
+din §2 (eticheta hardcodată) și am scris deducția cu aparența unei cifre
+măsurate — exact clasa de eroare pe care §0 al acestui ADR o reproșează altor
+trei afirmații de-ale mele. Găsită la verificarea de după push, nu de un test.
+
+**Măsurat: 1 rând** — și e `8ac89c70`, **campionul `blend_v1` activ**, etichetat
+**corect**, din 4 august, cu artefact, `PROMOTED`.
+
+**Nu infirmă nimic din §2 — îl confirmă cu martor pozitiv**, iar perechea e
+vizibilă în date:
+
+| `training_run_id` | `algorithm_name` | `created_at` | scris de |
+|---|---|---|---|
+| `d784f19f` | `xgboost_v1` | 2026-08-04 **14:46:35.541** | `_record_training_run()` |
+| `8ac89c70` | **`blend_v1`** | 2026-08-04 **14:46:35.811** | `training_runner.run_training()` |
+
+**270 de milisecunde** între ele, același `samples_used = 49983`, același mesaj.
+Pe 4 august adaptorul blend încă genera un `uuid` **propriu**, deci
+`storage.save_training_run()` nu avea ce să sară — și scria al doilea rând, **cu
+eticheta corectă**. Avem, așadar, toate trei regimurile atestate în producție:
+
+| regim | rânduri per antrenare | eticheta |
+|---|---:|---|
+| înainte de auditul ADR-051/052 | **2** | corectă (pe al doilea rând) |
+| după audit, până la ADR-086 | **1** | **greșită** |
+| **de la ADR-086 A** | **1** | **corectă** |
+
+Reparația de atunci a schimbat „două rânduri, etichetă corectă" în „un rând,
+etichetă greșită". A fost alegerea bună — un rând per tentativă e corect — dar
+a plătit cu eticheta, și nimeni n-a observat fiindcă singurul ei cititor e
+calea de servire (§3.2), unde consecința a fost tăcută.
+
+**O consecință care se închide curat**: campionul activ `8ac89c70` e etichetat
+`blend_v1`, deci `list_recent_training_runs('xgboost_v1','all')` **nu l-a văzut
+niciodată** — consecvent cu §1.2, unde cele 5 artefacte servite nu îl includ.
+Verificarea mea era corectă; afirmația despre cauză era nemăsurată.
 
 **Contrapondere obligatorie**: numărul total de rânduri `training_runs` per
 tentativă de antrenare trebuie să rămână **1**. Dacă devine 2, defectul
@@ -493,6 +534,19 @@ Fișierele au fost restaurate din instantanee și verificate cu `md5sum -c`
 `feature_engine.py`, `recalibration.py`, `app.py`, `oracle_api.py`) e **GOL**.
 Zero migrări, zero tabele, zero coloane. Singurul consumator real al etichetei
 e calea de servire (§3.2).
+
+### §9.6bis Corecție de după push, în aceeași zi — §6.1
+
+Linia de bază din §6 conținea o cifră pe care o **dedusesem** și o scrisesem ca
+măsurată („0 rânduri `blend_v1`"). Măsurat: **1**, campionul `8ac89c70`.
+Corectată, cu perechea de 270 ms care confirmă mecanismul. Testul decisiv din
+§6 a fost și el rescris — „primul rând" devenise un criteriu care s-ar fi
+îndeplinit din istoric, nu din reparație.
+
+**Lecția, în propriile condiții ale acestui ADR**: §0 enumeră trei afirmații
+false de-ale mele, iar §6 conținea o a patra, de aceeași clasă, scrisă în
+același document. **O deducție corectă despre mecanism nu devine o măsurătoare
+fiindcă mecanismul e corect.**
 
 ### §9.7 Ce rămâne de făcut
 

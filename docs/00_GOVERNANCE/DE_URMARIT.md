@@ -2484,7 +2484,7 @@ din `storage.save_training_run()`.
 
 | ce | valoare |
 |---|---|
-| rânduri `training_runs` cu `algorithm_name='blend_v1'` | **0** (zero, din totdeauna) |
+| rânduri `training_runs` cu `algorithm_name='blend_v1'` | **1** — `8ac89c70`, campionul blend activ, din 4 august (scrisesem „0, din totdeauna": era o **deducție** din mecanism, nu o măsurătoare — ADR-086 §6.1) |
 | rulări `trained` pentru `xgboost_v1`/`all` | 64 |
 | dintre ele, cu artefact persistat | 5 |
 | artefact servit | `dda4f7f3` (familia Challengerului: `xgboost_v1`) |
@@ -2505,7 +2505,12 @@ FROM training_runs WHERE league_scope = 'all' GROUP BY 1 ORDER BY 1;
 
 ### Ce TREBUIE să se vadă
 
-1. **Apare primul rând** cu `algorithm_name = 'blend_v1'`.
+1. **Apare un rând** cu `algorithm_name = 'blend_v1'` **și `created_at` ulterior
+   lui 2026-11-03** — nu „primul rând": unul există deja, din 4 august, scris pe
+   vremea când adaptorul blend genera un `uuid` propriu și `training_runner`
+   apuca să scrie al doilea rând, **cu eticheta corectă** (ADR-086 §6.1 —
+   perechea `d784f19f`/`8ac89c70`, la 270 ms distanță, e martorul pozitiv al
+   mecanismului).
 2. **UNUL SINGUR per tentativă de antrenare.** Dacă apar două, varianta
    respinsă pentru A s-a strecurat cumva și defectul reparat la auditul
    ADR-051/052 a fost reintrodus → **reparația se retrage**. Contrapondere deja
