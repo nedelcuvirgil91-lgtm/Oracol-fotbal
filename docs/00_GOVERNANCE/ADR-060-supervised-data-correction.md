@@ -205,3 +205,102 @@ Executat 2026-08-23, cu aprobare explicită separată (condiția 4).
 - `scripts/analyze_d2_vocabulary_drift.py`, `scripts/detect_identity_alias_candidates.py` — pregătirea Fazei 2 (neexecutată)
 - `scripts/measure_elo_divergence.py` — măsurătoarea care motivează Faza 3, rulată PRE (`run 32558948226`) și POST (`run 32582899754`) rebuild pentru închiderea buclei
 - `scripts/check_identity_drift.py` — verificarea/regenerarea baseline-ului folosită pentru închiderea Fazei 4
+
+---
+
+## Jurnal de execuție — retragerea backup-ului (2026-11-03)
+
+**Revizuirea cerută de §„Backup — decizie de retenție (2026-08-23)" s-a produs pe
+2026-11-03, cu 43 de zile întârziere** față de termenul notat acolo
+(~2026-09-21). Întârzierea nu e un accident: ADR-ul însuși consemnează că
+reminderul automat n-a putut fi programat și că „termenul rămâne doar notat
+aici, de readus în discuție manual". **Un termen fără mecanism s-a dovedit, a
+doua oară, că nu se ține** — la fel ca la ADR-069 (39 de zile). Lecția e
+consemnată separat, în `CLAUDE.md` §D-6.
+
+### Decizie: ȘTERGERE, aprobată explicit
+
+`match_history_backfill_backup_20260822` — **retras**. Migrarea
+`database/migrations/059_drop_adr060_backfill_backup.sql`, cu motivația completă
+în antetul ei.
+
+### Cele cinci verificări, măsurate ÎNAINTE de aprobare
+
+1. **Datele nu se pierd.** Toate cele 51.046 de rânduri din backup există în
+   continuare în `match_history` — join pe `id` a potrivit 51.046/51.046, iar
+   contra-verificarea („câte rânduri din backup NU au geamăn?") a dat **0**,
+   rulată din nou ca pre-flight imediat înainte de ștergere.
+2. **Ce ținea unic erau valori DOVEDIT greșite.** Diferențe față de starea de
+   azi: 14.795 de rânduri cu alt ELO pre-meci, 14.817 cu alt ELO post-meci,
+   6.892 cu altă formă, 5.025 cu alt H2H, 6 cu alt `backfill_done`. Iar tabelul
+   din §„Măsurătoare de închidere a buclei" a arătat că acele valori erau cele
+   incorecte: ELO pre-meci identic 66,4% → **100,0%**, divergență maximă **641 →
+   0**.
+3. **Pretenția e reproductibilă fără backup.** `scripts/measure_elo_divergence.py`
+   recalculează ELO din rezultatele reale; nu citește tabela. Cifrele
+   înainte/după sunt deja în acest document.
+4. **Cele 81 de rânduri cu identitate schimbată** după crearea backup-ului au
+   fost listate și citite individual, tocmai fiindcă ar fi putut ascunde o
+   redenumire neconsemnată. **Toate** sunt documentate: dezbrăcarea sufixului de
+   țară (ADR-078 Faza 1), `Din. Zagreb`→`Dinamo Zagreb`, `St. Truiden`→
+   `St Truiden` (unificarea formelor abreviate, 2026-08-23),
+   `Dyn. Kyiv (UKR)`→`Dynamo Kyiv` (ADR-078 Clasa B), `Red Bull Salzburg`→
+   `Salzburg` (precedentul Salzburg). Niciun nume neexplicat.
+5. **Zero dependențe, verificate la nivel de BAZĂ, nu doar prin `grep`**: 0
+   vederi (`information_schema.view_table_usage`), 0 chei străine, 0
+   funcții/proceduri care o numesc (`pg_proc.prosrc`), 0 triggere, 0 indecși.
+   Plus 0 referințe în cod (`*.py`/`*.sql`/`*.yml`/`*.json`).
+
+**Spațiul NU a fost argumentul**, și se scrie explicit ca să nu fie citit așa mai
+târziu: 9.768 kB = **2,26%** din cele 422 MB de tabele publice. Argumentul a fost
+că plasa de siguranță a unei operații încheiate și verificate acum 73 de zile nu
+mai e o plasă — e o tabelă fără proprietar, iar proprietarul produsului
+respinsese explicit, în august, „păstrare pe termen nelimitat fără termen".
+
+### Execuție și verificare
+
+Canalul MCP a fost **blocat**: atât `execute_sql` cât și `apply_migration` sunt
+gatate de confirmarea proprie a serverului Supabase pentru instrucțiuni
+distructive, iar dialogul nu ajungea la proprietarul produsului (două tentative,
+ambele expirate la 60 s). `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`, din
+aceeași sesiune, a trecut — deci poarta e pe clasificarea „distructiv", nu pe
+canal. Ștergerea a fost rulată de proprietarul produsului în SQL Editor, cu
+confirmarea „Potential issue detected → Run query": `Success. No rows returned`.
+
+Verificat după, read-only:
+
+| verificare | înainte | după |
+|---|---:|---:|
+| tabele cu „backup" în nume | 2 | **1** |
+| `match_history_backfill_backup_20260822` | există | **0** |
+| tabele publice | 62 | **61** |
+| mărime tabele `public` | 422 MB | **412 MB** |
+| `match_history` | — | **59.904**, neatins |
+| backup ADR-069 | 459 rânduri | **459**, RLS `true` |
+| tabele `public` fără RLS | 1 | **0** |
+
+### 🔴 Constatare colaterală: „corpus complet = 0" NU e un invariant stabil
+
+Verificarea de după a reluat interogarea de închidere din §„Verificare finală pe
+întregul corpus", care dăduse **0** în august. Azi dă **3**. Nu are legătură cu
+ștergerea — un `DROP` pe o tabelă de backup nu poate atinge `match_history` — dar
+a fost investigată, nu ignorată.
+
+Cele 3 sunt meciuri de pe **2 noiembrie, 20:00-20:15 UTC** (Benfica–Alverca,
+Gil Vicente–Vitoria Guimaraes, Dep. A Coruna–CA Osasuna). Latența e normală,
+măsurată pe 10 zile: 24 oct – 1 noiembrie au **100%** `backfill_done`, iar din
+16 meciuri de pe 2 noiembrie **13** sunt complete.
+
+Cauza celor 3 e o **proprietate de ordonare a pipeline-ului**, nu un defect:
+rezultatul lor a fost scris de Flashscore în **etapa 5** (statistici captate
+09:47-09:51 azi), adică **după** ce `feature_update` — care rulează în interiorul
+etapei 1-4 — trecuse deja. Un meci al cărui rezultat sosește pe calea Flashscore
+primește feature-urile abia la rularea următoare.
+
+**Consecința pentru citirea acestui document**: cifra „0" din §„Verificare finală
+pe întregul corpus" era corectă **la data măsurării** și rămâne corectă ca dovadă
+că rebuild-ul a reușit — dar **nu** e o proprietate permanentă a bazei. E 0 doar
+când niciun meci n-a terminat între ultimul `feature_update` și măsurătoare.
+Cine o reia ca invariant va găsi un număr mic și nenul, și va căuta o regresie
+inexistentă — exact clasa de eroare pe care `CLAUDE.md` o consemnează la
+comanda de verificare cu ieșire greșită (`grep -c BASELINE_SHADOW_CONTROL`).

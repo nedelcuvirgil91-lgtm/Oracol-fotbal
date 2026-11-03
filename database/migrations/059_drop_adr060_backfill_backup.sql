@@ -1,0 +1,67 @@
+-- ════════════════════════════════════════════════════════════════════════════
+-- 059 — Retragerea backup-ului ADR-060 (`match_history_backfill_backup_20260822`)
+-- ════════════════════════════════════════════════════════════════════════════
+--
+-- CONTEXT. ADR-060 (Supervised Data Correction, 2026-08-22) a resetat și
+-- reconstruit 20 de coloane de feature pentru 51.046 de rânduri din
+-- `match_history`. Înainte de scrierea distructivă s-a creat un snapshot:
+-- `match_history_backfill_backup_20260822`. Decizia de retenție, luată explicit
+-- de proprietarul produsului în aceeași zi, a fost **păstrare 30 de zile, cu
+-- revizuire la ~2026-09-21** — explicit NU „păstrare pe termen nelimitat fără
+-- termen". Revizuirea a venit pe 2026-11-03, cu 43 de zile întârziere (intrarea
+-- D-6 din `CLAUDE.md`), fiindcă termenul n-avea niciun mecanism care să-l
+-- urmărească.
+--
+-- DE CE SE ȘTERGE — fiecare punct MĂSURAT pe producție înainte de aprobare,
+-- nu presupus (`CLAUDE.md`, „Verificat, nu presupus"):
+--
+--   1. Datele NU se pierd. Toate cele 51.046 de rânduri din backup există în
+--      continuare în `match_history` (join pe `id` a potrivit 51.046/51.046).
+--   2. Ce ținea UNIC erau valorile de DINAINTE de backfill: 14.795 de rânduri
+--      cu alt ELO pre-meci, 14.817 cu alt ELO post-meci, 6.892 cu altă formă,
+--      5.025 cu alt H2H. Iar ADR-060 a DOVEDIT că acele valori erau greșite:
+--      ELO pre-meci identic (persistat = recalculat) 66,4% -> 100,0%,
+--      divergență maximă 641 de puncte -> 0.
+--   3. Pretenția e reproductibilă FĂRĂ backup: `scripts/measure_elo_divergence.py`
+--      recalculează ELO din rezultatele reale; nu citește această tabelă.
+--      Cifrele înainte/după sunt deja consemnate în tabelul din ADR-060.
+--   4. Cele 81 de rânduri cu identitate schimbată după backup au fost verificate
+--      individual: TOATE sunt redenumiri documentate — dezbrăcarea sufixului de
+--      țară (ADR-078 Faza 1), `Din. Zagreb`->`Dinamo Zagreb`,
+--      `St. Truiden`->`St Truiden` (unificarea formelor abreviate, 2026-08-23),
+--      `Dyn. Kyiv (UKR)`->`Dynamo Kyiv` (ADR-078 Clasa B),
+--      `Red Bull Salzburg`->`Salzburg` (precedentul Salzburg). Niciun nume
+--      neexplicat, deci nicio dovadă unică pierdută.
+--   5. Zero dependențe, verificate la nivel de BAZĂ, nu doar prin `grep`: zero
+--      vederi (`view_table_usage`), zero chei străine, zero funcții/proceduri
+--      care o numesc (`pg_proc.prosrc`), zero triggere, zero indecși. Plus zero
+--      referințe în cod (`*.py`/`*.sql`/`*.yml`/`*.json`).
+--
+-- SPAȚIUL NU E ARGUMENTUL, și se spune explicit ca să nu fie citit așa mai
+-- târziu: 9.768 kB = 2,26% din cele 422 MB de tabele publice. Argumentul e că
+-- plasa de siguranță a unei operații încheiate și verificate acum 73 de zile nu
+-- mai e o plasă — e o tabelă fără proprietar.
+--
+-- DE CE O MIGRARE ȘI NU UN `DROP` AD-HOC. Un `DROP` rulat prin MCP nu lasă
+-- nicio urmă nici în repo, nici în istoricul de migrări — exact clasa de punct
+-- orb care a rupt lanțul de amprente `model_config` (D-14: trei `UPDATE`-uri
+-- ad-hoc care au omis `updated_at`, iar garda AST nu putea vedea SQL rulat prin
+-- MCP). O migrare e trasabilă prin construcție (North Star #9).
+--
+-- NU ATINGE backup-ul ADR-069 (`flashscore_match_context_retention_backup_20260826`).
+-- Acela se PĂSTREAZĂ, prin decizie explicită din 2026-11-03, fiindcă e singura
+-- copie a 254 de rânduri de H2H adânc (1967-11-10 -> 2021-02-20) pe care tabela
+-- vie nu le poate ține prin construcție — `flashscore_match_context` are maximum
+-- 5 sloturi per (fixture, categorie), iar `meeting_order` e o POZIȚIE, nu o
+-- identitate. Vezi amendamentul 1 la ADR-069.
+--
+-- IDEMPOTENT prin `IF EXISTS`. FĂRĂ `CASCADE`, deliberat: dacă apare vreodată o
+-- dependență pe care verificarea de mai sus n-a văzut-o, migrarea trebuie să
+-- EȘUEZE, nu să distrugă în cascadă.
+--
+-- Garda `tests/test_migration_grants.py` nu se aplică: nu creează nicio tabelă
+-- (`incalca_regula` cere `tabele_create(sql)` nevid), deci nu e nevoie de niciun
+-- `GRANT`.
+-- ════════════════════════════════════════════════════════════════════════════
+
+DROP TABLE IF EXISTS public.match_history_backfill_backup_20260822;

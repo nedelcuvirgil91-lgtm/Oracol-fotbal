@@ -200,7 +200,18 @@ def test_create_table_din_COMENTARIU_nu_declanseaza_fals():
 def test_prinde_si_tiparul_CREATE_TABLE_AS():
     """Tiparul de backup. Tocmai el a produs singura tabelă fără RLS din
     proiect (`flashscore_match_context_retention_backup_20260826`), fiindcă
-    `CREATE TABLE AS` nu moștenește nimic de la sursă."""
+    `CREATE TABLE AS` nu moștenește nimic de la sursă.
+
+    [ACTUALIZAT 2026-11-03] Acea tabelă a primit între timp RLS, cu aprobare
+    explicită (ADR-069 Amendamentul 1, D-6), deci azi `public` are ZERO tabele
+    fără RLS. Fraza de mai sus rămâne ca **istoric al cauzei**, nu ca stare —
+    cine o verifică azi va găsi RLS activ și ar putea crede că garda păzește
+    ceva inexistent. Păzește tiparul care a produs-o, iar tiparul e neschimbat:
+    `CREATE TABLE AS` în continuare nu moștenește nici RLS, nici `GRANT`.
+
+    Garda NU detectează RLS — detectează lipsa `GRANT`-ului. Lipsa RLS e
+    detectată de lint-ul Supabase `rls_disabled_in_public` (nivel ERROR), care
+    exista și în august și pe care nimic din proiect nu îl citea."""
     sql = "CREATE TABLE backup_ceva AS SELECT * FROM ceva;"
     assert tabele_create(sql) == ["backup_ceva"]
     assert incalca_regula(sql)
