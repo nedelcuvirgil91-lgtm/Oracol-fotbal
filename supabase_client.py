@@ -38,6 +38,31 @@ _client_error: str | None = None
 # cititor, ar putea divergea — clasa de defect plătită deja la `_PAGE_SIZE`.
 EXPERIMENT_GROUP_CHAMPION = "champion"
 
+
+def _acum_utc() -> str:
+    """Momentul curent, ISO-8601 cu fus orar explicit — pentru orice coloană
+    `timestamptz` scrisă printr-un `upsert` care poate ajunge pe ramura
+    `DO UPDATE`.
+
+    DE CE EXISTĂ AICI, DUPLICAT față de `database.queries._acum_utc()`:
+    `database/queries.py` importă `supabase_client` (linia 68), deci un import
+    invers ar fi o dependință **„în sus"** între straturi — North Star #10.
+    Duplicarea e deliberată și costă trei linii; inversarea stratului ar costa
+    o regulă. Același raționament ca la `EXPERIMENT_GROUP_CHAMPION` de mai sus.
+
+    CAPCANA pe care o închide, pentru cine citește prima dată: `DEFAULT now()`
+    se aplică **numai** pe ramura `INSERT`. Un `upsert ... on_conflict` care nu
+    pune marcajul în payload îl **îngheață tăcut** la ora PRIMEI scrieri —
+    rândul își împrospătează conținutul și poartă o dată falsă. Clasa a fost
+    reparată în 6 locuri pe 2026-08-26 și declarată închisă; a reapărut aici,
+    a **șaptea** instanță, fiindcă garda de atunci scana un singur modul și o
+    listă fixă de tabele (vezi `tests/test_upsert_timestamp_freshness.py`).
+
+    Fusul NU e opțional: coloanele sunt `timestamptz`, iar un timestamp naiv ar
+    fi interpretat după fusul serverului — aceeași clasă de eroare tăcută, alt
+    mecanism."""
+    return datetime.now(timezone.utc).isoformat()
+
 # „Max Rows" al PostgREST — plafonul pe care serverul îl aplică SINGUR, chiar
 # dacă apelantul nu cere niciun `.limit()`. Numit aici ca testele să se lege de
 # el, nu de un 1000 scris de mână în două locuri care pot divergea.
@@ -683,8 +708,13 @@ def save_engine_comparison_snapshot(row: dict) -> bool:
     if client is None:
         return False
     try:
+        # `captured_at` EXPLICIT: upsert pe `fixture_id`, deci o reanalizare a
+        # aceluiași meci intră pe `DO UPDATE` și ar păstra ora primei scrieri.
+        # Măsurat înainte de reparație (2026-11-03): 464 din 1728 de rânduri
+        # (26,9%) aveau `captured_at` ANTERIOR antrenării artefactului care le
+        # produsese — decalaj de până la 66 de zile.
         client.table("engine_comparison_snapshots").upsert(
-            row, on_conflict="fixture_id",
+            {**row, "captured_at": _acum_utc()}, on_conflict="fixture_id",
         ).execute()
         return True
     except Exception as exc:
@@ -704,8 +734,13 @@ def save_validation_analysis_report(row: dict) -> bool:
     if client is None:
         return False
     try:
+        # `generated_at` EXPLICIT, din același motiv. Aici defectul e deocamdată
+        # STRUCTURAL, nu materializat — măsurat 2026-11-03: 88 de rapoarte, 88
+        # de chei `(cadence, period_end)` distincte, deci niciunul n-a fost încă
+        # regenerat. Se repară acum tocmai fiindcă prima regenerare ar produce
+        # un raport proaspăt purtând o dată veche, fără niciun semnal.
         client.table("validation_analysis_reports").upsert(
-            row, on_conflict="cadence,period_end",
+            {**row, "generated_at": _acum_utc()}, on_conflict="cadence,period_end",
         ).execute()
         return True
     except Exception as exc:
