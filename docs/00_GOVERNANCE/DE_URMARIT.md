@@ -2715,3 +2715,112 @@ familia `xgboost_v1` n-are niciun Challenger în stare neterminală, **ML se
 oprește complet** și se servește Oracle-only. Pe istoric a existat o fereastră
 de **8,4 ore** în acea situație (13-14 oct). E comportamentul corect — nimic
 negatat nu servește — dar nu e o ipoteză, s-a întâmplat.
+
+---
+
+## §22 — `closing_*` din `odds_history` NU e o cotă de închidere (măsurat 2026-11-03)
+
+**Semnalul era deschis din 21 octombrie** și consemnat ca „NEmăsurat deliberat":
+`closing_*` vs `opening_*`, aceeași casă și același meci, dădea **+0,01% /
++0,01% / +0,06%** pe 1312 de meciuri — zero mișcare de preț, ceea ce piețele
+reale nu fac. Investigat acum, read-only, fiindcă atinge **cea mai tare
+afirmație măsurată a proiectului**.
+
+### §22.1 Ce s-a stabilit
+
+**1. Nu e o anomalie de piață — pentru 9 rânduri din 10 nu există două
+observații.**
+
+```
+randuri_total                     3736
+opening_fetched_at = closing_...  3354   (89,8%)
+closing_fetched_at > opening_...   382   (10,2%)
+```
+
+**2. Pe provider**, și al doilea e cel care contează:
+
+| provider / import | rânduri | o singură captură | închidere reală |
+|---|---:|---:|---:|
+| `football-data.co.uk` / `historical_backfill` | 1520 | **100,0%** | 0 |
+| `the-odds-api` / `live_capture` | 2216 | 82,8% | **382** |
+
+Pentru importul istoric e **de așteptat**: fișierul sursă are un singur set de
+cote, scris în ambele perechi.
+
+**3. Mecanismul, citit în `database/migrations/010_...sql`, nu presupus:**
+
+```sql
+ON CONFLICT (fixture_id, bookmaker) DO UPDATE SET
+    closing_home = ..., closing_draw = ..., closing_away = ...,
+    closing_fetched_at = EXCLUDED.closing_fetched_at
+WHERE odds_history.closing_home IS DISTINCT FROM EXCLUDED.closing_home
+   OR odds_history.closing_draw IS DISTINCT FROM EXCLUDED.closing_draw
+   OR odds_history.closing_away IS DISTINCT FROM EXCLUDED.closing_away;
+```
+
+> **`closing_fetched_at` înseamnă „când s-a schimbat ultima dată prețul", nu
+> „când ne-am uitat ultima dată".**
+
+E o **gardă de idempotență deliberată** (§8 din designul Frozen: *„întoarce
+False dacă nu s-a schimbat nimic"*), **corectă pentru scopul ei** — dar cu o
+consecință pe care nu o scrie nimeni: coloana nu poate răspunde la „cât de
+aproape de fluier e ultima observație". **Rudă a clasei marcajului înghețat**
+(cele 6 instanțe reparate pe 26 aug + instanțele 7-8 de pe 3 nov), cu mecanism
+NOU: marcajul **e** în clauza `SET`, dar gatat de un `WHERE`.
+
+**4. Cifrele reperului sunt aproape neatinse.** Pe cele **214** rânduri cu două
+capturi reale: favoritul se schimbă în **6** (2,8%), cota gazdei e **identică în
+89** (41,6%), `|Δ|` mediu pe cota gazdei **0,055**. Deci **nu calculul e greșit,
+e eticheta.**
+
+### §22.2 Consecința pentru afirmația de titlu — e mai slabă decât suna
+
+Reperul extern e etichetat „cote medii de **închidere**". În realitate e
+*„ultima cotă observată, care pentru 88% din meciuri e prima"*.
+
+**Direcția erorii e cunoscută și e DEFAVORABILĂ lui Oracle.** Cotele de
+închidere sunt estimarea cea mai ascuțită a pieței; cele timpurii sunt
+substanțial mai slabe. Deci Oracle a fost comparat cu o versiune **mai slabă** a
+pieței și tot a pierdut cu 1,98pp (z=1,35, nesemnificativ). Contra închiderii
+reale, piața ar scora probabil mai sus → decalajul real **mai mare**.
+
+**Afirmația rămâne NEINFIRMATĂ** — nu avem cote de închidere cu care s-o
+testăm — **dar se citește de acum astfel**: Oracle e statistic indistinct de
+prețurile **timpurii** ale pieței, nu de linia de închidere.
+
+### §22.3 🔴 TREI erori proprii, prinse în această singură investigație
+
+Toate trei de **aceeași clasă**: *o măsurătoare al cărei domeniu sau sens a fost
+moștenit dintr-un artefact, nu derivat din întrebarea pusă.*
+
+| # | ce am citit | ce era de fapt |
+|---|---|---|
+| 1 | `ttl = 240` în `oracle_api.py:284` ca TTL-ul cotelor → „10 zile" | ramura de **fallback în memorie**, folosită doar dacă `CacheManager` lipsește, iar unitatea e `ttl * 60` **secunde = 4 ore**. TTL-ul real e `CATEGORY_TTL["odds"] = 4.0` ore |
+| 2 | „captura de închidere e la 3,4 zile de fluier" ca dovadă de sub-eșantionare | măsoară **când a încetat prețul să se miște** (vezi §22.1 pct. 3), nu când ne-am uitat |
+| 3 | „`/odds` apelat în doar 3 zile din 8" | **vârsta reparației de etichetă**: înainte de 1 nov, toate cele patru endpoint-uri Odds API se scriau ca `sports` (0 rânduri separate înainte de 1 nov, verificat pe zile) |
+
+A doua și a treia sunt **continuarea directă** a clasei numite în §18.3 în
+aceeași zi (fereastra de 60 de zile, filtrul `actual_result IS NOT NULL`) —
+deci **cinci instanțe într-o singură zi, trei dintre ele în această
+investigație**. Iar a treia e exact ce avertiza `CLAUDE.md` despre eticheta
+colapsată: *„o etichetă colapsată face și comparațiile înainte/după
+nefiabile."*
+
+### §22.4 Ce rămâne deschis — și ce NU se face
+
+**NEMĂSURAT**: cât de des observăm efectiv cotele unui meci înainte de fluier.
+**Imposibil de răspuns din jurnal înainte de 1 noiembrie** (eticheta colapsată),
+măsurabil de acum cu ~o săptămână de date. Până atunci, orice afirmație despre
+frecvența de eșantionare e o ipoteză.
+
+**NU se atinge nimic.** `services/odds_persistence_service.py` e **Frozen**
+(ADR-005/006), iar garda din RPC e **corectă** pentru scopul ei declarat.
+Radarul de value bets citește deliberat `opening_*` („garantat pre-meci"), deci
+nu e afectat. O cale care ar capta cote genuin târzii ar cere un ADR propriu, și
+nu se propune acum: valoarea e neclară, iar mecanismul relativ la fluier există
+deja în `lineup_sync.yml` (fereastră T-15min, țintind un provider mort).
+
+**Reparația reală de aici e de VOCABULAR, nu de cod**: coloana se numește
+`closing_*` și nu conține o închidere. Redenumirea ar fi o schimbare de contract
+de date (North Star #5), deci un ADR — iar costul ei depășește câștigul cât timp
+singurul cititor afectat e o analiză ad-hoc, nu codul de producție.

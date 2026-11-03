@@ -773,7 +773,17 @@ afirmație greșită, doar mai greu de prins, fiindcă pare prudență.**
 
 ## Reperul extern — cât de bun e Oracle, de fapt (măsurat prima dată 2026-10-14)
 
-**Până azi, Oracle fusese comparat doar cu el însuși și cu propriii Challengeri.** Nu exista nicio măsurătoare contra unui reper din afară. Acum există, pe **986 de meciuri terminate**, cu predicția SERVITĂ (rândul `control`) contra favoritului caselor de pariuri (cote medii de închidere din `odds_history`, cel mai mic preț = favorit), pe **exact același set de meciuri**:
+**Până azi, Oracle fusese comparat doar cu el însuși și cu propriii Challengeri.** Nu exista nicio măsurătoare contra unui reper din afară. Acum există, pe **986 de meciuri terminate**, cu predicția SERVITĂ (rândul `control`) contra favoritului caselor de pariuri (cote din `odds_history`, cel mai mic preț = favorit), pe **exact același set de meciuri**:
+
+> **🔴 [CORECTAT 2026-11-03 — rândul de mai sus spunea „cote medii de ÎNCHIDERE", și eticheta aceea e FALSĂ.]** Măsurat: **3354 din 3736 de rânduri (89,8%)** din `odds_history` au `opening_fetched_at` **identic** cu `closing_fetched_at` — adică o **singură observație**, scrisă în ambele perechi de coloane. Pe cohorta reperului: **1384 de meciuri cu o singură captură**, 191 cu două.
+>
+> **Cauza, citită în migrarea 010, nu presupusă**: `DO UPDATE ... WHERE closing_* IS DISTINCT FROM EXCLUDED.closing_*`. Deci **`closing_fetched_at` înseamnă „când s-a schimbat ultima dată prețul", nu „când ne-am uitat ultima dată"** — gardă de idempotență deliberată (§8 din designul Frozen), **corectă pentru scopul ei**, dar cu o consecință nescrisă nicăieri: coloana nu poate răspunde la întrebarea „cât de aproape de fluier e ultima observație".
+>
+> **Cifrele reperului sunt însă aproape neatinse**: pe cele 214 rânduri cu două capturi reale, favoritul se schimbă în **6** (2,8%), iar cota gazdei e identică în 89 (41,6%). Deci **nu calculul e greșit, e eticheta** — „favoritul după cota de închidere" e în realitate „favoritul după ultima cotă observată, care pentru 88% din meciuri e prima".
+>
+> **DIRECȚIA erorii e cunoscută și e DEFAVORABILĂ lui Oracle.** Cotele de închidere sunt estimarea cea mai ascuțită a pieței (încorporează echipe anunțate, accidentări, banii de ultim moment); cele timpurii sunt substanțial mai slabe. Deci Oracle a fost comparat cu o versiune **mai slabă** a pieței și tot a pierdut cu 1,98pp (z=1,35, nesemnificativ). Contra cotelor de închidere reale, piața ar scora probabil **mai sus**, deci decalajul real ar fi **mai mare**, nu mai mic. **Afirmația „pe 97,5% din volum, Oracle e statistic indistinct de casele de pariuri" rămâne neinfirmată, dar e mai slabă decât suna**: spune indistinct de prețurile **timpurii** ale pieței, nu de linia de închidere.
+>
+> **NEMĂSURAT, și nu se deduce**: cât de des observăm efectiv cotele unui meci înainte de fluier. Întrebarea e **imposibil de răspuns din jurnal înainte de 1 noiembrie**, fiindcă eticheta de endpoint colapsa cele patru endpoint-uri Odds API într-unul (`sports`) — reparată abia pe 1-2 nov. Devine măsurabilă de acum, cu ~o săptămână de date. Analiza completă, cu cele trei erori proprii prinse pe parcurs: `DE_URMARIT.md` §22.
 
 | Reper | Acuratețe |
 |---|---:|
