@@ -2,9 +2,9 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-11-04**. Ultimul element adăugat: **§3ter — ADR-071
-F3 remăsurat (12/13 politici peste prag), trei constatări noi și o corecție la
-o afirmație proprie din ziua precedentă**.
+Ultima actualizare: **2026-11-04** (a doua rundă). Ultimul element adăugat:
+**§16 ÎNCHISĂ — primul verdict Champion Guardian verificat, predicția se
+confirmă; plus §18.1 corectată, „erodare monotonă" retrasă pe punctul de 4 nov**.
 
 **Elemente deschise, în ordinea termenului:**
 
@@ -13,14 +13,15 @@ o afirmație proprie din ziua precedentă**.
 | **§3ter** | ⏳ **ADR-071 F3 — NEÎNCEPUT.** 8 săptămâni ✅ (8,4); prag 150 atins pe **12 din 13** politici, `market_floor_040` la **136** — îi trebuie și selecții NOI, nu doar rezolvarea celor 10 în așteptare (plafonul lor e 146). Trei constatări noi + o corecție la mine, 4 nov | **~8-10 noiembrie**, cu mecanism armat |
 | **§20.H** | 🔴 **Pasul 3 (servirea blendului) e BLOCAT de o dependență circulară** — rândul `control` e simultan predicția servită și baseline-ul porții, deci schimbarea servirii invalidează seriile pe care ADR-084 și D-15 se sprijină. Plus: ce a măsurat §20 ca mai bun (`blend_engine.py`, 50/50) **nu e** campionul `blend_v1` (0,35, Model Registry) | **după** ADR-084 și D-15 |
 | **§21** | ✅ Flagul B **ACTIV** din 3 nov 20:34:49. Rămâne: prima antrenare cerută de `blend_v1` (dovada Deciziei A) | fără termen — depinde de eliberarea slotului |
-| **§16** | 🔴 **PRIMUL VERDICT CHAMPION GUARDIAN** — R4 activat 2 nov 17:30:03. Predicție scrisă înainte: `healthy`, toate patru flagurile `false` | **rularea de noapte de 3 nov** |
-| **§18** | 🔴 **ADR-085 etapa 5** — testul decisiv NU e „restanța a scăzut", e ca **partiția pe oră să dispară** (era 47,8% seara vs 0,8% ziua). Și e **precondiția** deciziei de fond ADR-084 | **rularea de noapte de 3 nov**, apoi 3 zile |
+| **§18** | 🔴 **ADR-084 — decizia de fond pe poartă.** Condiția (2) ✅, condiția (3) ✅ 13 zile; condiția (1) e la **ziua 2 din 3**. Erodarea nu mai e „monotonă": 4 nov urcă pe toate trei (§18.1) | **5 noiembrie** (ziua 3 din 3) |
+| ~~**§16**~~ | ✅ **VERIFICAT 4 nov** — primul verdict Guardian: `healthy`, toate patru flagurile `false`, predicția se confirmă pe toate punctele. `model_champions` și `decision_feed` NEATINSE. Două cifre asumate corectate | închis, Etapa 3 activă |
+| ~~**§18.2**~~ | ✅ **ÎNCHISĂ 3 nov** — ADR-085 etapa 5: partiția pe oră a dispărut (7/7 meciuri de seară, `p ≈ 1,1%`) | închis |
 | **§19** | 📊 **Ablația Team Profile — rularea FINALĂ la ~16 xG/echipă.** Negativă de două ori (13 oct și 2 nov); interpretarea pentru decembrie e **declarată deja**, ca să nu alegem sensul după cifră | **~7 decembrie 2026** (median 11 azi, +1/săptămână) |
 | **§17** | 🔴 **Punctul B Odds API e BLOCAT de un cuplaj nescris** — `events_` și `odds_` împart categoria `"odds"`; comentariul care promite izolarea e FALS | te așteaptă |
 | **§15** | 📊 XGBoost bate Oracle-ul servit cu **+5,76pp**. Declanșator: 3/3 × 10 zile consecutive · n ≥ 500 | serie ruptă 25 oct; #13 a expirat 2 nov |
 | **§14** | Verdictul oscilează lângă prag — miza **reîncadrată** de §15: promovarea nu schimbă nimic servit | informativ |
 | ~~**§7**~~ | ✅ **ÎNCHIS 2 nov** — deciziile #12 și #13 au EXPIRAT prin sweep, `resolved_at = 10:19:32`, n = 600 / 447. Zero duplicate. Revin ~9 nov | închis |
-| **§9** | Supersedarea celor 30 de rânduri `openfootball` | fără termen, te așteaptă |
+| ~~**§9**~~ | ✅ **ÎNCHIS — executat 21 oct, verificat 4 nov.** Cele 30 de rânduri `openfootball`: **0 active, 30 supersedate**, o singură competiție (Champions League), 2024-09-17 → 2025-04-16. Rândul ăsta a stat „te așteaptă" **14 zile după execuție** — index stale, aceeași clasă „documentație care minte". Martor pozitiv cerut: id 130925 → `superseded_by = 3823`, `superseded_at = 21 oct 04:39:17` | închis |
 | ~~**§13**~~ | ✅ **EXECUTAT 22 oct** — `Sabah FC` unit cu `Sabah Baku` | închis |
 | ~~**§12**~~ | ✅ **EXECUTAT 26 oct** — ADR-081 complet: migrarea 058 + merge (`01ebd91`) | închis |
 
@@ -179,7 +180,13 @@ Al doilea de urmărit: `flashscore_team_dna/v1`, verdict înghețat de 34 de zil
 
 ---
 
-## 2ter. 🔴 `n = 1000` FIX la `flashscore_team_dna` — DE VERIFICAT LA URMĂTOAREA RULARE
+## 2ter. ✅ `n = 1000` FIX la `flashscore_team_dna` — ÎNCHIS, testul binar a ieșit curat
+
+> **✅ VERIFICAT 2026-11-04 (titlul de mai jos a rămas „DE VERIFICAT" cu ~2 săptămâni după ce testul trecuse — index stale, consemnat ca atare).** `experiment_registry` arată acum `flashscore_team_dna/v1` la **n = 1529**, reevaluat în aceeași zi (4 nov 09:11:41). **Nu era al cincilea plafon PostgREST** — cifra a trecut de 1000 și a continuat să crească, exact rezultatul care exclude un plafon. Un plafon ar fi rămas blocat la 1000 la infinit.
+>
+> Observație colaterală, din aceeași citire: statusul e acum **`monitoring`**, nu `candidate_for_promotion` (efectul ADR-080), iar `Δacc` a scăzut **+2,90 → +1,37pp** pe un `n` de 2,8× mai mare — coerent cu ablația negativă de două ori (D-7) și cu tiparul „avantaj timpuriu care regresează".
+>
+> Textul de mai jos se păstrează ca istoric al diagnosticului.
 
 **Starea**: `experiment_registry` arată `n_matches_evaluated = 1000` **exact**, iar rândurile eligibile numărate independent sunt **1022**. Diferență: **22**.
 
@@ -1578,6 +1585,21 @@ eșuează ~11 ori pe zi (măsurat 26 oct: **34 de apeluri / 0 reușite** în 3 z
 deci motivul refuzului intră singur. **Asta deblochează ADR-077**, oprit din 17
 oct exact fiindcă motivul nu putea fi citit.
 
+> **✅ VERIFICAT 2026-11-04 — contractul ține în ambele direcții, dar martorul a trebuit SCHIMBAT, fiindcă premisa interogării de mai sus s-a evaporat.**
+>
+> **SFI nu mai eșuează.** Măsurat pe 7 zile: **30 de apeluri, 30 reușite, 0 cu corp** — deci jumătatea „NULL pe succes" e verificată ✅, iar jumătatea „corp populat pe eșec" e **imposibil de verificat pe SFI**: ramura nu are rânduri. Cauza e cunoscută și datată: `9202d82` (26 oct 10:43) a reparat parametrul `d`, care eșuase 100% timp de 15 zile. **Nota de mai sus a fost scrisă pe 26 oct cu cifre de dinainte de propria noastră reparație din aceeași zi** — aceeași clasă ca premisa de volum a lui ADR-077.
+>
+> **Martorul pozitiv vine de la Odds API.** Pe `success = true`, **1656 de apeluri pe 5 provideri, ZERO cu corp** — niciun fals pozitiv. Pe `success = false`, rata brută pare proastă (48 din 360, iar `oddsapi` 1 din 202) — **dar e o rată calculată peste o fereastră care traversează reparațiile**, exact capcana de la ADR-085 etapa 5:
+>
+> | reparație | pe `main` | ultimul eșec de acel fel | după reparație |
+> |---|---|---|---|
+> | `1cd745c` — `/odds` pleca fără `apiKey` | 2 nov **11:01** | 2 nov **08:xx** — 34 × 401 pe `sports/odds` | **0** ✅ |
+> | `13fd1d4` — apelul `btts` eliminat | 2 nov **14:38** | 2 nov **09:35** — 14 × 422 pe `sports/odds` | **0** ✅ |
+>
+> Singurul eșec Odds API **de după** cablarea Amendamentului 1 (3 nov 14:51, `sports/events`, HTTP 401) **are corpul populat: 1 din 1.** Deci pe cohorta onestă contractul e respectat în ambele sensuri, iar cele două reparații de pe 2 noiembrie sunt **confirmate în producție**, nu doar în teste — zero 422 și zero 401 pe `/odds` în cele două zile de atunci.
+>
+> **Ce rămâne genuin neverificat**: comportamentul pe un eșec blocat **înainte** de cerere (cotă epuizată — `RateLimitManager` taie cererea, deci nu există răspuns HTTP și absența corpului e **corectă**, nu un defect). `freelivefootball` are 28 × 429 cu 9 corpuri, ceea ce e coerent cu amestecul celor două situații. Nu se raportează ca gol până nu se separă cele două cazuri.
+
 ---
 
 **Textul de mai jos e planul, păstrat ca istoric al deciziei.**
@@ -2181,9 +2203,27 @@ pornește automat (ADR-002).
 
 ---
 
-## §16. 🔴 Primul verdict al Champion Guardian — rularea de noapte de 3 noiembrie
+## §16. ✅ Primul verdict al Champion Guardian — VERIFICAT 2026-11-04, predicția se confirmă
 
 **ADR-037 R4 ACTIVAT 2026-11-02, 17:30:03 UTC**, aprobat explicit. `champion_guardian_enabled = true` (boolean). Prima expunere reală a Fazei D după **71 de zile** în care campionul n-a fost monitorizat deloc.
+
+> **✅ VERIFICAT 2026-11-04, read-only — predicția scrisă înainte de activare se confirmă pe toate punctele calitative.** `champion_health_evaluations` are **3 rânduri**, toate `blend_v1`/`all`/`8ac89c70`, toate `health_state = healthy`, `baseline_source = promotion_evaluation`, `brier_baseline = 0,6225` — toate patru flagurile `false` pe toate trei.
+>
+> | rând | evaluat | `window_end` | n | `brier_live` | `logloss_live` | `accuracy_live` | stabilitate |
+> |---:|---|---|---:|---:|---:|---:|---:|
+> | 1 | 3 nov 10:30:46 | 2 nov | **172** | 0,5532 | 0,9392 | 0,5523 | 0,1110 |
+> | 2 | 3 nov 20:11:37 *(rularea manuală 112)* | 2 nov | 173 | 0,5542 | 0,9404 | 0,5491 | 0,1107 |
+> | 3 | 4 nov 09:42:22 | 3 nov | **182** | 0,5533 | 0,9383 | 0,5549 | 0,1093 |
+>
+> Față de predicție: `brier_live` **0,5532** vs ≈0,551 prezis · `logloss_live` **0,9392** vs ≈0,936 · `accuracy_live` **0,5523** vs ≈0,553 · stabilitate **0,1110** vs ≈0,113 · `n` **172** vs „159+". Abaterile sunt de ordinul a 0,002 și se explică integral prin avansarea ferestrei cu o zi — **nu e nicio surpriză de investigat**. `degrading` nu s-a produs, exact cum cerea structura (`CONSECUTIVE_DEGRADED_WINDOWS = 2`, istoric gol).
+>
+> **Restul contractului Etapei 2, verificat punct cu punct**: `model_champions` are **exact un campion activ**, `promoted_at` în continuare **23 aug 09:36:27** — NEATINS ✅ · `decision_feed` are **11 rânduri, ZERO create după 2 nov**, ultimul din 26 oct — NEATINS ✅, deci Guardianul evaluează și jurnalizează dar **nu propune nimic**, cum cere absența lui `champion_guardian_proposals_enabled`.
+>
+> **🔴 DOUĂ CIFRE ASUMATE, amândouă greșite în aceeași direcție — consemnate, nu rotunjite.**
+> 1. Contractul de mai jos (punctul 1) scria **„2 per ciclu"**: `blend_v1|all` completed + `xgboost_v1|all` skipped. Măsurat: **3 per ciclu** — există și `production_champion|all`, tot `skipped` („niciun campion activ"). Al treilea nu fusese numărat fiindcă e a treia familie din registru, nu una dintre cele două la care se uită toată lumea. 9 rânduri / 3 rulări = 3,0 exact.
+> 2. `CLAUDE.md` scrie că `automation_runs` crește cu **„~2/noapte"**, deci „Activity Log" scade de la ~3,3 la **~2,9 zile**. Cu 3/noapte și o bază măsurată de ~17 rânduri/zi în regim liniștit (26 oct – 1 nov: 15, 17, 21, 15, 17), totalul e ~20/zi, deci cele 50 de rânduri ale lui `list_recent_runs` acoperă **~2,5 zile**, nu 2,9. **Direcția era corectă, magnitudinea subestimată cu ~15%.** Nu schimbă nicio decizie — dar „Activity Log" e nefiltrat pe producător, deci fiecare producător nou îl scurtează, și estimarea trebuie să fie onestă ca să se vadă când devine inutilizabil.
+>
+> **Etapa 3 e ACTIVĂ de aici**: observare, fără nicio schimbare de config. Etapa 4 nu se discută.
 
 ### Predicția, scrisă ÎNAINTE de activare ca să fie infirmabilă
 
@@ -2334,9 +2374,9 @@ Două afirmații proprii, false, purtate zile:
 Retragerea prematură e tot o afirmație greșită, doar mai greu de prins, fiindcă
 pare prudență.
 
-### §18.1 🔴 Condiția (3) e îndeplinită de 12 zile — dar MIZA SE ERODEAZĂ, monoton (măsurat 2026-11-03)
+### §18.1 🔴 Condiția (3) e îndeplinită de 13 zile — erodarea a fost monotonă până pe 3 nov, iar 4 nov o contrazice cu UN punct (măsurat 2026-11-04)
 
-Intrarea asta există fiindcă „condiția (3) îndeplinită 12 zile la rând" se
+Intrarea asta există fiindcă „condiția (3) îndeplinită 13 zile la rând" se
 citește ca un semnal mult mai tare decât e. Seria completă a verdictelor lui
 `blend_v1/174e7e17`, toate cu `baseline_source = 'shadow_control'`:
 
@@ -2353,27 +2393,58 @@ citește ca un semnal mult mai tare decât e. Seria completă a verdictelor lui
 | 31 oct | 543 | ✅ | ✅ | ❌ | +1,47pp | −0,0104 | −0,0160 |
 | 1 nov | 600 | ✅ | ✅ | ❌ | +1,33pp | −0,0095 | −0,0145 |
 | 2 nov | 659 | ✅ | ✅ | ❌ | +1,06pp | −0,0085 | −0,0129 |
-| **3 nov** | **672** | ✅ | ✅ | ❌ | **+1,04pp** | **−0,0082** | **−0,0123** |
+| 3 nov | 672 | ✅ | ✅ | ❌ | +1,04pp | −0,0082 | −0,0123 |
+| **4 nov** | **682** | ✅ | ✅ | ❌ | **+1,17pp** | **−0,0094** | **−0,0140** |
 
-**Zero oscilație** — Brier și log-loss semnificative în toate cele 12 zile,
+*(3 noiembrie are **două** rânduri de evaluare, n=672 și n=673, cu verdicte
+identice la a patra zecimală — a doua zi dublă din serie, după 17 oct. Se
+numără ca o zi; tabelul listează primul rând.)*
+
+**Zero oscilație** — Brier și log-loss semnificative în toate cele 13 zile,
 `Δacc` pozitiv în toate. Condiția (3) din declanșator e **îndeplinită**.
 
-**Dar nu e „acuratețea cedează" — se contractă TOT avantajul**, pe toate trei
-metricile simultan: Δacc 3,08 → 1,04pp, Δbrier −0,0136 → −0,0082, Δlog-loss
-−0,0209 → −0,0123. Tiparul clasic al unui avantaj timpuriu care regresează pe
-măsură ce `n` crește.
+**Până pe 3 nov nu era „acuratețea cedează" — se contracta TOT avantajul**, pe
+toate trei metricile simultan: Δacc 3,08 → 1,04pp, Δbrier −0,0136 → −0,0082,
+Δlog-loss −0,0209 → −0,0123. Tiparul clasic al unui avantaj timpuriu care
+regresează pe măsură ce `n` crește.
+
+> **🔴 [CORECTAT 2026-11-04 — cuvântul „monoton" din titlul de ieri nu mai e
+> adevărat, și corecția se face ÎN AMBELE SENSURI, nu doar când îmi convine.]**
+> Punctul de azi (n=682, +10 meciuri) e **mai bun pe toate trei metricile
+> simultan**: Δacc +1,04 → **+1,17pp**, Δbrier −0,0082 → **−0,0094**, Δlog-loss
+> −0,0123 → **−0,0140**. Prima creștere a avantajului de la 23 octombrie, deci
+> seria descrescătoare are exact **un** punct de ruptură.
+>
+> **NU se citește ca inversare de trend**, și ăsta e același standard invocat
+> ieri în favoarea prudenței, aplicat acum împotriva propriei extrapolări: *o
+> proiecție contrazisă de două puncte nu e încă infirmată* — cu atât mai puțin
+> una contrazisă de **unul singur**, pe un increment de 10 meciuri, adică sub
+> banda de zgomot a incrementelor zilnice deja observate (−0,0014, −0,0027,
+> −0,0002).
+>
+> **Ce se schimbă concret**: afirmația „erodare **monotonă**" e retrasă ca
+> descriere a seriei; afirmația „avantajul se contractă pe fereastra 23 oct – 3
+> nov" rămâne măsurată și validă. Direcția de ansamblu rămâne descrescătoare
+> (+3,08 → +1,17pp), dar **nu mai poate fi numită monotonă**, iar proiecția
+> trecerii prin zero își pierde singurul argument care o susținea (panta
+> constantă). Se reevaluează pe datele de 5-6 noiembrie, nu pe interpretarea
+> acestui punct.
 
 **Consecința pentru ADR-084, directă**: ADR-ul scrie *„aprobarea produce
 **imediat** un candidat de promovare"*. Era adevărat pe 2 noiembrie și devine
 tot mai puțin adevărat. Garda de direcție propusă e `Δacc ≥ 0`, iar `174e7e17`
 se apropie de ea **de sus**.
 
-**Extrapolare, declarată ca extrapolare**: panta pe ultima săptămână (27 oct →
-3 nov) e −0,0008/zi, ceea ce ar trece zero pe la mijlocul lui noiembrie. Dar
-ultimele trei incremente (−0,0014, −0,0027, −0,0002) sunt zgomotoase și panta
-**încetinește** — deci nu e o proiecție, e o direcție. Se aplică propria lecție
-din §18: *o proiecție contrazisă de două puncte nu e încă infirmată* — deci
-nici „candidatul e condamnat" nu se afirmă.
+~~**Extrapolare, declarată ca extrapolare**: panta pe ultima săptămână (27 oct →
+3 nov) e −0,0008/zi, ceea ce ar trece zero pe la mijlocul lui noiembrie.~~
+**[RETRASĂ 2026-11-04.]** Panta recalculată pe fereastra 27 oct → **4 nov** e
+−0,0005/zi, iar ultimul increment e **+0,0013** — de semn opus. O extrapolare
+liniară pe o serie cu un punct de semn opus la capăt nu mai are bază; „mijlocul
+lui noiembrie" era o cifră produsă de panta de ieri, nu o proprietate a
+modelului. **Nu se înlocuiește cu altă dată proiectată** (ar fi aceeași eroare,
+recalibrată): se așteaptă două-trei puncte în plus. Direcția de ansamblu rămâne
+descrescătoare, iar nici „candidatul e condamnat", nici „candidatul s-a
+stabilizat" nu se afirmă azi.
 
 **🧭 DE CE AȘTEPTAREA E INFORMATIVĂ, nu doar prudentă** — partea care contează
 pentru decizia de fond:
@@ -2386,9 +2457,11 @@ pentru decizia de fond:
   croirii regulii după date) devine argumentul dominant, exact cum prevede
   declanșatorul.
 
-**Starea celorlalte două condiții la 3 noiembrie** (ziua 1 din 3): (1)
-**NEÎNDEPLINITĂ** prin construcție — `1b3c3ef` a ajuns pe `main` pe 2 nov 20:06
-UTC, deci prima rulare cu codul e cea de azi; cel mai devreme **5 noiembrie**.
+**Starea celorlalte două condiții la 4 noiembrie** (**ziua 2 din 3**): (1)
+**ÎNCĂ NEÎNDEPLINITĂ**, prin construcție, nu din întârziere — `1b3c3ef` a ajuns
+pe `main` pe 2 nov 20:06 UTC, deci ziua 1 de evaluare e 3 nov, ziua 2 e azi, iar
+a treia e **5 noiembrie**. Data aceea nu s-a mișcat de ieri; **nu e nimic de
+făcut până atunci**, iar o decizie luată azi ar fi luată pe 2 din 3 condiții.
 (2) ✅ **provizoriu**, pe cohorta genuin post-reparație: **7/7 meciuri de seară**
 din 2 nov cu statistici (Newcastle–Everton, Atalanta–Parma, Benfica–Alverca,
 Dep. A Coruña–Osasuna, Gil Vicente–Vitória, Lorient–Brest, U Cluj–FCSB),
@@ -2803,13 +2876,26 @@ cauza lui `sample_factor`.
 | 23 oct | 204 | +8,33pp | **−0,0410** | −0,0612 | **3/3** |
 | 26 oct | 337 | +5,34pp | −0,0213 | −0,0317 | 1/3 |
 | 30 oct | 378 | +5,56pp | −0,0210 | −0,0313 | **3/3** |
-| **3 nov** | **520** | **+3,27pp** | **−0,0106** | **−0,0148** | **0/3** |
+| 3 nov | 520 | +3,27pp | −0,0106 | −0,0148 | 0/3 |
+| **4 nov** | **529** | **+3,78pp** | **−0,0137** | **−0,0191** | **1/3** |
 
-Avantajul pe Brier s-a contractat cu **74%**, iar semnificația a dispărut
-complet. `blend_v1` erodează la fel (−0,0136 → −0,0082, §18.1). Câștigul măsurat
-al blendului 50/50 e **−0,0089 pe Brier** — **același ordin de mărime** cu
-avantajul actual al lui XGBoost singur, care încă scade. Cele două nu sunt
-independente: blendul câștigă *din* informația independentă a ML-ului.
+Pe fereastra 23 oct – 3 nov, avantajul pe Brier s-a contractat cu **74%**, iar
+semnificația a dispărut complet. `blend_v1` s-a contractat la fel (−0,0136 →
+−0,0082, §18.1). Câștigul măsurat al blendului 50/50 e **−0,0089 pe Brier** —
+**același ordin de mărime** cu avantajul de atunci al lui XGBoost singur. Cele
+două nu sunt independente: blendul câștigă *din* informația independentă a
+ML-ului.
+
+> **[ACTUALIZAT 2026-11-04 — amândoi Challengerii urcă ÎN ACEEAȘI ZI, și ăsta e
+> faptul care contează, nu mărimea salturilor.]** XGBoost +3,27 → **+3,78pp** și
+> Brier −0,0106 → **−0,0137** (semnificație 0/3 → **1/3**); `blend_v1` +1,04 →
+> **+1,17pp** (§18.1). Incrementul e de 9-10 meciuri la amândoi, deci e **un
+> singur lot de meciuri noi, corelat între cele două serii** — nu două dovezi
+> independente că erodarea s-a oprit. **Nu se schimbă nicio concluzie din §20.H**:
+> ordinea forțată rămâne (1) ADR-084 → (2) D-15 → (3) Pasul 3, fiindcă ea derivă
+> din **dependența circulară**, nu din panta erodării. Ce se schimbă e strict
+> propoziția „care încă scade", pusă acum la trecut. Și, pentru D-15: 1/3 nu e
+> 3/3, deci seria declanșatorului rămâne **0**.
 
 #### Ce ADR-086 a rezolvat, și ce NU
 
@@ -2846,10 +2932,10 @@ recuperarea D-B și prin ceilalți scriitori ai coloanei.
 
 #### ORDINEA FORȚATĂ — precondiția reală a Pasului 3
 
-| # | ce trebuie să se închidă întâi | starea la 3 nov |
+| # | ce trebuie să se închidă întâi | starea la **4 nov** |
 |---|---|---|
-| 1 | **ADR-084** — decizia de fond pe poartă | cel mai devreme **5 nov** (ziua 3 din 3) |
-| 2 | **D-15** — declanșatorul 3/3 × 10 zile, `n` ≥ 500 | serie **0** pe ambii; XGBoost **0/3** |
+| 1 | **ADR-084** — decizia de fond pe poartă | azi e **ziua 2 din 3**; cel mai devreme **5 nov** |
+| 2 | **D-15** — declanșatorul 3/3 × 10 zile, `n` ≥ 500 | serie **0** pe ambii; XGBoost **1/3** (`n`=529) |
 | 3 | **Pasul 3** — ADR pentru calea de servire | abia după 1 **și** 2 |
 
 **Nu e prudență, e ordine derivată**: ambele decizii de mai sus citesc baseline-ul

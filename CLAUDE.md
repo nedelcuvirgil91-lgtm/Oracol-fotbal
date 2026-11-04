@@ -45,7 +45,9 @@ Disclaimer de proiect (nu al acestui document): instrument de analiză statistic
 >
 > **Ce NU s-a activat**: `champion_guardian_proposals_enabled` rămâne **ABSENT** (Etapa 4, decizie separată, North Star #3). Deci Guardianul **evaluează și jurnalizează, dar nu propune nimic**. Faza D e read-only pe starea canonică: scrie un rând append-only în `champion_health_evaluations` + 1-2 `automation_runs`; `model_champions` și `decision_feed` sunt neatinse.
 >
-> **Cost asumat, măsurat**: `automation_runs` crește cu ~2/noapte, deci „Activity Log" din `app.py` (`list_recent_runs(limit=50)`, **nefiltrat pe producător**) scade de la ~3,3 la ~2,9 zile de istoric vizibil.
+> ~~**Cost asumat, măsurat**: `automation_runs` crește cu ~2/noapte, deci „Activity Log" din `app.py` (`list_recent_runs(limit=50)`, **nefiltrat pe producător**) scade de la ~3,3 la ~2,9 zile de istoric vizibil.~~ **[CORECTAT 2026-11-04 — amândouă cifrele erau subestimate.]** Măsurat pe 3 rulări: **3 rânduri per ciclu**, nu 2 — `blend_v1|all` `completed`, plus `xgboost_v1|all` ȘI **`production_champion|all`** amândouă `skipped`. A treia familie din registru nu fusese numărată. Cu o bază de ~17 rânduri/zi în regim liniștit (26 oct – 1 nov), „Activity Log" acoperă **~2,5 zile**, nu 2,9. Direcția era corectă, magnitudinea greșită cu ~15%.
+>
+> **✅ PRIMUL VERDICT VERIFICAT 2026-11-04 — predicția se confirmă pe toate punctele calitative.** 3 rânduri în `champion_health_evaluations`, toate `healthy`, toate patru flagurile `false`: `brier_live` **0,5532** vs ≈0,551 prezis, `logloss_live` **0,9392** vs ≈0,936, `accuracy_live` **0,5523** vs ≈0,553, stabilitate **0,1110** vs ≈0,113, `n` **172** vs „159+". Abateri de ordinul 0,002, explicate integral de avansarea ferestrei. `model_champions` are exact un campion activ cu `promoted_at` în continuare 23 aug; `decision_feed` are **zero** rânduri create după 2 nov — Faza D e read-only pe starea canonică, confirmat în date, nu doar în cod. Detalii: `DE_URMARIT.md` §16.
 >
 > **Revenire**: `champion_guardian_enabled = false` — Faza D se oprește instant la rularea următoare, fără deploy. Jurnalul rămâne.
 >
@@ -673,21 +675,33 @@ Brier ✅, log-loss ✅, acuratețe ❌ dar **Δacc +1,06pp** — și ar fi trec
 **șapte zile consecutive** (27 oct – 2 nov). Aprobarea produce **imediat** un
 candidat de promovare.
 
-> **🔴 [MĂSURAT 2026-11-03 — condiția (3) e îndeplinită de 12 zile, DAR MIZA SE
-> ERODEAZĂ, monoton.]** Brier și log-loss semnificative în **toate** cele 12
-> zile (23 oct – 3 nov), `Δacc` pozitiv în toate — **zero oscilație**, condiția
-> (3) bifată. Dar nu e „acuratețea cedează": **se contractă tot avantajul**, pe
-> toate trei metricile simultan — `Δacc` **+3,08 → +1,04pp**, `Δbrier`
-> −0,0136 → −0,0082, `Δlog-loss` −0,0209 → −0,0123, în timp ce `n` urcă
-> 357 → 672. Tiparul clasic al unui avantaj timpuriu care regresează.
+> **🔴 [MĂSURAT 2026-11-03, CORECTAT 2026-11-04 — condiția (3) e îndeplinită de
+> 13 zile; erodarea a fost monotonă până pe 3 nov, iar 4 nov o contrazice cu UN
+> punct.]** Brier și log-loss semnificative în **toate** cele 13 zile (23 oct –
+> 4 nov), `Δacc` pozitiv în toate — **zero oscilație**, condiția (3) bifată. Pe
+> fereastra 23 oct – 3 nov nu era „acuratețea cedează": **se contracta tot
+> avantajul**, pe toate trei metricile simultan — `Δacc` **+3,08 → +1,04pp**,
+> `Δbrier` −0,0136 → −0,0082, `Δlog-loss` −0,0209 → −0,0123, în timp ce `n`
+> urcă 357 → 672. Tiparul clasic al unui avantaj timpuriu care regresează.
 >
-> Deci afirmația de mai sus („aprobarea produce **imediat** un candidat") era
-> adevărată pe 2 noiembrie și devine tot mai puțin adevărată: garda de direcție
-> propusă e `Δacc ≥ 0`, iar `174e7e17` se apropie de ea **de sus**. O
-> extrapolare pe ultima săptămână (−0,0008/zi) ar trece zero pe la mijlocul lui
-> noiembrie — spus **ca extrapolare**: ultimele trei incremente sunt zgomotoase
-> și panta încetinește, iar se aplică propria lecție de mai jos (o proiecție
-> contrazisă de două puncte nu e încă infirmată).
+> **Punctul de 4 nov (n=682) e mai bun pe TOATE TREI**: `Δacc` **+1,17pp**,
+> `Δbrier` **−0,0094**, `Δlog-loss` **−0,0140** — prima creștere a avantajului
+> de la 23 octombrie. **Cuvântul „monoton" se retrage**; „avantajul se contractă
+> pe fereastra 23 oct – 3 nov" rămâne măsurat și valid. **NU se citește ca
+> inversare de trend**: e același standard invocat cu o zi înainte în favoarea
+> prudenței, aplicat acum împotriva propriei extrapolări — *o proiecție
+> contrazisă de două puncte nu e încă infirmată*, cu atât mai puțin una
+> contrazisă de **unul singur**, pe un increment de 10 meciuri, sub banda de
+> zgomot deja observată.
+>
+> Afirmația de mai sus („aprobarea produce **imediat** un candidat") era
+> adevărată pe 2 noiembrie și rămâne adevărată azi, dar cu marjă mai mică decât
+> la propunere: garda de direcție propusă e `Δacc ≥ 0`, iar `174e7e17` se
+> apropie de ea **de sus**. ~~O extrapolare pe ultima săptămână (−0,0008/zi) ar
+> trece zero pe la mijlocul lui noiembrie.~~ **RETRASĂ 4 nov** — ultimul
+> increment e **+0,0013**, de semn opus, deci panta nu mai susține nicio dată
+> proiectată. **Nu se înlocuiește cu alta** (ar fi aceeași eroare, recalibrată);
+> se așteaptă două-trei puncte în plus.
 >
 > **De aici, așteptarea e INFORMATIVĂ, nu doar prudentă**: dacă `Δacc` se
 > stabilizează peste zero, cazul e mai puternic pe date așezate; dacă trece sub
@@ -696,10 +710,12 @@ candidat de promovare.
 > criteriu pentru care merită schimbată poarta, și §7.1 devine dominant.
 > Seria completă, pe zile: `DE_URMARIT.md` §18.1.
 >
-> **Starea celorlalte două condiții la 3 nov**: (1) **NEÎNDEPLINITĂ prin
-> construcție** — `1b3c3ef` a ajuns pe `main` pe 2 nov 20:06 UTC, deci **ziua 1
-> din 3** e 3 nov; cel mai devreme **5 noiembrie**. (2) ✅ **provizoriu**, pe
-> cohorta genuin post-reparație (7/7 meciuri de seară, `p ≈ 1,1%`).
+> **Starea celorlalte două condiții la 4 nov** (**ziua 2 din 3**): (1) **ÎNCĂ
+> NEÎNDEPLINITĂ prin construcție**, nu din întârziere — `1b3c3ef` a ajuns pe
+> `main` pe 2 nov 20:06 UTC, deci ziua 1 e 3 nov, ziua 2 e 4 nov, a treia e
+> **5 noiembrie**; data nu s-a mișcat, și **nu e nimic de făcut până atunci**.
+> (2) ✅ **provizoriu**, pe cohorta genuin post-reparație (7/7 meciuri de seară,
+> `p ≈ 1,1%`).
 
 **De ce se amână, și e argument nu ezitare**: ambii Challengeri activi au
 `baseline_source = 'shadow_control'`, deci cifrele vin din rândul `control` —
