@@ -2,14 +2,15 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-11-03**. Ultimul element adăugat: **§20.H — rândul
-`control` are DOUĂ roluri (predicția servită ȘI baseline-ul porții), deci
-Pasul 3 nu poate precede ADR-084 și D-15**.
+Ultima actualizare: **2026-11-04**. Ultimul element adăugat: **§3ter — ADR-071
+F3 remăsurat (12/13 politici peste prag), trei constatări noi și o corecție la
+o afirmație proprie din ziua precedentă**.
 
 **Elemente deschise, în ordinea termenului:**
 
 | § | Ce | Termen |
 |---|---|---|
+| **§3ter** | ⏳ **ADR-071 F3 — NEÎNCEPUT.** 8 săptămâni ✅ (8,4); prag 150 atins pe **12 din 13** politici, `market_floor_040` la **136** — îi trebuie și selecții NOI, nu doar rezolvarea celor 10 în așteptare (plafonul lor e 146). Trei constatări noi + o corecție la mine, 4 nov | **~8-10 noiembrie**, cu mecanism armat |
 | **§20.H** | 🔴 **Pasul 3 (servirea blendului) e BLOCAT de o dependență circulară** — rândul `control` e simultan predicția servită și baseline-ul porții, deci schimbarea servirii invalidează seriile pe care ADR-084 și D-15 se sprijină. Plus: ce a măsurat §20 ca mai bun (`blend_engine.py`, 50/50) **nu e** campionul `blend_v1` (0,35, Model Registry) | **după** ADR-084 și D-15 |
 | **§21** | ✅ Flagul B **ACTIV** din 3 nov 20:34:49. Rămâne: prima antrenare cerută de `blend_v1` (dovada Deciziei A) | fără termen — depinde de eliberarea slotului |
 | **§16** | 🔴 **PRIMUL VERDICT CHAMPION GUARDIAN** — R4 activat 2 nov 17:30:03. Predicție scrisă înainte: `healthy`, toate patru flagurile `false` | **rularea de noapte de 3 nov** |
@@ -343,6 +344,88 @@ Dacă nu vine la termen: nu e defect, e calendar fotbalistic. Semnal real ar fi 
 ### Gol de proces, de reținut
 
 Evaluatorul (`value_selector_evaluation.yml`) e `workflow_dispatch`-only, deliberat („o citire nu produce date, deci nu are motiv să ruleze automat"). Consecința reală: **a rulat o singură dată, pe 6 septembrie, ziua în care a fost construit, și apoi deloc 39 de zile** — până la întrebarea proprietarului produsului. Același tipar ca ADR-057: un mecanism corect pe care nimeni nu-l citește. **Nereparat** — dar dacă F2 se apropie de verdict, merită o cadență, chiar rară.
+
+> **[CONFIRMAT 2026-11-04]** A **treia** rulare din totdeauna (`41780794591`, `success`, 100 s) — 6 sep, 15 oct, 4 nov. Deci golul de proces de mai sus nu e o temere, e istoricul complet al acestui instrument.
+
+---
+
+### ✅ RE-MĂSURAT 2026-11-04 — cifre proaspete, trei constatări noi, și o corecție la mine
+
+**Pornit din întrebarea proprietarului produsului: „care mai este starea lui F3? A început? E terminat?"** Răspunsul: **nu** și **nu**. F3 e NEÎNCEPUT și NEAUTORIZAT; ce rulează e F2 (colectarea). Pornirea cere decizie umană explicită (ADR-002).
+
+#### Condițiile de intrare, măsurate
+
+| condiția | stare la 4 nov |
+|---|---|
+| ≥ 8 săptămâni | ✅ **8,4** — prima rulare 5 sep 15:52, ultima 3 nov 17:18; 55 de rulări, 53 de zile distincte |
+| ≥ 150 selecții decise **per politică** | ⏳ **12 din 13**. Întârziatul: `market_floor_040` la **136** |
+| colapsarea brațelor identice (golul 1) | ✅ 13 politici → **12 familii, 12 amprente**; duplicatul `shrunk_050` ≡ `market_floor_025` e **marcat**, nu șters |
+| evaluatorul există (golul 2) | ✅ |
+| `leakage_suspect` | ✅ **0** pe toate cele 116.727 de rânduri (niciun `NULL`, verificat separat — `.eq(False)` din evaluator n-ar fi prins un `NULL`) |
+
+**Precizie care schimbă estimarea**: `market_floor_040` are 146 de selecții Top, 136 decise, 10 în așteptare — deci chiar dacă TOATE cele în așteptare se rezolvă, ajunge la **146, sub 150**. Îi trebuie și **selecții noi**. La ritmul recent (~21-24/săptămână) → **~8-10 noiembrie**, spus ca interval, nu ca dată (proiecțiile acestui proiect au fost optimiste de trei ori la rând).
+
+#### Cifrele cumulate (categoria Top, §16 global, formulele din cod)
+
+| profil | decise | rată | piața | ROI | ROI piață | dif. pp |
+|---|---:|---:|---:|---:|---:|---:|
+| `shrunk_100` | 198 | 58,6% | 46,1% | +20,0% | −5,8% | **+25,8** |
+| `ranker_prob_value` | 198 | 56,6% | 45,0% | +18,9% | −5,9% | +24,8 |
+| `market_floor_020` | 202 | 58,4% | 46,9% | +18,6% | −5,7% | +24,3 |
+| `market_floor_035` | 165 | 63,0% | 50,7% | +18,0% | −5,7% | +23,7 |
+| `shrunk_075` | 197 | 57,9% | 46,9% | +17,0% | −5,8% | +22,9 |
+| `market_floor_030` | 189 | 59,8% | 48,3% | +16,9% | −5,7% | +22,6 |
+| **`shrunk_050`** (activ) | 198 | 58,6% | 47,4% | +16,7% | −5,7% | +22,4 |
+| `market_floor_025` | 198 | 58,6% | 47,4% | +16,7% | −5,7% | +22,4 |
+| `shrunk_025` | 198 | 56,6% | 47,6% | +11,9% | −5,7% | +17,5 |
+| `market_floor_040` | **136** | 64,0% | 53,7% | +11,7% | −5,8% | +17,5 |
+| `ranker_shrunk_ev` | 202 | 42,6% | 37,5% | +5,5% | −5,6% | +11,1 |
+| `market_only` (control) | 225 | 67,6% | 64,8% | −1,1% | −5,6% | +4,5 |
+| `legacy` | 1254 | 30,4% | 28,4% | −2,5% | −5,7% | **+3,2** |
+
+Tabelul anterior al acestei secțiuni (15 oct, `shrunk_100` la 111 decise) e **ISTORIC** — raportul nu se persistă nicăieri, deci cifrele vechi erau singurele înregistrate.
+
+#### 🔴 Constatarea 1 — jumătățile NU însumează întregul: §16 se reaplică pe perioadă
+
+`evalueaza()` recalculează „prima apariție" **în interiorul fiecărui subset** de perioadă. Deci un meci apărut întâi ÎNAINTE de cutoff și revăzut DUPĂ e numărat **a doua oară**, cu cotele de după.
+
+Măsurat: `shrunk_050` — dedup global dă `dupa = 68`, re-dedup pe perioadă dă **77** (9 în plus). `legacy` — 869 + 511 = **1380** vs **1337** cumulat.
+
+**Replicarea e exactă, nu aproximativă**: reproducând re-dedup-ul pe subset în SQL obțin 77/62/15, 76/61/15, 76/62/14 — **identic, bit cu bit**, cu raportul evaluatorului pentru `shrunk_050`/`shrunk_075`/`shrunk_100`. Așa s-a și identificat cauza.
+
+**Consecința de interpretare, nu de corectitudine**: blocul „după" **nu e o cohortă curată post-extindere** — include meciuri din universul vechi, cu observații mai târzii. Nu e cherry-picking (alegerea rămâne deterministă: prima din perioadă), dar nici o partiție. **Nedocumentat nicăieri** — de decis explicit la autorizarea F3, nu lăsat implicit.
+
+#### 🔴 Constatarea 2 — `COMPETITII_INTRATE_2026_10_15` are 2 din 5
+
+Constanta (`value_selector_evaluation.py:360`) listează doar `Conference League` și `HNL`. Măsurat, **cinci** competiții au prima apariție pe 21 oct: + `Austria Bundesliga` (13 meciuri), `Danish Superliga` (13), `Swiss Super League` (12).
+
+**Fără pagubă azi**: toate cinci intră în aceeași rulare, deci `min(run_id)` e identic → cutoff-ul detectat e corect (`2026-10-21T12:38Z`). **Gol latent**: dacă vreodată ar intra una din cele trei fără cele două listate, `detecteaza_cutoff` ar întoarce `None` și raportul n-ar mai împărți nimic — tăcut.
+
+#### 🔴 Constatarea 3 — `legacy` a trecut punctul de 3pp, iar secțiunea asta declara opusul
+
+Textul de mai sus spune: *„Avem putere statistică să spunem că vechiul selector nu bate piața"* — la 665 de selecții, +2,60pp, sub criteriul GO de +3pp.
+
+**Remăsurat la 1254 de selecții: +3,19pp — PESTE prag ca punct.** Dar intervalul e **±9,77pp**, deci **[−6,6; +13,0]**: nedistins de zero.
+
+**Formularea veche era prea tare în ambele sensuri.** Nu avem putere să stabilim că `legacy` *nu* bate piața; avem doar absența unei dovezi că o bate. **Rezervă spusă de mine**: intervalul e o aproximare normală pe o distribuție cu coadă grea (`cotă·câștig` ∈ {0; ~4,5}), deci orientativ, nu un test riguros. Pentru comparație, `shrunk_100` are +25,8 ± 15,3 → [10,5; 41,1], cu limita de jos peste 3pp — dar vezi rezervele de mai jos.
+
+#### 🔴 O CORECȚIE LA MINE, din aceeași zi
+
+Pe 3 noiembrie am prezentat „universul s-a lărgit cu 5 competiții la 7 săptămâni din 8" ca pe **o constatare nouă, nedocumentată**. **Fals.** `detecteaza_cutoff` + împărțirea pe perioade există din **`332ca74`, 15 octombrie** — adăugate în chiar commit-ul care a reparat acoperirea competițiilor. Preocuparea era deja **anticipată și cablată în cod**, iar docstring-ul de acolo o spune mai bine: *„Cutoff-ul se DEDUCE din date, nu se configurează."* Aceeași clasă pe care documentul ăsta o reproșează altora: am raportat ca descoperire ceva ce codul rezolvase deja.
+
+#### Mișcare de date, consemnată cu ora
+
+Între două măsurători la ~20 de minute distanță, `decise` a crescut pe toate politicile: `shrunk_050` 194 → **198**, `legacy` 1242 → **1254**. `top_total` **identic** (214), deci nu selecții noi — **rezultate sosite**. Ambele formulări SQL verificate pe aceleași date dau identic, deci nu e o diferență de interogare. **Scriitorul NU e atribuit**: în fereastră au rulat `sync_pre_match_odds` (00:18-01:08) și `live_sync` (3 nov 22:11), dar n-am verificat care — și nu se ghicește. **Orice cifră de aici poartă ora ei.**
+
+#### Ce NU se concluzionează, și de ce
+
+Cifrele arată spectaculos. Trei motive care rețin concluzia:
+
+1. **E maximul a 12 politici aplicate aproape acelorași meciuri** — un rezultat citit în 12 feluri, nu 12 teste independente.
+2. **Contrazice reperul extern**: pe 986 de meciuri Oracle ia 0,4939 vs piața 0,5233. Aici, pe ~198 de meciuri *selectate*, pare să bată probabilitatea pieței cu ~12pp. Nu e imposibil — selectorul alege exact subsetul unde modelul deviază — dar **asta e ipoteza pe care F3 trebuie s-o dovedească**, nu una pe care are voie s-o presupună.
+3. **Eșantionul amestecă două universuri**, iar nici împărțirea pe perioade nu e o partiție curată (constatarea 1).
+
+**Nicio politică nu e declarată câștigătoare. `shrunk_050` rămâne activ** până la o decizie umană explicită.
 
 ---
 
