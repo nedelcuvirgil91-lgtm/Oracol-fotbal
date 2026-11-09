@@ -2,18 +2,19 @@
 
 Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". Se actualizează; nu e jurnal istoric.
 
-Ultima actualizare: **2026-11-04** (a doua rundă). Ultimul element adăugat:
-**§16 ÎNCHISĂ — primul verdict Champion Guardian verificat, predicția se
-confirmă; plus §18.1 corectată, „erodare monotonă" retrasă pe punctul de 4 nov**.
+Ultima actualizare: **2026-11-09**. Ultimul element adăugat: **§18.1bis
+remăsurat după 4 zile de inactivitate — cohortă nouă C5 (n=137) care TRECE pe
+toate trei, C4b crescută 20→55; decizia din 5 nov rămâne neschimbată, dar
+tabloul e mixt (2 din 4 cohorte trec). Plus: pragul F3 a trecut pe 7 noiembrie**.
 
 **Elemente deschise, în ordinea termenului:**
 
 | § | Ce | Termen |
 |---|---|---|
-| **§3ter** | ⏳ **ADR-071 F3 — NEÎNCEPUT.** 8 săptămâni ✅ (8,4); prag 150 atins pe **12 din 13** politici, `market_floor_040` la **136** — îi trebuie și selecții NOI, nu doar rezolvarea celor 10 în așteptare (plafonul lor e 146). Trei constatări noi + o corecție la mine, 4 nov | **~8-10 noiembrie**, cu mecanism armat |
+| **§3ter** | 🟢 **ADR-071 F3 — PRAGUL S-A ÎNCHIS, dar F3 rămâne NEÎNCEPUT și NEAUTORIZAT.** Măsurat 9 nov: 8 săptămâni ✅ (**9,1**); prag 150 atins pe **13 din 13** politici — `market_floor_040` a trecut pe **7 noiembrie**, exact la 150, și e azi la **154**. Colapsarea brațelor ✅ (12 amprente), evaluator ✅, `leakage_suspect` **0 rânduri** | **te așteaptă** — pornirea cere autorizare explicită (ADR-002) + decizia pe §16 |
 | **§20.H** | 🔴 **Pasul 3 (servirea blendului) e BLOCAT de o dependență circulară** — rândul `control` e simultan predicția servită și baseline-ul porții, deci schimbarea servirii invalidează seriile pe care ADR-084 și D-15 se sprijină. Plus: ce a măsurat §20 ca mai bun (`blend_engine.py`, 50/50) **nu e** campionul `blend_v1` (0,35, Model Registry) | **după** ADR-084 și D-15 |
 | **§21** | ✅ Flagul B **ACTIV** din 3 nov 20:34:49. Rămâne: prima antrenare cerută de `blend_v1` (dovada Deciziei A) | fără termen — depinde de eliberarea slotului |
-| **§18** | 🔴 **ADR-084 — decizia de fond pe poartă.** Condiția (2) ✅, condiția (3) ✅ 13 zile; condiția (1) e la **ziua 2 din 3**. Erodarea nu mai e „monotonă": 4 nov urcă pe toate trei (§18.1) | **5 noiembrie** (ziua 3 din 3) |
+| ~~**§18**~~ | 🔴 **ADR-084 — NEAPROBATĂ 5 nov, declanșatorul §11 CONSUMAT.** Premisa condiției (3) e **falsă**: măsura persistența unei medii cumulative, nu performanța pe date noi. **[REMĂSURAT 9 nov]** C4a (n=352) cade în continuare, dar **C5 (n=137, 6–9 nov) trece pe toate trei** — tablou mixt, 2 din 4 cohorte trec (§18.1bis). Decizia din 5 nov rămâne, cu data ei. ADR-084 rămâne PROPUNERE, nemodificată | închis ca declanșator; metodologia se redefinește înainte de orice termen nou |
 | ~~**§16**~~ | ✅ **VERIFICAT 4 nov** — primul verdict Guardian: `healthy`, toate patru flagurile `false`, predicția se confirmă pe toate punctele. `model_champions` și `decision_feed` NEATINSE. Două cifre asumate corectate | închis, Etapa 3 activă |
 | ~~**§18.2**~~ | ✅ **ÎNCHISĂ 3 nov** — ADR-085 etapa 5: partiția pe oră a dispărut (7/7 meciuri de seară, `p ≈ 1,1%`) | închis |
 | **§19** | 📊 **Ablația Team Profile — rularea FINALĂ la ~16 xG/echipă.** Negativă de două ori (13 oct și 2 nov); interpretarea pentru decembrie e **declarată deja**, ca să nu alegem sensul după cifră | **~7 decembrie 2026** (median 11 azi, +1/săptămână) |
@@ -353,6 +354,41 @@ Dacă nu vine la termen: nu e defect, e calendar fotbalistic. Semnal real ar fi 
 Evaluatorul (`value_selector_evaluation.yml`) e `workflow_dispatch`-only, deliberat („o citire nu produce date, deci nu are motiv să ruleze automat"). Consecința reală: **a rulat o singură dată, pe 6 septembrie, ziua în care a fost construit, și apoi deloc 39 de zile** — până la întrebarea proprietarului produsului. Același tipar ca ADR-057: un mecanism corect pe care nimeni nu-l citește. **Nereparat** — dar dacă F2 se apropie de verdict, merită o cadență, chiar rară.
 
 > **[CONFIRMAT 2026-11-04]** A **treia** rulare din totdeauna (`41780794591`, `success`, 100 s) — 6 sep, 15 oct, 4 nov. Deci golul de proces de mai sus nu e o temere, e istoricul complet al acestui instrument.
+
+> ### 🟢 [MĂSURAT 2026-11-09] PRAGUL S-A ÎNCHIS — pe 7 noiembrie, și a stat 2 zile neobservat
+>
+> | condiția de intrare | stare |
+> |---|---|
+> | ≥ 8 săptămâni | ✅ **9,1** (5 sep 15:52 → 8 nov 16:16; 60 de rulări, 58 de zile distincte) |
+> | ≥ 150 selecții decise per politică | ✅ **13 din 13**. Întârziatul `market_floor_040`: **154** |
+> | colapsarea brațelor identice | ✅ 13 politici → **12 amprente**, exact o coliziune |
+> | evaluatorul există | ✅ |
+> | zero scurgere temporală | ✅ **0 rânduri** `leakage_suspect` în toată tabela |
+>
+> **Data trecerii, pe zile**: 136 (3 nov) → 137 → 140 → 145 → **150 (7 nov)** →
+> **154 (8 nov)**. Reminderele din 7 și 8 nov au fost livrate și n-au fost
+> citite — deci pragul a fost raportat **cu două zile întârziere**. Clasa
+> ADR-057 în miniatură; ce o deosebește de precedentul de 14 zile e doar
+> magnitudinea.
+>
+> **🔴 Nimic din sistem nu știe încă.** Evaluatorul e `workflow_dispatch`-only
+> și a rulat de **patru** ori în istoria lui; ultimul lui raport (4 nov) spune
+> încă „136, `esantion_insuficient`". Pragul s-a închis **în date**, nu într-un
+> raport.
+>
+> **Definiția lui „decise" m-a costat două măsurători greșite** înainte de cea
+> corectă (3285, apoi 1164, contra celor 136 cunoscute). Regula reală e în
+> `value_selector_evaluation.py` și are **trei** componente: dedup pe
+> `(policy_id, fixture_id)` la cel mai vechi `run_id` (§16 „prima apariție",
+> **nu** pe selecție), `leakage_suspect` exclus **la sursă**, și pragul aplicat
+> **separat pe `top` și pe `longshot`** — cei 136 erau categoria `top`, nu
+> politica întreagă. A treia măsurătoare a fost acceptată **doar** fiindcă
+> reconciliază cu citirea de pe 4 nov la ritmul documentat (+18 în 5 zile,
+> ~3,6/zi, contra ~3,07-3,3 documentat).
+>
+> **F3 rămâne NEÎNCEPUT și NEAUTORIZAT.** Pragul atins **nu e autorizare**
+> (ADR-002). La autorizare rămâne de decis explicit: **§16 se reaplică pe
+> fiecare perioadă, deci jumătățile nu însumează întregul.**
 
 ---
 
@@ -2374,7 +2410,18 @@ Două afirmații proprii, false, purtate zile:
 Retragerea prematură e tot o afirmație greșită, doar mai greu de prins, fiindcă
 pare prudență.
 
-### §18.1 🔴 Condiția (3) e îndeplinită de 13 zile — erodarea a fost monotonă până pe 3 nov, iar 4 nov o contrazice cu UN punct (măsurat 2026-11-04)
+### §18.1 🔴 Condiția (3) — PREMISA E FALSĂ. Seria cumulativă nu demonstra nimic despre stabilitatea pe date noi (corectat 2026-11-05)
+
+> **🔴 [CORECTAT 2026-11-05 — toată intrarea de mai jos, inclusiv titlul ei de
+> ieri, se citește de acum prin §18.1bis. Cifrele rămân corecte; INTERPRETAREA
+> lor era greșită.]** Seria de mai jos sunt **medii cumulative** pe o fereastră
+> în expansiune. Măsurată pe cohorte **disjuncte**, performanța lui `174e7e17`
+> **nu** e stabilă: C3 (5–21 oct, n=302) trece, C4 (22 oct – 5 nov, n=372) cade
+> pe toate trei metricile, inclusiv pe garda de direcție. Deci „13-14 zile fără
+> oscilație" nu sunt 13-14 confirmări independente — sunt 13-14 citiri ale
+> aceleiași ferestre, dominate de un singur bloc de 17 zile. **Nici „erodarea s-a
+> oprit", nici „erodarea e monotonă" nu se mai afirmă.** Vezi §18.1bis și
+> `JURNAL_VERIFICARE_ADR-084_2026-11-05.md` §3.
 
 Intrarea asta există fiindcă „condiția (3) îndeplinită 13 zile la rând" se
 citește ca un semnal mult mai tare decât e. Seria completă a verdictelor lui
@@ -2400,8 +2447,13 @@ citește ca un semnal mult mai tare decât e. Seria completă a verdictelor lui
 identice la a patra zecimală — a doua zi dublă din serie, după 17 oct. Se
 numără ca o zi; tabelul listează primul rând.)*
 
-**Zero oscilație** — Brier și log-loss semnificative în toate cele 13 zile,
-`Δacc` pozitiv în toate. Condiția (3) din declanșator e **îndeplinită**.
+~~**Zero oscilație** — Brier și log-loss semnificative în toate cele 13 zile,
+`Δacc` pozitiv în toate. Condiția (3) din declanșator e **îndeplinită**.~~
+**[RETRAS 2026-11-05.]** „Zero oscilație" descrie corect seria, dar seria e
+cumulativă — deci absența oscilației e o proprietate a mediei, nu a
+performanței. Condiția (3) a fost raportată ca îndeplinită pe 5 noiembrie și
+**declanșatorul §11 e consemnat ca CONSUMAT, fără aprobare**: premisa ei nu
+rezistă la cohorte disjuncte (§18.1bis).
 
 **Până pe 3 nov nu era „acuratețea cedează" — se contracta TOT avantajul**, pe
 toate trei metricile simultan: Δacc 3,08 → 1,04pp, Δbrier −0,0136 → −0,0082,
@@ -2449,8 +2501,13 @@ stabilizat" nu se afirmă azi.
 **🧭 DE CE AȘTEPTAREA E INFORMATIVĂ, nu doar prudentă** — partea care contează
 pentru decizia de fond:
 
-- dacă `Δacc` se **stabilizează** peste zero → cazul pentru ADR-084 e mai
-  puternic decât azi, pe date care s-au așezat;
+- ~~dacă `Δacc` se **stabilizează** peste zero → cazul pentru ADR-084 e mai
+  puternic decât azi, pe date care s-au așezat;~~ **[RETRASĂ 2026-11-05 ca
+  ramură utilizabilă.]** Pe 5 nov seria cumulativă arăta exact asta
+  (+1,33/+1,06/+1,04/+1,17/+1,15pp) și **a fost citită greșit de mine** ca
+  stabilizare. O medie cumulativă nu se poate „stabiliza" informativ: se
+  stabilizează prin construcție. Ramura e nefolosibilă **pe seria cumulativă**;
+  pe cohorte disjuncte, răspunsul măsurat e opusul (§18.1bis);
 - dacă **trece sub zero** → candidatul dispare singur, **iar asta e în sine
   răspunsul**: un criteriu al cărui unic exemplu viu se evaporă în două
   săptămâni nu e un criteriu pentru care merită schimbată poarta. §7.1 (riscul
@@ -2468,6 +2525,82 @@ Dep. A Coruña–Osasuna, Gil Vicente–Vitória, Lorient–Brest, U Cluj–FCSB
 `p ≈ 1,1%` sub rata veche de 47,8%. Fereastra 26 oct – 3 nov dă 0/53 și 0/129,
 dar **nu dovedește nimic** — include cele 27 de meciuri recuperate manual pe
 2 nov.
+
+### §18.1bis 🔴 Cohorte DISJUNCTE — constatarea care a oprit ADR-084 (măsurat 2026-11-05, **remăsurat 2026-11-09**)
+
+Cerută explicit de proprietarul produsului, cu observația care s-a dovedit
+decisivă: *„două ferestre consecutive care conțin aproape aceleași meciuri nu
+reprezintă două confirmări independente."*
+
+`blend_v1/174e7e17`, bandă `treatment` contra bandă `control`, partiție
+**disjunctă** pe `kickoff_date`:
+
+| cohortă | interval | n | Δbrier | IC95 Brier | Δacc | gardă `Δacc≥0` |
+|---|---|---:|---:|---|---:|:-:|
+| C2 | 15 sep – 4 oct | 19 | +0,0329 | [+0,0009, +0,0649] | −5,26pp | ❌ |
+| **C3** | 5 – 21 oct | 302 | **−0,0147** | [−0,0229, **−0,0065**] | **+3,31pp** | ✅ |
+| C4a | 22 oct – 2 nov | 352 | −0,0050 | [−0,0122, **+0,0022**] | −0,57pp | ❌ |
+| C4b | 3 – 5 nov | 20 | −0,0368 | [−0,0792, +0,0057] | +5,00pp | (n prea mic) |
+| **C4** | 22 oct – 5 nov | **372** | **−0,0067** | sus **+0,0005** | **−0,27pp** | ❌ |
+| TOTAL cumulat | tot | 693 | −0,0091 | sus −0,0038 | +1,15pp | ✅ |
+
+Aritmetica se închide exact: 19 + 302 + 372 = **693** = `n` stocat pe 5 nov.
+
+**C3 e singura cohortă care trece. C4 — cea mai recentă ȘI cea mai mare — cade
+pe toate trei**, inclusiv pe garda de direcție. Tăietura C4a/C4b e
+**pre-declarată** (`1b3c3ef`, 2 nov 20:06), deci slăbiciunea lui C4 **nu e
+artefact ADR-085**: e în C4a, blocul de 352 de meciuri de dinainte. C2 (n=19) și
+C4b (n=20) sunt neinterpretabile — nici în favoarea, nici împotriva.
+
+> **Fereastra cumulativă spune TRECE. Informația nouă spune CADE.** Cele 19
+> declanșări ale porții propuse (contra 2 ale porții de azi) provin dintr-un
+> singur bloc de 17 zile din octombrie.
+
+> **🔴 [REMĂSURAT 2026-11-09 — tabelul de mai sus e corect LA DATA LUI și a fost
+> depășit. Documentul a stat 4 zile.]** Proprietarul produsului a cerut ca
+> analiza să țină cont de inactivitate. Două lucruri s-au mișcat:
+>
+> | cohortă | n (5 nov) | **n (9 nov)** | Δbrier | IC95 Brier | sig | Δacc | gardă |
+> |---|---:|---:|---:|---|:-:|---:|:-:|
+> | C4b · 3–5 nov | **20** | **55** | −0,0172 | [−0,0376, +0,0032] | ❌ | +1,82pp | ✅ |
+> | **C5 · 6–9 nov** | — | **137** | **−0,0131** | [−0,0248, **−0,0015**] | **✅** | **+1,46pp** | **✅** |
+> | TOTAL cumulat | 693 | **865** | −0,0096 | [−0,0144, −0,0049] | ✅ | +1,16pp | ✅ |
+>
+> C3 și C4a sunt **neschimbate** (302 și 352). Aritmetica se închide:
+> 19 + 302 + 352 + 55 + 137 = **865**.
+>
+> **NU e o inversare.** C4a, cea mai mare cohortă post-C3, cade în continuare.
+> Din patru cohorte post-C2: **două trec** (C3, C5), una cade (C4a), una e
+> direcțional corectă dar nesemnificativă (C4b). Secvența e **trece → cade →
+> direcție corectă → trece** — oscilație pe date independente, ceea ce e în sine
+> informație contra stabilității criteriului.
+>
+> **Două rezerve, spuse de mine**: e a **treia** citire a aceleiași întrebări
+> (ADR-084 §7.1 avertizează exact contra asta — remăsurarea a fost cerută, nu
+> căutată); iar C5 e la limită, cu capătul IC la −0,0015.
+>
+> **C4b arată o întrebare nerezolvată în propunerea de criteriu**: a fost
+> „neconcludentă" pe 5 nov **doar fiindcă nu terminase de umplut**. Orice
+> criteriu pe cohorte are nevoie și de o regulă despre când o cohortă e
+> **închisă**. Detalii: `JURNAL_VERIFICARE_ADR-084_2026-11-05.md` §3bis.
+
+**Blendul 50/50 (D-17), aceeași disciplină**, pe cohorte lunare disjuncte:
+Δbrier −0,0080 / −0,0045 / **−0,0136** / −0,0105 (aug/sep/oct/nov) — **4 din 4
+semn negativ, dar doar 1 din 4 semnificativă** (octombrie, IC95 [−0,0218,
+−0,0054]). Deci nici el nu e „confirmat de patru ori": asimetria față de
+`174e7e17` (2/3 semn negativ, 1/3 semnificativă) e doar în consecvența semnului.
+**Rămâne cercetare, fără servire.**
+
+**Verificat cu aceeași ocazie, și consemnat ca gol:** integritatea baseline-ului
+e demonstrată doar în forma slabă — **878/878 rânduri `control` identice bit cu
+bit** cu martorul independent `engine_comparison_snapshots`, divergență
+`0,00000000`; dar ambii scriitori primesc **același obiect `pred`**, deci asta e
+fidelitate de **înregistrare**, nu corectitudine a predicției. Verificarea
+completă **nu e construibilă** azi (singurul martor care nu împarte `pred` e
+`match_history.prob_*_pred`, înghețat prin design).
+
+Toate cifrele, definițiile, limitele metodei de replay și decizia formală:
+**`JURNAL_VERIFICARE_ADR-084_2026-11-05.md`**.
 
 ### §18.2 ADR-085 etapa 5 — ÎNCHISĂ 2026-11-03, cu un test care NU poate rezolva și un reziduu nou
 

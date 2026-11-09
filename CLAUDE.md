@@ -656,7 +656,52 @@ completă, cu tabelul pe ambele propuneri deschise: `BACKLOG.md` §1.0ter.
 ștergibilă are nevoie și de o condiție despre existența ei, altfel se resetează
 tăcut și arată identic cu „n-a atins pragul încă".
 
-### D-16. Poarta de promovare — ADR-084, decizia de fond AMÂNATĂ cu declanșator (2026-11-02)
+### D-16. Poarta de promovare — ⛔ **ADR-084 NEAPROBATĂ, declanșatorul §11 CONSUMAT fără aprobare (2026-11-05)**
+
+> **⛔ DECIZIE FORMALĂ, 2026-11-05 — aprobată explicit de proprietarul
+> produsului.** Toate trei condițiile declanșatorului s-au raportat îndeplinite
+> pe 5 noiembrie, iar verificările cerute înainte de decizie au arătat că
+> **premisa condiției (3) e falsă**. ADR-084 revizia 3 e **NEAPROBATĂ**;
+> declanșatorul §11 e **consumat**; `174e7e17` rămâne `SUCCEEDED`, fără
+> promovare; blendul 50/50 rămâne cercetare, fără servire; ADR-086, D-15 și
+> producția **neschimbate**; ADR-084 însuși **nemodificat**, rămâne PROPUNERE.
+>
+> **Motivul nu e o rezervă statistică, e o problemă demonstrată de
+> metodologie**: s-a confundat stabilitatea unei estimări **cumulative** cu
+> stabilitatea performanței pe date **noi, independente**. Pe cohorte disjuncte,
+> C3 (5–21 oct, n=302) trece, iar **C4 (22 oct – 5 nov, n=372) cade pe toate
+> trei metricile**, inclusiv pe garda de direcție (`Δacc −0,27pp`). Deci cele 19
+> declanșări ale porții propuse (contra 2 ale porții de azi) provin dintr-un
+> **singur** bloc de 17 zile.
+>
+> **NU s-a stabilit un declanșator calendaristic nou, deliberat** — o dată
+> prestabilită produce presiune pentru o decizie insuficient fundamentată, exact
+> tiparul documentat aici. Metodologia de confirmare se definește întâi, iar
+> propunerea de revizuire (confirmare pe ≥ 2 cohorte disjuncte) e o
+> **PROPUNERE**, nu o regulă aprobată, și nu se citează ca în vigoare.
+>
+> **🔴 [REMĂSURAT 2026-11-09, la cererea proprietarului produsului — decizia a
+> fost prezentată cu 4 zile întârziere, iar între timp s-au jucat 4 zile de
+> fotbal.]** Două lucruri s-au mișcat: **C4b a crescut 20 → 55** (era
+> incompletă, nu neconcludentă), iar o cohortă nouă, **C5 (6–9 nov, n=137),
+> trece pe toate trei** — Δbrier **−0,0131** IC95 [−0,0248, **−0,0015**],
+> log-loss semnificativ, Δacc **+1,46pp**. **NU e o inversare**: C4a (n=352)
+> cade în continuare, deci tabloul e **mixt** — din patru cohorte post-C2,
+> **două trec**. Secvența e trece → cade → direcție corectă → trece, adică
+> **oscilație pe date independente**, ceea ce susține îngrijorarea despre
+> instabilitatea criteriului chiar dacă ultimul punct e favorabil.
+>
+> **Decizia de mai sus rămâne neschimbată, cu data ei** — a fost corectă pe
+> dovezile de la 5 noiembrie, și nu se rescrie retroactiv (North Star #9). Ce se
+> adaugă e dovadă nouă, datată, pentru discuția următoare. **Rezerve**: e a
+> **treia** citire a aceleiași întrebări (§7.1), remăsurarea a fost **cerută**,
+> nu căutată, iar C5 e la limită. Și criteriul propus în §6 al jurnalului ar fi
+> **satisfăcut azi** de C3 + C5 — motiv de prudență, nu de încredere.
+> `JURNAL_VERIFICARE_ADR-084_2026-11-05.md` §3bis · `DE_URMARIT.md` §18.1bis.
+>
+> Toate cifrele, definițiile cohortelor, intervalele de încredere, metoda de
+> replay și limitele ei: **`docs/00_GOVERNANCE/JURNAL_VERIFICARE_ADR-084_2026-11-05.md`**
+> (jurnal de verificare, NU un ADR) · `DE_URMARIT.md` §18.1bis.
 
 **Scrisă aici fiindcă secțiunea asta o cere**: orice decizie amânată se
 consemnează în documentele vii, cu declanșator verificabil. Precedentul ADR-057
@@ -670,10 +715,15 @@ log-loss sunt *proper scoring rules* — folosesc toată distribuția, iar produ
 vinde probabilități. **North Star #2 rămâne ca principiu**; se schimbă
 operaționalizarea. ADR-002 neatins: promovarea rămâne act uman.
 
-**Miza e VIE, nu teoretică**: `blend_v1/174e7e17` (n=659) ar trece criteriul —
+~~**Miza e VIE, nu teoretică**: `blend_v1/174e7e17` (n=659) ar trece criteriul —
 Brier ✅, log-loss ✅, acuratețe ❌ dar **Δacc +1,06pp** — și ar fi trecut
 **șapte zile consecutive** (27 oct – 2 nov). Aprobarea produce **imediat** un
-candidat de promovare.
+candidat de promovare.~~ **[CORECTAT 2026-11-05 — fraza e adevărată ca
+aritmetică și înșelătoare ca dovadă.]** „Șapte zile consecutive" (apoi 19) sunt
+citiri ale aceleiași ferestre cumulative, nu confirmări independente. Aprobarea
+**ar** produce imediat un candidat — dar un candidat care, măsurat pe informație
+nouă, **nu are dovezile necesare** (§18.1bis). Miza rămâne vie; ce era fals e
+puterea probatorie a numărului de zile.
 
 > **🔴 [MĂSURAT 2026-11-03, CORECTAT 2026-11-04 — condiția (3) e îndeplinită de
 > 13 zile; erodarea a fost monotonă până pe 3 nov, iar 4 nov o contrazice cu UN
@@ -703,19 +753,29 @@ candidat de promovare.
 > proiectată. **Nu se înlocuiește cu alta** (ar fi aceeași eroare, recalibrată);
 > se așteaptă două-trei puncte în plus.
 >
-> **De aici, așteptarea e INFORMATIVĂ, nu doar prudentă**: dacă `Δacc` se
-> stabilizează peste zero, cazul e mai puternic pe date așezate; dacă trece sub
+> ~~**De aici, așteptarea e INFORMATIVĂ, nu doar prudentă**: dacă `Δacc` se
+> stabilizează peste zero, cazul e mai puternic pe date așezate;~~ dacă trece sub
 > zero, **candidatul dispare singur, iar asta e în sine răspunsul** — un
 > criteriu al cărui unic exemplu viu se evaporă în două săptămâni nu e un
 > criteriu pentru care merită schimbată poarta, și §7.1 devine dominant.
-> Seria completă, pe zile: `DE_URMARIT.md` §18.1.
 >
-> **Starea celorlalte două condiții la 4 nov** (**ziua 2 din 3**): (1) **ÎNCĂ
-> NEÎNDEPLINITĂ prin construcție**, nu din întârziere — `1b3c3ef` a ajuns pe
-> `main` pe 2 nov 20:06 UTC, deci ziua 1 e 3 nov, ziua 2 e 4 nov, a treia e
-> **5 noiembrie**; data nu s-a mișcat, și **nu e nimic de făcut până atunci**.
-> (2) ✅ **provizoriu**, pe cohorta genuin post-reparație (7/7 meciuri de seară,
-> `p ≈ 1,1%`).
+> **🔴 [RETRAS 2026-11-05 — ramura „se stabilizează peste zero" e
+> NEFOLOSIBILĂ pe seria cumulativă, și am invocat-o greșit pe 5 nov.]** Seria
+> +1,33/+1,06/+1,04/+1,17/+1,15pp a fost citită de mine ca stabilizare peste
+> zero, deci ca argument în favoarea ADR-084. **Sunt medii cumulative.** O medie
+> cumulativă nu se poate „stabiliza" informativ — se stabilizează prin
+> construcție, odată ce un bloc timpuriu suficient de mare o domină. A treia
+> instanță a clasei deja numite în acest document („un indicator înghețat nu
+> poate partiționa un rezultat împrospătat", ADR-072), în forma ei cumulativă.
+> Ramura rămâne valabilă **doar** reformulată pe cohorte disjuncte — iar acolo
+> răspunsul măsurat e **opusul**: C4 (n=372) are `Δacc` **−0,27pp**.
+>
+> **Starea celor trei condiții la 5 nov**: toate trei **raportate îndeplinite** —
+> (1) ✅ zilele 3, 4, 5 nov; (2) ✅ 17/17 meciuri de seară cu statistici pe
+> cohorta post-`1b3c3ef`; (3) ✅ 14 zile. **Și tocmai de aceea declanșatorul e
+> consumat, nu satisfăcut**: verificările cerute înaintea deciziei au arătat că
+> (3) măsoară obiectul greșit. Seria completă, pe zile: `DE_URMARIT.md` §18.1;
+> cohortele disjuncte: §18.1bis.
 
 **De ce se amână, și e argument nu ezitare**: ambii Challengeri activi au
 `baseline_source = 'shadow_control'`, deci cifrele vin din rândul `control` —
