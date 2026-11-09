@@ -10,8 +10,21 @@ name: Football Oracle — Data Health Check (read-only, ADR-063)
 #   4. ligi urmarite fara niciun meci descoperit de Flashscore in 7 zile
 #      (alarma care inlocuieste plasa de siguranta data la o parte de ADR-063)
 #
-# Job-ul devine ROSU daca exista constatari — acelasi tipar deja folosit de
-# identity_drift_check.yml, fara infrastructura noua de notificare.
+# [CORECTAT — 2026-11-09] Randul de aici spunea "Job-ul devine ROSU daca exista
+# constatari". Adevarat la scriere, FALS de acum, si tocmai inversul lui era
+# problema: cu 11 clase, oricare dintre ele inrosea jobul, deci jobul era rosu
+# 8 zile din 8 (rularile 77-84) pe reziduuri cunoscute. Un cod de iesire care
+# nu se poate schimba nu transporta informatie.
+#
+# DE ACUM: jobul devine ROSU doar pentru clasele marcate CRITIC in
+# `scripts/check_data_health.py` (§SEVERITATE) — azi clasa 10 (declansatorul de
+# servire D-15) si sub-clasa `delta_sync` a clasei 11. Restul se RAPORTEAZA
+# integral in log, dar nu coloreaza. Lista creste prin DECIZIE, iar
+# `tests/test_data_health_severity.py` cade daca devine majoritara.
+#
+# Tiparul e cel aplicat lui night_sync.yml pe 2026-10-21, cu semnul schimbat:
+# acolo "verde-mereu te antreneaza sa nu te uiti", aici "rosu-mereu te
+# antreneaza sa ignori". Fara infrastructura noua de notificare.
 #
 # Cadenta: zilnic, 07:30 UTC. night_sync.yml ruleaza la 03:00 cu timeout 180
 # min -> finalizare cea mai tarzie 06:00; identity_drift_check.yml la 06:30

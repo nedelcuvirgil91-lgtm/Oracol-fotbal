@@ -63,6 +63,7 @@ import logging
 import re
 import sys
 from collections import defaultdict
+from collections.abc import Sequence
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -77,6 +78,70 @@ BAR = "=" * 78
 STALE_DAYS = 5
 
 BASELINE_PATH = Path(__file__).resolve().parent / "data_health_baseline.json"
+
+
+# ── SEVERITATE: care constatare COLOREAZA jobul ──────────────────────────────
+#
+# DE CE EXISTA. `main()` intorcea `1 if findings else 0`, deci ORICARE dintre
+# cele 11 clase facea jobul rosu. Masurat 2026-11-09: rosu 8 zile din 8
+# (rularile 77-84, toate `schedule`, toate complete), iar pe 8 noiembrie trageau
+# 5 clase — si NICIUNA nu era informatie noua: clasa 4 trage pe pauza
+# internationala, iar propriul ei text spune "normal pentru competitii in
+# pauza"; clasa 1 avea 1 element nou printre 27 cunoscute; clasele 8, 9 si 11
+# sunt reziduuri documentate (ADR-078, ADR-075 §8, ADR-076).
+#
+# Consecinta e structurala, nu estetica: un cod de iesire care nu se poate
+# schimba nu transporta informatie. Clasa 10 — declansatorul D-15, singura a
+# carei constatare ar fi o VESTE care cere decizie umana — e inecata PRIN
+# CONSTRUCTIE: un declansator ATINS ar adauga o constatare la un job deja rosu.
+# Detectorul ruleaza impecabil si semnalul nu poate ajunge.
+#
+# E OGLINDA unui defect deja reparat aici. `night_sync` era verde prin
+# constructie ("verde-mereu te antrenează sa nu te uiti") si a primit pe
+# 2026-10-21 exact tiparul de mai jos. Aceeasi boala, cu semnul schimbat:
+# "rosu-mereu te antreneaza sa ignori" — pe care ACEST script o are deja
+# documentata despre el insusi, din 29 august, si nereparata pana acum.
+#
+# IMPLICIT `False`, DELIBERAT (North Star #3 aplicat la ceva ce nu e flag de
+# produs): nicio clasa nu coloreaza jobul decat marcata EXPLICIT la locul ei.
+# Lista creste prin DECIZIE, nu prin constructie — iar
+# `tests/test_data_health_severity.py` cade daca devine majoritara, fiindca
+# atunci mecanismul ar fi redevenit pe furis un `exit 1` global.
+#
+# CE E CRITIC AZI, ales pe datele de 8 noiembrie, nu presupus:
+#   · clasa 10 — declansator de servire atins (D-15). Prin constructie se
+#     numara constatare DOAR la declansare, deci nu poate deveni zgomot.
+#   · clasa 11, DOAR sub-clasa `delta_sync`. Masurat: 0 azi. Un rand nou acolo
+#     inseamna ca reparatia ADR-085 a regresat — veste noua. Sub-clasa
+#     `extragere` (7 randuri azi, MLS septembrie) e reziduul cunoscut al penei
+#     ADR-076 si NU coloreaza; cele doua au cauze si remedii OPUSE, motiv
+#     pentru care clasa 11 le separa deja prin `referee`.
+# Pe datele de 8 noiembrie, jobul ar fi fost VERDE — corect: nu se intamplase
+# nimic nou.
+
+def constata(registru: list[tuple[int, bool]], clasa: int, *,
+             critic: bool = False) -> None:
+    """Inregistreaza o constatare. `critic=True` coloreaza jobul.
+
+    Implicit False: o clasa noua adaugata fara sa se gandeasca nimeni la
+    severitate NU poate face jobul rosu din greseala."""
+    registru.append((clasa, critic))
+
+
+def clase_critice(registru: Sequence[tuple[int, bool]]) -> list[int]:
+    """Functie PURA — ce clase CRITICE au constatat ceva.
+
+    Pura ca sa fie testabila fara Supabase, fara retea si fara o rulare de
+    productie; `night_sync.etape_critice_esuate()` are acelasi rol."""
+    return sorted({clasa for clasa, critic in registru if critic})
+
+
+def cod_de_iesire(registru: Sequence[tuple[int, bool]]) -> int:
+    """PURA. Jobul e rosu DOAR pentru clase critice.
+
+    O constatare necritica se RAPORTEAZA (se vede in log, integral), dar nu
+    atinge culoarea — altfel am reconstrui exact `exit 1` global."""
+    return 1 if clase_critice(registru) else 0
 
 
 def load_baseline(path: Path | None = None) -> dict:
@@ -451,7 +516,7 @@ def main() -> int:
     season_start = "2026-07-01"
     today = date.today()
     now = datetime.now(timezone.utc)
-    findings = 0
+    constatari: list[tuple[int, bool]] = []
     baseline = load_baseline()
 
     print(BAR)
@@ -527,7 +592,7 @@ def main() -> int:
         detalii = ", ".join(f"{lg} ({n})" for lg, n in sorted(stale_incheiate.items()))
         print(f"     în competiții ÎNCHEIATE (context, nu acțiune)     : {total_inch} — {detalii}")
     if stale_noi:
-        findings += 1
+        constata(constatari, 1)
     print(BAR)
 
     # ── 2. Duplicate pe cheie naturală ───────────────────────────────────
@@ -541,7 +606,7 @@ def main() -> int:
     for k, v in list(dups.items())[:10]:
         print(f"       {k[2]}  {k[0]} – {k[1]}  ->  {[r.get('fixture_id') for r in v]}")
     if dups:
-        findings += 1
+        constata(constatari, 2)
     print(BAR)
 
     # ── 3. Forme abreviate vs forme lungi ────────────────────────────────
@@ -570,7 +635,7 @@ def main() -> int:
         n_l = sum(1 for r in all_name_rows if long in (r.get("home_team"), r.get("away_team")))
         print(f"       {short!r} ({n_s} rânduri)  vs  {long!r} ({n_l} rânduri)")
     if pairs:
-        findings += 1
+        constata(constatari, 3)
         print("     (candidați, NU concluzii — fiecare cere verificare umană, regula D3)")
     print(BAR)
 
@@ -588,7 +653,7 @@ def main() -> int:
     for lg in missing:
         print(f"       {lg}")
     if missing:
-        findings += 1
+        constata(constatari, 4)
         print("     (normal pentru competiții în pauză sau neîncepute — verifică înainte de a acționa)")
     print(BAR)
 
@@ -610,7 +675,7 @@ def main() -> int:
         print(f"       {c['kickoff_date']}  [{c['league']}]  {c['home_team']} – {c['away_team']}")
         print(f"          stadion: {c['stadium']!r}  ·  al gazdei ar fi: {c['stadion_asteptat_gazda']!r}")
     if inversari:
-        findings += 1
+        constata(constatari, 5)
         print("     (o inversare contaminează ELO, formă, H2H și atribuirea xG — "
               "verifică extern înainte de orice corecție, regula D3)")
     print(BAR)
@@ -687,7 +752,7 @@ def main() -> int:
         print("     (ștergerea acestora ar elimina echipa din clasament — "
               "nu există rând canonic care să o înlocuiască)")
     if orfane:
-        findings += 1
+        constata(constatari, 6)
     print(BAR)
 
     # ── 7. EXTRAGEREA FLASHSCORE A ÎNCETAT SĂ PRODUCĂ (ADR-076) ───────────
@@ -747,7 +812,7 @@ def main() -> int:
                 print("        Semnătura ADR-076: extragerea nu mai potrivește "
                       "markup-ul Flashscore. Verifică log-ul pentru "
                       "'STRUCTURA SCHIMBATA'.")
-                findings += 1
+                constata(constatari, 7)
     print(BAR)
 
     # ── 8. UN ID FLASHSCORE CU DOUĂ ETICHETE (ADR-078, Faza 0) ────────────
@@ -793,7 +858,7 @@ def main() -> int:
                 print(f"        … și încă {len(drift) - 15}")
             print("        Același club sub două identități: lanț ELO despicat, "
                   "H2H despicat. Vezi ADR-078.")
-            findings += 1
+            constata(constatari, 8)
     print(BAR)
 
     # ════════════════════════════════════════════════════════════════════
@@ -845,7 +910,7 @@ def main() -> int:
             print(f"        … și încă {n_orfane - len(exemple)}")
         print("        Un rând scos din setul live fără motiv nu e trasabil. "
               "Niciun scriitor din cod poate produce asta — vezi ADR-075 §8.")
-        findings += 1
+        constata(constatari, 9)
     print(BAR)
 
     # ════════════════════════════════════════════════════════════════════
@@ -895,7 +960,7 @@ def main() -> int:
             print("     ⛔ DECLANȘATOR ATINS — NU e un defect. Cere decizie "
                   "umană: se deschide discuția despre un ADR pentru calea de "
                   "servire (D-15). Nimic nu pornește automat (ADR-002).")
-            findings += 1
+            constata(constatari, 10, critic=True)
     print(BAR)
 
     # ── 11. MECIURI TERMINATE FĂRĂ STATISTICI (ADR-085, etapa 4) ────────────
@@ -948,13 +1013,24 @@ def main() -> int:
                           f"{m['home_team']} – {m['away_team']}")
                 if len(lista) > 10:
                     print(f"        … și încă {len(lista) - 10}")
-            findings += 1
+            # Critic DOAR pe `delta_sync`: un rand nou acolo inseamna ca
+            # reparatia ADR-085 a regresat. `extragere` e reziduul cunoscut
+            # al penei ADR-076 — se raporteaza, nu coloreaza.
+            constata(constatari, 11, critic=bool(gol["delta_sync"]))
     print(BAR)
 
-    print(f"  Clase cu constatări: {findings}/11")
+    critice = clase_critice(constatari)
+    print(f"  Clase cu constatări: {len(constatari)}/11")
+    if critice:
+        print(f"  ⛔ CLASE CRITICE cu constatări: {critice}")
+        print("     Jobul e ROȘU din cauza LOR, nu a celorlalte. Cere decizie.")
+    else:
+        print("  ✅ Nicio clasă CRITICĂ — jobul rămâne VERDE.")
+        print("     Constatările de mai sus, dacă există, sunt reziduuri cunoscute:")
+        print("     se raportează integral, dar nu colorează. Vezi §SEVERITATE.")
     print("  Verificare încheiată. ZERO scriere efectuată.")
     print(BAR)
-    return 1 if findings else 0
+    return cod_de_iesire(constatari)
 
 
 if __name__ == "__main__":

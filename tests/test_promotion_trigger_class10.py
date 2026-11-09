@@ -337,9 +337,16 @@ def test_raportul_numara_toate_clasele():
     sursa = _sursa("scripts/check_data_health.py")
     indici = {int(m) for m in re.findall(r'print\(f?"  (\d+)\. ', sursa)}
     assert indici, "nicio clasă detectată în raport"
-    assert f"{{findings}}/{max(indici)}" in sursa, (
-        f"numitorul din raport nu e {max(indici)}, deși clasele tipărite "
-        f"merg până acolo: {sorted(indici)}")
+    # [ACTUALIZAT 2026-11-09] Ancora era `{findings}/N`; mecanismul de
+    # severitate a înlocuit contorul cu registrul `constatari`. Se ancorează
+    # acum pe ETICHETA lizibilă, nu pe numele variabilei — invariantul
+    # („numitorul = cel mai mare indice tipărit") e același, dar nu mai e legat
+    # de cum se cheamă contorul, deci o redenumire viitoare nu-l mai rupe.
+    sumar = re.search(r"Clase cu constatări: \{[^}]+\}/(\d+)", sursa)
+    assert sumar, "linia de sumar lipsește din raport"
+    assert int(sumar.group(1)) == max(indici), (
+        f"numitorul din raport e {sumar.group(1)}, deși clasele tipărite "
+        f"merg până la {max(indici)}: {sorted(indici)}")
 
 
 def test_constatarea_se_numara_DOAR_la_declansare():
@@ -360,11 +367,20 @@ def test_constatarea_se_numara_DOAR_la_declansare():
     urmatoarea = re.search(r'print\(f?"  11\. ', sursa[i:])
     sfarsit = i + urmatoarea.start() if urmatoarea else sursa.index("Clase cu constatări")
     bloc = sursa[i:sfarsit]
-    assert bloc.count("findings += 1") == 1, \
-        f"clasa 10 incrementează de {bloc.count('findings += 1')} ori"
+    # [ACTUALIZAT 2026-11-09] Ancora era `findings += 1`. Sub severitate, clasa
+    # 10 înregistrează `constata(constatari, 10, critic=True)` — e singura, cu
+    # clasa 11, care COLOREAZĂ jobul, deci proprietatea păzită aici a devenit
+    # mai importantă, nu mai puțin: dacă înregistrarea ar ieși din ramura de
+    # declanșare, jobul ar fi roșu în fiecare zi în care un Challenger e la 3/3
+    # de câteva zile — exact boala pe care docstring-ul o numește.
+    ancora = "constata(constatari, 10"
+    assert bloc.count(ancora) == 1, \
+        f"clasa 10 înregistrează de {bloc.count(ancora)} ori"
+    assert "critic=True" in bloc, \
+        "clasa 10 nu mai e marcată critică — declanșatorul atins n-ar mai colora jobul"
     pozitie_declansati = bloc.index("if declansati:")
-    assert pozitie_declansati < bloc.index("findings += 1"), \
-        "incrementul trebuie să fie în interiorul ramurii de declanșare"
+    assert pozitie_declansati < bloc.index(ancora), \
+        "înregistrarea trebuie să fie în interiorul ramurii de declanșare"
 
 
 def test_pragurile_aprobate_nu_s_au_schimbat_tacit():

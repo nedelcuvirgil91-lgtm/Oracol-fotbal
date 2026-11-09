@@ -313,8 +313,14 @@ def test_raportul_nu_mai_pretinde_neconditionat_ca_exista_geaman():
 
 
 def test_clasa_6_chiar_ridica_alarma():
-    """A doua mutație neprinsă: `if orfane: findings += 1` poate fi neutralizat
-    fără ca vreun test să cadă. Detectorul care nu alarmează nu e detector."""
+    """A doua mutație neprinsă: `if orfane: <înregistrare>` poate fi
+    neutralizat fără ca vreun test să cadă. Detectorul care nu alarmează nu e
+    detector.
+
+    [ACTUALIZAT 2026-11-09] Ancora era `findings += 1`; severitatea a înlocuit
+    contorul cu `constata(constatari, 6)`. Proprietatea păzită e neschimbată:
+    constatarea trebuie înregistrată SUB ramura `if orfane:`, nu
+    necondiționat."""
     import ast
 
     arbore = _arbore_main()
@@ -322,13 +328,13 @@ def test_clasa_6_chiar_ridica_alarma():
         isinstance(n, ast.If)
         and getattr(n.test, "id", None) == "orfane"
         and any(
-            isinstance(x, ast.AugAssign) and getattr(x.target, "id", None) == "findings"
+            isinstance(x, ast.Call) and getattr(x.func, "id", None) == "constata"
             for x in ast.walk(n)
         )
         for n in ast.walk(arbore)
     )
     assert gardat, (
-        "constatarile clasei 6 trebuie sa incrementeze `findings` sub `if orfane:`"
+        "constatarile clasei 6 trebuie sa apeleze `constata` sub `if orfane:`"
     )
 
 
@@ -366,7 +372,13 @@ def _asigura_sumar_consistent(sursa: str) -> None:
     nu lista, care se învechește")."""
     import re as _re
     clase = _re.findall(r'print\(\s*f?"\s{2}(\d+)\.', sursa)
-    sumar = _re.search(r"findings\}/(\d+)", sursa)
+    # [ACTUALIZAT 2026-11-09] Ancora era `findings\}/(\d+)`, iar mecanismul de
+    # severitate a redenumit contorul (`findings` -> registrul `constatari`).
+    # Noua ancora e pe ETICHETA LIZIBILA, nu pe numele variabilei: o
+    # redenumire viitoare nu mai rupe garda, fiindca invariantul verificat
+    # („numitorul = numarul de clase tiparite") n-are nicio legatura cu cum se
+    # cheama contorul.
+    sumar = _re.search(r"Clase cu constatări: \{[^}]+\}/(\d+)", sursa)
     assert sumar, "linia de sumar lipsește din raport"
     assert clase, "nicio clasă tipărită în raport"
     assert int(sumar.group(1)) == len(set(clase)), (

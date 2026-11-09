@@ -306,9 +306,20 @@ def test_clasa_7_e_cablata_in_check_data_health():
     _asigura_sumar_consistent(sursa)
 
 
-def test_clasa_7_incrementeaza_findings():
-    """Un semnal care se tipărește dar nu schimbă codul de ieșire e un semnal
-    pe care CI-ul îl ignoră."""
+def test_clasa_7_inregistreaza_constatare():
+    """Un semnal care se tipărește dar nu e ÎNREGISTRAT e un semnal invizibil
+    mecanismului.
+
+    [REDENUMIT ȘI ACTUALIZAT 2026-11-09, odată cu severitatea.] Formularea
+    originală era: *„Un semnal care se tipărește dar nu schimbă codul de ieșire
+    e un semnal pe care CI-ul îl ignoră."* Corectă atunci — orice constatare
+    înroșea jobul. Nu mai e criteriul potrivit: sub severitate, clasa 7
+    raportează **deliberat** fără să coloreze, iar culoarea e rezervată claselor
+    marcate critic. Îngrijorarea de fond se păstrează însă neatinsă, doar mutată
+    la nivelul corect — clasa trebuie să **se înregistreze** (deci să fie
+    numărată, tipărită și disponibilă deciziei de severitate), nu să fie un
+    `print` orfan. O clasă care nu apelează `constata` e invizibilă indiferent
+    de culoare."""
     import ast
     import inspect
 
@@ -319,10 +330,15 @@ def test_clasa_7_incrementeaza_findings():
         n for n in ast.walk(arbore)
         if isinstance(n, ast.If)
         and "ZERO rânduri noi" in ast.dump(n)
-        and any(isinstance(x, ast.AugAssign) and getattr(x.target, "id", None) == "findings"
+        and any(isinstance(x, ast.Call)
+                and getattr(x.func, "id", None) == "constata"
                 for x in ast.walk(n))
     ]
-    assert sub_semnal, "ramura care raportează zero scrieri nu incrementează `findings`"
+    assert sub_semnal, (
+        "ramura care raportează zero scrieri nu apelează `constata` — "
+        "constatarea nu ajunge în registru, deci nici în sumar, nici în decizia "
+        "de severitate"
+    )
 
 
 def test_clasa_7_nu_da_verdict_sub_pragul_de_meciuri():
@@ -356,7 +372,13 @@ def _asigura_sumar_consistent(sursa: str) -> None:
     nu lista, care se învechește")."""
     import re as _re
     clase = _re.findall(r'print\(\s*f?"\s{2}(\d+)\.', sursa)
-    sumar = _re.search(r"findings\}/(\d+)", sursa)
+    # [ACTUALIZAT 2026-11-09] Ancora era `findings\}/(\d+)`, iar mecanismul de
+    # severitate a redenumit contorul (`findings` -> registrul `constatari`).
+    # Noua ancora e pe ETICHETA LIZIBILA, nu pe numele variabilei: o
+    # redenumire viitoare nu mai rupe garda, fiindca invariantul verificat
+    # („numitorul = numarul de clase tiparite") n-are nicio legatura cu cum se
+    # cheama contorul.
+    sumar = _re.search(r"Clase cu constatări: \{[^}]+\}/(\d+)", sursa)
     assert sumar, "linia de sumar lipsește din raport"
     assert clase, "nicio clasă tipărită în raport"
     assert int(sumar.group(1)) == len(set(clase)), (
