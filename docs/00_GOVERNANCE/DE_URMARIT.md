@@ -5,13 +5,16 @@ Un singur loc pentru „ce așteptăm, când, și ce înseamnă dacă nu vine". 
 Ultima actualizare: **2026-11-09**. Ultimul element adăugat: **§18.1bis
 remăsurat după 4 zile de inactivitate — cohortă nouă C5 (n=137) care TRECE pe
 toate trei, C4b crescută 20→55; decizia din 5 nov rămâne neschimbată, dar
-tabloul e mixt (2 din 4 cohorte trec). Plus: pragul F3 a trecut pe 7 noiembrie**.
+tabloul e mixt (2 din 4 cohorte trec). Plus: **§3ter — pragul F3 confirmat de
+evaluatorul însuși (run 4, `market_floor_040` = 154), dar despicat pe perioade
+brațul Top e insuficient la 11/13 înainte și 12/13 după; cele două citiri dau
+răspunsuri opuse, iar care guvernează NU e decis**.
 
 **Elemente deschise, în ordinea termenului:**
 
 | § | Ce | Termen |
 |---|---|---|
-| **§3ter** | 🟢 **ADR-071 F3 — PRAGUL S-A ÎNCHIS, dar F3 rămâne NEÎNCEPUT și NEAUTORIZAT.** Măsurat 9 nov: 8 săptămâni ✅ (**9,1**); prag 150 atins pe **13 din 13** politici — `market_floor_040` a trecut pe **7 noiembrie**, exact la 150, și e azi la **154**. Colapsarea brațelor ✅ (12 amprente), evaluator ✅, `leakage_suspect` **0 rânduri** | **te așteaptă** — pornirea cere autorizare explicită (ADR-002) + decizia pe §16 |
+| **§3ter** | 🟢 **ADR-071 F3 — PRAGUL S-A ÎNCHIS pe citirea CUMULATĂ; F3 rămâne NEÎNCEPUT și NEAUTORIZAT.** Confirmat de evaluatorul însuși, run 4 (9 nov): 8 săptămâni ✅ (**9,1**); prag 150 atins pe toate politicile, pe categoriile pe care le au efectiv — `market_floor_040` = **154**. Colapsarea brațelor ✅ (12 familii, verificat prin cifre identice), `leakage_suspect` **0**. **DAR** experimentul traversează o lărgire de univers (cutoff dedus `2026-10-21T12:38Z`), iar despicat pe perioade brațul Top e **insuficient la 11/13 înainte și 12/13 după** | **te așteaptă** — autorizare explicită (ADR-002) **plus** decizia pe §16: pragul se citește cumulat (citirea primară a codului) sau pe perioadă? Cele două dau răspunsuri OPUSE |
 | **§20.H** | 🔴 **Pasul 3 (servirea blendului) e BLOCAT de o dependență circulară** — rândul `control` e simultan predicția servită și baseline-ul porții, deci schimbarea servirii invalidează seriile pe care ADR-084 și D-15 se sprijină. Plus: ce a măsurat §20 ca mai bun (`blend_engine.py`, 50/50) **nu e** campionul `blend_v1` (0,35, Model Registry) | **după** ADR-084 și D-15 |
 | **§21** | ✅ Flagul B **ACTIV** din 3 nov 20:34:49. Rămâne: prima antrenare cerută de `blend_v1` (dovada Deciziei A) | fără termen — depinde de eliberarea slotului |
 | ~~**§18**~~ | 🔴 **ADR-084 — NEAPROBATĂ 5 nov, declanșatorul §11 CONSUMAT.** Premisa condiției (3) e **falsă**: măsura persistența unei medii cumulative, nu performanța pe date noi. **[REMĂSURAT 9 nov]** C4a (n=352) cade în continuare, dar **C5 (n=137, 6–9 nov) trece pe toate trei** — tablou mixt, 2 din 4 cohorte trec (§18.1bis). Decizia din 5 nov rămâne, cu data ei. ADR-084 rămâne PROPUNERE, nemodificată | închis ca declanșator; metodologia se redefinește înainte de orice termen nou |
@@ -389,6 +392,90 @@ Evaluatorul (`value_selector_evaluation.yml`) e `workflow_dispatch`-only, delibe
 > **F3 rămâne NEÎNCEPUT și NEAUTORIZAT.** Pragul atins **nu e autorizare**
 > (ADR-002). La autorizare rămâne de decis explicit: **§16 se reaplică pe
 > fiecare perioadă, deci jumătățile nu însumează întregul.**
+
+> ### 🔴 [RULAT 2026-11-09, run 4 — cifra e confirmată, dar cele două citiri se CONTRAZIC]
+>
+> Până aici, fiecare cifră de după 4 noiembrie era **extrapolarea mea**:
+> evaluatorul rulase ultima dată pe 4 nov. Dispatch aprobat explicit →
+> `value_selector_evaluation.yml` run **4** (`42600236151`, `success`, 82 s,
+> pe `93f8e23`). **De acum cifrele de mai jos sunt ale evaluatorului, nu ale
+> mele.**
+>
+> **Raportul propriu, set complet**: 139.113 selecții citite → **49.335** după
+> regula §16 · 60 de rulări · 1265 de meciuri (1259 cu rezultat, **6** în
+> așteptare) · 13 politici / **12 familii**.
+>
+> **`market_floor_040` → top = 154.** Identic cu cifra din blocul de mai sus,
+> deci acela **nu se corectează**. Martor pozitiv pentru coliziunea unică de
+> amprentă: `market_floor_025` și `shrunk_050` au cifre **identice în fiecare
+> bloc** (222 / 674), deci „13 politici, 12 familii" e verificat în date.
+>
+> **Precizie care lipsea**: `legacy` are longshot = **0** și e marcat
+> `esantion_insuficient` acolo — structural, n-are braț longshot. „13 din 13"
+> e adevărat **pe categoriile pe care fiecare politică le are efectiv**, nu pe
+> toate 26 de combinații.
+>
+> **CONSTATAREA NOUĂ.** Evaluatorul detectează singur un **cutoff dedus din
+> date** (`detecteaza_cutoff`, nu o constantă): **`2026-10-21T12:38Z`** — exact
+> rularea manuală `39601154972` care a reparat acoperirea radarului de la 15 la
+> 20 de competiții (§10). Deci experimentul **traversează o lărgire a
+> universului**. Pragul pe categoria **Top**, pe fiecare perioadă:
+>
+> | politică | set complet | înainte | după |
+> |---|---:|---:|---:|
+> | `market_floor_020` | 226 ✅ | **149** ⛔ | 86 ⛔ |
+> | `market_floor_025` | 222 ✅ | 145 ⛔ | 86 ⛔ |
+> | `market_floor_030` | 211 ✅ | 139 ⛔ | 80 ⛔ |
+> | `market_floor_035` | 184 ✅ | 119 ⛔ | 70 ⛔ |
+> | `market_floor_040` | **154** ✅ | **95** ⛔ | **64** ⛔ |
+> | `market_only` | 250 ✅ | 169 ✅ | 93 ⛔ |
+> | `shrunk_*` / `ranker_*` | 221-227 ✅ | 145-146 ⛔ | 85-88 ⛔ |
+>
+> **Pe setul cumulat pragul e atins la toate. Despicat pe perioade, brațul Top
+> e insuficient la 11 din 13 înainte și la 12 din 13 după.**
+> `market_floor_020` ratează prima jumătate cu **o** selecție (149 vs 150).
+>
+> **Care citire guvernează NU e decis, și codul nu o decide.** Docstring-ul lui
+> `run()` e explicit: *„Cifrele cumulate rămân primele și neschimbate... cele
+> două jumătăți se arată alături, nu în locul lui."* Deci pe **citirea primară
+> a evaluatorului** condiția de intrare **este** îndeplinită. Nota de mai sus
+> („§16 se reaplică pe fiecare perioadă") rămâne ce a fost — **o chestiune de
+> decis, NU o regulă în vigoare**; nu se citează ca atare.
+>
+> **De ce contează, și de ce nu e pedanterie**: ADR-071 cere pentru F3 exact
+> *politică înghețată, universul stabil, fără ajustarea pragurilor pe parcurs*.
+> Un prag atins prin agregare peste o schimbare de univers e **aceeași
+> structură de argument** pe care proiectul a respins-o pe 5 noiembrie la
+> ADR-084 („19 zile consecutive" = citiri ale aceleiași ferestre cumulative,
+> §18.1bis). Acolo concluzia a fost că stabilitatea unei estimări cumulative nu
+> e stabilitate pe informație nouă. Aici e varianta pe eșantion.
+>
+> **🔴 DOUĂ ERORI ALE MELE, prinse de această rulare:**
+>
+> 1. **Am ridicat o alarmă falsă pe propriul document.** Reconstruind „decise"
+>    în SQL am obținut `market_floor_040` top = **59** și am raportat §3ter ca
+>    posibil fals. Evaluatorul dă 154 — **documentul era corect, SQL-ul meu
+>    era greșit.** Cauza e scrisă în docstring-ul lui
+>    `pastreaza_prima_aparitie`, liniile 98-101: funcția întoarce **TOATE**
+>    rândurile rulării celei mai vechi pentru o pereche (cele trei selecții
+>    1/X/2), iar `DISTINCT ON (policy_id, fixture_id)` păstrează **unul**. A
+>    treia reconstrucție greșită a aceleiași cantități.
+>    **Clasa, scrisă ca regulă**: când o cantitate are o funcție care o
+>    definește, o reconstrucție în alt limbaj e o **a doua sursă de adevăr** —
+>    legitimă doar ca *martor* confirmat contra ieșirii funcției, niciodată ca
+>    *înlocuitor*. Contrastul din aceeași zi: la clasa 10 din
+>    `check_data_health`, SQL-ul meu a dat 2/3 · n=870 și 2/3 · n=717, iar
+>    scriptul a tipărit aceleași cifre — acolo a fost martor și s-a închis.
+> 2. **Blocul de mai sus spunea „a rulat de patru ori" când rulase de trei**,
+>    contrazicând propoziția din aceeași secțiune („a treia rulare din
+>    totdeauna — 6 sep, 15 oct, 4 nov"). A devenit adevărată **doar** prin
+>    rularea de azi. Numărul corect al istoricului complet: **5 rulări**
+>    (6 sep · 15 oct · 4 nov · 9 nov). Iar propoziția „ultimul lui raport
+>    (4 nov) spune încă «136, `esantion_insuficient`»" e **depășită de azi**.
+>
+> **Golul de cadență rămâne deschis și s-a mai umplut o dată manual**: cinci
+> rulări în 64 de zile, toate `workflow_dispatch`, fiecare pornită de o
+> întrebare, niciuna de un mecanism.
 
 ---
 
